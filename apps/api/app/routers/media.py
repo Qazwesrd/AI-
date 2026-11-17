@@ -7,7 +7,8 @@ import urllib.error
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -827,22 +828,33 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
 
 
 @router.post("/files/upload")
-async def upload_media(file: UploadFile = File(...), category: str = "video",
-                       db: Session = Depends(get_db)):
-    allowed = {"video": VIDEO_DIR, "audio": AUDIO_DIR, "image": STORAGE / "images"}
+async def upload_media(
+    file: UploadFile = File(...),
+    category: str = "video",
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    allowed = {
+        "video": VIDEO_DIR,
+        "audio": AUDIO_DIR,
+        "image": STORAGE / "images",
+        "other": STORAGE / "other",
+    }
     if category not in allowed:
         raise HTTPException(400, "不支持的素材类别")
 
+    original_name = Path(file.filename or "upload.bin").name
+    suffix = Path(original_name).suffix.lower()[:20]
     folder = allowed[category]
     folder.mkdir(parents=True, exist_ok=True)
-    suffix = Path(file.filename or "upload.bin").suffix[:20]
     filename = f"{uuid.uuid4().hex}{suffix}"
     destination = folder / filename
+    temporary = destination.with_suffix(destination.suffix + ".uploading")
     size = 0
     limit = 2 * 1024 * 1024 * 1024
 
     try:
-        with open(destination, "wb") as output:
+        with temporary.open("wb") as output:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -851,21 +863,29 @@ async def upload_media(file: UploadFile = File(...), category: str = "video",
                 if size > limit:
                     raise HTTPException(413, "单个文件不能超过 2GB")
                 output.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "不能上传空文件")
+        os.replace(temporary, destination)
 
         media = MediaFile(
-            name=file.filename or filename, category=category,
+            name=original_name, category=category,
             file_path=str(destination), mime_type=file.content_type,
-            file_size=size
+            file_size=size,
+            metadata_json={"description": description[:2000], "stored_name": filename},
         )
         db.add(media)
         db.commit()
         db.refresh(media)
         return {"id": media.id, "name": media.name, "category": category,
-                "size": size, "path": media.file_path}
+                "size": size, "path": media.file_path,
+                "description": description[:2000]}
     except Exception:
-        if destination.exists():
-            destination.unlink()
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
         raise
+    finally:
+        await file.close()
 
 
 @router.get("/files")
@@ -876,8 +896,44 @@ def list_media_files(category: Optional[str] = None, db: Session = Depends(get_d
     return [{
         "id": f.id, "name": f.name, "category": f.category,
         "path": f.file_path, "size": f.file_size,
-        "mime_type": f.mime_type, "created_at": f.created_at
+        "mime_type": f.mime_type,
+        "description": (f.metadata_json or {}).get("description", ""),
+        "url": f"/api/media/files/{f.id}/download",
+        "created_at": f.created_at
     } for f in query.order_by(MediaFile.id.desc()).limit(500).all()]
+
+
+@router.get("/files/{file_id}/download")
+def download_media_file(file_id: int, db: Session = Depends(get_db)):
+    media = db.query(MediaFile).filter(MediaFile.id == file_id).first()
+    if not media:
+        raise HTTPException(404, "素材文件不存在")
+    try:
+        path = safe_storage_file(media.file_path)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(404, "素材文件不存在或路径无效") from exc
+    return FileResponse(
+        path=str(path),
+        media_type=media.mime_type or "application/octet-stream",
+        filename=media.name,
+    )
+
+
+@router.delete("/files/{file_id}")
+def delete_media_file(file_id: int, db: Session = Depends(get_db)):
+    media = db.query(MediaFile).filter(MediaFile.id == file_id).first()
+    if not media:
+        raise HTTPException(404, "素材文件不存在")
+    try:
+        path = safe_storage_file(media.file_path)
+        path.unlink(missing_ok=True)
+    except FileNotFoundError:
+        pass
+    except ValueError as exc:
+        raise HTTPException(400, "素材文件路径无效，已阻止删除目录外文件") from exc
+    db.delete(media)
+    db.commit()
+    return {"success": True, "id": file_id}
 
 
 class SubtitleCue(BaseModel):
