@@ -58,7 +58,7 @@ def provider_dict(x):
         "base_url": x.base_url,
         "model": x.model,
         "enabled": x.enabled,
-        "paid": True,
+        "paid": bool(x.paid),
         "purpose": x.purpose,
         "has_api_key": bool(x.encrypted_api_key),
     }
@@ -144,9 +144,9 @@ def save_provider(payload: ProviderInput, db: Session = Depends(get_db)):
     item.base_url = payload.base_url.rstrip("/")
     item.model = payload.model
     item.enabled = payload.enabled
-    # Billing classification is server-controlled. Never trust a browser flag
-    # to downgrade a provider to free and bypass the paid-call confirmation gate.
-    item.paid = True
+    # Billing mode is explicitly selected by the local user for this provider.
+    # Paid remains the safe default; free mode is an intentional user decision.
+    item.paid = bool(payload.paid)
     item.purpose = payload.purpose
 
     if payload.api_key.strip():
@@ -217,8 +217,10 @@ def ai_chat(payload: ChatInput, db: Session = Depends(get_db)):
         raise HTTPException(400, "模型不存在或尚未启用")
     if not config.base_url or not config.model or not config.encrypted_api_key:
         raise HTTPException(400, "请先完整配置模型地址、模型名称和 API 密钥")
-    if not (settings.paid_api_allowed and payload.confirm_paid):
-        raise HTTPException(403, "该模型标记为付费服务，必须开启付费授权并在本次请求明确确认")
+    if config.paid and not settings.paid_api_allowed:
+        raise HTTPException(403, "该模型标记为付费服务，必须先开启付费API总授权")
+    if config.paid and not payload.confirm_paid:
+        raise HTTPException(403, "本次请求可能产生费用，必须明确确认后才能调用")
 
     api_key = decrypt_key(config.encrypted_api_key)
     url = config.base_url.rstrip("/") + "/chat/completions"
