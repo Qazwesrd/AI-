@@ -362,7 +362,7 @@ export default function NovelsPage() {
                       导入小说文件（支持多种格式）
                     </button>
                     <button onClick={analyze} disabled={loading || chapters.length === 0} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
-                      ✨ 初步解析小说
+                      ✨ AI深度分析小说
                     </button>
                   </div>
                 </div>
@@ -417,7 +417,7 @@ export default function NovelsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-bold">🔎 小说解析结果</h3>
-                      <p className="mt-1 text-xs text-purple-300">先进行基础线索提取，后续接入 AI 模型进行深度分析。</p>
+                      <p className="mt-1 text-xs text-purple-300">调用已配置的文本 AI 模型，分析人物、关系、场景、道具、服装、建筑、事件、世界观与时间线。</p>
                     </div>
                     <button onClick={confirmAnalysis} disabled={analysis.length === 0} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">
                       确认全部结果
@@ -441,7 +441,7 @@ export default function NovelsPage() {
                       </div>
                     ))}
                     {analysis.length === 0 && (
-                      <p className="py-5 text-sm text-purple-300">尚无解析结果。导入小说后点击“初步解析小说”。</p>
+                      <p className="py-5 text-sm text-purple-300">尚无解析结果。导入小说后点击“AI深度分析小说”。</p>
                     )}
                   </div>
                 </div>
