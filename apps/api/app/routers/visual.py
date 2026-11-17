@@ -16,6 +16,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from app.database import get_db, ROOT_DIR
 from app.models.visual import VisualAsset, ImageTask
 from app.models.studio import AIProviderConfig, AIRuntimeSetting
+from app.services.media_service import http_download
 
 router = APIRouter(prefix="/api/visual", tags=["AI视觉素材"])
 
@@ -286,12 +287,9 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
             task.result_path = str(output)
         elif image_url:
             task.result_url = image_url
-            download_request = urllib.request.Request(image_url)
-            with urllib.request.urlopen(download_request, timeout=300) as response:
-                image_bytes = response.read()
             filename = f"image_task_{task.id}.png"
             output = ASSET_DIR / filename
-            output.write_bytes(image_bytes)
+            http_download(image_url, output)
             task.result_path = str(output)
         else:
             raise ValueError("服务商返回结果中没有图片 URL 或 b64_json")
