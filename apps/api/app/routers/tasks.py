@@ -85,7 +85,7 @@ def list_unified_tasks(
             "context": f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
                 f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
             ),
-            "error": (task.error or "")[:1200], "result_path": task.result_path or "",
+            "error": (task.error or "")[:1200], "result_available": bool(task.result_path),
             "created_at": _iso(task.created_at), "updated_at": _iso(task.updated_at),
             "can_open": True,
         })
@@ -98,7 +98,7 @@ def list_unified_tasks(
             "provider": task.provider or "", "model": task.model or "",
             "summary": (task.prompt or "")[:180],
             "context": f"素材 #{task.asset_id}" if task.asset_id else "",
-            "error": (task.error or "")[:1200], "result_path": task.result_path or "",
+            "error": (task.error or "")[:1200], "result_available": bool(task.result_path),
             "created_at": _iso(task.created_at), "updated_at": _iso(task.finished_at or task.created_at),
             "can_open": True,
         })
@@ -111,7 +111,7 @@ def list_unified_tasks(
             "provider": job.provider or "", "model": job.model or "",
             "summary": f"已完成 {job.completed_chunks}/{job.total_chunks} 个分析批次",
             "context": novel_title or f"小说 #{job.novel_id}",
-            "error": (job.last_error or "")[:1200], "result_path": "",
+            "error": (job.last_error or "")[:1200], "result_available": False,
             "progress": round(job.completed_chunks * 100 / job.total_chunks) if job.total_chunks else 0,
             "completed_chunks": job.completed_chunks, "total_chunks": job.total_chunks,
             "created_at": _iso(job.created_at), "updated_at": _iso(job.updated_at),
