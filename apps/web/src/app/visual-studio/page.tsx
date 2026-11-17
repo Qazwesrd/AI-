@@ -247,6 +247,20 @@ export default function VisualStudioPage() {
     } finally { setBusy(false); }
   }
 
+  async function confirmAsset(asset: Asset) {
+    if (!window.confirm("确认“" + asset.name + "”的设定已审核无误？确认后，AI 分镜和三维生成将优先复用这份素材。")) return;
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/visual/assets/" + asset.id + "/confirm", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "确认素材失败");
+      setMessage("素材“" + asset.name + "”已确认。");
+      await loadAssets();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "确认素材失败");
+    } finally { setBusy(false); }
+  }
+
   async function generateEditable3D(asset: Asset) {
     if (!asset.confirmed) {
       setMessage("请先确认素材设定，再生成真实三维模型。");
@@ -474,6 +488,7 @@ export default function VisualStudioPage() {
                   使用此素材生成图片
                 </button>
                 <div className="mt-3 flex flex-wrap gap-2">
+                  {!item.confirmed && <button className="rounded-lg border border-amber-300/30 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-900/30" disabled={busy} onClick={() => confirmAsset(item)}>审核通过并确认素材</button>}
                   <button className="rounded-lg border border-sky-300/20 px-3 py-1.5 text-xs hover:bg-sky-900/40" disabled={busy} onClick={() => generateProfessionalPrompt(item.id)}>生成专业提示词</button>
                   {item.confirmed && <button className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" disabled={busy} onClick={() => generateEditable3D(item)}>生成真实3D模型（Tripo）</button>}
                   {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" disabled={busy} onClick={() => refreshEditable3D(item)}>查询/下载3D模型</button>}
