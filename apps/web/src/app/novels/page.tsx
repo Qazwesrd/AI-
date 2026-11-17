@@ -450,7 +450,7 @@ export default function NovelsPage() {
                         </div>
                         <div className="mt-2 font-semibold">{item.name}</div>
                         <p className="mt-1 text-xs leading-5 text-purple-300">{item.description}</p>
-                        {item.data?.source_stale && (
+                        {Boolean(item.data?.source_stale) && (
                           <p className="mt-2 rounded-lg border border-red-400/20 bg-red-950/30 p-2 text-xs leading-5 text-red-200">
                             该条目来自重新导入前的小说版本，已保留供参考，不会自动同步到视觉素材库。请重新分析当前原文并核对后再使用。
                           </p>
