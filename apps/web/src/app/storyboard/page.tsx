@@ -110,6 +110,22 @@ export default function StoryboardPage() {
     }
   }
 
+  async function planEpisodesAI() {
+    if (!projectId) return setMessage("请先选择剧本项目");
+    const approved = window.confirm("将调用已启用的文本 AI 模型，逐章分析剧情并决定每章生成1集或在自然剧情断点拆成2集。若当前模型为付费服务，可能产生费用。是否继续？");
+    if (!approved) return;
+    setBusy(true);
+    try {
+      const response = await request(`/api/story/projects/${projectId}/plan-ai`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm_paid: true }),
+      });
+      setEpisodes(response.episodes || []);
+      setMessage(response.message || "AI分集规划完成");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AI分集规划失败");
+    } finally { setBusy(false); }
+  }
   async function planEpisodes() {
     if (!projectId) return setMessage("请先选择剧本项目");
     setBusy(true);
@@ -265,7 +281,8 @@ export default function StoryboardPage() {
           </select>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={!projectId || busy} onClick={planEpisodes}>生成初步分集计划</button>
+          <button className={button} disabled={!projectId || busy} onClick={planEpisodesAI}>AI智能分集规划</button>
+          <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy} onClick={planEpisodes}>按章节建立草案</button>
           <button className="rounded-xl border border-sky-300/30 bg-sky-800/60 px-4 py-2 text-sm" disabled={episodes.length < 2} onClick={mergeEpisodes}>合并前两集</button>
         </div>
         <p className="mt-2 text-xs text-slate-400">当前自动分集按章节长度进行初步规划；AI剧情理解、剧本改编将在后续 AI 编排阶段接入。</p>
