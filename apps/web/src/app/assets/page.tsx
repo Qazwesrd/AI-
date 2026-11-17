@@ -6,7 +6,7 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type Asset = {
   id: number;
-  source: "uploaded" | "generated";
+  source: "uploaded" | "generated" | "visual";
   filename: string;
   category: string;
   mime_type: string;
@@ -33,16 +33,21 @@ export default function AssetsPage() {
 
   async function refresh() {
     const suffix = category === "all" ? "" : `?category=${encodeURIComponent(category)}`;
-    const [uploadedResponse, generatedResponse] = await Promise.all([
+    const [uploadedResponse, generatedResponse, visualResponse] = await Promise.all([
       fetch(`${API}/api/assets${suffix}`),
       fetch(`${API}/api/media/files${suffix}`),
+      category === "all" || category === "image"
+        ? fetch(`${API}/api/visual/assets`)
+        : Promise.resolve(null),
     ]);
-    const [uploadedData, generatedData] = await Promise.all([
+    const [uploadedData, generatedData, visualData] = await Promise.all([
       uploadedResponse.json(),
       generatedResponse.json(),
+      visualResponse ? visualResponse.json() : Promise.resolve([]),
     ]);
     if (!uploadedResponse.ok) throw new Error(uploadedData.detail || "读取已上传素材失败");
     if (!generatedResponse.ok) throw new Error(generatedData.detail || "读取生成媒体失败");
+    if (visualResponse && !visualResponse.ok) throw new Error(visualData.detail || "读取 AI 视觉素材失败");
 
     const uploaded: Asset[] = (uploadedData.items || []).map((item: {
       id: number; filename: string; category: string; mime_type: string;
@@ -61,7 +66,29 @@ export default function AssetsPage() {
       description: item.description || "AI生成或视频处理输出",
       url: item.url,
     }));
-    setAssets([...uploaded, ...generated].sort((a, b) => b.id - a.id));
+    const visual: Asset[] = (Array.isArray(visualData) ? visualData : []).map((item: {
+      id: number; category: string; name: string; description: string;
+      appearance: string; image_path: string; reference_path: string;
+    }) => {
+      const imageName = String(item.image_path || "").split(/[\\/]/).pop() || "";
+      const referenceName = String(item.reference_path || "").split(/[\\/]/).pop() || "";
+      const url = imageName
+        ? `/api/visual/files/${encodeURIComponent(imageName)}`
+        : referenceName
+          ? `/api/visual/references/${encodeURIComponent(referenceName)}`
+          : "";
+      return {
+        id: item.id,
+        source: "visual" as const,
+        filename: item.name,
+        category: "image",
+        mime_type: "image/*",
+        file_size: 0,
+        description: [item.category, item.description, item.appearance].filter(Boolean).join(" · "),
+        url,
+      };
+    });
+    setAssets([...uploaded, ...generated, ...visual].sort((a, b) => b.id - a.id));
   }
 
   useEffect(() => {
@@ -95,6 +122,10 @@ export default function AssetsPage() {
 
   async function remove(asset: Asset) {
     if (!confirm("确定删除这份素材吗？")) return;
+    if (asset.source === "visual") {
+      setMessage("视觉素材请在三维视觉素材工作室中管理，避免误删角色和场景设定。");
+      return;
+    }
     const endpoint = asset.source === "uploaded"
       ? `${API}/api/assets/${asset.id}`
       : `${API}/api/media/files/${asset.id}`;
@@ -159,8 +190,12 @@ export default function AssetsPage() {
                 <p className="mt-1 text-xs text-purple-300">{sizeText(asset.file_size)} · {asset.category} · {asset.source === "uploaded" ? "上传素材" : "生成成品"}</p>
                 <p className="mt-2 break-words text-xs text-purple-200">{asset.description}</p>
                 <div className="mt-4 flex gap-4 text-sm">
-                  <a href={`${API}${asset.url}`} target="_blank" rel="noreferrer" className="text-purple-300">打开文件</a>
-                  <button onClick={() => remove(asset)} className="text-red-300">删除</button>
+                  {asset.url
+                    ? <a href={`${API}${asset.url}`} target="_blank" rel="noreferrer" className="text-purple-300">打开文件</a>
+                    : <a href="/visual-studio" className="text-purple-300">管理素材</a>}
+                  {asset.source === "visual"
+                    ? <a href="/visual-studio" className="text-purple-300">视觉工作室</a>
+                    : <button onClick={() => remove(asset)} className="text-red-300">删除</button>}
                 </div>
               </article>
             ))}
