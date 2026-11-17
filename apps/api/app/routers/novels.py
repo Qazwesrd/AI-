@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.document_import import extract_document_text
 from app.models.novel import Novel, Chapter, AnalysisItem
+from app.models.story import StoryProject
 
 router = APIRouter(prefix="/api", tags=["小说与章节"])
 
@@ -161,6 +162,13 @@ async def import_txt(
     item.source_text = text
     item.title = item.title or Path(filename).stem
 
+    # Keep old screenplay content, but mark it for review after source replacement.
+    affected_projects = db.query(StoryProject).filter(
+        StoryProject.novel_id == novel_id
+    ).all()
+    for project in affected_projects:
+        project.status = "source_changed"
+
     for old in list(item.chapters):
         db.delete(old)
 
@@ -180,8 +188,9 @@ async def import_txt(
         "filename": filename,
         "chapter_count": len(parts),
         "word_count": len(re.sub(r"\s+", "", text)),
+        "outdated_story_projects": len(affected_projects),
         # Avoid returning every chapter body in a single response for large novels.
-        "message": "小说正文已导入，章节列表请通过章节接口读取。",
+        "message": "小说正文已导入，章节列表请通过章节接口读取；已有剧本项目已标记为需要复核。",
     }
 
 @router.get("/novels/{novel_id}/chapters")
