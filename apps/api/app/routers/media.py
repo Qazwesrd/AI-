@@ -397,6 +397,27 @@ def render_episode_from_shots(
             "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
             str(output),
         ])
+        # Mix an optional generated episode dialogue track with the original clip audio.
+        speech_tasks = db.query(MediaTask).filter(
+            MediaTask.task_type == "episode_speech_track"
+        ).order_by(MediaTask.id.desc()).all()
+        speech_path = None
+        for speech_task in speech_tasks:
+            speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
+            if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
+                speech_path = safe_storage_file(speech_task.result_path)
+                break
+        if speech_path:
+            mixed_output = output.with_name(output.stem + "_mixed.mp4")
+            run_ffmpeg([
+                "-i", str(output), "-i", str(speech_path),
+                "-filter_complex",
+                "[0:a]volume=0.35[original];[1:a]volume=1.0[voice];[original][voice]amix=inputs=2:duration=first:dropout_transition=2[mix]",
+                "-map", "0:v:0", "-map", "[mix]",
+                "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_output),
+            ])
+            output.unlink(missing_ok=True)
+            os.replace(mixed_output, output)
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
