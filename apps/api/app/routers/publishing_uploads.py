@@ -1,4 +1,4 @@
-﻿import os
+import os
 import uuid
 from pathlib import Path
 
@@ -6,8 +6,14 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 router = APIRouter(prefix="/api/publishing", tags=["Publishing Uploads"])
 
+# Keep uploaded media beside the database in the Electron user-data directory.
+# Development falls back to the repository root; packaged builds set APP_DATA_DIR
+# to app.getPath("userData") in the Electron main process.
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
-UPLOAD_ROOT = PROJECT_ROOT / "storage" / "publishing"
+DATA_ROOT = Path(
+    os.environ.get("APP_DATA_DIR", str(PROJECT_ROOT))
+).expanduser().resolve()
+UPLOAD_ROOT = DATA_ROOT / "storage" / "publishing"
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 MAX_VIDEO_SIZE = 2 * 1024 * 1024 * 1024
@@ -89,4 +95,3 @@ async def upload_publishing_file(
         await file.close()
         if temporary.exists():
             temporary.unlink(missing_ok=True)
-
