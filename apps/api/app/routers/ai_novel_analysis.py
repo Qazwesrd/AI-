@@ -27,8 +27,19 @@ CATEGORY_MAP = {
     "道具": "prop",
     "物品": "prop",
     "prop": "prop",
+    "武器": "weapon",
+    "兵器": "weapon",
+    "刀具": "weapon",
+    "刀剑": "weapon",
+    "weapon": "weapon",
     "服装": "costume",
     "衣着": "costume",
+    "costume": "costume",
+    "建筑": "architecture",
+    "architecture": "architecture",
+    "特殊物品": "special_item",
+    "法器": "special_item",
+    "special_item": "special_item",
     "costume": "costume",
     "建筑": "architecture",
     "architecture": "architecture",
@@ -360,9 +371,9 @@ def analyze_chunk(config, api_key, content, chapter_label):
 必须识别：
 - 人物关系：双方人物、关系类型、变化和证据。
 - 场景：名称、地点、环境、时间和氛围。
-- 道具：名称、外观、材质、颜色、用途和所属人物。
+- 道具：名称、外观、材质、颜色、用途和所属人物。\n- 武器与刀具：名称、类别、刀身/刃口/握柄/护手/鞘的结构、材质、颜色、尺寸、使用者、剧情状态和原文依据；必须与普通道具区分。
 - 服装：穿着人物、款式、颜色、材质和使用场合。
-- 建筑：名称、结构、外观和所在地点。
+- 建筑：名称、结构、外观、建筑风格、材质、规模和所在地点。\n- 特殊物品：法器、神器、信物、关键线索物和具有剧情作用的独特物品。
 - 事件：事件名称、参与人物、地点、起因和结果。
 - 世界观：时代、地理、势力、规则和能力体系。
 - 时间线：事件顺序、时间线索和涉及章节。
