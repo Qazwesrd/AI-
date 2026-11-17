@@ -6,7 +6,7 @@ import urllib.error
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 from app.database import get_db, ROOT_DIR
@@ -104,7 +104,7 @@ class RuntimeInput(BaseModel):
 class ResourceInput(BaseModel):
     name: str
     description: str = ""
-    data: dict = {}
+    data: dict = Field(default_factory=dict)
     image_path: str = ""
     confirmed: bool = False
 
@@ -144,7 +144,9 @@ def save_provider(payload: ProviderInput, db: Session = Depends(get_db)):
     item.base_url = payload.base_url.rstrip("/")
     item.model = payload.model
     item.enabled = payload.enabled
-    item.paid = payload.paid
+    # Billing classification is server-controlled. Never trust a browser flag
+    # to downgrade a provider to free and bypass the paid-call confirmation gate.
+    item.paid = True
     item.purpose = payload.purpose
 
     if payload.api_key.strip():
