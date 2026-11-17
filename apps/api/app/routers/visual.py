@@ -16,7 +16,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from app.database import get_db, ROOT_DIR
 from app.models.visual import VisualAsset, ImageTask
 from app.models.novel import Novel, AnalysisItem
-from app.models.studio import AIProviderConfig, AIRuntimeSetting
+from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
 from app.services.media_service import http_download
 
 router = APIRouter(prefix="/api/visual", tags=["AI视觉素材"])
@@ -650,6 +650,13 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
         raise HTTPException(404, "素材不存在")
     if not asset.confirmed:
         raise HTTPException(409, "请先确认人物/场景/道具设定，再生成三维模型")
+    active = db.query(ImageTask).filter(
+        ImageTask.asset_id == asset_id,
+        ImageTask.task_type == "model3d_multiview",
+        ImageTask.status.in_(("submitted", "running")),
+    ).order_by(ImageTask.id.desc()).first()
+    if active and (active.result_url or "").startswith("tripo-task:"):
+        return {"success": True, "task_id": active.id, "status": active.status, "message": "该素材已有正在处理的 3D 任务，已返回现有任务，避免重复扣费。"}
     provider, api_key, base = _tripo_provider(db, payload.provider, payload.confirm_paid)
     data = asset.data if isinstance(asset.data, dict) else {}
     views = data.get("generated_views") if isinstance(data.get("generated_views"), dict) else {}
@@ -692,6 +699,10 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
             result_url="tripo-task:" + str(remote_id),
         )
         db.add(task)
+        db.add(AIUsageLog(
+            provider=payload.provider, model=payload.model, task="visual_multiview_to_3d",
+            status="submitted", detail=f"素材：{asset.name}；输入视角：{','.join(tokens.keys())}",
+        ))
         db.commit()
         db.refresh(task)
         data = dict(asset.data) if isinstance(asset.data, dict) else {}
@@ -706,8 +717,12 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
         return {"success": True, "task_id": task.id, "remote_task_id": str(remote_id), "status": "submitted", "input_views": list(tokens.keys()), "message": "已将三视图上传并提交真实 3D 模型生成任务；请稍后查询任务。"}
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:1600]
+        db.add(AIUsageLog(provider=payload.provider, model=payload.model, task="visual_multiview_to_3d", status="failed", detail=f"HTTP {exc.code}: {detail}"))
+        db.commit()
         raise HTTPException(502, f"Tripo API HTTP {exc.code}：{detail}") from exc
     except Exception as exc:
+        db.add(AIUsageLog(provider=payload.provider, model=payload.model, task="visual_multiview_to_3d", status="failed", detail=str(exc)[:1600]))
+        db.commit()
         raise HTTPException(502, "提交 Tripo 3D 任务失败：" + str(exc)[:1600]) from exc
 
 
