@@ -48,6 +48,7 @@ export default function StoryboardPage() {
   const [speechModel, setSpeechModel] = useState("");
   const [speechVoice, setSpeechVoice] = useState("alloy");
   const [speechPaidConfirmed, setSpeechPaidConfirmed] = useState(false);
+  const [backgroundMusicPath, setBackgroundMusicPath] = useState("");
 
   const [shotForm, setShotForm] = useState({
     scene_name: "", shot_type: "中景", camera_movement: "固定镜头",
@@ -239,7 +240,8 @@ export default function StoryboardPage() {
     if (!window.confirm("只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
     setBusy(true);
     try {
-      const result = await request("/api/media/video/episodes/" + episode.id + "/render", { method: "POST" });
+      const query = backgroundMusicPath.trim() ? "?music_path=" + encodeURIComponent(backgroundMusicPath.trim()) : "";
+      const result = await request("/api/media/video/episodes/" + episode.id + "/render" + query, { method: "POST" });
       setMessage("第" + episode.episode_number + "集初版视频已合成：" + result.output);
     } catch (error) { setMessage(error instanceof Error ? error.message : "视频合成失败"); }
     finally { setBusy(false); }
@@ -437,6 +439,10 @@ export default function StoryboardPage() {
             <input className={field} value={speechVoice} onChange={e => setSpeechVoice(e.target.value)} placeholder="声音 ID" />
           </div>
           <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={speechPaidConfirmed} onChange={e => setSpeechPaidConfirmed(e.target.checked)} />我已确认本次配音可能产生费用</label>
+          <div className="mt-4">
+            <label className="mb-2 block text-xs text-slate-300">背景音乐文件路径（可选，需先上传到媒体素材库）</label>
+            <input className={field} value={backgroundMusicPath} onChange={e => setBackgroundMusicPath(e.target.value)} placeholder="填写 storage 目录中的背景音乐完整路径" />
+          </div>
         </div>
       </section>
 
