@@ -200,7 +200,7 @@ export default function AICenterPage() {
               </p>
             </section>
 
-            <section className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
+            <section id="usage-logs" className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
               <h2 className="mb-4 text-lg font-bold">最近调用记录</h2>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 {logs.map((log) => (
