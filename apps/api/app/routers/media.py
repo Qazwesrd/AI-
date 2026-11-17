@@ -658,6 +658,13 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
     if not task or task.task_type not in ("video", "storyboard_video"):
         raise HTTPException(404, "视频任务不存在")
+    if task.status == "submission_unknown" or not task.remote_task_id:
+        return {
+            "task_id": task.id,
+            "status": "submission_unknown",
+            "error": task.error or "提交结果尚未核实，请先检查服务商控制台",
+            "polling_skipped": True,
+        }
     if task.result_path and Path(task.result_path).is_file():
         task.status = "completed"
         task.error = None
