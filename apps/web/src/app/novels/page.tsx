@@ -28,6 +28,7 @@ type AnalysisItem = {
   name: string;
   description: string;
   confirmed: boolean;
+  data?: Record<string, unknown>;
 };
 
 const categoryNames: Record<string, string> = {
@@ -443,12 +444,17 @@ export default function NovelsPage() {
                       <div key={item.id} className="rounded-xl border border-purple-400/20 bg-black/20 p-4">
                         <div className="flex items-center justify-between gap-2">
                           <span className="text-xs text-purple-300">{categoryNames[item.category] || item.category}</span>
-                          <span className={`text-xs ${item.confirmed ? "text-emerald-300" : "text-yellow-300"}`}>
-                            {item.confirmed ? "已确认" : "待确认"}
+                          <span className={`text-xs ${item.data?.source_stale ? "text-red-300" : item.confirmed ? "text-emerald-300" : "text-yellow-300"}`}>
+                            {item.data?.source_stale ? "旧版本 · 已过期" : item.confirmed ? "已确认" : "待确认"}
                           </span>
                         </div>
                         <div className="mt-2 font-semibold">{item.name}</div>
                         <p className="mt-1 text-xs leading-5 text-purple-300">{item.description}</p>
+                        {item.data?.source_stale && (
+                          <p className="mt-2 rounded-lg border border-red-400/20 bg-red-950/30 p-2 text-xs leading-5 text-red-200">
+                            该条目来自重新导入前的小说版本，已保留供参考，不会自动同步到视觉素材库。请重新分析当前原文并核对后再使用。
+                          </p>
+                        )}
                         <div className="mt-3 flex gap-3 text-xs">
                           <button onClick={() => editAnalysis(item)} className="text-purple-200">修改</button>
                           <button onClick={() => deleteAnalysis(item.id)} className="text-red-300">删除</button>
