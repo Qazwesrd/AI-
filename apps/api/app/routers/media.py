@@ -35,7 +35,7 @@ def get_provider(db, provider_name, confirm_paid=False):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise HTTPException(403, "全局网络调用开关已关闭")
 
-    paid = bool(getattr(config, "paid", True))
+    paid = config.provider.lower() != "cloudflare"
     if paid:
         if not getattr(runtime, "paid_api_allowed", False):
             raise HTTPException(403, "付费 API 总授权未开启")
@@ -379,8 +379,8 @@ class RenderInput(BaseModel):
     subtitle_path: Optional[str] = None
     music_volume: float = Field(default=0.25, ge=0, le=2)
     original_volume: float = Field(default=1.0, ge=0, le=2)
-    width: int = 1920
-    height: int = 1080
+    width: int = Field(default=1920, ge=256, le=3840)
+    height: int = Field(default=1080, ge=256, le=3840)
 
 
 @router.post("/render")
@@ -390,6 +390,8 @@ def render_video(data: RenderInput):
         output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
         if not output_name.lower().endswith(".mp4"):
             output_name += ".mp4"
+        if data.width % 2 or data.height % 2:
+            raise HTTPException(400, "输出宽度和高度必须是偶数")
         output = VIDEO_DIR / f"{uuid.uuid4().hex}_{output_name}"
 
         args = ["-i", str(video)]
@@ -420,13 +422,14 @@ def render_video(data: RenderInput):
             else:
                 args += ["-an"]
 
+        video_filters = [
+            f"scale={data.width}:{data.height}:force_original_aspect_ratio=decrease",
+            f"pad={data.width}:{data.height}:(ow-iw)/2:(oh-ih)/2",
+        ]
         if subtitle:
             escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
-            args += ["-vf", f"subtitles='{escaped}'"]
-
-        args += [
-            "-vf" if not subtitle else "-metadata", 
-        ] if False else []
+            video_filters.append(f"subtitles='{escaped}'")
+        args += ["-vf", ",".join(video_filters)]
 
         args += [
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
