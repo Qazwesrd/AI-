@@ -244,11 +244,14 @@ def get_reference(filename: str):
 @router.get("/tasks")
 def list_tasks(db: Session = Depends(get_db)):
     tasks = db.query(ImageTask).order_by(ImageTask.created_at.desc()).limit(100).all()
+    asset_ids = {x.asset_id for x in tasks if x.asset_id}
+    asset_rows = db.query(VisualAsset).filter(VisualAsset.id.in_(asset_ids)).all() if asset_ids else []
+    asset_data_by_id = {x.id: (x.data if isinstance(x.data, dict) else {}) for x in asset_rows}
     return [{
         "id": x.id,
         "asset_id": x.asset_id,
         "provider": x.provider,
-        "model": (x.data or {}).get("model", "") if isinstance(getattr(x, "data", None), dict) else "",
+        "model": (asset_data_by_id.get(x.asset_id, {}).get("model3d_task") or {}).get("model", ""),
         "task_type": x.task_type,
         "prompt": x.prompt,
         "status": x.status,
