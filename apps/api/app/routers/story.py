@@ -308,6 +308,13 @@ def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends
             {StoryAssetLink.episode_id: first.id}
         )
         db.delete(item)
+    db.flush()
+    remaining = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number, EpisodePlan.id).all()
+    for index, item in enumerate(remaining, start=1):
+        item.sort_order = index
+        item.episode_number = index
     db.commit()
     return {"success": True, "merged_episode_id": first.id}
 
@@ -347,6 +354,7 @@ def split_episode(episode_id: int, db: Session = Depends(get_db)):
     later = db.query(EpisodePlan).filter(
         EpisodePlan.project_id == episode.project_id,
         EpisodePlan.id != episode.id,
+        EpisodePlan.id != second.id,
         EpisodePlan.sort_order >= second.sort_order
     ).all()
     for item in later:
