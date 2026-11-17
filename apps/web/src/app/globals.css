@@ -2602,3 +2602,60 @@ body {
 }
 
 /* ===== COSMIC NEBULA V6 END ===== */
+
+
+/* ===== GLOBAL COSMIC BACKGROUND CONSISTENCY FIX ===== */
+html,
+body {
+  min-height: 100%;
+  background-color: #03030b !important;
+}
+
+body {
+  position: relative;
+  isolation: isolate;
+  background-image:
+    linear-gradient(180deg, rgba(2, 2, 12, .20), rgba(2, 2, 12, .38)),
+    url("/images/cosmic-background.png") !important;
+  background-size: cover, cover !important;
+  background-position: center center, center center !important;
+  background-repeat: no-repeat, no-repeat !important;
+  background-attachment: fixed, fixed !important;
+}
+
+/* Every route uses the same sharp base image; the home page no longer gets a different blur treatment. */
+.cosmic {
+  background-color: #03030b !important;
+  background-image:
+    linear-gradient(180deg, rgba(2, 2, 12, .18), rgba(2, 2, 12, .34)),
+    url("/images/cosmic-background.png") !important;
+  background-size: cover, cover !important;
+  background-position: center center, center center !important;
+  background-repeat: no-repeat, no-repeat !important;
+  background-attachment: fixed, fixed !important;
+}
+
+/* Keep nebula detail visible instead of washing the entire home screen with heavy blur. */
+.cosmic .nebula-cloud-a,
+.cosmic .nebula-cloud-b,
+.cosmic .nebula-cloud-c,
+.cosmic .nebula-cloud-d,
+.cosmic .nebula-cloud-e,
+.cosmic .nebula-cloud-f {
+  filter: blur(7px) !important;
+  opacity: .42 !important;
+}
+
+/* Restore the black hole that an older background override accidentally hid. */
+.cosmic .black-hole {
+  display: block !important;
+  opacity: .9;
+}
+
+@media (max-width: 900px) {
+  body,
+  .cosmic {
+    background-attachment: scroll, scroll !important;
+  }
+}
+/* ===== GLOBAL COSMIC BACKGROUND CONSISTENCY FIX END ===== */
