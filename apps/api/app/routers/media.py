@@ -692,6 +692,7 @@ def generate_episode_voice_track(
         if prior.provider == data.provider and prior.model == data.model and prior_meta.get("voice") == data.voice and prior_meta.get("episode_id") == episode_id and prior_meta.get("shot_id") and prior.result_path and Path(prior.result_path).is_file():
             generated.setdefault(prior_meta["shot_id"], Path(prior.result_path))
     failures = []
+    blocked_shots = set()
     for shot in shots:
         existing_audio = generated.get(shot.id)
         if existing_audio:
@@ -703,7 +704,7 @@ def generate_episode_voice_track(
                 )
                 if speech_duration > target_duration * 1.5:
                     generated.pop(shot.id, None)
-                    existing_audio.unlink(missing_ok=True)
+                    blocked_shots.add(shot.id)
                     failures.append({
                         "shot_number": shot.shot_number,
                         "error": f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；为避免截断台词，请拆分对白或延长镜头。",
@@ -712,8 +713,9 @@ def generate_episode_voice_track(
                     speech_durations[shot.id] = speech_duration
             except Exception as exc:
                 generated.pop(shot.id, None)
+                blocked_shots.add(shot.id)
                 failures.append({"shot_number": shot.shot_number, "error": f"无法读取已有配音时长：{exc}"})
-        if shot.id in generated:
+        if shot.id in generated or shot.id in blocked_shots:
             continue
         text_value = (shot.dialogue or "").strip()
         if not text_value:
