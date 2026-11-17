@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+type Novel = { id: number; title?: string; name?: string };
+
 type Asset = {
   id: number;
   category: string;
@@ -49,6 +51,8 @@ const styles = [
 export default function VisualStudioPage() {
   const [category, setCategory] = useState("characters");
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [novels, setNovels] = useState<Novel[]>([]);
+  const [sourceNovelId, setSourceNovelId] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -62,6 +66,27 @@ export default function VisualStudioPage() {
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function loadNovels() {
+    try {
+      const response = await fetch(`${API}/api/story/novels`);
+      if (response.ok) setNovels(await response.json());
+    } catch {}
+  }
+
+  async function importAnalysisAssets() {
+    if (!sourceNovelId) { setMessage("请先选择要同步的小说"); return; }
+    setBusy(true);
+    try {
+      const response = await fetch(`${API}/api/visual/assets/import-analysis/${sourceNovelId}`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "同步失败");
+      setMessage(result.message + ` 新增 ${result.created} 项，更新 ${result.updated} 项，跳过 ${result.skipped} 项。`);
+      await loadAssets();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "同步失败");
+    } finally { setBusy(false); }
+  }
 
   async function loadAssets() {
     try {
@@ -80,6 +105,8 @@ export default function VisualStudioPage() {
   useEffect(() => {
     loadAssets();
   }, [category]);
+
+  useEffect(() => { loadNovels(); }, []);
 
   useEffect(() => {
     loadTasks();
@@ -308,8 +335,15 @@ export default function VisualStudioPage() {
       </section>
 
       <section className={panel}>
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold">当前素材库</h2>
+          <div className="flex flex-wrap gap-2">
+            <select className="max-w-xs rounded-xl border border-purple-300/20 bg-slate-900 px-3 py-2 text-sm text-white" value={sourceNovelId} onChange={(e) => setSourceNovelId(e.target.value)}>
+              <option value="">选择小说，同步 AI 分析资产</option>
+              {novels.map((novel) => <option key={novel.id} value={novel.id}>{novel.title || novel.name || `小说 #${novel.id}`}</option>)}
+            </select>
+            <button className={button} disabled={busy || !sourceNovelId} onClick={importAnalysisAssets}>同步 AI 识别结果</button>
+          </div>
           <button className={button} onClick={loadAssets}>刷新素材</button>
         </div>
         {assets.length === 0 ? (
