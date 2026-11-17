@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,13 @@ from app.database import get_db
 from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
+from app.routers.visual import (
+    pause_image_task,
+    resume_image_task,
+    retry_image_task,
+    cancel_image_task,
+)
+from app.routers.media import refresh_video_task
 
 router = APIRouter(prefix="/api/tasks", tags=["统一任务中心"])
 
@@ -151,3 +158,40 @@ def list_unified_tasks(
         "generated_at": datetime.utcnow().isoformat(),
         "note": "任务中心为跨模块只读汇总；各模块原有的暂停、恢复、重试、轮询和付费确认规则保持不变。",
     }
+
+@router.post("/{source}/{task_id}/{action}")
+def control_unified_task(
+    source: str,
+    task_id: int,
+    action: str,
+    db: Session = Depends(get_db),
+):
+    """统一任务中心的显式人工操作入口；不自动执行 AI 生成。"""
+    if source == "image":
+        handlers = {
+            "pause": pause_image_task,
+            "resume": resume_image_task,
+            "retry": retry_image_task,
+            "cancel": cancel_image_task,
+        }
+        handler = handlers.get(action)
+        if not handler:
+            raise HTTPException(400, "视觉任务仅支持暂停、恢复、重试或取消")
+        return handler(task_id, db)
+
+    if source == "media":
+        if action != "refresh":
+            raise HTTPException(
+                409,
+                "媒体任务暂不支持本地强制暂停、取消或自动重试；请使用所属模块的安全控制流程",
+            )
+        return refresh_video_task(task_id, db)
+
+    if source == "analysis":
+        raise HTTPException(
+            409,
+            "小说解析任务请在小说详情页继续或重试，以保留原有模型、服务商和付费确认设置",
+        )
+
+    raise HTTPException(404, "不支持的任务来源")
+
