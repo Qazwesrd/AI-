@@ -18,6 +18,11 @@ type Asset = {
   style: string;
   image_path: string;
   confirmed: boolean;
+  data?: {
+    model3d_task?: { task_id?: number; status?: string };
+    model3d?: { path?: string; format?: string };
+    generated_views?: Record<string, { path?: string }>;
+  };
 };
 
 type Task = {
@@ -242,6 +247,44 @@ export default function VisualStudioPage() {
     } finally { setBusy(false); }
   }
 
+  async function generateEditable3D(asset: Asset) {
+    if (!asset.confirmed) {
+      setMessage("请先确认素材设定，再生成真实三维模型。");
+      return;
+    }
+    if (!window.confirm("将把已生成的正面、侧面、背面参考图上传到 Tripo，并调用多视图转 3D 模型 API。该服务可能消耗付费额度，是否继续？")) return;
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/visual/assets/" + asset.id + "/model3d/tripo", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "tripo3d", model: "v3.1-20260211", texture: true, pbr: true, texture_quality: "detailed", geometry_quality: "standard", confirm_paid: confirmPaid }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "3D 模型任务提交失败");
+      setMessage("已提交 Tripo 三维模型任务 #" + result.task_id + "。输入视角：" + (result.input_views || []).join("、") + "。稍后可点击查询并下载 GLB。");
+      await loadAssets();
+      await loadTasks();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "3D 模型生成失败");
+    } finally { setBusy(false); }
+  }
+
+  async function refreshEditable3D(asset: Asset) {
+    const taskId = asset.data?.model3d_task?.task_id;
+    if (!taskId) return setMessage("该素材尚无 3D 模型任务。");
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/visual/tasks/" + taskId + "/refresh-model3d", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "查询 3D 模型失败");
+      setMessage(result.status === "completed" ? "GLB 三维模型已下载到本地素材库。" : result.status === "failed" ? (result.error || "3D 任务失败") : "3D 模型仍在生成，当前进度：" + (result.progress ?? "未知") + "%");
+      await loadAssets();
+      await loadTasks();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "查询 3D 模型失败");
+    } finally { setBusy(false); }
+  }
+
   async function addEvolution(asset: Asset) {
     const chapter = window.prompt("变化发生的章节号：");
     if (!chapter || !/^[1-9]\d*$/.test(chapter)) return;
@@ -432,6 +475,9 @@ export default function VisualStudioPage() {
                 </button>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button className="rounded-lg border border-sky-300/20 px-3 py-1.5 text-xs hover:bg-sky-900/40" disabled={busy} onClick={() => generateProfessionalPrompt(item.id)}>生成专业提示词</button>
+                  {item.confirmed && <button className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" disabled={busy} onClick={() => generateEditable3D(item)}>生成真实3D模型（Tripo）</button>}
+                  {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" disabled={busy} onClick={() => refreshEditable3D(item)}>查询/下载3D模型</button>}
+                  {item.data?.model3d?.path && <a className="rounded-lg border border-green-300/30 px-3 py-1.5 text-xs text-green-200 hover:bg-green-900/30" href={API + "/api/visual/models3d/" + encodeURIComponent(item.data.model3d.path.split(/[\\/]/).pop() || "")} target="_blank" rel="noreferrer">下载 GLB 模型</a>}
                   <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs hover:bg-purple-900/50" disabled={busy} onClick={() => createViewBatch(item.id)}>创建多视角任务</button>
                   {(item.category === "props" || item.category === "weapons" || item.category === "special_items" || item.category === "costumes") && (
                     <button className="rounded-lg border border-amber-300/20 px-3 py-1.5 text-xs hover:bg-amber-900/30" disabled={busy} onClick={() => addEvolution(item)}>记录剧情变化</button>
