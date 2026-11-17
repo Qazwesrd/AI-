@@ -45,7 +45,9 @@ def get_ai_config(db, provider_name):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise RuntimeError("全局网络调用开关已关闭")
 
-    paid = True
+    # 只有明确标记为付费的服务才要求付费总授权。
+    # 缺失计费信息时默认按付费处理，避免未知费用被放行。
+    paid = bool(getattr(config, "paid", True))
     if paid and not getattr(runtime, "paid_api_allowed", False):
         raise RuntimeError("付费 API 总授权未开启")
 
