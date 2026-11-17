@@ -256,7 +256,7 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None):
         concat_file = work / "concat.txt"
         concat_file.write_text(
             "".join(
-                "file '" + str(item).replace("\\", "/").replace("'", "'\\''") + "'\\n"
+                "file '" + str(item).replace("\\", "/").replace("'", "'\\''") + "'\n"
                 for item in clips
             ),
             encoding="utf-8"
