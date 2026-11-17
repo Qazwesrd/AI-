@@ -360,11 +360,38 @@ def render_episode_from_shots(
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-movflags", "+faststart", str(output)
         ])
+        subtitle_lines = []
+        elapsed = 0.0
+        subtitle_index = 1
+        for shot in shots:
+            duration = max(1.0, float(shot.duration_seconds or 5))
+            dialogue = (shot.dialogue or "").strip()
+            if dialogue:
+                subtitle_lines.extend([
+                    str(subtitle_index),
+                    f"{srt_time(elapsed)} --> {srt_time(elapsed + duration)}",
+                    dialogue,
+                    "",
+                ])
+                subtitle_index += 1
+            elapsed += duration
+        subtitle_path = None
+        if subtitle_lines:
+            subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
+            subtitle_file.write_text("\\n".join(subtitle_lines), encoding="utf-8-sig")
+            subtitle_path = str(subtitle_file)
+            db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+        db.add(MediaFile(
+            name=output.name, category="video", file_path=str(output),
+            mime_type="video/mp4", file_size=output.stat().st_size,
+        ))
         episode.status = "rendered"
         db.commit()
         return {"success": True, "episode_id": episode_id,
-                "output": str(output), "size": output.stat().st_size,
-                "clip_count": len(clips), "duration_target": episode.duration_seconds}
+                "output": str(output), "subtitle_path": subtitle_path,
+                "size": output.stat().st_size,
+                "clip_count": len(clips), "duration_target": episode.duration_seconds,
+                "subtitle_count": subtitle_index - 1}
     except Exception as exc:
         output.unlink(missing_ok=True)
         raise HTTPException(500, "分集视频合成失败：" + str(exc))
