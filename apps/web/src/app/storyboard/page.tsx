@@ -16,7 +16,7 @@ type Shot = {
   character_actions: string; dialogue: string; sound_effects: string; image_prompt: string;
 };
 type VisualAsset = { id: number; category: string; name: string; description: string };
-type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string };
+type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };
 
 const styles = [
   "3D动漫电影风格", "真人电影风格", "2D动漫风格",
@@ -481,7 +481,12 @@ export default function StoryboardPage() {
                 <div key={task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-black/20 p-2 text-xs">
                   <span>镜头 {task.shot_number} · {task.provider}/{task.model} · {task.status}</span>
                   {task.result_path && <span className="break-all text-emerald-300">已下载到本地</span>}
-                  {task.error && <span className="text-red-300">{task.error}</span>}
+                  {task.status === "submission_unknown" && (
+                    <span className="w-full rounded-md border border-amber-400/30 bg-amber-950/30 p-2 text-amber-200">
+                      提交结果待核实：请先到服务商控制台检查任务记录。系统已阻止自动重复提交，确认服务商没有创建任务后再重新提交。
+                    </span>
+                  )}
+                  {task.error && <span className="w-full break-words text-red-300">{task.error}</span>}
                 </div>
               ))}
               {videoTasks.length === 0 && <p className="text-xs text-slate-400">尚未提交视频任务。</p>}
