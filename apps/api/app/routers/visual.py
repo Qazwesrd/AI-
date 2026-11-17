@@ -97,9 +97,9 @@ def list_assets(category: Optional[str] = None, db: Session = Depends(get_db)):
 
 @router.post("/assets")
 def create_asset(payload: AssetInput, db: Session = Depends(get_db)):
-    allowed = {"characters", "scenes", "props"}
+    allowed = {"characters", "scenes", "props", "weapons", "costumes", "buildings", "special_items"}
     if payload.category not in allowed:
-        raise HTTPException(400, "素材分类只支持 characters、scenes、props")
+        raise HTTPException(400, "素材分类支持人物、场景、道具、武器刀具、服装、建筑和特殊物品")
     item = VisualAsset(**payload.model_dump())
     db.add(item)
     db.commit()
