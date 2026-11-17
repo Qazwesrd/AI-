@@ -120,9 +120,20 @@ export default function VisualStudioPage() {
   function buildPrompt() {
     const selected = assets.find((item) => item.id === selectedAsset);
     const base = selected
-      ? `${selected.name}。${selected.description}。外貌：${selected.appearance}。服装：${selected.clothing}。角色固定特征：${selected.consistency_prompt}。`
+      ? `${selected.name}。原文设定：${selected.description}。外观：${selected.appearance}。服装/装备：${selected.clothing}。性格/气质：${selected.personality}。必须保持的固定特征：${selected.consistency_prompt}。`
       : "";
-    const full = `${base}${prompt}。风格：${style}。高质量电影级画面，精细材质，清晰细节，统一角色设计。`;
+    const viewGuide = category === "characters"
+      ? "生成同一角色标准三视图设定稿：正面全身、严格90度侧面全身、背面全身，三个视角必须是同一张画布内同一人物、同一身高比例、同一服装、同一发型、同一装备；中性站姿，纯净背景，不添加文字水印，不得生成三个不同人物。"
+      : category === "weapons"
+      ? "生成武器/刀具专业三视图：正视图、侧视图、背视图，完整展示刃口、刀背、护手、握柄、刀鞘、连接结构和材质纹理；严格保持同一件武器的比例和结构，不得擅自添加不存在的零件。"
+      : category === "props" || category === "special_items"
+      ? "生成物品正面、侧面、背面三视图，完整展示轮廓、尺寸比例、材质、颜色、纹理、磨损和独特标记，三个视角必须是同一件物品。"
+      : category === "costumes"
+      ? "生成服装装备正面、侧面、背面三视图，清晰展示剪裁、层次、系带、护甲、配饰、材质和纹样；服装结构必须一致。"
+      : category === "buildings"
+      ? "生成建筑正立面、侧立面和整体轴测参考图，保持建筑结构、层数、屋顶、门窗、材质和比例一致。"
+      : "生成电影级环境概念设定图，建立明确空间布局、地形、建筑位置、光照方向、天气、时间和可供人物行动的区域；保持可复用的场景地理结构。";
+    const full = `${base}${prompt}。${viewGuide}视觉风格：${style}。高质量电影级3D资产设定，清晰锐利，真实材质细节，统一比例，专业角色/道具设计稿。`;
     setPrompt(full);
   }
 
