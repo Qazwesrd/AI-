@@ -497,6 +497,21 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         ensure_project_source_current(project)
     style = project.adaptation_style if project else "3D动漫电影风格"
     target = project.target_duration if project else 120
+    novel_id = project.novel_id if project else None
+    asset_query = db.query(VisualAsset).filter(VisualAsset.confirmed == True)
+    confirmed_assets = asset_query.order_by(VisualAsset.id.asc()).limit(300).all()
+    catalog_rows = []
+    for asset in confirmed_assets:
+        asset_data = asset.data if isinstance(asset.data, dict) else {}
+        if novel_id is not None and asset_data.get("source_novel_id") not in (None, novel_id):
+            continue
+        catalog_rows.append({
+            "category": asset.category, "name": asset.name,
+            "description": (asset.description or "")[:300],
+            "appearance": (asset.appearance or "")[:300],
+            "consistency": (asset.consistency_prompt or "")[:200],
+        })
+    asset_catalog_text = json.dumps(catalog_rows[:160], ensure_ascii=False)
     source = (episode.source_text or "")[:28000]
     prompt = (
         "你是专业影视编剧、漫剧导演和分镜师。把原著改编成可直接制作的短篇漫剧。"
@@ -504,6 +519,8 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         "剧本必须包含场景、动作、表情、走位、对白、旁白和转场；分镜必须逐段覆盖剧本，不得遗漏关键剧情。"
         "每个镜头必须写明景别、运镜、画面构图、角色动作、场景、对白/旁白、音效和可直接用于图像模型的提示词。"
         "画面风格：" + style + "。目标时长约" + str(target) + "秒，成片允许90至150秒。生成10至24个镜头，镜头时长合计尽量接近目标时长。"
+        "优先复用下列已确认视觉素材的准确名称，人物/场景/武器/道具名称必须与素材库一致；没有匹配项时才使用原文名称，不得把不同素材混为一体。"
+        "已确认素材目录（JSON）：" + asset_catalog_text + "。"
         "输出简体中文 JSON，不要 Markdown，格式：{\"title\":\"标题\",\"synopsis\":\"剧情摘要\",\"screenplay\":\"分场影视剧本\",\"shots\":[{\"scene_name\":\"场景名称，尽量与已识别场景素材名称一致\",\"character_names\":[\"本镜头出场人物素材名称\"],\"prop_names\":[\"本镜头出现的武器/道具/特殊物品素材名称\"],\"shot_type\":\"景别\",\"camera_movement\":\"运镜\",\"duration_seconds\":5,\"visual_description\":\"画面\",\"character_actions\":\"动作表情走位\",\"dialogue\":\"对白旁白\",\"sound_effects\":\"音效\",\"image_prompt\":\"图像模型提示词\"}]}。"
         "小说章节原文：\n" + source
     )
