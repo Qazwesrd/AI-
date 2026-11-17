@@ -5,7 +5,7 @@
     "description": "AI漫剧制作大师 Windows 桌面应用",
     "main": "main.cjs",
     "scripts": {
-        "api": "cd ..\\api && .venv\\Scripts\\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload",
+        "api": "cd ..\\api && .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
         "dev": "concurrently -k \"npm --prefix ../web run dev\" \"npm run api\" \"wait-on tcp:3000 tcp:8000 && electron .\"",
         "build:desktop": "electron-builder --win nsis",
         "build:windows": "powershell -ExecutionPolicy Bypass -File ../../scripts/build-windows.ps1",
