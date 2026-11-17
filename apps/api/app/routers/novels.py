@@ -197,7 +197,10 @@ async def import_txt(
 def list_chapters(novel_id: int, db: Session = Depends(get_db)):
     if not db.query(Novel).filter(Novel.id == novel_id).first():
         raise HTTPException(404, "小说不存在")
-    items = db.query(Chapter).filter(
+    items = db.query(
+        Chapter.id, Chapter.novel_id, Chapter.chapter_number,
+        Chapter.title, Chapter.word_count
+    ).filter(
         Chapter.novel_id == novel_id
     ).order_by(Chapter.chapter_number).all()
     # Return directory metadata only. Chapter bodies are fetched on demand so
