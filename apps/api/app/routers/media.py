@@ -89,7 +89,7 @@ class VideoTaskInput(BaseModel):
     task_id_field: str = "id"
     video_url_field: str = "video_url"
     status_field: str = "status"
-    extra_payload: dict = {}
+    extra_payload: dict = Field(default_factory=dict)
 
 
 @router.post("/video/tasks")
@@ -143,6 +143,13 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
     if not task or task.task_type != "video":
         raise HTTPException(404, "视频任务不存在")
+    if task.status == "completed" and task.result_path and Path(task.result_path).is_file():
+        return {
+            "task_id": task.id,
+            "status": "completed",
+            "result_path": task.result_path,
+            "already_downloaded": True,
+        }
 
     config, key, base = get_provider(
         db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
@@ -157,7 +164,7 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
         task.status = status
 
         video_url = value_at(result, settings.get("video_url_field", "video_url"))
-        if video_url:
+        if video_url and not (task.result_path and Path(task.result_path).is_file()):
             filename = f"video_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
             destination = VIDEO_DIR / filename
             http_download(str(video_url), destination)
@@ -389,17 +396,29 @@ def render_video(data: RenderInput):
         audio = safe_storage_file(data.audio_path) if data.audio_path else None
         subtitle = safe_storage_file(data.subtitle_path) if data.subtitle_path else None
 
+        video_info = probe_media(video)
+        has_original_audio = any(
+            stream.get("codec_type") == "audio"
+            for stream in video_info.get("streams", [])
+        )
         if audio:
             args += ["-i", str(audio)]
-            filter_complex = (
-                f"[0:a]volume={data.original_volume}[original];"
-                f"[1:a]volume={data.music_volume}[music];"
-                "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]"
-            )
+            if has_original_audio:
+                filter_complex = (
+                    f"[0:a]volume={data.original_volume}[original];"
+                    f"[1:a]volume={data.music_volume}[music];"
+                    "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]"
+                )
+            else:
+                filter_complex = f"[1:a]volume={data.music_volume}[mix]"
             args += ["-filter_complex", filter_complex, "-map", "0:v:0",
                      "-map", "[mix]", "-shortest"]
         else:
-            args += ["-map", "0:v:0", "-map", "0:a?"]
+            args += ["-map", "0:v:0"]
+            if has_original_audio:
+                args += ["-map", "0:a:0"]
+            else:
+                args += ["-an"]
 
         if subtitle:
             escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
