@@ -246,7 +246,7 @@ export default function VisualStudioPage() {
         <div className="text-sm text-purple-300">AI COMIC STUDIO / VISUAL LAB</div>
         <h1 className="mt-2 text-3xl font-bold">AI视觉素材生产中心</h1>
         <p className="mt-2 text-sm text-slate-300">
-          统一管理人物、场景、道具、角色一致性和 AI 图片生成任务。
+          统一管理人物、场景、普通道具、武器刀具、服装、建筑和特殊物品，并为后续镜头生成提供统一视觉参考。
         </p>
       </header>
 
@@ -269,9 +269,13 @@ export default function VisualStudioPage() {
           >
             <div className="text-lg font-semibold">{item.label}</div>
             <div className="mt-1 text-xs text-slate-400">
-              {item.key === "characters" ? "人物设定、服装、三视图与一致性" :
-               item.key === "scenes" ? "地点、环境、时间、氛围与场景图" :
-               "物品外观、材质、尺寸与道具图"}
+              {item.key === "characters" ? "人物身份、外貌、服装、三视图与角色一致性" :
+               item.key === "scenes" ? "地点布局、环境、时间、天气、氛围与场景参考图" :
+               item.key === "weapons" ? "刀身、刃口、刀背、护手、握柄、刀鞘与武器结构" :
+               item.key === "costumes" ? "服装剪裁、层次、护甲、配饰、材质与纹样" :
+               item.key === "buildings" ? "建筑立面、屋顶、门窗、结构、材质与比例" :
+               item.key === "special_items" ? "法器、神器、信物、关键线索与独特物品" :
+               "普通道具外观、材质、颜色、尺寸与三视图"}
             </div>
           </button>
         ))}
