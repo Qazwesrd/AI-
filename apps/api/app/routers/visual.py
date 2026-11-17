@@ -107,8 +107,14 @@ def import_novel_analysis_assets(novel_id: int, db: Session = Depends(get_db)):
         "architecture": "buildings", "special_item": "special_items",
     }
     rows = db.query(AnalysisItem).filter(AnalysisItem.novel_id == novel_id).all()
-    created, updated, skipped = 0, 0, 0
+    created, updated, skipped, stale_skipped = 0, 0, 0, 0
     for row in rows:
+        row_data = row.data if isinstance(row.data, dict) else {}
+        # Old analysis belongs to the previous novel source revision. Keep it
+        # visible for reference, but never silently sync it into current assets.
+        if row_data.get("source_stale"):
+            stale_skipped += 1
+            continue
         target = category_map.get(row.category)
         if not target:
             skipped += 1
@@ -152,7 +158,7 @@ def import_novel_analysis_assets(novel_id: int, db: Session = Depends(get_db)):
         ))
         created += 1
     db.commit()
-    return {"success": True, "novel_id": novel_id, "created": created, "updated": updated, "skipped": skipped, "total_analysis_items": len(rows), "message": "已将小说 AI 分析结果同步到视觉资产库；已确认的视觉资产不会被覆盖。"}
+    return {"success": True, "novel_id": novel_id, "created": created, "updated": updated, "skipped": skipped, "stale_skipped": stale_skipped, "total_analysis_items": len(rows), "message": f"已同步当前版本解析结果；跳过 {stale_skipped} 条旧版本过期解析，已确认的视觉资产不会被覆盖。"}
 
 @router.post("/assets")
 def create_asset(payload: AssetInput, db: Session = Depends(get_db)):
