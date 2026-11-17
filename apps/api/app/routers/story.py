@@ -280,6 +280,13 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
 
     settings = dict(project.settings or {})
     progress = dict(settings.get("ai_episode_planning") or {})
+    if not progress and db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).count():
+        raise HTTPException(
+            409,
+            "该项目已有分集草案。为避免把新规划追加到旧分集，请新建改编项目后再执行 AI 规划。",
+        )
     cursor = max(0, min(int(progress.get("chapter_cursor", 0)), len(chapters)))
     if progress.get("status") == "completed":
         episodes = db.query(EpisodePlan).filter(
