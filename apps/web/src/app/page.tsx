@@ -51,7 +51,7 @@ const navigation = [
       ["🎬", "AI漫剧制作", "/novels"],
       ["✂️", "AI视频剪辑", "/video-editor"],
       ["📜", "剧本与分镜", "/storyboard"],
-      ["🧊", "三维素材生成", "/visual-studio"]
+      ["🧊", "三维素材生成", "/visual-studio"],
       ["🧭", "统一任务中心", "/tasks"]
     ]
   },
