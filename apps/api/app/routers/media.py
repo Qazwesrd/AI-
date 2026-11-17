@@ -143,7 +143,10 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
     if not task or task.task_type != "video":
         raise HTTPException(404, "视频任务不存在")
-    if task.status == "completed" and task.result_path and Path(task.result_path).is_file():
+    if task.result_path and Path(task.result_path).is_file():
+        task.status = "completed"
+        task.error = None
+        db.commit()
         return {
             "task_id": task.id,
             "status": "completed",
@@ -385,6 +388,7 @@ class RenderInput(BaseModel):
 
 @router.post("/render")
 def render_video(data: RenderInput):
+    output = None
     try:
         video = safe_storage_file(data.video_path)
         output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
@@ -439,6 +443,8 @@ def render_video(data: RenderInput):
         return {"status": "completed", "output": str(output),
                 "size": output.stat().st_size}
     except Exception as exc:
+        if output and output.exists():
+            output.unlink()
         raise HTTPException(500, f"视频合成失败：{exc}")
 
 
