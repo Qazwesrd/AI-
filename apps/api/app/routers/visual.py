@@ -113,10 +113,17 @@ def import_novel_analysis_assets(novel_id: int, db: Session = Depends(get_db)):
         if not target:
             skipped += 1
             continue
-        existing = db.query(VisualAsset).filter(
-            VisualAsset.category == target, VisualAsset.name == row.name,
-        ).first()
         data = row.data if isinstance(row.data, dict) else {}
+        # 素材必须按来源小说隔离；不同小说同名角色/武器不能被错误覆盖。
+        candidates = db.query(VisualAsset).filter(
+            VisualAsset.category == target, VisualAsset.name == row.name,
+        ).all()
+        existing = next((
+            item for item in candidates
+            if isinstance(item.data, dict)
+            and item.data.get("source_novel_id") == novel_id
+            and item.data.get("source_analysis_item_id") == row.id
+        ), None)
         appearance = str(data.get("appearance") or data.get("visual_description") or data.get("look") or "")
         clothing = str(data.get("clothing") or data.get("costume") or data.get("equipment") or "")
         personality = str(data.get("personality") or data.get("temperament") or "")
