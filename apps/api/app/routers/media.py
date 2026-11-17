@@ -606,38 +606,51 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
         **data.extra_payload
     }
     path = "/" + data.create_path.lstrip("/")
+    task = MediaTask(
+        task_type="video",
+        provider=data.provider,
+        model=data.model,
+        status="submitting",
+        prompt=data.prompt,
+        request_data={
+            "base_url": base,
+            "status_path_template": data.status_path_template,
+            "video_url_field": data.video_url_field,
+            "status_field": data.status_field,
+            "task_id_field": data.task_id_field,
+            "confirm_paid": data.confirm_paid,
+        },
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
     try:
         result = http_json(base + path, key, body=payload, timeout=300)
         remote_id = value_at(result, data.task_id_field)
         if not remote_id:
             raise RuntimeError(
-                "视频服务商没有返回任务编号。请按该服务商文档配置请求路径和返回字段。"
+                "服务商已返回响应，但未找到任务编号；提交结果不确定，请先到服务商控制台核对。"
             )
-
-        task = MediaTask(
-            task_type="video",
-            provider=data.provider,
-            model=data.model,
-            status="submitted",
-            prompt=data.prompt,
-            remote_task_id=str(remote_id),
-            request_data={
-                "base_url": base,
-                "status_path_template": data.status_path_template,
-                "video_url_field": data.video_url_field,
-                "status_field": data.status_field,
-                "task_id_field": data.task_id_field,
-                "confirm_paid": data.confirm_paid
-            },
-            result_data=result
-        )
-        db.add(task)
+        task.remote_task_id = str(remote_id)
+        task.result_data = result
+        task.status = "submitted"
+        task.error = None
         db.commit()
-        db.refresh(task)
         return {"task_id": task.id, "remote_task_id": remote_id,
                 "status": task.status, "provider_response": result}
     except Exception as exc:
-        raise HTTPException(502, f"视频生成请求失败：{exc}")
+        task.status = "submission_unknown"
+        task.error = (
+            "提交结果不确定：请先在视频服务商控制台核对是否已创建任务；"
+            "确认不存在后再人工重新提交。原始错误：" + str(exc)
+        )[:2000]
+        db.commit()
+        return {
+            "success": False,
+            "task_id": task.id,
+            "status": task.status,
+            "message": task.error,
+        }
 
 
 @router.post("/video/tasks/{task_id}/refresh")
