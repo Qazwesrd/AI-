@@ -112,18 +112,27 @@ export default function StoryboardPage() {
 
   async function planEpisodesAI() {
     if (!projectId) return setMessage("请先选择剧本项目");
-    const approved = window.confirm("将调用已启用的文本 AI 模型，逐章分析剧情并决定每章生成1集或在自然剧情断点拆成2集。若当前模型为付费服务，可能产生费用。是否继续？");
+    const approved = window.confirm("AI 将按每批最多3章的方式分析剧情；每章完成后立即保存。886章小说需要多批处理，过程中可关闭软件，之后再次点击会从上次进度继续。若当前模型为付费服务，可能产生费用。是否开始/继续？");
     if (!approved) return;
     setBusy(true);
     try {
-      const response = await request(`/api/story/projects/${projectId}/plan-ai`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm_paid: true }),
-      });
-      setEpisodes(response.episodes || []);
-      setMessage(response.message || "AI分集规划完成");
+      let done = false;
+      let latest: { episodes?: Episode[]; message?: string; processed_chapters?: number; total_chapters?: number } | null = null;
+      let batches = 0;
+      while (!done && batches < 400) {
+        latest = await request(`/api/story/projects/${projectId}/plan-ai`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm_paid: true }),
+        });
+        done = Boolean((latest as { done?: boolean }).done);
+        setEpisodes(latest.episodes || []);
+        setMessage(latest.message || "AI分集规划处理中");
+        batches += 1;
+      }
+      if (!done) throw new Error("已达到单次连续执行批次数上限；当前进度已保存，再次点击即可继续。");
+      setMessage(latest?.message || "AI分集规划完成");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "AI分集规划失败");
+      setMessage((error instanceof Error ? error.message : "AI分集规划暂停") + "。已完成章节会保留，再次点击可继续。");
     } finally { setBusy(false); }
   }
   async function planEpisodes() {
@@ -301,7 +310,7 @@ export default function StoryboardPage() {
           <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy} onClick={planEpisodes}>按章节建立草案</button>
           <button className="rounded-xl border border-sky-300/30 bg-sky-800/60 px-4 py-2 text-sm" disabled={episodes.length < 2} onClick={mergeEpisodes}>合并前两集</button>
         </div>
-        <p className="mt-2 text-xs text-slate-400">当前自动分集按章节长度进行初步规划；AI剧情理解、剧本改编将在后续 AI 编排阶段接入。</p>
+        <p className="mt-2 text-xs text-slate-400">AI分集规划每批处理最多3章并逐章保存；中断后再次点击可从已保存进度继续。</p>
         <div className="mt-4 space-y-3">
           {episodes.map((ep, index) => (
             <article key={ep.id} className={`rounded-xl border p-4 ${episodeId === ep.id ? "border-purple-400 bg-purple-950/40" : "border-purple-300/15 bg-slate-900/70"}`}>
