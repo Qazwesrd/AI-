@@ -238,8 +238,11 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         raise HTTPException(400, f"{task.provider} 服务商尚未配置或未启用")
     if not provider.encrypted_api_key:
         raise HTTPException(400, "服务商尚未保存 API Key")
-    if not runtime["paid_api_allowed"] or not confirm_paid:
-        raise HTTPException(403, "该服务商可能产生费用。请开启付费授权，并在本次任务中明确确认")
+    if bool(getattr(provider, "paid", True)):
+        if not runtime["paid_api_allowed"]:
+            raise HTTPException(403, "该图像模型属于付费服务，请先开启付费API总授权")
+        if not confirm_paid:
+            raise HTTPException(403, "本次图像生成可能产生费用，请明确确认后再执行")
 
     task.status = "running"
     task.error = ""
