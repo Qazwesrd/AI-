@@ -18,6 +18,33 @@ function Check-ExitCode {
 Write-Host "========== WINDOWS BUILD START =========="
 Write-Host "Project root: $Root"
 
+# Validate source code before producing an installer.
+Write-Host "[0/4] Running source validation..."
+& $Python -m compileall -q "$Api\app"
+Check-ExitCode "Python source compilation failed"
+
+$FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
+$FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
+$SystemFfmpeg = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$SystemFfprobe = (Get-Command ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+
+if (!(Test-Path $FfmpegSource) -or (Get-Item $FfmpegSource).Length -lt 1MB) {
+    if ($SystemFfmpeg) {
+        New-Item -ItemType Directory -Path (Split-Path $FfmpegSource) -Force | Out-Null
+        Copy-Item $SystemFfmpeg $FfmpegSource -Force
+    } else {
+        throw "FFmpeg 文件缺失或只是 Git LFS 指针。请先安装 FFmpeg 并加入 PATH。"
+    }
+}
+if (!(Test-Path $FfprobeSource) -or (Get-Item $FfprobeSource).Length -lt 1MB) {
+    if ($SystemFfprobe) {
+        New-Item -ItemType Directory -Path (Split-Path $FfprobeSource) -Force | Out-Null
+        Copy-Item $SystemFfprobe $FfprobeSource -Force
+    } else {
+        throw "FFprobe 文件缺失或只是 Git LFS 指针。请先安装 FFmpeg 并加入 PATH。"
+    }
+}
+
 if (!(Test-Path $Python)) {
     throw "Python virtual environment not found."
 }
@@ -81,6 +108,9 @@ Write-Host "API executable created."
 Write-Host "[3/4] Building Next.js frontend..."
 
 Set-Location $Web
+
+npx tsc --noEmit
+Check-ExitCode "TypeScript validation failed"
 
 npm run build
 Check-ExitCode "Next.js build failed"
