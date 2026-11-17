@@ -58,9 +58,9 @@ const navigation = [
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
-      ["📊", "AI使用统计", "/ai-center"],
+      ["📊", "AI调用记录", "/ai-center#usage-logs"],
       ["🗄️", "素材库", "/assets"],
-      ["🔧", "系统设置", "/ai-center"]
+      ["🔧", "网络与付费权限", "/ai-center"]
     ]
   }
 ];
@@ -71,15 +71,12 @@ export default function Home() {
       <div className="black-hole" aria-hidden="true" />
       <div className="nebula nebula-one" />
       <div className="nebula nebula-two" />
-            <div className="nebula-cloud nebula-cloud-a" />
-            <div className="nebula-cloud nebula-cloud-b" />
-            <div className="nebula-cloud nebula-cloud-c" />
-            <div className="nebula-cloud nebula-cloud-d" />
-            <div className="nebula-cloud nebula-cloud-e" />
-            <div className="nebula-cloud nebula-cloud-f" />
-<div className="nebula-cloud nebula-cloud-b" />
-<div className="nebula-cloud nebula-cloud-d" />
-<div className="nebula-cloud nebula-cloud-f" />
+      <div className="nebula-cloud nebula-cloud-a" />
+      <div className="nebula-cloud nebula-cloud-b" />
+      <div className="nebula-cloud nebula-cloud-c" />
+      <div className="nebula-cloud nebula-cloud-d" />
+      <div className="nebula-cloud nebula-cloud-e" />
+      <div className="nebula-cloud nebula-cloud-f" />
             
             
 <div className="meteor meteor-one" />
@@ -266,22 +263,22 @@ export default function Home() {
               <div className="space-y-4 text-sm">
                 <div className="flex justify-between">
                   <span className="text-purple-200">本地工作空间</span>
-                  <span className="text-green-400">已创建</span>
+                  <span className="text-green-400">本地运行</span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-purple-200">AI模型服务</span>
-                  <span className="text-yellow-300">待配置</span>
+                  <span className="text-yellow-300">进入 AI 管理中心查看</span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-purple-200">视频处理引擎</span>
-                  <span className="text-yellow-300">待配置</span>
+                  <span className="text-yellow-300">随桌面组件提供</span>
                 </div>
 
                 <div className="flex justify-between">
                   <span className="text-purple-200">桌面程序</span>
-                  <span className="text-green-400">基础框架已建立</span>
+                  <span className="text-green-400">桌面端</span>
                 </div>
               </div>
 

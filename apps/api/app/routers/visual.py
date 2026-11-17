@@ -9,13 +9,14 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.database import get_db, ROOT_DIR
 from app.models.visual import VisualAsset, ImageTask
 from app.models.studio import AIProviderConfig, AIRuntimeSetting
+from app.services.media_service import http_download
 
 router = APIRouter(prefix="/api/visual", tags=["AI视觉素材"])
 
@@ -35,7 +36,7 @@ class AssetInput(BaseModel):
     personality: str = ""
     consistency_prompt: str = ""
     style: str = "3D动漫电影风格"
-    data: dict = {}
+    data: dict = Field(default_factory=dict)
 
 
 class GenerateInput(BaseModel):
@@ -134,20 +135,34 @@ async def upload_reference(
     asset_id: Optional[int] = Form(None),
     db: Session = Depends(get_db)
 ):
-    suffix = Path(file.filename or "reference.png").suffix[:12] or ".png"
-    filename = f"reference_{datetime.now().strftime('%Y%m%d%H%M%S%f')}{suffix}"
-    destination = REFERENCE_DIR / filename
-    content = await file.read()
-    if len(content) > 100 * 1024 * 1024:
-        raise HTTPException(413, "参考图片不能超过 100 MB")
-    destination.write_bytes(content)
-
+    item = None
     if asset_id:
         item = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
         if not item:
             raise HTTPException(404, "指定素材不存在")
-        item.reference_path = str(destination)
-        db.commit()
+
+    suffix = Path(file.filename or "reference.png").suffix[:12].lower() or ".png"
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+        raise HTTPException(400, "参考图片只支持 PNG、JPG、WEBP 或 GIF")
+    filename = f"reference_{datetime.now().strftime('%Y%m%d%H%M%S%f')}{suffix}"
+    destination = REFERENCE_DIR / filename
+    size = 0
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > 100 * 1024 * 1024:
+                    raise HTTPException(413, "参考图片不能超过 100 MB")
+                output.write(chunk)
+        if item:
+            item.reference_path = str(destination)
+            db.commit()
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
 
     return {"success": True, "filename": filename, "path": str(destination)}
 
@@ -223,7 +238,7 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         raise HTTPException(400, f"{task.provider} 服务商尚未配置或未启用")
     if not provider.encrypted_api_key:
         raise HTTPException(400, "服务商尚未保存 API Key")
-    if bool(provider.paid) and (not runtime["paid_api_allowed"] or not confirm_paid):
+    if not runtime["paid_api_allowed"] or not confirm_paid:
         raise HTTPException(403, "该服务商可能产生费用。请开启付费授权，并在本次任务中明确确认")
 
     task.status = "running"
@@ -272,12 +287,9 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
             task.result_path = str(output)
         elif image_url:
             task.result_url = image_url
-            download_request = urllib.request.Request(image_url)
-            with urllib.request.urlopen(download_request, timeout=300) as response:
-                image_bytes = response.read()
             filename = f"image_task_{task.id}.png"
             output = ASSET_DIR / filename
-            output.write_bytes(image_bytes)
+            http_download(image_url, output, max_bytes=100 * 1024 * 1024)
             task.result_path = str(output)
         else:
             raise ValueError("服务商返回结果中没有图片 URL 或 b64_json")

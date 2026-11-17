@@ -1,9 +1,10 @@
-import re
+﻿import re
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.document_import import extract_document_text
 from app.models.novel import Novel, Chapter, AnalysisItem
 
 router = APIRouter(prefix="/api", tags=["小说与章节"])
@@ -148,24 +149,11 @@ async def import_txt(
         raise HTTPException(404, "小说不存在")
 
     filename = file.filename or "novel.txt"
-    if Path(filename).suffix.lower() != ".txt":
-        raise HTTPException(400, "目前仅支持 TXT 文件")
-
     raw = await file.read()
-    if len(raw) > 100 * 1024 * 1024:
-        raise HTTPException(413, "TXT 文件不能超过 100 MB")
-
-    text = None
-    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
-        try:
-            text = raw.decode(encoding)
-            break
-        except UnicodeDecodeError:
-            continue
-
-    if text is None:
-        raise HTTPException(400, "文件编码无法识别，请转换为 UTF-8")
-
+    try:
+        text = extract_document_text(filename, raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     parts = split_chapters(text)
     if not parts:
         raise HTTPException(400, "文件内容为空")
@@ -329,3 +317,4 @@ def confirm_analysis(novel_id: int, db: Session = Depends(get_db)):
         item.confirmed = True
     db.commit()
     return {"success": True, "confirmed_count": len(items)}
+

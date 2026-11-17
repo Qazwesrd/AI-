@@ -70,6 +70,14 @@ def create_edit_job(data: CreateEditInput, db: Session = Depends(get_db)):
         }
     except Exception as exc:
         db.rollback()
+        if "job" in locals() and job is not None:
+            try:
+                job.status = "failed"
+                job.error = str(exc)[:4000]
+                db.add(job)
+                db.commit()
+            except Exception:
+                db.rollback()
         raise HTTPException(502, f"AI 剪辑方案生成失败：{exc}")
 
 

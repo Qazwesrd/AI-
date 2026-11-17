@@ -6,3 +6,5 @@ pydantic-settings
 python-multipart
 
 cryptography
+pypdf>=5.0.0
+striprtf>=0.0.29

@@ -110,26 +110,44 @@ export default function NovelsPage() {
   }
 
   async function importTxt() {
-    const file = fileRef.current?.files?.[0];
-    if (!selected || !file) {
-      setMessage("请先选择小说，再选择 TXT 文件");
+    if (!selected) {
+      setMessage("请先在左侧选择或创建一个小说项目");
       return;
     }
+
+    const file = fileRef.current?.files?.[0];
+    if (!file) {
+      setMessage("请选择小说文件");
+      fileRef.current?.click();
+      return;
+    }
+
+    const allowed = [".txt", ".md", ".markdown", ".csv", ".log", ".docx", ".pdf", ".epub", ".rtf"];
+    const ext = file.name.toLowerCase().slice(file.name.lastIndexOf("."));
+    if (!allowed.includes(ext)) {
+      setMessage("暂不支持此文件格式，请选择 TXT、MD、CSV、LOG、DOCX、PDF、EPUB 或 RTF 文件");
+      return;
+    }
+
     setLoading(true);
+    setMessage("正在上传并解析小说，请稍候……");
+
     try {
       const form = new FormData();
       form.append("file", file);
+
       const data = await request(`/api/novels/${selected.id}/import-txt`, {
         method: "POST",
         body: form,
       });
-      setChapters(data.chapters || []);
+
       setCurrentChapter(null);
       await loadNovels();
-      setMessage(`导入成功：${data.chapter_count} 章，共 ${data.word_count} 字`);
+      await openNovel(selected);
+      setMessage(`导入成功：${data.chapter_count ?? 0} 章，共 ${data.word_count ?? 0} 字`);
       if (fileRef.current) fileRef.current.value = "";
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "导入失败");
+      setMessage(error instanceof Error ? error.message : "小说导入失败，请检查文件格式或后端服务");
     } finally {
       setLoading(false);
     }
@@ -325,9 +343,9 @@ export default function NovelsPage() {
                     </button>
                   </div>
                   <div className="mt-5 flex flex-wrap items-center gap-3">
-                    <input ref={fileRef} type="file" accept=".txt,text/plain" className="max-w-full text-sm text-purple-200" />
+                    <input ref={fileRef} type="file" accept=".txt,.md,.markdown,.csv,.log,.docx,.pdf,.epub,.rtf,text/plain,text/markdown,application/pdf,application/epub+zip,application/rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" className="max-w-full text-sm text-purple-200" />
                     <button onClick={importTxt} disabled={loading} className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
-                      导入 TXT 小说
+                      导入小说文件（支持多种格式）
                     </button>
                     <button onClick={analyze} disabled={loading || chapters.length === 0} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
                       ✨ 初步解析小说

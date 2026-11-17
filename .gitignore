@@ -31,3 +31,13 @@ repair-backups/
 storage/**
 !storage/.gitkeep
 _repair_backups/
+venv/
+.env.*
+!.env.example
+storage/
+data/
+logs/
+coverage/
+.ruff_cache/
+Thumbs.db
+Desktop.ini

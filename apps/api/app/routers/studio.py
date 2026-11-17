@@ -6,7 +6,7 @@ import urllib.error
 from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 from app.database import get_db, ROOT_DIR
@@ -58,7 +58,7 @@ def provider_dict(x):
         "base_url": x.base_url,
         "model": x.model,
         "enabled": x.enabled,
-        "paid": x.paid,
+        "paid": True,
         "purpose": x.purpose,
         "has_api_key": bool(x.encrypted_api_key),
     }
@@ -104,7 +104,7 @@ class RuntimeInput(BaseModel):
 class ResourceInput(BaseModel):
     name: str
     description: str = ""
-    data: dict = {}
+    data: dict = Field(default_factory=dict)
     image_path: str = ""
     confirmed: bool = False
 
@@ -144,7 +144,9 @@ def save_provider(payload: ProviderInput, db: Session = Depends(get_db)):
     item.base_url = payload.base_url.rstrip("/")
     item.model = payload.model
     item.enabled = payload.enabled
-    item.paid = payload.paid
+    # Billing classification is server-controlled. Never trust a browser flag
+    # to downgrade a provider to free and bypass the paid-call confirmation gate.
+    item.paid = True
     item.purpose = payload.purpose
 
     if payload.api_key.strip():
@@ -215,7 +217,7 @@ def ai_chat(payload: ChatInput, db: Session = Depends(get_db)):
         raise HTTPException(400, "模型不存在或尚未启用")
     if not config.base_url or not config.model or not config.encrypted_api_key:
         raise HTTPException(400, "请先完整配置模型地址、模型名称和 API 密钥")
-    if config.paid and not (settings.paid_api_allowed and payload.confirm_paid):
+    if not (settings.paid_api_allowed and payload.confirm_paid):
         raise HTTPException(403, "该模型标记为付费服务，必须开启付费授权并在本次请求明确确认")
 
     api_key = decrypt_key(config.encrypted_api_key)

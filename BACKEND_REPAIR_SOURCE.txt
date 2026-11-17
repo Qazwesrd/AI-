@@ -1,0 +1,1440 @@
+﻿AI漫剧制作大师 - 第二阶段集中修复源码
+采集时间：2026-11-17 16:56:59
+项目目录：D:\AI漫剧制作大师
+
+==================================================
+文件：apps\api\app\routers\studio.py
+==================================================
+
+---------- 代码片段 ----------
+   42:         raise HTTPException(500, "API瀵嗛挜瑙ｅ瘑澶辫触锛岃妫€鏌ユ湰鍦板瘑閽ユ枃浠?)
+   43: 
+   44: def runtime(db):
+   45:     row = db.query(AIRuntimeSetting).first()
+   46:     if not row:
+   47:         row = AIRuntimeSetting(network_enabled=False, paid_api_allowed=False)
+   48:         db.add(row)
+   49:         db.commit()
+   50:         db.refresh(row)
+   51:     return row
+   52: 
+   53: def provider_dict(x):
+   54:     return {
+   55:         "id": x.id,
+   56:         "provider": x.provider,
+   57:         "display_name": x.display_name,
+   58:         "base_url": x.base_url,
+   59:         "model": x.model,
+   60:         "enabled": x.enabled,
+   61:         "paid": x.paid,
+   62:         "purpose": x.purpose,
+   63:         "has_api_key": bool(x.encrypted_api_key),
+   64:     }
+   65: 
+   66: def resource_dict(x):
+   67:     return {
+   68:         "id": x.id,
+   69:         "category": x.category,
+   70:         "name": x.name,
+   71:         "description": x.description,
+
+---------- 代码片段 ----------
+   81:         "filename": x.filename,
+   82:         "category": x.category,
+   83:         "mime_type": x.mime_type,
+   84:         "file_size": x.file_size,
+   85:         "description": x.description,
+   86:         "url": f"/api/assets/{x.id}/download",
+   87:         "created_at": x.created_at.isoformat() if x.created_at else None,
+   88:     }
+   89: 
+   90: class ProviderInput(BaseModel):
+   91:     provider: str
+   92:     display_name: str
+   93:     base_url: str
+   94:     model: str
+   95:     api_key: str = ""
+   96:     enabled: bool = False
+   97:     paid: bool = True
+   98:     purpose: str = "text"
+   99: 
+  100: class RuntimeInput(BaseModel):
+  101:     network_enabled: bool
+  102:     paid_api_allowed: bool
+  103: 
+  104: class ResourceInput(BaseModel):
+  105:     name: str
+  106:     description: str = ""
+  107:     data: dict = {}
+  108:     image_path: str = ""
+  109:     confirmed: bool = False
+  110: 
+  111: class ResourceUpdate(BaseModel):
+  112:     name: str | None = None
+
+---------- 代码片段 ----------
+  116:     confirmed: bool | None = None
+  117: 
+  118: class ChatInput(BaseModel):
+  119:     provider: str
+  120:     messages: list[dict]
+  121:     confirm_paid: bool = False
+  122:     task: str = "chat"
+  123: 
+  124: @router.get("/ai/providers")
+  125: def list_providers(db: Session = Depends(get_db)):
+  126:     items = db.query(AIProviderConfig).order_by(AIProviderConfig.id).all()
+  127:     return {"items": [provider_dict(x) for x in items]}
+  128: 
+  129: @router.post("/ai/providers")
+  130: def save_provider(payload: ProviderInput, db: Session = Depends(get_db)):
+  131:     provider_id = payload.provider.strip().lower()
+  132:     if not provider_id:
+  133:         raise HTTPException(400, "鏈嶅姟鍟嗘爣璇嗕笉鑳戒负绌?)
+  134: 
+  135:     item = db.query(AIProviderConfig).filter(
+  136:         AIProviderConfig.provider == provider_id
+  137:     ).first()
+  138: 
+  139:     if not item:
+  140:         item = AIProviderConfig(provider=provider_id)
+
+---------- 代码片段 ----------
+  142: 
+  143:     item.display_name = payload.display_name
+  144:     item.base_url = payload.base_url.rstrip("/")
+  145:     item.model = payload.model
+  146:     item.enabled = payload.enabled
+  147:     item.paid = payload.paid
+  148:     item.purpose = payload.purpose
+  149: 
+  150:     if payload.api_key.strip():
+  151:         item.encrypted_api_key = encrypt_key(payload.api_key.strip())
+  152: 
+  153:     db.commit()
+  154:     db.refresh(item)
+  155:     return provider_dict(item)
+  156: 
+  157: @router.delete("/ai/providers/{provider}")
+
+---------- 代码片段 ----------
+  168: @router.get("/ai/runtime")
+  169: def get_runtime(db: Session = Depends(get_db)):
+  170:     x = runtime(db)
+  171:     return {
+  172:         "network_enabled": x.network_enabled,
+  173:         "paid_api_allowed": x.paid_api_allowed,
+  174:     }
+  175: 
+  176: @router.put("/ai/runtime")
+  177: def update_runtime(payload: RuntimeInput, db: Session = Depends(get_db)):
+  178:     x = runtime(db)
+  179:     x.network_enabled = payload.network_enabled
+  180:     x.paid_api_allowed = payload.paid_api_allowed
+  181:     db.commit()
+  182:     return {
+  183:         "success": True,
+  184:         "network_enabled": x.network_enabled,
+  185:         "paid_api_allowed": x.paid_api_allowed,
+  186:     }
+  187: 
+  188: @router.get("/ai/usage-logs")
+  189: def usage_logs(db: Session = Depends(get_db)):
+  190:     items = db.query(AIUsageLog).order_by(
+  191:         AIUsageLog.created_at.desc()
+  192:     ).limit(200).all()
+  193:     return {
+  194:         "items": [{
+  195:             "id": x.id,
+
+---------- 代码片段 ----------
+  213:         raise HTTPException(403, "缃戠粶璋冪敤鎬诲紑鍏冲凡鍏抽棴")
+  214:     if not config or not config.enabled:
+  215:         raise HTTPException(400, "妯″瀷涓嶅瓨鍦ㄦ垨灏氭湭鍚敤")
+  216:     if not config.base_url or not config.model or not config.encrypted_api_key:
+  217:         raise HTTPException(400, "璇峰厛瀹屾暣閰嶇疆妯″瀷鍦板潃銆佹ā鍨嬪悕绉板拰 API 瀵嗛挜")
+  218:     if config.paid and not (settings.paid_api_allowed and payload.confirm_paid):
+  219:         raise HTTPException(403, "璇ユā鍨嬫爣璁颁负浠樿垂鏈嶅姟锛屽繀椤诲紑鍚粯璐规巿鏉冨苟鍦ㄦ湰娆¤姹傛槑纭‘璁?)
+  220: 
+  221:     api_key = decrypt_key(config.encrypted_api_key)
+  222:     url = config.base_url.rstrip("/") + "/chat/completions"
+  223:     body = json.dumps({
+  224:         "model": config.model,
+  225:         "messages": payload.messages,
+  226:     }).encode("utf-8")
+  227: 
+  228:     request = urllib.request.Request(
+
+---------- 代码片段 ----------
+  343:     file: UploadFile = File(...),
+  344:     category: str = Form("other"),
+  345:     description: str = Form(""),
+  346:     db: Session = Depends(get_db),
+  347: ):
+  348:     allowed = {"image", "audio", "video", "other"}
+  349:     if category not in allowed:
+  350:         raise HTTPException(400, "绱犳潗鍒嗙被鏃犳晥")
+  351: 
+  352:     original = Path(file.filename or "upload.bin").name
+  353:     suffix = Path(original).suffix.lower()
+  354:     stored = f"{uuid.uuid4().hex}{suffix}"
+  355:     destination = ASSET_DIR / stored
+  356: 
+  357:     size = 0
+  358:     try:
+
+---------- 代码片段 ----------
+  390:     if category:
+  391:         query = query.filter(MediaAsset.category == category)
+  392:     items = query.order_by(MediaAsset.created_at.desc()).limit(1000).all()
+  393:     return {"items": [asset_dict(x) for x in items], "total": len(items)}
+  394: 
+  395: @router.get("/assets/{asset_id}/download")
+  396: def download_asset(asset_id: int, db: Session = Depends(get_db)):
+  397:     from fastapi.responses import FileResponse
+  398:     item = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+  399:     if not item or not Path(item.file_path).exists():
+  400:         raise HTTPException(404, "鏂囦欢涓嶅瓨鍦?)
+  401:     return FileResponse(
+  402:         item.file_path,
+  403:         media_type=item.mime_type or "application/octet-stream",
+  404:         filename=item.filename,
+  405:     )
+  406: 
+
+==================================================
+文件：apps\api\app\routers\story.py
+==================================================
+
+---------- 代码片段 ----------
+    6: from sqlalchemy.orm import Session
+    7: from sqlalchemy.inspection import inspect as sa_inspect
+    8: 
+    9: from app.database import get_db
+   10: from app.models.novel import Novel, Chapter
+   11: from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
+   12: from app.models.visual import VisualAsset
+   13: 
+   14: router = APIRouter(prefix="/api/story", tags=["鍓ф湰鏀圭紪涓庢櫤鑳藉垎闀?])
+   15: 
+   16: 
+   17: def serialize_model(obj):
+   18:     result = {}
+   19:     for column in sa_inspect(obj.__class__).mapper.column_attrs:
+   20:         value = getattr(obj, column.key)
+   21:         if isinstance(value, datetime):
+
+---------- 代码片段 ----------
+   67: 
+   68: class ProjectInput(BaseModel):
+   69:     novel_id: int
+   70:     name: str
+   71:     adaptation_style: str = "3D鍔ㄦ极鐢靛奖椋庢牸"
+   72:     target_duration: int = 120
+   73:     min_duration: int = 90
+   74:     max_duration: int = 150
+   75:     settings: dict = Field(default_factory=dict)
+   76: 
+   77: 
+   78: class EpisodeUpdate(BaseModel):
+   79:     title: Optional[str] = None
+   80:     synopsis: Optional[str] = None
+   81:     screenplay: Optional[str] = None
+   82:     duration_seconds: Optional[int] = None
+   83:     sort_order: Optional[int] = None
+   84:     status: Optional[str] = None
+   85: 
+   86: 
+   87: class EpisodeReorder(BaseModel):
+   88:     episode_ids: list[int]
+   89: 
+   90: 
+   91: class EpisodeMerge(BaseModel):
+   92:     episode_ids: list[int]
+   93:     title: str = ""
+   94: 
+   95: 
+   96: class ShotInput(BaseModel):
+   97:     shot_number: int = 1
+   98:     scene_name: str = ""
+   99:     shot_type: str = "涓櫙"
+  100:     camera_movement: str = "鍥哄畾闀滃ご"
+  101:     duration_seconds: float = 5
+  102:     visual_description: str = ""
+  103:     character_actions: str = ""
+  104:     dialogue: str = ""
+  105:     sound_effects: str = ""
+  106:     image_prompt: str = ""
+  107:     character_ids: list[int] = Field(default_factory=list)
+  108:     scene_asset_id: Optional[int] = None
+  109:     prop_ids: list[int] = Field(default_factory=list)
+  110:     status: str = "draft"
+  111:     sort_order: int = 0
+
+---------- 代码片段 ----------
+  140: @router.post("/projects")
+  141: def create_project(payload: ProjectInput, db: Session = Depends(get_db)):
+  142:     novel = db.query(Novel).filter(Novel.id == payload.novel_id).first()
+  143:     if not novel:
+  144:         raise HTTPException(404, "灏忚涓嶅瓨鍦?)
+  145:     if payload.min_duration > payload.max_duration:
+  146:         raise HTTPException(400, "鍗曢泦鏈€鐭椂闀夸笉鑳藉ぇ浜庢渶闀挎椂闀?)
+  147: 
+  148:     project = StoryProject(**payload.model_dump())
+  149:     db.add(project)
+  150:     db.commit()
+  151:     db.refresh(project)
+  152:     return {"success": True, "project": serialize_model(project)}
+  153: 
+  154: 
+  155: @router.get("/projects")
+
+---------- 代码片段 ----------
+  161: @router.get("/projects/{project_id}")
+  162: def get_project(project_id: int, db: Session = Depends(get_db)):
+  163:     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+  164:     if not project:
+  165:         raise HTTPException(404, "鍓ф湰椤圭洰涓嶅瓨鍦?)
+  166:     episodes = db.query(EpisodePlan).filter(
+  167:         EpisodePlan.project_id == project_id
+  168:     ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number).all()
+  169:     return {
+  170:         "project": serialize_model(project),
+  171:         "episodes": [serialize_model(x) for x in episodes],
+  172:     }
+  173: 
+  174: 
+  175: @router.post("/projects/{project_id}/plan")
+  176: def plan_episodes(project_id: int, db: Session = Depends(get_db)):
+  177:     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+  178:     if not project:
+  179:         raise HTTPException(404, "鍓ф湰椤圭洰涓嶅瓨鍦?)
+  180: 
+  181:     chapters = get_novel_chapters(db, project.novel_id)
+  182:     if not chapters:
+  183:         raise HTTPException(400, "璇ュ皬璇存病鏈夋壘鍒扮珷鑺傚唴瀹癸紝鏃犳硶瑙勫垝鍒嗛泦")
+  184: 
+  185:     # 淇濈暀鍘熺珷鑺傞『搴忥紱瓒呴暱绔犺妭鍏佽鎷嗘垚涓ら泦锛屼笉鑷姩鎶婄煭绔犺妭鎷嗙銆?    old = db.query(EpisodePlan).filter(EpisodePlan.project_id == project_id).all()
+  186:     for item in old:
+  187:         db.delete(item)
+  188:     db.flush()
+  189: 
+  190:     episode_number = 1
+  191:     for chapter in chapters:
+  192:         content = get_chapter_content(chapter)
+  193:         title = get_chapter_title(chapter)
+  194:         if not content.strip():
+  195:             continue
+  196: 
+  197:         # 鐢ㄧ珷鑺傚唴瀹归暱搴︿及绠楀垎闆嗭紱姝ゅ鏄垵姝ヨ鍒掕鍒欙紝涓嶅啋鍏?AI 鍓ф儏鍒嗘瀽銆?        split = len(content) > 9000
+  198:         parts = [content[:len(content)//2], content[len(content)//2:]] if split else [content]
+  199: 
+  200:         for part_index, part in enumerate(parts):
+  201:             suffix = f"锛堜笅锛? if split and part_index == 1 else (f"锛堜笂锛? if split else "")
+  202:             episode = EpisodePlan(
+  203:                 project_id=project_id,
+  204:                 episode_number=episode_number,
+  205:                 title=f"{title}{suffix}",
+  206:                 source_chapter_ids=[chapter.id],
+  207:                 source_text=part,
+  208:                 synopsis="寰?AI 鏍规嵁鍘熻憲鍐呭鎻愮偧鍓ф儏鎽樿",
+  209:                 screenplay="寰?AI 鏀圭紪涓哄奖瑙嗗墽鏈?,
+  210:                 duration_seconds=project.target_duration,
+  211:                 status="planned",
+  212:                 sort_order=episode_number,
+  213:             )
+  214:             db.add(episode)
+  215:             episode_number += 1
+  216: 
+  217:     project.status = "planned"
+  218:     project.updated_at = datetime.utcnow()
+  219:     db.commit()
+  220: 
+  221:     episodes = db.query(EpisodePlan).filter(
+  222:         EpisodePlan.project_id == project_id
+  223:     ).order_by(EpisodePlan.sort_order).all()
+  224: 
+  225:     return {
+  226:         "success": True,
+  227:         "message": "鍒濇鍒嗛泦璁″垝宸插缓绔嬨€傚墽鎯呮憳瑕佸拰鍓ф湰姝ｆ枃浠嶉渶 AI 鏀圭紪銆?,
+  228:         "episode_count": len(episodes),
+  229:         "episodes": [serialize_model(x) for x in episodes],
+  230:     }
+  231: 
+  232: 
+  233: @router.put("/episodes/{episode_id}")
+  234: def update_episode(episode_id: int, payload: EpisodeUpdate, db: Session = Depends(get_db)):
+  235:     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+  236:     if not episode:
+  237:         raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+  238:     for key, value in payload.model_dump(exclude_unset=True).items():
+  239:         if key == "duration_seconds" and (value < 1 or value > 3600):
+  240:             raise HTTPException(400, "鍗曢泦鏃堕暱蹇呴』鍦?1 鍒?3600 绉掍箣闂?)
+  241:         setattr(episode, key, value)
+  242:     episode.updated_at = datetime.utcnow()
+  243:     db.commit()
+  244:     return {"success": True, "episode": serialize_model(episode)}
+  245: 
+  246: 
+  247: @router.delete("/episodes/{episode_id}")
+  248: def delete_episode(episode_id: int, db: Session = Depends(get_db)):
+  249:     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+  250:     if not episode:
+  251:         raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+  252:     db.query(StoryboardShot).filter(StoryboardShot.episode_id == episode_id).delete()
+  253:     db.query(StoryAssetLink).filter(StoryAssetLink.episode_id == episode_id).delete()
+  254:     db.delete(episode)
+  255:     db.commit()
+  256:     return {"success": True}
+  257: 
+  258: 
+  259: @router.post("/projects/{project_id}/reorder")
+  260: def reorder_episodes(project_id: int, payload: EpisodeReorder, db: Session = Depends(get_db)):
+  261:     episodes = db.query(EpisodePlan).filter(
+  262:         EpisodePlan.project_id == project_id
+  263:     ).all()
+  264:     lookup = {x.id: x for x in episodes}
+  265:     if set(payload.episode_ids) != set(lookup.keys()):
+  266:         raise HTTPException(400, "鎺掑簭鍒楄〃蹇呴』鍖呭惈璇ラ」鐩叏閮ㄥ垎闆嗭紝涓斾笉鑳介噸澶?)
+  267:     for index, episode_id in enumerate(payload.episode_ids, start=1):
+  268:         lookup[episode_id].sort_order = index
+  269:         lookup[episode_id].episode_number = index
+  270:     db.commit()
+  271:     return {"success": True}
+  272: 
+  273: 
+  274: @router.post("/projects/{project_id}/merge")
+  275: def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends(get_db)):
+  276:     if len(payload.episode_ids) < 2:
+  277:         raise HTTPException(400, "鑷冲皯閫夋嫨涓ら泦鎵嶈兘鍚堝苟")
+  278:     episodes = db.query(EpisodePlan).filter(
+  279:         EpisodePlan.project_id == project_id,
+  280:         EpisodePlan.id.in_(payload.episode_ids)
+  281:     ).order_by(EpisodePlan.sort_order).all()
+  282:     if len(episodes) != len(set(payload.episode_ids)):
+  283:         raise HTTPException(400, "鍒嗛泦涓嶅瓨鍦ㄦ垨涓嶅睘浜庤椤圭洰")
+  284: 
+  285:     first = episodes[0]
+  286:     first.title = payload.title.strip() or " + ".join(x.title for x in episodes)
+  287:     first.source_text = "\n\n".join(x.source_text or "" for x in episodes)
+  288:     first.source_chapter_ids = list(dict.fromkeys(
+  289:         chapter_id for x in episodes for chapter_id in (x.source_chapter_ids or [])
+  290:     ))
+  291:     first.duration_seconds = min(
+  292:         3600, sum(x.duration_seconds for x in episodes)
+  293:     )
+  294:     for item in episodes[1:]:
+  295:         db.query(StoryboardShot).filter(StoryboardShot.episode_id == item.id).update(
+  296:             {StoryboardShot.episode_id: first.id}
+  297:         )
+  298:         db.query(StoryAssetLink).filter(StoryAssetLink.episode_id == item.id).update(
+  299:             {StoryAssetLink.episode_id: first.id}
+  300:         )
+  301:         db.delete(item)
+  302:     db.commit()
+  303:     return {"success": True, "merged_episode_id": first.id}
+  304: 
+  305: 
+  306: @router.post("/episodes/{episode_id}/split")
+  307: def split_episode(episode_id: int, db: Session = Depends(get_db)):
+  308:     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+  309:     if not episode:
+  310:         raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+  311:     text = episode.source_text or ""
+  312:     if len(text.strip()) < 2:
+  313:         raise HTTPException(400, "鍘熷鍐呭澶煭锛屾棤娉曟媶鍒?)
+  314:     midpoint = len(text) // 2
+  315:     split_at = text.find("\n", midpoint - 500, midpoint + 500)
+  316:     if split_at < 0:
+  317:         split_at = midpoint
+  318: 
+  319:     second = EpisodePlan(
+  320:         project_id=episode.project_id,
+  321:         episode_number=episode.episode_number + 1,
+  322:         title=episode.title + "锛堜笅锛?,
+  323:         source_chapter_ids=episode.source_chapter_ids or [],
+  324:         source_text=text[split_at:],
+  325:         synopsis="寰?AI 鎻愮偧鍓ф儏鎽樿",
+  326:         screenplay="寰?AI 鏀圭紪鍓ф湰",
+  327:         duration_seconds=episode.duration_seconds,
+  328:         status="planned",
+  329:         sort_order=episode.sort_order + 1,
+  330:     )
+  331:     episode.title = episode.title + "锛堜笂锛?
+  332:     episode.source_text = text[:split_at]
+  333:     db.add(second)
+  334:     db.flush()
+  335: 
+  336:     later = db.query(EpisodePlan).filter(
+  337:         EpisodePlan.project_id == episode.project_id,
+  338:         EpisodePlan.id != episode.id,
+  339:         EpisodePlan.sort_order >= second.sort_order
+  340:     ).all()
+  341:     for item in later:
+  342:         item.sort_order += 1
+  343:         item.episode_number += 1
+  344: 
+  345:     db.commit()
+  346:     return {"success": True, "new_episode": serialize_model(second)}
+  347: 
+  348: 
+  349: @router.get("/episodes/{episode_id}/shots")
+  350: def list_shots(episode_id: int, db: Session = Depends(get_db)):
+  351:     shots = db.query(StoryboardShot).filter(
+  352:         StoryboardShot.episode_id == episode_id
+  353:     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+  354:     return [serialize_model(x) for x in shots]
+  355: 
+  356: 
+  357: @router.post("/episodes/{episode_id}/shots")
+  358: def create_shot(episode_id: int, payload: ShotInput, db: Session = Depends(get_db)):
+  359:     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+  360:     if not episode:
+  361:         raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+  362:     shot = StoryboardShot(
+  363:         project_id=episode.project_id,
+  364:         episode_id=episode_id,
+  365:         **payload.model_dump()
+  366:     )
+  367:     db.add(shot)
+  368:     db.commit()
+  369:     db.refresh(shot)
+  370:     return {"success": True, "shot": serialize_model(shot)}
+  371: 
+  372: 
+  373: @router.put("/shots/{shot_id}")
+  374: def update_shot(shot_id: int, payload: ShotInput, db: Session = Depends(get_db)):
+  375:     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+  376:     if not shot:
+  377:         raise HTTPException(404, "鍒嗛暅闀滃ご涓嶅瓨鍦?)
+  378:     for key, value in payload.model_dump().items():
+  379:         setattr(shot, key, value)
+  380:     shot.updated_at = datetime.utcnow()
+  381:     db.commit()
+  382:     return {"success": True}
+  383: 
+  384: 
+  385: @router.delete("/shots/{shot_id}")
+  386: def delete_shot(shot_id: int, db: Session = Depends(get_db)):
+  387:     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+  388:     if not shot:
+  389:         raise HTTPException(404, "鍒嗛暅闀滃ご涓嶅瓨鍦?)
+  390:     db.query(StoryAssetLink).filter(StoryAssetLink.shot_id == shot_id).delete()
+  391:     db.delete(shot)
+  392:     db.commit()
+  393:     return {"success": True}
+  394: 
+  395: 
+  396: @router.get("/assets")
+  397: def list_visual_assets(db: Session = Depends(get_db)):
+
+---------- 代码片段 ----------
+  407:     } for x in items]
+  408: 
+  409: 
+  410: @router.post("/shots/{shot_id}/assets")
+  411: def link_asset(shot_id: int, payload: AssetLinkInput, db: Session = Depends(get_db)):
+  412:     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+  413:     asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
+  414:     if not shot or not asset:
+  415:         raise HTTPException(404, "鍒嗛暅鎴栬瑙夌礌鏉愪笉瀛樺湪")
+  416:     link = StoryAssetLink(
+  417:         project_id=shot.project_id,
+  418:         episode_id=shot.episode_id,
+  419:         shot_id=shot.id,
+  420:         asset_id=asset.id,
+  421:         role=payload.role,
+  422:     )
+
+==================================================
+文件：apps\api\app\routers\media.py
+==================================================
+
+---------- 代码片段 ----------
+   11: 
+   12: from app.database import get_db
+   13: from app.models.media import MediaTask, MediaFile, SubtitleTrack
+   14: from app.models.studio import AIProviderConfig, AIRuntimeSetting
+   15: from app.services.media_service import (
+   16:     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
+   17:     decrypt_api_key, http_json, http_download,
+   18:     safe_storage_file, run_ffmpeg, probe_media
+   19: )
+   20: 
+   21: router = APIRouter(prefix="/api/media", tags=["濯掍綋鐢熶骇"])
+   22: 
+   23: 
+   24: def get_provider(db, provider_name, confirm_paid=False):
+   25:     config = db.query(AIProviderConfig).filter(
+   26:         AIProviderConfig.provider == provider_name
+   27:     ).first()
+   28:     if not config:
+   29:         raise HTTPException(404, f"AI 鏈嶅姟鍟?{provider_name} 灏氭湭閰嶇疆")
+   30: 
+   31:     if not getattr(config, "enabled", False):
+   32:         raise HTTPException(400, "璇?AI 鏈嶅姟鍟嗗皻鏈惎鐢?)
+   33: 
+   34:     runtime = db.query(AIRuntimeSetting).first()
+   35:     if not runtime or not getattr(runtime, "network_enabled", False):
+   36:         raise HTTPException(403, "鍏ㄥ眬缃戠粶璋冪敤寮€鍏冲凡鍏抽棴")
+   37: 
+   38:     paid = bool(getattr(config, "paid", True))
+   39:     if paid:
+   40:         if not getattr(runtime, "paid_api_allowed", False):
+   41:             raise HTTPException(403, "浠樿垂 API 鎬绘巿鏉冩湭寮€鍚?)
+   42:         if not confirm_paid:
+   43:             raise HTTPException(403, "姝ゆ搷浣滃彲鑳戒骇鐢熻垂鐢紝蹇呴』鏄庣‘纭鍚庢墠鑳借皟鐢?)
+   44: 
+   45:     encrypted = (
+   46:         getattr(config, "api_key_encrypted", None)
+   47:         or getattr(config, "encrypted_api_key", None)
+   48:     )
+   49:     if not encrypted:
+   50:         raise HTTPException(400, "璇ユ湇鍔″晢灏氭湭淇濆瓨 API Key")
+   51: 
+   52:     base_url = getattr(config, "base_url", None)
+
+---------- 代码片段 ----------
+   61:     return config, api_key, base_url.rstrip("/")
+   62: 
+   63: 
+   64: def value_at(data, dotted_path):
+   65:     current = data
+   66:     for part in dotted_path.split("."):
+   67:         if isinstance(current, dict):
+   68:             current = current.get(part)
+   69:         elif isinstance(current, list) and part.isdigit():
+   70:             current = current[int(part)]
+   71:         else:
+   72:             return None
+   73:         if current is None:
+   74:             return None
+   75:     return current
+   76: 
+   77: 
+   78: class VideoTaskInput(BaseModel):
+   79:     provider: str
+   80:     model: str
+   81:     prompt: str = Field(min_length=1, max_length=20000)
+   82:     duration: int = Field(default=10, ge=1, le=600)
+   83:     aspect_ratio: str = "16:9"
+   84:     confirm_paid: bool = False
+   85: 
+   86:     # 姣忓瑙嗛鏈嶅姟鍟嗙殑 API 璺緞鍜岃姹傜粨鏋勫彲鑳戒笉鍚岋紝鍏佽閰嶇疆
+   87:     create_path: str = "/videos/generations"
+   88:     status_path_template: str = "/videos/{task_id}"
+   89:     task_id_field: str = "id"
+   90:     video_url_field: str = "video_url"
+   91:     status_field: str = "status"
+   92:     extra_payload: dict = {}
+   93: 
+   94: 
+   95: @router.post("/video/tasks")
+   96: def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
+   97:     config, key, base = get_provider(db, data.provider, data.confirm_paid)
+   98: 
+   99:     payload = {
+  100:         "model": data.model,
+  101:         "prompt": data.prompt,
+  102:         "duration": data.duration,
+  103:         "aspect_ratio": data.aspect_ratio,
+  104:         **data.extra_payload
+  105:     }
+  106:     path = "/" + data.create_path.lstrip("/")
+  107:     try:
+  108:         result = http_json(base + path, key, body=payload, timeout=300)
+  109:         remote_id = value_at(result, data.task_id_field)
+  110:         if not remote_id:
+  111:             raise RuntimeError(
+  112:                 "瑙嗛鏈嶅姟鍟嗘病鏈夎繑鍥炰换鍔＄紪鍙枫€傝鎸夎鏈嶅姟鍟嗘枃妗ｉ厤缃姹傝矾寰勫拰杩斿洖瀛楁銆?
+
+---------- 代码片段 ----------
+  123:                 "base_url": base,
+  124:                 "status_path_template": data.status_path_template,
+  125:                 "video_url_field": data.video_url_field,
+  126:                 "status_field": data.status_field,
+  127:                 "task_id_field": data.task_id_field,
+  128:                 "confirm_paid": data.confirm_paid
+  129:             },
+  130:             result_data=result
+  131:         )
+  132:         db.add(task)
+  133:         db.commit()
+  134:         db.refresh(task)
+  135:         return {"task_id": task.id, "remote_task_id": remote_id,
+  136:                 "status": task.status, "provider_response": result}
+  137:     except Exception as exc:
+  138:         raise HTTPException(502, f"瑙嗛鐢熸垚璇锋眰澶辫触锛歿exc}")
+
+---------- 代码片段 ----------
+  143:     task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+  144:     if not task or task.task_type != "video":
+  145:         raise HTTPException(404, "瑙嗛浠诲姟涓嶅瓨鍦?)
+  146: 
+  147:     config, key, base = get_provider(
+  148:         db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
+  149:     )
+  150:     settings = task.request_data or {}
+  151:     template = settings.get("status_path_template", "/videos/{task_id}")
+  152:     path = template.replace("{task_id}", str(task.remote_task_id))
+  153:     try:
+  154:         result = http_json(base + "/" + path.lstrip("/"), key, "GET")
+  155:         status = str(value_at(result, settings.get("status_field", "status")) or "processing")
+  156:         task.result_data = result
+  157:         task.status = status
+  158: 
+  159:         video_url = value_at(result, settings.get("video_url_field", "video_url"))
+  160:         if video_url:
+  161:             filename = f"video_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
+  162:             destination = VIDEO_DIR / filename
+  163:             http_download(str(video_url), destination)
+  164:             media = MediaFile(
+  165:                 name=filename, category="video", file_path=str(destination),
+  166:                 mime_type="video/mp4", file_size=destination.stat().st_size
+  167:             )
+  168:             db.add(media)
+  169:             task.result_path = str(destination)
+  170:             task.status = "completed"
+  171: 
+  172:         db.commit()
+  173:         return {"task_id": task.id, "status": task.status,
+
+---------- 代码片段 ----------
+  197:     text: str = Field(min_length=1, max_length=4096)
+  198:     voice: str = "alloy"
+  199:     instructions: Optional[str] = None
+  200:     response_format: str = "mp3"
+  201:     speed: float = Field(default=1.0, ge=0.25, le=4.0)
+  202:     confirm_paid: bool = False
+  203: 
+  204: 
+  205: @router.post("/speech/generate")
+  206: def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
+  207:     config, key, base = get_provider(db, data.provider, data.confirm_paid)
+  208: 
+  209:     payload = {
+  210:         "model": data.model,
+  211:         "input": data.text,
+  212:         "voice": data.voice,
+  213:         "response_format": data.response_format,
+  214:         "speed": data.speed
+  215:     }
+  216:     if data.instructions:
+  217:         payload["instructions"] = data.instructions
+  218: 
+  219:     filename = f"speech_{uuid.uuid4().hex}.{data.response_format}"
+  220:     destination = AUDIO_DIR / filename
+  221:     import urllib.request
+  222:     import urllib.error
+  223: 
+  224:     request = urllib.request.Request(
+  225:         base + "/audio/speech",
+  226:         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+  227:         headers={
+  228:             "Authorization": f"Bearer {key}",
+  229:             "Content-Type": "application/json"
+  230:         },
+  231:         method="POST"
+  232:     )
+  233:     try:
+  234:         with urllib.request.urlopen(request, timeout=300) as response:
+  235:             with open(destination, "wb") as output:
+
+---------- 代码片段 ----------
+  238:                     if not chunk:
+  239:                         break
+  240:                     output.write(chunk)
+  241: 
+  242:         media = MediaFile(
+  243:             name=filename, category="audio", file_path=str(destination),
+  244:             mime_type="audio/" + data.response_format,
+  245:             file_size=destination.stat().st_size
+  246:         )
+  247:         task = MediaTask(
+  248:             task_type="speech", provider=data.provider, model=data.model,
+  249:             status="completed", prompt=data.text, result_path=str(destination)
+  250:         )
+  251:         db.add(media)
+  252:         db.add(task)
+  253:         db.commit()
+  254:         return {"status": "completed", "file": filename,
+
+---------- 代码片段 ----------
+  261: 
+  262: 
+  263: @router.post("/files/upload")
+  264: async def upload_media(file: UploadFile = File(...), category: str = "video",
+  265:                        db: Session = Depends(get_db)):
+  266:     allowed = {"video": VIDEO_DIR, "audio": AUDIO_DIR, "image": STORAGE / "images"}
+  267:     if category not in allowed:
+  268:         raise HTTPException(400, "涓嶆敮鎸佺殑绱犳潗绫诲埆")
+  269: 
+  270:     folder = allowed[category]
+  271:     folder.mkdir(parents=True, exist_ok=True)
+  272:     suffix = Path(file.filename or "upload.bin").suffix[:20]
+  273:     filename = f"{uuid.uuid4().hex}{suffix}"
+  274:     destination = folder / filename
+  275:     size = 0
+  276:     limit = 2 * 1024 * 1024 * 1024
+
+---------- 代码片段 ----------
+  366: 
+  367: 
+  368: class RenderInput(BaseModel):
+  369:     video_path: str
+  370:     output_name: str = "rendered_video.mp4"
+  371:     audio_path: Optional[str] = None
+  372:     subtitle_path: Optional[str] = None
+  373:     music_volume: float = Field(default=0.25, ge=0, le=2)
+  374:     original_volume: float = Field(default=1.0, ge=0, le=2)
+  375:     width: int = 1920
+  376:     height: int = 1080
+  377: 
+  378: 
+  379: @router.post("/render")
+  380: def render_video(data: RenderInput):
+  381:     try:
+  382:         video = safe_storage_file(data.video_path)
+  383:         output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
+  384:         if not output_name.lower().endswith(".mp4"):
+  385:             output_name += ".mp4"
+  386:         output = VIDEO_DIR / f"{uuid.uuid4().hex}_{output_name}"
+  387: 
+  388:         args = ["-i", str(video)]
+  389:         audio = safe_storage_file(data.audio_path) if data.audio_path else None
+  390:         subtitle = safe_storage_file(data.subtitle_path) if data.subtitle_path else None
+  391: 
+  392:         if audio:
+  393:             args += ["-i", str(audio)]
+  394:             filter_complex = (
+  395:                 f"[0:a]volume={data.original_volume}[original];"
+  396:                 f"[1:a]volume={data.music_volume}[music];"
+  397:                 "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]"
+  398:             )
+  399:             args += ["-filter_complex", filter_complex, "-map", "0:v:0",
+  400:                      "-map", "[mix]", "-shortest"]
+  401:         else:
+  402:             args += ["-map", "0:v:0", "-map", "0:a?"]
+  403: 
+  404:         if subtitle:
+  405:             escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
+  406:             args += ["-vf", f"subtitles='{escaped}'"]
+  407: 
+
+---------- 代码片段 ----------
+  411: 
+  412:         args += [
+  413:             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+  414:             "-c:a", "aac", "-movflags", "+faststart", str(output)
+  415:         ]
+  416:         run_ffmpeg(args)
+  417:         return {"status": "completed", "output": str(output),
+  418:                 "size": output.stat().st_size}
+  419:     except Exception as exc:
+  420:         raise HTTPException(500, f"瑙嗛鍚堟垚澶辫触锛歿exc}")
+  421: 
+  422: 
+  423: @router.get("/probe")
+  424: def media_probe(path: str):
+  425:     try:
+  426:         file_path = safe_storage_file(path)
+  427:         return probe_media(file_path)
+  428:     except Exception as exc:
+  429:         raise HTTPException(400, str(exc))
+  430: 
+  431: 
+  432: @router.get("/health")
+  433: def media_health():
+  434:     import shutil
+  435:     return {
+  436:         "media_api": "ready",
+  437:         "ffmpeg": shutil.which(os.environ.get("FFMPEG_PATH", "ffmpeg")),
+  438:         "ffprobe": shutil.which(os.environ.get("FFPROBE_PATH", "ffprobe")),
+  439:         "storage": str(STORAGE)
+  440:     }
+
+==================================================
+文件：apps\api\app\routers\visual.py
+==================================================
+
+---------- 代码片段 ----------
+   42:     asset_id: Optional[int] = None
+   43:     provider: str = "doubao"
+   44:     task_type: str = "character"
+   45:     prompt: str
+   46:     size: str = "2K"
+   47:     confirm_paid: bool = False
+   48: 
+   49: 
+   50: def decrypt_key(encrypted):
+   51:     if not encrypted:
+   52:         return ""
+   53:     key_file = ROOT / "storage" / "secrets" / "local.key"
+   54:     if not key_file.exists():
+   55:         raise HTTPException(400, "本地加密密钥不存在，无法读取服务商 API Key")
+   56:     try:
+   57:         key = key_file.read_bytes()
+
+---------- 代码片段 ----------
+   61: 
+   62: 
+   63: def get_runtime(db):
+   64:     setting = db.query(AIRuntimeSetting).first()
+   65:     if not setting:
+   66:         return {"network_enabled": False, "paid_api_allowed": False}
+   67:     return {
+   68:         "network_enabled": bool(setting.network_enabled),
+   69:         "paid_api_allowed": bool(setting.paid_api_allowed),
+   70:     }
+   71: 
+   72: 
+   73: @router.get("/assets")
+   74: def list_assets(category: Optional[str] = None, db: Session = Depends(get_db)):
+   75:     query = db.query(VisualAsset)
+   76:     if category:
+   77:         query = query.filter(VisualAsset.category == category)
+   78:     items = query.order_by(VisualAsset.created_at.desc()).all()
+   79:     return [{
+
+---------- 代码片段 ----------
+  201:     db.refresh(task)
+  202:     return {"success": True, "task_id": task.id, "status": task.status}
+  203: 
+  204: 
+  205: @router.post("/tasks/{task_id}/run")
+  206: def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get_db)):
+  207:     task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+  208:     if not task:
+  209:         raise HTTPException(404, "图片任务不存在")
+  210:     if task.status == "completed":
+  211:         return {"success": True, "task_id": task.id, "status": task.status, "result_path": task.result_path}
+  212:     if task.status == "running":
+  213:         raise HTTPException(409, "任务正在执行")
+  214: 
+  215:     runtime = get_runtime(db)
+  216:     if not runtime["network_enabled"]:
+
+---------- 代码片段 ----------
+  221:     ).first()
+  222:     if not provider or not provider.enabled:
+  223:         raise HTTPException(400, f"{task.provider} 服务商尚未配置或未启用")
+  224:     if not provider.encrypted_api_key:
+  225:         raise HTTPException(400, "服务商尚未保存 API Key")
+  226:     if bool(provider.paid) and (not runtime["paid_api_allowed"] or not confirm_paid):
+  227:         raise HTTPException(403, "该服务商可能产生费用。请开启付费授权，并在本次任务中明确确认")
+  228: 
+  229:     task.status = "running"
+  230:     task.error = ""
+  231:     db.commit()
+  232: 
+  233:     try:
+  234:         api_key = decrypt_key(provider.encrypted_api_key)
+  235:         base_url = (provider.base_url or "").rstrip("/")
+  236:         if not base_url:
+
+---------- 代码片段 ----------
+  270:             output = ASSET_DIR / filename
+  271:             output.write_bytes(image_bytes)
+  272:             task.result_path = str(output)
+  273:         elif image_url:
+  274:             task.result_url = image_url
+  275:             download_request = urllib.request.Request(image_url)
+  276:             with urllib.request.urlopen(download_request, timeout=300) as response:
+  277:                 image_bytes = response.read()
+  278:             filename = f"image_task_{task.id}.png"
+  279:             output = ASSET_DIR / filename
+  280:             output.write_bytes(image_bytes)
+  281:             task.result_path = str(output)
+  282:         else:
+  283:             raise ValueError("服务商返回结果中没有图片 URL 或 b64_json")
+  284: 
+  285:         task.model = provider.model
+  286:         task.status = "completed"
+
+==================================================
+文件：apps\api\app\services\editing_service.py
+==================================================
+
+---------- 代码片段 ----------
+    5: import urllib.request
+    6: import urllib.error
+    7: from pathlib import Path
+    8: 
+    9: from app.services.media_service import (
+   10:     STORAGE, VIDEO_DIR, safe_storage_file, run_ffmpeg
+   11: )
+   12: 
+   13: EDIT_DIR = STORAGE / "edit-jobs"
+   14: EDIT_DIR.mkdir(parents=True, exist_ok=True)
+   15: 
+   16: 
+   17: def decrypt_key(config):
+   18:     from app.services.media_service import decrypt_api_key
+   19: 
+   20:     encrypted = (
+
+---------- 代码片段 ----------
+   41: 
+   42:     runtime = db.query(AIRuntimeSetting).first()
+   43:     if not runtime or not getattr(runtime, "network_enabled", False):
+   44:         raise RuntimeError("鍏ㄥ眬缃戠粶璋冪敤寮€鍏冲凡鍏抽棴")
+   45: 
+   46:     paid = bool(getattr(config, "paid", True))
+   47:     if paid and not getattr(runtime, "paid_api_allowed", False):
+   48:         raise RuntimeError("浠樿垂 API 鎬绘巿鏉冩湭寮€鍚?)
+   49: 
+   50:     base_url = getattr(config, "base_url", None)
+   51:     if not base_url:
+   52:         raise RuntimeError("AI 鏈嶅姟鍟嗙己灏?Base URL")
+   53: 
+   54:     return config, decrypt_key(config), base_url.rstrip("/")
+   55: 
+   56: 
+   57: def call_ai_for_edit_plan(db, provider, model, instruction, source_files,
+   58:                           confirm_paid=False):
+   59:     config, key, base = get_ai_config(db, provider)
+   60: 
+   61:     if bool(getattr(config, "paid", True)) and not confirm_paid:
+   62:         raise RuntimeError("鏈 AI 鍓緫鍒嗘瀽鍙兘浜х敓璐圭敤锛岃鍏堟槑纭‘璁?)
+   63: 
+   64:     system_prompt = """
+   65: 浣犳槸涓撲笟褰辫鍓緫甯堛€備綘蹇呴』鎶婄敤鎴风殑鍓緫瑕佹眰杞崲鎴愪弗鏍?JSON銆?鍙兘浣跨敤鐢ㄦ埛鎻愪緵鐨勮棰戞枃浠惰矾寰勶紝涓嶅緱缂栭€犺矾寰勩€?鍙繑鍥?JSON锛屼笉瑕?Markdown锛屼笉瑕佽В閲娿€?
+   66: JSON 鏍煎紡锛?{
+   67:   "title": "鍓緫椤圭洰鍚嶇О",
+   68:   "summary": "鍓緫鏂规璇存槑",
+   69:   "segments": [
+   70:     {
+   71:       "file_path": "蹇呴』鏄緭鍏ユ枃浠朵腑鐨勮矾寰?,
+
+---------- 代码片段 ----------
+  131:     content = str(content).strip()
+  132:     content = re.sub(r"^```(?:json)?\s*", "", content)
+  133:     content = re.sub(r"\s*```$", "", content)
+  134: 
+  135:     try:
+  136:         plan = json.loads(content)
+  137:     except Exception as exc:
+  138:         raise RuntimeError("AI 杩斿洖鐨勫壀杈戞柟妗堜笉鏄湁鏁?JSON锛? + content[:1500]) from exc
+  139: 
+  140:     if not isinstance(plan, dict) or not isinstance(plan.get("segments"), list):
+  141:         raise RuntimeError("AI 杩斿洖鐨勫壀杈戞柟妗堢己灏?segments")
+  142: 
+  143:     return plan, result
+  144: 
+  145: 
+  146: def validate_plan(plan, allowed_files):
+  147:     if not plan.get("segments"):
+  148:         raise ValueError("鍓緫鏂规娌℃湁鍙墽琛岀殑瑙嗛鐗囨")
+  149: 
+  150:     allowed = {str(Path(x).resolve()) for x in allowed_files}
+  151:     validated = []
+  152: 
+  153:     for index, segment in enumerate(plan["segments"], 1):
+  154:         if not isinstance(segment, dict):
+  155:             raise ValueError(f"绗?{index} 涓墖娈垫牸寮忛敊璇?)
+  156: 
+  157:         raw_path = segment.get("file_path")
+  158:         if not raw_path:
+  159:             raise ValueError(f"绗?{index} 涓墖娈电己灏戣棰戣矾寰?)
+  160: 
+  161:         path = safe_storage_file(raw_path)
+  162:         if str(path.resolve()) not in allowed:
+  163:             raise ValueError(f"绗?{index} 涓墖娈典娇鐢ㄤ簡鏈巿鏉冪殑杈撳叆鏂囦欢")
+
+---------- 代码片段 ----------
+  176:             "start": start,
+  177:             "end": end,
+  178:             "description": str(segment.get("description", ""))[:1000]
+  179:         })
+  180: 
+  181:     width = int(plan.get("width", 1920))
+  182:     height = int(plan.get("height", 1080))
+  183: 
+  184:     if not (256 <= width <= 3840 and 256 <= height <= 3840):
+  185:         raise ValueError("杈撳嚭鍒嗚鲸鐜囪秴鍑哄厑璁歌寖鍥?)
+  186: 
+  187:     return {
+  188:         "title": str(plan.get("title", "瑙嗛鍓緫"))[:300],
+  189:         "summary": str(plan.get("summary", ""))[:5000],
+  190:         "segments": validated,
+  191:         "width": width,
+  192:         "height": height,
+  193:         "subtitle_text": str(plan.get("subtitle_text", ""))[:10000],
+  194:         "notes": plan.get("notes", [])
+  195:     }
+  196: 
+  197: 
+  198: def execute_edit_plan(plan, subtitle_path=None, audio_path=None):
+  199:     work = EDIT_DIR / uuid.uuid4().hex
+  200:     work.mkdir(parents=True, exist_ok=True)
+  201: 
+  202:     clips = []
+  203: 
+  204:     for index, segment in enumerate(plan["segments"]):
+  205:         output = work / f"segment_{index:04d}.mp4"
+  206:         duration = segment["end"] - segment["start"]
+  207: 
+  208:         args = [
+  209:             "-ss", str(segment["start"]),
+  210:             "-i", segment["file_path"],
+  211:             "-t", str(duration),
+  212:             "-vf",
+  213:             f"scale={plan['width']}:{plan['height']}:force_original_aspect_ratio=decrease,"
+  214:             f"pad={plan['width']}:{plan['height']}:(ow-iw)/2:(oh-ih)/2",
+  215:             "-c:v", "libx264",
+  216:             "-preset", "veryfast",
+  217:             "-crf", "21",
+  218:             "-c:a", "aac",
+  219:             "-ar", "48000",
+  220:             "-ac", "2",
+  221:             "-avoid_negative_ts", "make_zero",
+  222:             "-movflags", "+faststart",
+  223:             str(output)
+  224:         ]
+  225:         run_ffmpeg(args)
+  226:         clips.append(output)
+  227: 
+  228:     concat_file = work / "concat.txt"
+  229:     concat_file.write_text(
+  230:         "".join("file '" + str(x).replace("\\", "/").replace("'", "'\\''") + "'\n"
+  231:                 for x in clips),
+  232:         encoding="utf-8"
+  233:     )
+  234: 
+  235:     output = VIDEO_DIR / f"ai_edit_{uuid.uuid4().hex}.mp4"
+
+---------- 代码片段 ----------
+  238:         "-f", "concat",
+  239:         "-safe", "0",
+  240:         "-i", str(concat_file)
+  241:     ]
+  242: 
+  243:     audio = safe_storage_file(audio_path) if audio_path else None
+  244:     if audio:
+  245:         args += ["-i", str(audio)]
+  246: 
+  247:     subtitle = safe_storage_file(subtitle_path) if subtitle_path else None
+  248: 
+  249:     if subtitle:
+  250:         escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
+  251:         args += ["-vf", f"subtitles='{escaped}'"]
+  252: 
+  253:     if audio:
+  254:         args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+  255:     else:
+  256:         args += ["-map", "0:v:0", "-map", "0:a?"]
+  257: 
+  258:     args += [
+  259:         "-c:v", "libx264",
+  260:         "-preset", "medium",
+  261:         "-crf", "20",
+  262:         "-c:a", "aac",
+  263:         "-movflags", "+faststart",
+  264:         str(output)
+  265:     ]
+  266: 
+  267:     run_ffmpeg(args)
+  268: 
+  269:     return str(output), output.stat().st_size
+
+==================================================
+文件：apps\api\app\services\media_service.py
+==================================================
+
+---------- 代码片段 ----------
+    4: import urllib.request
+    5: import urllib.error
+    6: from pathlib import Path
+    7: from cryptography.fernet import Fernet
+    8: 
+    9: ROOT = Path(os.environ.get("APP_DATA_DIR", str(Path(__file__).resolve().parents[4])))
+   10: STORAGE = ROOT / "storage"
+   11: VIDEO_DIR = STORAGE / "videos"
+   12: AUDIO_DIR = STORAGE / "audio"
+   13: SUBTITLE_DIR = STORAGE / "subtitles"
+   14: 
+   15: for folder in (VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR):
+   16:     folder.mkdir(parents=True, exist_ok=True)
+   17: 
+   18: 
+   19: def decrypt_api_key(value):
+   20:     if not value:
+   21:         return ""
+   22:     key_file = STORAGE / "secrets" / "local.key"
+   23:     if not key_file.exists():
+   24:         raise RuntimeError("API 瀵嗛挜鍔犲瘑鏂囦欢涓嶅瓨鍦紝鏃犳硶瑙ｅ瘑宸蹭繚瀛樼殑瀵嗛挜")
+   25:     try:
+
+---------- 代码片段 ----------
+   51:         raise RuntimeError(f"杩滅▼ API 杩斿洖 HTTP {exc.code}: {detail[:2000]}") from exc
+   52:     except urllib.error.URLError as exc:
+   53:         raise RuntimeError(f"鏃犳硶杩炴帴杩滅▼ API: {exc}") from exc
+   54: 
+   55: 
+   56: def http_download(url, destination, api_key=None):
+   57:     headers = {}
+   58:     if api_key:
+   59:         headers["Authorization"] = f"Bearer {api_key}"
+   60:     request = urllib.request.Request(url, headers=headers)
+   61:     try:
+   62:         with urllib.request.urlopen(request, timeout=600) as response:
+   63:             with open(destination, "wb") as output:
+   64:                 while True:
+   65:                     chunk = response.read(1024 * 1024)
+   66:                     if not chunk:
+
+---------- 代码片段 ----------
+   80:     if not candidate.is_file():
+   81:         raise FileNotFoundError("鎸囧畾鐨勭礌鏉愭枃浠朵笉瀛樺湪")
+   82:     return candidate
+   83: 
+   84: 
+   85: def run_ffmpeg(args):
+   86:     executable = _bundled_media_path("ffmpeg.exe")
+   87:     command = [executable, "-y"] + [str(item) for item in args]
+   88:     try:
+   89:         result = subprocess.run(
+   90:             command, capture_output=True, text=True, timeout=7200
+   91:         )
+   92:     except FileNotFoundError as exc:
+   93:         raise RuntimeError("鏈壘鍒?FFmpeg锛岃鍏堝畨瑁?FFmpeg 骞堕厤缃?PATH") from exc
+   94:     if result.returncode != 0:
+   95:         raise RuntimeError("FFmpeg 鎵ц澶辫触锛? + result.stderr[-3000:])
+   96:     return result
+   97: 
+   98: 
+   99: def probe_media(path):
+  100:     executable = _bundled_media_path("ffprobe.exe")
+  101:     command = [
+  102:         executable, "-v", "quiet", "-print_format", "json",
+  103:         "-show_format", "-show_streams", str(path)
+  104:     ]
+  105:     try:
+  106:         result = subprocess.run(
+  107:             command, capture_output=True, text=True, timeout=120
+  108:         )
+  109:     except FileNotFoundError as exc:
+  110:         raise RuntimeError("鏈壘鍒?FFprobe锛岃瀹夎 FFmpeg 瀹屾暣鐗堟湰") from exc
+  111:     if result.returncode != 0:
+  112:         raise RuntimeError(result.stderr[-2000:])
+  113:     return json.loads(result.stdout)
+  114: 
+  115: 
+  116: 
+  117: # Packaged desktop media-tool discovery.
+  118: def _bundled_media_path(filename: str) -> str:
+  119:     from pathlib import Path
+  120:     import os
+  121:     import sys
+  122: 
+  123:     configured = os.environ.get(
+  124:         "FFMPEG_PATH" if filename == "ffmpeg.exe" else "FFPROBE_PATH"
+  125:     )
+  126:     if configured and Path(configured).is_file():
+  127:         return configured
+  128: 
+  129:     candidates = []
+  130:     if getattr(sys, "frozen", False):
+  131:         candidates.append(
+  132:             Path(sys.executable).resolve().parent.parent / "media" / filename
+  133:         )
+  134:         candidates.append(
+
+---------- 代码片段 ----------
+  138:     for candidate in candidates:
+  139:         if candidate.is_file():
+  140:             return str(candidate)
+  141: 
+  142:     from shutil import which
+  143:     command = "ffmpeg" if filename == "ffmpeg.exe" else "ffprobe"
+  144:     found = which(command)
+  145:     if found:
+  146:         return found
+  147: 
+  148:     raise FileNotFoundError(
+  149:         f"鎵句笉鍒?{command}銆傝妫€鏌ヨ蒋浠跺獟浣撶粍浠舵槸鍚﹀畬鏁村畨瑁呫€?
+  150:     )
+
+==================================================
+文件：apps\desktop\main.cjs
+==================================================
+
+---------- 代码片段 ----------
+   25:       mainWindow.focus();
+   26:     }
+   27:   });
+   28: }
+   29: 
+   30: function checkPort(port) {
+   31:   return new Promise((resolve) => {
+   32:     const server = net.createServer();
+   33:     server.once("error", () => resolve(false));
+   34:     server.once("listening", () => {
+   35:       server.close(() => resolve(true));
+   36:     });
+   37:     server.listen(port, "127.0.0.1");
+   38:   });
+   39: }
+   40: 
+   41: function requestHealth() {
+   42:   return new Promise((resolve) => {
+   43:     const req = http.get(
+   44:       `http://127.0.0.1:${API_PORT}/health`,
+   45:       { timeout: 2000 },
+   46:       (res) => {
+   47:         let body = "";
+   48:         res.setEncoding("utf8");
+   49:         res.on("data", (chunk) => body += chunk);
+   50:         res.on("end", () => {
+   51:           try {
+   52:             const data = JSON.parse(body);
+   53:             resolve(res.statusCode === 200 ? data : null);
+   54:           } catch {
+
+---------- 代码片段 ----------
+   63:       resolve(null);
+   64:     });
+   65:   });
+   66: }
+   67: 
+   68: function waitForApi(timeout = 120000) {
+   69:   return new Promise((resolve, reject) => {
+   70:     const started = Date.now();
+   71: 
+   72:     const timer = setInterval(async () => {
+   73:       if (apiProcess && apiProcess.exitCode !== null) {
+   74:         clearInterval(timer);
+   75:         reject(new Error("鏈湴 API 鏈嶅姟鎻愬墠閫€鍑猴紝璇锋鏌ユ棩蹇椼€?));
+   76:         return;
+   77:       }
+   78: 
+   79:       const health = await requestHealth();
+   80:       if (health) {
+   81:         clearInterval(timer);
+   82:         resolve(health);
+   83:         return;
+   84:       }
+   85: 
+   86:       if (Date.now() - started > timeout) {
+   87:         clearInterval(timer);
+   88:         reject(new Error("绛夊緟鏈湴 API 鍋ュ悍妫€鏌ヨ秴鏃躲€?));
+   89:       }
+   90:     }, 800);
+   91:   });
+   92: }
+
+---------- 代码片段 ----------
+  128:   child.stderr?.on("data", (data) => {
+  129:     console.error(`[${name}] ${data}`);
+  130:   });
+  131: }
+  132: 
+  133: function stopChild(child) {
+  134:   if (!child || !child.pid) return;
+  135: 
+  136:   if (process.platform === "win32") {
+  137:     execFile(
+  138:       "taskkill",
+  139:       ["/PID", String(child.pid), "/T", "/F"],
+  140:       () => {}
+  141:     );
+  142:   } else {
+  143:     try { child.kill("SIGTERM"); } catch {}
+  144:   }
+  145: }
+  146: 
+  147: function stopServices() {
+  148:   stopChild(webProcess);
+  149:   stopChild(apiProcess);
+  150:   webProcess = null;
+  151:   apiProcess = null;
+  152: }
+  153: 
+  154: function startProductionServices() {
+  155:   const resources = process.resourcesPath;
+  156:   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
+  157:   const webServer = path.join(resources, "web", "server.js");
+  158:   const webNodeModules = path.join(resources, "web", "node_modules", "next");
+  159:   const ffmpeg = path.join(resources, "media", "ffmpeg.exe");
+  160:   const ffprobe = path.join(resources, "media", "ffprobe.exe");
+  161:   const dataDir = app.getPath("userData");
+  162: 
+  163:   for (const file of [apiExe, webServer, webNodeModules, ffmpeg, ffprobe]) {
+  164:     if (!fs.existsSync(file)) {
+  165:       throw new Error(`瀹夎鍖呯己灏戝繀瑕佹枃浠讹細${file}`);
+  166:     }
+  167:   }
+  168: 
+  169:   fs.mkdirSync(dataDir, { recursive: true });
+  170: 
+  171:   if (fs.existsSync(dataDir)) {
+  172:     const storageDir = path.join(dataDir, "storage");
+  173:     fs.mkdirSync(storageDir, { recursive: true });
+
+---------- 代码片段 ----------
+  176:   apiProcess = spawn(apiExe, [], {
+  177:     cwd: resources,
+  178:     windowsHide: true,
+  179:     env: {
+  180:       ...process.env,
+  181:       APP_DATA_DIR: dataDir,
+  182:       PYTHONUNBUFFERED: "1",
+  183:       FFMPEG_PATH: ffmpeg,
+  184:       FFPROBE_PATH: ffprobe
+  185:     }
+  186:   });
+  187: 
+  188:   logChild("API", apiProcess);
+  189: 
+  190:   webProcess = spawn(process.execPath, [webServer], {
+  191:     cwd: path.join(resources, "web"),
+  192:     windowsHide: true,
+  193:     env: {
+
+---------- 代码片段 ----------
+  218:   });
+  219: 
+  220:   mainWindow.once("ready-to-show", () => mainWindow.show());
+  221: 
+  222:   if (app.isPackaged) {
+  223:     const apiPortFree = await checkPort(API_PORT);
+  224:     const webPortFree = await checkPort(WEB_PORT);
+  225: 
+  226:     if (!apiPortFree || !webPortFree) {
+  227:       throw new Error(
+  228:         "杞欢闇€瑕佷娇鐢ㄦ湰鍦?8000 鍜?3000 绔彛锛屼絾绔彛宸茶鍏朵粬绋嬪簭鍗犵敤銆傝鍏抽棴鍗犵敤绋嬪簭鍚庨噸鏂板惎鍔ㄣ€?
+  229:       );
+  230:     }
+  231: 
+  232:     startProductionServices();
+  233:     await waitForApi();
+  234:     await waitForWeb();
+  235:     await mainWindow.loadURL("http://127.0.0.1:3000");
+  236:   } else {
+  237:     await mainWindow.loadURL("http://127.0.0.1:3000");
+  238:   }
+  239: 
+  240:   mainWindow.on("closed", () => {
+  241:     mainWindow = null;
+  242:   });
+  243: }
+
+==================================================
+文件：scripts\build-windows.ps1
+==================================================
+
+---------- 代码片段 ----------
+    1: $ErrorActionPreference = "Stop"
+    2: 
+    3: # Automatically locate the project root.
+    4: $Root = Split-Path -Parent $PSScriptRoot
+    5: $Api = Join-Path $Root "apps\api"
+    6: $Web = Join-Path $Root "apps\web"
+    7: $Desktop = Join-Path $Root "apps\desktop"
+    8: $Python = Join-Path $Api ".venv\Scripts\python.exe"
+    9: 
+   10: function Check-ExitCode {
+   11:     param([string]$Message)
+   12: 
+   13:     if ($LASTEXITCODE -ne 0) {
+   14:         throw "$Message. Exit code: $LASTEXITCODE"

@@ -1,0 +1,2604 @@
+@import "tailwindcss";
+
+:root {
+  --background: #05030d;
+  --foreground: #f5efff;
+  --purple: #9b4dff;
+  --purple-light: #d2a4ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #05030d;
+  color: var(--foreground);
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* ================= 宇宙主背景 ================= */
+
+.cosmic {
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 72% 42%, #17102e 0%, transparent 42%),
+    radial-gradient(ellipse at 18% 80%, #160b32 0%, transparent 42%),
+    linear-gradient(135deg, #03020a 0%, #0b061b 48%, #05030e 100%);
+}
+
+/* 多层星云与空间尘埃 */
+.cosmic::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 72% 35%, #a52bff33 0%, transparent 18%),
+    radial-gradient(ellipse at 65% 42%, #5725c955 0%, transparent 28%),
+    radial-gradient(ellipse at 28% 68%, #5222c955 0%, transparent 25%),
+    radial-gradient(ellipse at 42% 20%, #3520a944 0%, transparent 22%),
+    radial-gradient(ellipse at 85% 78%, #8a2cbd33 0%, transparent 24%),
+    radial-gradient(ellipse at 15% 30%, #252c9b33 0%, transparent 25%);
+  background-size: 130% 130%;
+  animation: cosmicNebula 35s ease-in-out infinite alternate;
+}
+
+/* 星海 */
+.cosmic::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: .85;
+  background-image:
+    radial-gradient(2px 2px at 8% 15%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 18% 42%, #d8caff 98%, transparent),
+    radial-gradient(2px 2px at 35% 12%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 48% 73%, #bda8ff 98%, transparent),
+    radial-gradient(2px 2px at 66% 20%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 78% 65%, #fff 98%, transparent),
+    radial-gradient(2px 2px at 91% 35%, #d9bdff 98%, transparent),
+    radial-gradient(1px 1px at 95% 82%, #fff 98%, transparent);
+  background-size: 340px 290px;
+  animation: starDrift 100s linear infinite;
+}
+
+/* ================= 星云动态层 ================= */
+
+.nebula {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+}
+
+.nebula-one {
+  width: 720px;
+  height: 310px;
+  top: 24%;
+  left: 20%;
+  opacity: .27;
+  background:
+    radial-gradient(ellipse at center,
+      #a52aff55 0%,
+      #7434df44 30%,
+      #3720a822 55%,
+      transparent 75%);
+  transform: rotate(-25deg);
+  animation: nebulaOne 32s ease-in-out infinite alternate;
+}
+
+.nebula-two {
+  width: 650px;
+  height: 350px;
+  right: -5%;
+  bottom: 3%;
+  opacity: .3;
+  background:
+    radial-gradient(ellipse at center,
+      #9c37ff55 0%,
+      #4e35d344 35%,
+      #251c8044 58%,
+      transparent 76%);
+  transform: rotate(25deg);
+  animation: nebulaTwo 38s ease-in-out infinite alternate;
+}
+
+/* ================= 黑洞 ================= */
+
+.black-hole {
+  position: fixed;
+  z-index: 3;
+  width: 490px;
+  height: 300px;
+  top: 8%;
+  right: 8%;
+  pointer-events: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at center,
+      #000 0%,
+      #000 23%,
+      #05020c 29%,
+      transparent 34%);
+  filter: drop-shadow(0 0 28px #923bff66);
+}
+
+/* 发光吸积盘 */
+.black-hole::before {
+  content: "";
+  position: absolute;
+  inset: 13% 2%;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      #6826d8 35deg,
+      #e7b5ff 65deg,
+      #ffffff 78deg,
+      #a43dff 105deg,
+      transparent 145deg,
+      #5b25ca 210deg,
+      #d38aff 250deg,
+      #fff0ff 270deg,
+      #8b32ff 300deg,
+      transparent 340deg
+    );
+  transform: rotateX(68deg);
+  box-shadow:
+    0 0 12px #d18aff,
+    0 0 30px #a43dff,
+    0 0 65px #7329e8;
+  animation: accretionRotate 8s linear infinite;
+}
+
+/* 黑洞视界及外层能量环 */
+.black-hole::after {
+  content: "";
+  position: absolute;
+  width: 37%;
+  height: 37%;
+  left: 31.5%;
+  top: 31.5%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 35%, #090512 0%, #000 65%, #000 100%);
+  box-shadow:
+    0 0 0 8px #10071e,
+    0 0 15px 10px #a14aff,
+    0 0 35px 15px #7928db,
+    0 0 75px 22px #5115a566;
+}
+
+/* ================= 流星雨 ================= */
+
+.meteor {
+  position: fixed;
+  z-index: 4;
+  width: 210px;
+  height: 3px;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: 100%;
+  transform: rotate(35deg);
+  transform-origin: right center;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #4722a000 30%,
+    #7439d9 65%,
+    #d7aaff 88%,
+    #ffffff 100%
+  );
+  box-shadow:
+    0 0 7px #c18aff,
+    0 0 16px #963fff,
+    0 0 30px #7436ff;
+  animation: meteorFall 5s linear infinite;
+}
+
+.meteor::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 8px #fff,
+    0 0 18px #d8aaff,
+    0 0 32px #a64cff;
+}
+
+.meteor-one {
+  top: 5%;
+  left: 12%;
+  animation-duration: 4.5s;
+  animation-delay: 0s;
+}
+
+.meteor-two {
+  top: 17%;
+  left: 45%;
+  animation-duration: 5.5s;
+  animation-delay: 1.2s;
+}
+
+.meteor-three {
+  top: 28%;
+  left: 75%;
+  animation-duration: 4.8s;
+  animation-delay: 2.5s;
+}
+
+.meteor-four {
+  top: 40%;
+  left: 25%;
+  animation-duration: 6s;
+  animation-delay: 3.2s;
+}
+
+.meteor-five {
+  top: 12%;
+  left: 88%;
+  animation-duration: 5s;
+  animation-delay: 4s;
+}
+
+/* ================= 动画 ================= */
+
+@keyframes cosmicNebula {
+  0% {
+    transform: translate(-2%, 1%) scale(1);
+  }
+  50% {
+    transform: translate(2%, -2%) scale(1.06);
+  }
+  100% {
+    transform: translate(3%, 2%) scale(1.1);
+  }
+}
+
+@keyframes nebulaOne {
+  from {
+    transform: translate(-50px, 30px) rotate(-25deg) scale(1);
+  }
+  to {
+    transform: translate(90px, -50px) rotate(-12deg) scale(1.12);
+  }
+}
+
+@keyframes nebulaTwo {
+  from {
+    transform: translate(50px, 20px) rotate(25deg) scale(1);
+  }
+  to {
+    transform: translate(-90px, -65px) rotate(42deg) scale(1.15);
+  }
+}
+
+@keyframes starDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 340px 580px;
+  }
+}
+
+@keyframes accretionRotate {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes meteorFall {
+  0% {
+    opacity: 0;
+    translate: 0 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  65% {
+    opacity: .9;
+  }
+  100% {
+    opacity: 0;
+    translate: 650px 650px;
+  }
+}
+
+/* ================= 界面玻璃卡片 ================= */
+
+.glass {
+  background: linear-gradient(135deg, #1c1038d9, #10091edb);
+  border: 1px solid #a66bff55;
+  box-shadow:
+    0 8px 35px #0007,
+    inset 0 1px 1px #ffffff18;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.glass:hover {
+  border-color: #c17affaa;
+  box-shadow:
+    0 0 28px #903cff35,
+    inset 0 1px 1px #ffffff25;
+  transition: .3s;
+}
+
+.sidebar {
+  background: #0a0719e8;
+  border-right: 1px solid #9e64ff33;
+  backdrop-filter: blur(8px);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 15px;
+  border-radius: 12px;
+  color: #c5b5e6;
+  text-decoration: none;
+  font-size: 14px;
+  transition: .25s;
+}
+
+.nav-item:hover, .nav-active {
+  background: linear-gradient(90deg, #8438ed88, #5120a555);
+  color: white;
+  box-shadow: 0 0 18px #963cff44;
+}
+
+.primary-button {
+  background: linear-gradient(110deg, #8d38fa, #b84bff);
+  color: white;
+  border: 1px solid #d9a1ff66;
+  border-radius: 30px;
+  padding: 11px 23px;
+  box-shadow: 0 0 20px #963cff55;
+  font-weight: 600;
+  transition: .25s;
+}
+
+.primary-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 28px #c16aff99;
+}
+
+.feature-card {
+  position: relative;
+  min-height: 215px;
+  overflow: hidden;
+  transition: .3s;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+}
+
+.feature-number {
+  color: #ad79ff;
+  font-size: 28px;
+  font-weight: 800;
+  opacity: .75;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #30e995;
+  box-shadow: 0 0 10px #30e995;
+}
+
+@media (max-width: 1100px) {
+  .black-hole {
+    width: 350px;
+    height: 220px;
+    right: 2%;
+    top: 10%;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100% !important;
+  }
+
+  .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .black-hole {
+    opacity: .65;
+  }
+}
+
+@media (max-width: 550px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .black-hole {
+    width: 250px;
+    height: 160px;
+    right: -50px;
+  }
+
+  .meteor {
+    width: 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cosmic::before,
+  .cosmic::after,
+  .nebula,
+  .black-hole::before,
+  .meteor {
+    animation-duration: 60s !important;
+  }
+}
+
+
+
+/* ===== AI CINEMATIC COSMIC BACKGROUND V2 ===== */
+
+/* 宇宙底层：真实宇宙图片 */
+html,
+body {
+    min-height: 100%;
+    background: #03030b !important;
+}
+
+.cosmic {
+    position: relative;
+    isolation: isolate;
+    min-height: 100vh;
+    overflow: hidden;
+
+    background-color: #03030b !important;
+
+    /* 不依赖可能缺失或低分辨率的背景图片，使用清晰的渐变宇宙底色 */
+    background-image:
+        radial-gradient(ellipse at 68% 34%, rgba(91, 42, 160, .34) 0%, transparent 42%),
+        radial-gradient(ellipse at 22% 76%, rgba(42, 45, 130, .28) 0%, transparent 43%),
+        radial-gradient(ellipse at 48% 52%, rgba(36, 18, 73, .22) 0%, transparent 58%),
+        linear-gradient(135deg, #03020a 0%, #0b061b 48%, #05030e 100%) !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+}
+
+/* 第一层：远处星空 */
+.cosmic::before {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(2px 2px at 8% 12%, rgba(255,255,255,.9) 50%, transparent 100%),
+        radial-gradient(1px 1px at 18% 72%, rgba(190,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 28% 35%, rgba(255,255,255,.8) 50%, transparent 100%),
+        radial-gradient(1px 1px at 39% 82%, rgba(180,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 48% 18%, rgba(255,255,255,.9) 50%, transparent 100%),
+        radial-gradient(1px 1px at 59% 62%, rgba(220,210,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 69% 28%, rgba(255,255,255,.8) 50%, transparent 100%),
+        radial-gradient(1px 1px at 78% 78%, rgba(190,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 91% 48%, rgba(255,255,255,.9) 50%, transparent 100%);
+    background-size: 430px 370px;
+    opacity: .8;
+    animation: cosmicStarDrift 100s linear infinite;
+}
+
+/* 第二层：细密星点 */
+.cosmic::after {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(1px 1px at 12% 23%, #fff 50%, transparent 100%),
+        radial-gradient(1px 1px at 32% 64%, #b9b8ff 50%, transparent 100%),
+        radial-gradient(1px 1px at 52% 43%, #fff 50%, transparent 100%),
+        radial-gradient(1px 1px at 73% 15%, #d6caff 50%, transparent 100%),
+        radial-gradient(1px 1px at 88% 84%, #fff 50%, transparent 100%);
+    background-size: 230px 210px;
+    opacity: .48;
+    animation: cosmicStarTwinkle 5s ease-in-out infinite alternate;
+}
+
+/* 星云：只柔化星云，不模糊整张背景 */
+.cosmic .nebula {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(34px);
+    mix-blend-mode: screen;
+    z-index: 1;
+}
+
+.cosmic .nebula-one {
+    width: 65vw;
+    height: 45vw;
+    top: 8%;
+    left: 30%;
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(94, 43, 190, .24) 0%,
+            rgba(48, 67, 177, .16) 35%,
+            rgba(87, 27, 143, .09) 55%,
+            transparent 72%);
+    animation: nebulaFlowOne 32s ease-in-out infinite alternate;
+}
+
+.cosmic .nebula-two {
+    width: 58vw;
+    height: 48vw;
+    left: 8%;
+    bottom: -12%;
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(48, 57, 173, .2) 0%,
+            rgba(111, 37, 164, .15) 40%,
+            transparent 72%);
+    animation: nebulaFlowTwo 38s ease-in-out infinite alternate;
+}
+
+/* 远处中央黑洞 */
+.cosmic .black-hole {
+    position: fixed;
+    z-index: 2;
+    pointer-events: none;
+    width: clamp(340px, 43vw, 680px);
+    height: clamp(340px, 43vw, 680px);
+    left: 57%;
+    top: 43%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(0,0,0,.98) 0%,
+        rgba(1,1,8,.98) 13%,
+        rgba(4,3,17,.52) 20%,
+        transparent 48%
+    );
+}
+
+/* 旋转吸积盘 */
+.cosmic .black-hole::before {
+    content: "";
+    position: absolute;
+    inset: 4%;
+    border-radius: 50%;
+    background:
+        radial-gradient(
+            ellipse at center,
+            transparent 0%,
+            transparent 34%,
+            rgba(99, 57, 255, .16) 37%,
+            rgba(120, 91, 255, .75) 40%,
+            rgba(70, 151, 255, .85) 42%,
+            rgba(240, 207, 255, .95) 44%,
+            rgba(151, 93, 255, .7) 46%,
+            rgba(49, 77, 203, .32) 50%,
+            transparent 58%
+        );
+    transform: rotate(-20deg) scaleY(.38);
+    filter: drop-shadow(0 0 13px rgba(133, 91, 255, .8));
+    animation: blackHoleDiskSpin 32s linear infinite;
+}
+
+/* 黑洞视界 */
+.cosmic .black-hole::after {
+    content: "";
+    position: absolute;
+    width: 27%;
+    height: 27%;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        #000 0%,
+        #000 65%,
+        rgba(1, 1, 8, .98) 78%,
+        rgba(30, 20, 63, .45) 100%
+    );
+    box-shadow:
+        0 0 28px 12px rgba(0, 0, 0, .95),
+        0 0 65px 18px rgba(76, 50, 165, .22);
+}
+
+/* 流星主体 */
+.cosmic .meteor {
+    position: fixed;
+    z-index: 4;
+    width: 220px;
+    height: 2px;
+    pointer-events: none;
+    opacity: 0;
+    border-radius: 50%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(119, 113, 255, .08) 35%,
+        rgba(160, 174, 255, .7) 85%,
+        #fff 100%
+    );
+    box-shadow: 0 0 9px rgba(154, 151, 255, .8);
+    transform: rotate(35deg);
+    animation: meteorFall 8s linear infinite;
+}
+
+.cosmic .meteor::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow:
+        0 0 8px 3px #fff,
+        0 0 20px 6px rgba(139, 148, 255, .95);
+}
+
+.cosmic .meteor-one {
+    left: 12%;
+    top: -10%;
+    animation-delay: 0s;
+    animation-duration: 8s;
+}
+
+.cosmic .meteor-two {
+    left: 45%;
+    top: -20%;
+    animation-delay: 2.2s;
+    animation-duration: 9s;
+}
+
+.cosmic .meteor-three {
+    left: 76%;
+    top: -15%;
+    animation-delay: 4.5s;
+    animation-duration: 7s;
+}
+
+.cosmic .meteor-four {
+    left: 28%;
+    top: -20%;
+    animation-delay: 5.8s;
+    animation-duration: 10s;
+}
+
+.cosmic .meteor-five {
+    left: 88%;
+    top: -10%;
+    animation-delay: 7s;
+    animation-duration: 8.5s;
+}
+
+/* 内容始终在背景上方 */
+.cosmic .main-layout {
+    position: relative;
+    z-index: 10;
+}
+
+/* 星点缓慢漂移 */
+@keyframes cosmicStarDrift {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(-90px, 55px, 0); }
+}
+
+@keyframes cosmicStarTwinkle {
+    from { opacity: .28; }
+    to { opacity: .7; }
+}
+
+/* 星云流动 */
+@keyframes nebulaFlowOne {
+    0% { transform: translate(-3%, -2%) scale(.95) rotate(-5deg); }
+    100% { transform: translate(5%, 4%) scale(1.12) rotate(7deg); }
+}
+
+@keyframes nebulaFlowTwo {
+    0% { transform: translate(3%, 2%) scale(1.05) rotate(4deg); }
+    100% { transform: translate(-5%, -3%) scale(.92) rotate(-8deg); }
+}
+
+/* 吸积盘旋转 */
+@keyframes blackHoleDiskSpin {
+    from { transform: rotate(-20deg) scaleY(.38); }
+    to { transform: rotate(340deg) scaleY(.38); }
+}
+
+/* 流星斜向下划过 */
+@keyframes meteorFall {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0) rotate(35deg);
+    }
+    8% { opacity: .95; }
+    65% { opacity: .85; }
+    100% {
+        opacity: 0;
+        transform: translate3d(75vw, 105vh, 0) rotate(35deg);
+    }
+}
+
+/* 小屏幕适配 */
+@media (max-width: 900px) {
+    .cosmic .black-hole {
+        left: 62%;
+        width: 390px;
+        height: 390px;
+        opacity: .75;
+    }
+
+    .cosmic .nebula-one,
+    .cosmic .nebula-two {
+        width: 100vw;
+        height: 75vw;
+    }
+}
+
+/* 尊重系统减少动态效果设置 */
+@media (prefers-reduced-motion: reduce) {
+    .cosmic::before,
+    .cosmic::after,
+    .cosmic .nebula,
+    .cosmic .black-hole::before,
+    .cosmic .meteor {
+        animation: none !important;
+    }
+}
+
+/* ===== BACKGROUND V2 END ===== */
+
+
+
+
+
+@import "tailwindcss";
+
+:root {
+  --background: #05030d;
+  --foreground: #f5efff;
+  --purple: #9b4dff;
+  --purple-light: #d2a4ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #05030d;
+  color: var(--foreground);
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* ================= 宇宙主背景 ================= */
+
+.cosmic {
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 72% 42%, #17102e 0%, transparent 42%),
+    radial-gradient(ellipse at 18% 80%, #160b32 0%, transparent 42%),
+    linear-gradient(135deg, #03020a 0%, #0b061b 48%, #05030e 100%);
+}
+
+/* 多层星云与空间尘埃 */
+.cosmic::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 72% 35%, #a52bff33 0%, transparent 18%),
+    radial-gradient(ellipse at 65% 42%, #5725c955 0%, transparent 28%),
+    radial-gradient(ellipse at 28% 68%, #5222c955 0%, transparent 25%),
+    radial-gradient(ellipse at 42% 20%, #3520a944 0%, transparent 22%),
+    radial-gradient(ellipse at 85% 78%, #8a2cbd33 0%, transparent 24%),
+    radial-gradient(ellipse at 15% 30%, #252c9b33 0%, transparent 25%);
+  background-size: 130% 130%;
+  animation: cosmicNebula 35s ease-in-out infinite alternate;
+}
+
+/* 星海 */
+.cosmic::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: .85;
+  background-image:
+    radial-gradient(2px 2px at 8% 15%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 18% 42%, #d8caff 98%, transparent),
+    radial-gradient(2px 2px at 35% 12%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 48% 73%, #bda8ff 98%, transparent),
+    radial-gradient(2px 2px at 66% 20%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 78% 65%, #fff 98%, transparent),
+    radial-gradient(2px 2px at 91% 35%, #d9bdff 98%, transparent),
+    radial-gradient(1px 1px at 95% 82%, #fff 98%, transparent);
+  background-size: 340px 290px;
+  animation: starDrift 100s linear infinite;
+}
+
+/* ================= 星云动态层 ================= */
+
+.nebula {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+}
+
+.nebula-one {
+  width: 720px;
+  height: 310px;
+  top: 24%;
+  left: 20%;
+  opacity: .27;
+  background:
+    radial-gradient(ellipse at center,
+      #a52aff55 0%,
+      #7434df44 30%,
+      #3720a822 55%,
+      transparent 75%);
+  transform: rotate(-25deg);
+  animation: nebulaOne 32s ease-in-out infinite alternate;
+}
+
+.nebula-two {
+  width: 650px;
+  height: 350px;
+  right: -5%;
+  bottom: 3%;
+  opacity: .3;
+  background:
+    radial-gradient(ellipse at center,
+      #9c37ff55 0%,
+      #4e35d344 35%,
+      #251c8044 58%,
+      transparent 76%);
+  transform: rotate(25deg);
+  animation: nebulaTwo 38s ease-in-out infinite alternate;
+}
+
+/* ================= 黑洞 ================= */
+
+.black-hole {
+  position: fixed;
+  z-index: 3;
+  width: 490px;
+  height: 300px;
+  top: 8%;
+  right: 8%;
+  pointer-events: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at center,
+      #000 0%,
+      #000 23%,
+      #05020c 29%,
+      transparent 34%);
+  filter: drop-shadow(0 0 28px #923bff66);
+}
+
+/* 发光吸积盘 */
+.black-hole::before {
+  content: "";
+  position: absolute;
+  inset: 13% 2%;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      #6826d8 35deg,
+      #e7b5ff 65deg,
+      #ffffff 78deg,
+      #a43dff 105deg,
+      transparent 145deg,
+      #5b25ca 210deg,
+      #d38aff 250deg,
+      #fff0ff 270deg,
+      #8b32ff 300deg,
+      transparent 340deg
+    );
+  transform: rotateX(68deg);
+  box-shadow:
+    0 0 12px #d18aff,
+    0 0 30px #a43dff,
+    0 0 65px #7329e8;
+  animation: accretionRotate 8s linear infinite;
+}
+
+/* 黑洞视界及外层能量环 */
+.black-hole::after {
+  content: "";
+  position: absolute;
+  width: 37%;
+  height: 37%;
+  left: 31.5%;
+  top: 31.5%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 35%, #090512 0%, #000 65%, #000 100%);
+  box-shadow:
+    0 0 0 8px #10071e,
+    0 0 15px 10px #a14aff,
+    0 0 35px 15px #7928db,
+    0 0 75px 22px #5115a566;
+}
+
+/* ================= 流星雨 ================= */
+
+.meteor {
+  position: fixed;
+  z-index: 4;
+  width: 210px;
+  height: 3px;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: 100%;
+  transform: rotate(35deg);
+  transform-origin: right center;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #4722a000 30%,
+    #7439d9 65%,
+    #d7aaff 88%,
+    #ffffff 100%
+  );
+  box-shadow:
+    0 0 7px #c18aff,
+    0 0 16px #963fff,
+    0 0 30px #7436ff;
+  animation: meteorFall 5s linear infinite;
+}
+
+.meteor::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 8px #fff,
+    0 0 18px #d8aaff,
+    0 0 32px #a64cff;
+}
+
+.meteor-one {
+  top: 5%;
+  left: 12%;
+  animation-duration: 4.5s;
+  animation-delay: 0s;
+}
+
+.meteor-two {
+  top: 17%;
+  left: 45%;
+  animation-duration: 5.5s;
+  animation-delay: 1.2s;
+}
+
+.meteor-three {
+  top: 28%;
+  left: 75%;
+  animation-duration: 4.8s;
+  animation-delay: 2.5s;
+}
+
+.meteor-four {
+  top: 40%;
+  left: 25%;
+  animation-duration: 6s;
+  animation-delay: 3.2s;
+}
+
+.meteor-five {
+  top: 12%;
+  left: 88%;
+  animation-duration: 5s;
+  animation-delay: 4s;
+}
+
+/* ================= 动画 ================= */
+
+@keyframes cosmicNebula {
+  0% {
+    transform: translate(-2%, 1%) scale(1);
+  }
+  50% {
+    transform: translate(2%, -2%) scale(1.06);
+  }
+  100% {
+    transform: translate(3%, 2%) scale(1.1);
+  }
+}
+
+@keyframes nebulaOne {
+  from {
+    transform: translate(-50px, 30px) rotate(-25deg) scale(1);
+  }
+  to {
+    transform: translate(90px, -50px) rotate(-12deg) scale(1.12);
+  }
+}
+
+@keyframes nebulaTwo {
+  from {
+    transform: translate(50px, 20px) rotate(25deg) scale(1);
+  }
+  to {
+    transform: translate(-90px, -65px) rotate(42deg) scale(1.15);
+  }
+}
+
+@keyframes starDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 340px 580px;
+  }
+}
+
+@keyframes accretionRotate {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes meteorFall {
+  0% {
+    opacity: 0;
+    translate: 0 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  65% {
+    opacity: .9;
+  }
+  100% {
+    opacity: 0;
+    translate: 650px 650px;
+  }
+}
+
+/* ================= 界面玻璃卡片 ================= */
+
+.glass {
+  background: linear-gradient(135deg, #1c1038d9, #10091edb);
+  border: 1px solid #a66bff55;
+  box-shadow:
+    0 8px 35px #0007,
+    inset 0 1px 1px #ffffff18;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.glass:hover {
+  border-color: #c17affaa;
+  box-shadow:
+    0 0 28px #903cff35,
+    inset 0 1px 1px #ffffff25;
+  transition: .3s;
+}
+
+.sidebar {
+  background: #0a0719e8;
+  border-right: 1px solid #9e64ff33;
+  backdrop-filter: blur(8px);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 15px;
+  border-radius: 12px;
+  color: #c5b5e6;
+  text-decoration: none;
+  font-size: 14px;
+  transition: .25s;
+}
+
+.nav-item:hover, .nav-active {
+  background: linear-gradient(90deg, #8438ed88, #5120a555);
+  color: white;
+  box-shadow: 0 0 18px #963cff44;
+}
+
+.primary-button {
+  background: linear-gradient(110deg, #8d38fa, #b84bff);
+  color: white;
+  border: 1px solid #d9a1ff66;
+  border-radius: 30px;
+  padding: 11px 23px;
+  box-shadow: 0 0 20px #963cff55;
+  font-weight: 600;
+  transition: .25s;
+}
+
+.primary-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 28px #c16aff99;
+}
+
+.feature-card {
+  position: relative;
+  min-height: 215px;
+  overflow: hidden;
+  transition: .3s;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+}
+
+.feature-number {
+  color: #ad79ff;
+  font-size: 28px;
+  font-weight: 800;
+  opacity: .75;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #30e995;
+  box-shadow: 0 0 10px #30e995;
+}
+
+@media (max-width: 1100px) {
+  .black-hole {
+    width: 350px;
+    height: 220px;
+    right: 2%;
+    top: 10%;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100% !important;
+  }
+
+  .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .black-hole {
+    opacity: .65;
+  }
+}
+
+@media (max-width: 550px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .black-hole {
+    width: 250px;
+    height: 160px;
+    right: -50px;
+  }
+
+  .meteor {
+    width: 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cosmic::before,
+  .cosmic::after,
+  .nebula,
+  .black-hole::before,
+  .meteor {
+    animation-duration: 60s !important;
+  }
+}
+
+
+
+/* ===== AI CINEMATIC COSMIC BACKGROUND V2 ===== */
+
+/* 宇宙底层：真实宇宙图片 */
+html,
+body {
+    min-height: 100%;
+    background: #03030b !important;
+}
+
+.cosmic {
+    position: relative;
+    isolation: isolate;
+    min-height: 100vh;
+    overflow: hidden;
+
+    background-color: #03030b !important;
+
+    background-image:
+        linear-gradient(
+            180deg,
+            rgba(2, 2, 12, .22) 0%,
+            rgba(2, 2, 12, .12) 45%,
+            rgba(2, 2, 12, .42) 100%
+        ),
+        url("/images/cosmic-background.png") !important;
+
+    background-size: cover, cover !important;
+    background-position: center center, center center !important;
+    background-repeat: no-repeat, no-repeat !important;
+    background-attachment: fixed, fixed !important;
+}
+
+/* 第一层：远处星空 */
+.cosmic::before {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(2px 2px at 8% 12%, rgba(255,255,255,.9) 50%, transparent 100%),
+        radial-gradient(1px 1px at 18% 72%, rgba(190,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 28% 35%, rgba(255,255,255,.8) 50%, transparent 100%),
+        radial-gradient(1px 1px at 39% 82%, rgba(180,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 48% 18%, rgba(255,255,255,.9) 50%, transparent 100%),
+        radial-gradient(1px 1px at 59% 62%, rgba(220,210,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 69% 28%, rgba(255,255,255,.8) 50%, transparent 100%),
+        radial-gradient(1px 1px at 78% 78%, rgba(190,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 91% 48%, rgba(255,255,255,.9) 50%, transparent 100%);
+    background-size: 430px 370px;
+    opacity: .8;
+    animation: cosmicStarDrift 100s linear infinite;
+}
+
+/* 第二层：细密星点 */
+.cosmic::after {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(1px 1px at 12% 23%, #fff 50%, transparent 100%),
+        radial-gradient(1px 1px at 32% 64%, #b9b8ff 50%, transparent 100%),
+        radial-gradient(1px 1px at 52% 43%, #fff 50%, transparent 100%),
+        radial-gradient(1px 1px at 73% 15%, #d6caff 50%, transparent 100%),
+        radial-gradient(1px 1px at 88% 84%, #fff 50%, transparent 100%);
+    background-size: 230px 210px;
+    opacity: .48;
+    animation: cosmicStarTwinkle 5s ease-in-out infinite alternate;
+}
+
+/* 星云：只柔化星云，不模糊整张背景 */
+.cosmic .nebula {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(34px);
+    mix-blend-mode: screen;
+    z-index: 1;
+}
+
+.cosmic .nebula-one {
+    width: 65vw;
+    height: 45vw;
+    top: 8%;
+    left: 30%;
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(94, 43, 190, .24) 0%,
+            rgba(48, 67, 177, .16) 35%,
+            rgba(87, 27, 143, .09) 55%,
+            transparent 72%);
+    animation: nebulaFlowOne 32s ease-in-out infinite alternate;
+}
+
+.cosmic .nebula-two {
+    width: 58vw;
+    height: 48vw;
+    left: 8%;
+    bottom: -12%;
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(48, 57, 173, .2) 0%,
+            rgba(111, 37, 164, .15) 40%,
+            transparent 72%);
+    animation: nebulaFlowTwo 38s ease-in-out infinite alternate;
+}
+
+/* 远处中央黑洞 */
+.cosmic .black-hole {
+    position: fixed;
+    z-index: 2;
+    pointer-events: none;
+    width: clamp(340px, 43vw, 680px);
+    height: clamp(340px, 43vw, 680px);
+    left: 57%;
+    top: 43%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(0,0,0,.98) 0%,
+        rgba(1,1,8,.98) 13%,
+        rgba(4,3,17,.52) 20%,
+        transparent 48%
+    );
+}
+
+/* 旋转吸积盘 */
+.cosmic .black-hole::before {
+    content: "";
+    position: absolute;
+    inset: 4%;
+    border-radius: 50%;
+    background:
+        radial-gradient(
+            ellipse at center,
+            transparent 0%,
+            transparent 34%,
+            rgba(99, 57, 255, .16) 37%,
+            rgba(120, 91, 255, .75) 40%,
+            rgba(70, 151, 255, .85) 42%,
+            rgba(240, 207, 255, .95) 44%,
+            rgba(151, 93, 255, .7) 46%,
+            rgba(49, 77, 203, .32) 50%,
+            transparent 58%
+        );
+    transform: rotate(-20deg) scaleY(.38);
+    filter: drop-shadow(0 0 13px rgba(133, 91, 255, .8));
+    animation: blackHoleDiskSpin 32s linear infinite;
+}
+
+/* 黑洞视界 */
+.cosmic .black-hole::after {
+    content: "";
+    position: absolute;
+    width: 27%;
+    height: 27%;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        #000 0%,
+        #000 65%,
+        rgba(1, 1, 8, .98) 78%,
+        rgba(30, 20, 63, .45) 100%
+    );
+    box-shadow:
+        0 0 28px 12px rgba(0, 0, 0, .95),
+        0 0 65px 18px rgba(76, 50, 165, .22);
+}
+
+/* 流星主体 */
+.cosmic .meteor {
+    position: fixed;
+    z-index: 4;
+    width: 220px;
+    height: 2px;
+    pointer-events: none;
+    opacity: 0;
+    border-radius: 50%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(119, 113, 255, .08) 35%,
+        rgba(160, 174, 255, .7) 85%,
+        #fff 100%
+    );
+    box-shadow: 0 0 9px rgba(154, 151, 255, .8);
+    transform: rotate(35deg);
+    animation: meteorFall 8s linear infinite;
+}
+
+.cosmic .meteor::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow:
+        0 0 8px 3px #fff,
+        0 0 20px 6px rgba(139, 148, 255, .95);
+}
+
+.cosmic .meteor-one {
+    left: 12%;
+    top: -10%;
+    animation-delay: 0s;
+    animation-duration: 8s;
+}
+
+.cosmic .meteor-two {
+    left: 45%;
+    top: -20%;
+    animation-delay: 2.2s;
+    animation-duration: 9s;
+}
+
+.cosmic .meteor-three {
+    left: 76%;
+    top: -15%;
+    animation-delay: 4.5s;
+    animation-duration: 7s;
+}
+
+.cosmic .meteor-four {
+    left: 28%;
+    top: -20%;
+    animation-delay: 5.8s;
+    animation-duration: 10s;
+}
+
+.cosmic .meteor-five {
+    left: 88%;
+    top: -10%;
+    animation-delay: 7s;
+    animation-duration: 8.5s;
+}
+
+/* 内容始终在背景上方 */
+.cosmic .main-layout {
+    position: relative;
+    z-index: 10;
+}
+
+/* 星点缓慢漂移 */
+@keyframes cosmicStarDrift {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(-90px, 55px, 0); }
+}
+
+@keyframes cosmicStarTwinkle {
+    from { opacity: .28; }
+    to { opacity: .7; }
+}
+
+/* 星云流动 */
+@keyframes nebulaFlowOne {
+    0% { transform: translate(-3%, -2%) scale(.95) rotate(-5deg); }
+    100% { transform: translate(5%, 4%) scale(1.12) rotate(7deg); }
+}
+
+@keyframes nebulaFlowTwo {
+    0% { transform: translate(3%, 2%) scale(1.05) rotate(4deg); }
+    100% { transform: translate(-5%, -3%) scale(.92) rotate(-8deg); }
+}
+
+/* 吸积盘旋转 */
+@keyframes blackHoleDiskSpin {
+    from { transform: rotate(-20deg) scaleY(.38); }
+    to { transform: rotate(340deg) scaleY(.38); }
+}
+
+/* 流星斜向下划过 */
+@keyframes meteorFall {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0) rotate(35deg);
+    }
+    8% { opacity: .95; }
+    65% { opacity: .85; }
+    100% {
+        opacity: 0;
+        transform: translate3d(75vw, 105vh, 0) rotate(35deg);
+    }
+}
+
+/* 小屏幕适配 */
+@media (max-width: 900px) {
+    .cosmic .black-hole {
+        left: 62%;
+        width: 390px;
+        height: 390px;
+        opacity: .75;
+    }
+
+    .cosmic .nebula-one,
+    .cosmic .nebula-two {
+        width: 100vw;
+        height: 75vw;
+    }
+}
+
+/* 尊重系统减少动态效果设置 */
+@media (prefers-reduced-motion: reduce) {
+    .cosmic::before,
+    .cosmic::after,
+    .cosmic .nebula,
+    .cosmic .black-hole::before,
+    .cosmic .meteor {
+        animation: none !important;
+    }
+}
+
+/* ===== BACKGROUND V2 END ===== */
+
+
+
+
+
+
+@import "tailwindcss";
+
+:root {
+  --background: #05030d;
+  --foreground: #f5efff;
+  --purple: #9b4dff;
+  --purple-light: #d2a4ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: #05030d;
+  color: var(--foreground);
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* ================= 宇宙主背景 ================= */
+
+.cosmic {
+  min-height: 100vh;
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 72% 42%, #17102e 0%, transparent 42%),
+    radial-gradient(ellipse at 18% 80%, #160b32 0%, transparent 42%),
+    linear-gradient(135deg, #03020a 0%, #0b061b 48%, #05030e 100%);
+}
+
+/* 多层星云与空间尘埃 */
+.cosmic::before {
+  content: "";
+  position: fixed;
+  inset: -20%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 72% 35%, #a52bff33 0%, transparent 18%),
+    radial-gradient(ellipse at 65% 42%, #5725c955 0%, transparent 28%),
+    radial-gradient(ellipse at 28% 68%, #5222c955 0%, transparent 25%),
+    radial-gradient(ellipse at 42% 20%, #3520a944 0%, transparent 22%),
+    radial-gradient(ellipse at 85% 78%, #8a2cbd33 0%, transparent 24%),
+    radial-gradient(ellipse at 15% 30%, #252c9b33 0%, transparent 25%);
+  background-size: 130% 130%;
+  animation: cosmicNebula 35s ease-in-out infinite alternate;
+}
+
+/* 星海 */
+.cosmic::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: .85;
+  background-image:
+    radial-gradient(2px 2px at 8% 15%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 18% 42%, #d8caff 98%, transparent),
+    radial-gradient(2px 2px at 35% 12%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 48% 73%, #bda8ff 98%, transparent),
+    radial-gradient(2px 2px at 66% 20%, #fff 98%, transparent),
+    radial-gradient(1px 1px at 78% 65%, #fff 98%, transparent),
+    radial-gradient(2px 2px at 91% 35%, #d9bdff 98%, transparent),
+    radial-gradient(1px 1px at 95% 82%, #fff 98%, transparent);
+  background-size: 340px 290px;
+  animation: starDrift 100s linear infinite;
+}
+
+/* ================= 星云动态层 ================= */
+
+.nebula {
+  position: fixed;
+  pointer-events: none;
+  z-index: 2;
+  border-radius: 50%;
+  mix-blend-mode: screen;
+}
+
+.nebula-one {
+  width: 720px;
+  height: 310px;
+  top: 24%;
+  left: 20%;
+  opacity: .27;
+  background:
+    radial-gradient(ellipse at center,
+      #a52aff55 0%,
+      #7434df44 30%,
+      #3720a822 55%,
+      transparent 75%);
+  transform: rotate(-25deg);
+  animation: nebulaOne 32s ease-in-out infinite alternate;
+}
+
+.nebula-two {
+  width: 650px;
+  height: 350px;
+  right: -5%;
+  bottom: 3%;
+  opacity: .3;
+  background:
+    radial-gradient(ellipse at center,
+      #9c37ff55 0%,
+      #4e35d344 35%,
+      #251c8044 58%,
+      transparent 76%);
+  transform: rotate(25deg);
+  animation: nebulaTwo 38s ease-in-out infinite alternate;
+}
+
+/* ================= 黑洞 ================= */
+
+.black-hole {
+  position: fixed;
+  z-index: 3;
+  width: 490px;
+  height: 300px;
+  top: 8%;
+  right: 8%;
+  pointer-events: none;
+  border-radius: 50%;
+  background:
+    radial-gradient(ellipse at center,
+      #000 0%,
+      #000 23%,
+      #05020c 29%,
+      transparent 34%);
+  filter: drop-shadow(0 0 28px #923bff66);
+}
+
+/* 发光吸积盘 */
+.black-hole::before {
+  content: "";
+  position: absolute;
+  inset: 13% 2%;
+  border-radius: 50%;
+  background:
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      #6826d8 35deg,
+      #e7b5ff 65deg,
+      #ffffff 78deg,
+      #a43dff 105deg,
+      transparent 145deg,
+      #5b25ca 210deg,
+      #d38aff 250deg,
+      #fff0ff 270deg,
+      #8b32ff 300deg,
+      transparent 340deg
+    );
+  transform: rotateX(68deg);
+  box-shadow:
+    0 0 12px #d18aff,
+    0 0 30px #a43dff,
+    0 0 65px #7329e8;
+  animation: accretionRotate 8s linear infinite;
+}
+
+/* 黑洞视界及外层能量环 */
+.black-hole::after {
+  content: "";
+  position: absolute;
+  width: 37%;
+  height: 37%;
+  left: 31.5%;
+  top: 31.5%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 35%, #090512 0%, #000 65%, #000 100%);
+  box-shadow:
+    0 0 0 8px #10071e,
+    0 0 15px 10px #a14aff,
+    0 0 35px 15px #7928db,
+    0 0 75px 22px #5115a566;
+}
+
+/* ================= 流星雨 ================= */
+
+.meteor {
+  position: fixed;
+  z-index: 4;
+  width: 210px;
+  height: 3px;
+  pointer-events: none;
+  opacity: 0;
+  border-radius: 100%;
+  transform: rotate(35deg);
+  transform-origin: right center;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    #4722a000 30%,
+    #7439d9 65%,
+    #d7aaff 88%,
+    #ffffff 100%
+  );
+  box-shadow:
+    0 0 7px #c18aff,
+    0 0 16px #963fff,
+    0 0 30px #7436ff;
+  animation: meteorFall 5s linear infinite;
+}
+
+.meteor::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow:
+    0 0 8px #fff,
+    0 0 18px #d8aaff,
+    0 0 32px #a64cff;
+}
+
+.meteor-one {
+  top: 5%;
+  left: 12%;
+  animation-duration: 4.5s;
+  animation-delay: 0s;
+}
+
+.meteor-two {
+  top: 17%;
+  left: 45%;
+  animation-duration: 5.5s;
+  animation-delay: 1.2s;
+}
+
+.meteor-three {
+  top: 28%;
+  left: 75%;
+  animation-duration: 4.8s;
+  animation-delay: 2.5s;
+}
+
+.meteor-four {
+  top: 40%;
+  left: 25%;
+  animation-duration: 6s;
+  animation-delay: 3.2s;
+}
+
+.meteor-five {
+  top: 12%;
+  left: 88%;
+  animation-duration: 5s;
+  animation-delay: 4s;
+}
+
+/* ================= 动画 ================= */
+
+@keyframes cosmicNebula {
+  0% {
+    transform: translate(-2%, 1%) scale(1);
+  }
+  50% {
+    transform: translate(2%, -2%) scale(1.06);
+  }
+  100% {
+    transform: translate(3%, 2%) scale(1.1);
+  }
+}
+
+@keyframes nebulaOne {
+  from {
+    transform: translate(-50px, 30px) rotate(-25deg) scale(1);
+  }
+  to {
+    transform: translate(90px, -50px) rotate(-12deg) scale(1.12);
+  }
+}
+
+@keyframes nebulaTwo {
+  from {
+    transform: translate(50px, 20px) rotate(25deg) scale(1);
+  }
+  to {
+    transform: translate(-90px, -65px) rotate(42deg) scale(1.15);
+  }
+}
+
+@keyframes starDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 340px 580px;
+  }
+}
+
+@keyframes accretionRotate {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+
+@keyframes meteorFall {
+  0% {
+    opacity: 0;
+    translate: 0 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  65% {
+    opacity: .9;
+  }
+  100% {
+    opacity: 0;
+    translate: 650px 650px;
+  }
+}
+
+/* ================= 界面玻璃卡片 ================= */
+
+.glass {
+  background: linear-gradient(135deg, #1c1038d9, #10091edb);
+  border: 1px solid #a66bff55;
+  box-shadow:
+    0 8px 35px #0007,
+    inset 0 1px 1px #ffffff18;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.glass:hover {
+  border-color: #c17affaa;
+  box-shadow:
+    0 0 28px #903cff35,
+    inset 0 1px 1px #ffffff25;
+  transition: .3s;
+}
+
+.sidebar {
+  background: #0a0719e8;
+  border-right: 1px solid #9e64ff33;
+  backdrop-filter: blur(8px);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 12px 15px;
+  border-radius: 12px;
+  color: #c5b5e6;
+  text-decoration: none;
+  font-size: 14px;
+  transition: .25s;
+}
+
+.nav-item:hover, .nav-active {
+  background: linear-gradient(90deg, #8438ed88, #5120a555);
+  color: white;
+  box-shadow: 0 0 18px #963cff44;
+}
+
+.primary-button {
+  background: linear-gradient(110deg, #8d38fa, #b84bff);
+  color: white;
+  border: 1px solid #d9a1ff66;
+  border-radius: 30px;
+  padding: 11px 23px;
+  box-shadow: 0 0 20px #963cff55;
+  font-weight: 600;
+  transition: .25s;
+}
+
+.primary-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 28px #c16aff99;
+}
+
+.feature-card {
+  position: relative;
+  min-height: 215px;
+  overflow: hidden;
+  transition: .3s;
+}
+
+.feature-card:hover {
+  transform: translateY(-5px);
+}
+
+.feature-number {
+  color: #ad79ff;
+  font-size: 28px;
+  font-weight: 800;
+  opacity: .75;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+  border-radius: 50%;
+  background: #30e995;
+  box-shadow: 0 0 10px #30e995;
+}
+
+@media (max-width: 1100px) {
+  .black-hole {
+    width: 350px;
+    height: 220px;
+    right: 2%;
+    top: 10%;
+  }
+}
+
+@media (max-width: 900px) {
+  .main-layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100% !important;
+  }
+
+  .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .black-hole {
+    opacity: .65;
+  }
+}
+
+@media (max-width: 550px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .black-hole {
+    width: 250px;
+    height: 160px;
+    right: -50px;
+  }
+
+  .meteor {
+    width: 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cosmic::before,
+  .cosmic::after,
+  .nebula,
+  .black-hole::before,
+  .meteor {
+    animation-duration: 60s !important;
+  }
+}
+
+
+
+/* ===== AI CINEMATIC COSMIC BACKGROUND V2 ===== */
+
+/* 宇宙底层：真实宇宙图片 */
+html,
+body {
+    min-height: 100%;
+    background: #03030b !important;
+}
+
+.cosmic {
+    position: relative;
+    isolation: isolate;
+    min-height: 100vh;
+    overflow: hidden;
+
+    background-color: #03030b !important;
+
+    background-image:
+        linear-gradient(
+            180deg,
+            rgba(2, 2, 12, .22) 0%,
+            rgba(2, 2, 12, .12) 45%,
+            rgba(2, 2, 12, .42) 100%
+        ),
+        url("/images/cosmic-background.png") !important;
+
+    background-size: cover, cover !important;
+    background-position: center center, center center !important;
+    background-repeat: no-repeat, no-repeat !important;
+    background-attachment: fixed, fixed !important;
+}
+
+/* 第一层：远处星空 */
+.cosmic::before {
+    content: "";
+    position: fixed;
+    inset: -20%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(2px 2px at 8% 12%, rgba(255,255,255,.9) 50%, transparent 100%),
+        radial-gradient(1px 1px at 18% 72%, rgba(190,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 28% 35%, rgba(255,255,255,.8) 50%, transparent 100%),
+        radial-gradient(1px 1px at 39% 82%, rgba(180,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 48% 18%, rgba(255,255,255,.9) 50%, transparent 100%),
+        radial-gradient(1px 1px at 59% 62%, rgba(220,210,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 69% 28%, rgba(255,255,255,.8) 50%, transparent 100%),
+        radial-gradient(1px 1px at 78% 78%, rgba(190,190,255,.9) 50%, transparent 100%),
+        radial-gradient(2px 2px at 91% 48%, rgba(255,255,255,.9) 50%, transparent 100%);
+    background-size: 430px 370px;
+    opacity: .8;
+    animation: cosmicStarDrift 100s linear infinite;
+}
+
+/* 第二层：细密星点 */
+.cosmic::after {
+    content: "";
+    position: fixed;
+    inset: -10%;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+        radial-gradient(1px 1px at 12% 23%, #fff 50%, transparent 100%),
+        radial-gradient(1px 1px at 32% 64%, #b9b8ff 50%, transparent 100%),
+        radial-gradient(1px 1px at 52% 43%, #fff 50%, transparent 100%),
+        radial-gradient(1px 1px at 73% 15%, #d6caff 50%, transparent 100%),
+        radial-gradient(1px 1px at 88% 84%, #fff 50%, transparent 100%);
+    background-size: 230px 210px;
+    opacity: .48;
+    animation: cosmicStarTwinkle 5s ease-in-out infinite alternate;
+}
+
+/* 星云：只柔化星云，不模糊整张背景 */
+.cosmic .nebula {
+    position: fixed;
+    pointer-events: none;
+    border-radius: 50%;
+    filter: blur(34px);
+    mix-blend-mode: screen;
+    z-index: 1;
+}
+
+.cosmic .nebula-one {
+    width: 65vw;
+    height: 45vw;
+    top: 8%;
+    left: 30%;
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(94, 43, 190, .24) 0%,
+            rgba(48, 67, 177, .16) 35%,
+            rgba(87, 27, 143, .09) 55%,
+            transparent 72%);
+    animation: nebulaFlowOne 32s ease-in-out infinite alternate;
+}
+
+.cosmic .nebula-two {
+    width: 58vw;
+    height: 48vw;
+    left: 8%;
+    bottom: -12%;
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(48, 57, 173, .2) 0%,
+            rgba(111, 37, 164, .15) 40%,
+            transparent 72%);
+    animation: nebulaFlowTwo 38s ease-in-out infinite alternate;
+}
+
+/* 远处中央黑洞 */
+.cosmic .black-hole {
+    position: fixed;
+    z-index: 2;
+    pointer-events: none;
+    width: clamp(340px, 43vw, 680px);
+    height: clamp(340px, 43vw, 680px);
+    left: 57%;
+    top: 43%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(0,0,0,.98) 0%,
+        rgba(1,1,8,.98) 13%,
+        rgba(4,3,17,.52) 20%,
+        transparent 48%
+    );
+}
+
+/* 旋转吸积盘 */
+.cosmic .black-hole::before {
+    content: "";
+    position: absolute;
+    inset: 4%;
+    border-radius: 50%;
+    background:
+        radial-gradient(
+            ellipse at center,
+            transparent 0%,
+            transparent 34%,
+            rgba(99, 57, 255, .16) 37%,
+            rgba(120, 91, 255, .75) 40%,
+            rgba(70, 151, 255, .85) 42%,
+            rgba(240, 207, 255, .95) 44%,
+            rgba(151, 93, 255, .7) 46%,
+            rgba(49, 77, 203, .32) 50%,
+            transparent 58%
+        );
+    transform: rotate(-20deg) scaleY(.38);
+    filter: drop-shadow(0 0 13px rgba(133, 91, 255, .8));
+    animation: blackHoleDiskSpin 32s linear infinite;
+}
+
+/* 黑洞视界 */
+.cosmic .black-hole::after {
+    content: "";
+    position: absolute;
+    width: 27%;
+    height: 27%;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        #000 0%,
+        #000 65%,
+        rgba(1, 1, 8, .98) 78%,
+        rgba(30, 20, 63, .45) 100%
+    );
+    box-shadow:
+        0 0 28px 12px rgba(0, 0, 0, .95),
+        0 0 65px 18px rgba(76, 50, 165, .22);
+}
+
+/* 流星主体 */
+.cosmic .meteor {
+    position: fixed;
+    z-index: 4;
+    width: 220px;
+    height: 2px;
+    pointer-events: none;
+    opacity: 0;
+    border-radius: 50%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(119, 113, 255, .08) 35%,
+        rgba(160, 174, 255, .7) 85%,
+        #fff 100%
+    );
+    box-shadow: 0 0 9px rgba(154, 151, 255, .8);
+    transform: rotate(35deg);
+    animation: meteorFall 8s linear infinite;
+}
+
+.cosmic .meteor::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow:
+        0 0 8px 3px #fff,
+        0 0 20px 6px rgba(139, 148, 255, .95);
+}
+
+.cosmic .meteor-one {
+    left: 12%;
+    top: -10%;
+    animation-delay: 0s;
+    animation-duration: 8s;
+}
+
+.cosmic .meteor-two {
+    left: 45%;
+    top: -20%;
+    animation-delay: 2.2s;
+    animation-duration: 9s;
+}
+
+.cosmic .meteor-three {
+    left: 76%;
+    top: -15%;
+    animation-delay: 4.5s;
+    animation-duration: 7s;
+}
+
+.cosmic .meteor-four {
+    left: 28%;
+    top: -20%;
+    animation-delay: 5.8s;
+    animation-duration: 10s;
+}
+
+.cosmic .meteor-five {
+    left: 88%;
+    top: -10%;
+    animation-delay: 7s;
+    animation-duration: 8.5s;
+}
+
+/* 内容始终在背景上方 */
+.cosmic .main-layout {
+    position: relative;
+    z-index: 10;
+}
+
+/* 星点缓慢漂移 */
+@keyframes cosmicStarDrift {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(-90px, 55px, 0); }
+}
+
+@keyframes cosmicStarTwinkle {
+    from { opacity: .28; }
+    to { opacity: .7; }
+}
+
+/* 星云流动 */
+@keyframes nebulaFlowOne {
+    0% { transform: translate(-3%, -2%) scale(.95) rotate(-5deg); }
+    100% { transform: translate(5%, 4%) scale(1.12) rotate(7deg); }
+}
+
+@keyframes nebulaFlowTwo {
+    0% { transform: translate(3%, 2%) scale(1.05) rotate(4deg); }
+    100% { transform: translate(-5%, -3%) scale(.92) rotate(-8deg); }
+}
+
+/* 吸积盘旋转 */
+@keyframes blackHoleDiskSpin {
+    from { transform: rotate(-20deg) scaleY(.38); }
+    to { transform: rotate(340deg) scaleY(.38); }
+}
+
+/* 流星斜向下划过 */
+@keyframes meteorFall {
+    0% {
+        opacity: 0;
+        transform: translate3d(0, 0, 0) rotate(35deg);
+    }
+    8% { opacity: .95; }
+    65% { opacity: .85; }
+    100% {
+        opacity: 0;
+        transform: translate3d(75vw, 105vh, 0) rotate(35deg);
+    }
+}
+
+/* 小屏幕适配 */
+@media (max-width: 900px) {
+    .cosmic .black-hole {
+        left: 62%;
+        width: 390px;
+        height: 390px;
+        opacity: .75;
+    }
+
+    .cosmic .nebula-one,
+    .cosmic .nebula-two {
+        width: 100vw;
+        height: 75vw;
+    }
+}
+
+/* 尊重系统减少动态效果设置 */
+@media (prefers-reduced-motion: reduce) {
+    .cosmic::before,
+    .cosmic::after,
+    .cosmic .nebula,
+    .cosmic .black-hole::before,
+    .cosmic .meteor {
+        animation: none !important;
+    }
+}
+
+/* ===== BACKGROUND V2 END ===== */
+
+
+
+
+
+
+
+
+/* ===== COSMIC NEBULA V6：立体电影级动态星云 ===== */
+
+/* 不再显示黑洞 */
+.cosmic .black-hole {
+    display: none !important;
+}
+
+/* 原有基础星云 */
+.cosmic .nebula {
+    z-index: 1 !important;
+    mix-blend-mode: screen;
+    filter: blur(20px);
+}
+
+/* 六层独立星云 */
+.cosmic .nebula-cloud {
+    position: fixed;
+    display: block;
+    pointer-events: none;
+    z-index: 2;
+    border-radius: 50%;
+    mix-blend-mode: screen;
+    will-change: transform, opacity;
+    transform-origin: center;
+}
+
+/* 第一层：巨大紫色星云 */
+.cosmic .nebula-cloud-a {
+    width: 95vw;
+    height: 65vw;
+    top: -8%;
+    left: -18%;
+    opacity: .92;
+    filter: blur(15px);
+    background:
+        radial-gradient(ellipse at 28% 48%,
+            rgba(181, 66, 255, .75) 0%,
+            rgba(145, 53, 240, .42) 20%,
+            transparent 50%),
+        radial-gradient(ellipse at 62% 42%,
+            rgba(101, 80, 255, .58) 0%,
+            rgba(94, 61, 220, .27) 26%,
+            transparent 55%),
+        radial-gradient(ellipse at 42% 75%,
+            rgba(211, 62, 255, .38) 0%,
+            transparent 45%);
+    animation: cloudV6A 24s ease-in-out infinite alternate;
+}
+
+/* 第二层：蓝色星际云带 */
+.cosmic .nebula-cloud-b {
+    width: 100vw;
+    height: 65vw;
+    top: 15%;
+    left: 28%;
+    opacity: .88;
+    filter: blur(17px);
+    background:
+        radial-gradient(ellipse at 40% 40%,
+            rgba(51, 139, 255, .7) 0%,
+            rgba(45, 100, 230, .4) 22%,
+            transparent 53%),
+        radial-gradient(ellipse at 75% 65%,
+            rgba(98, 71, 255, .52) 0%,
+            rgba(86, 51, 206, .26) 30%,
+            transparent 58%);
+    animation: cloudV6B 31s ease-in-out infinite alternate;
+}
+
+/* 第三层：洋红色气体云 */
+.cosmic .nebula-cloud-c {
+    width: 75vw;
+    height: 55vw;
+    top: 38%;
+    left: -8%;
+    opacity: .82;
+    filter: blur(13px);
+    background:
+        radial-gradient(ellipse at 45% 48%,
+            rgba(255, 57, 210, .58) 0%,
+            rgba(177, 48, 255, .45) 24%,
+            transparent 57%),
+        radial-gradient(ellipse at 72% 36%,
+            rgba(107, 81, 255, .48) 0%,
+            transparent 48%);
+    animation: cloudV6C 27s ease-in-out infinite alternate;
+}
+
+/* 第四层：横向斜向流动云带 */
+.cosmic .nebula-cloud-d {
+    width: 125vw;
+    height: 42vw;
+    top: 24%;
+    left: -12%;
+    opacity: .75;
+    filter: blur(11px);
+    background:
+        linear-gradient(
+            155deg,
+            transparent 4%,
+            rgba(73, 100, 255, .12) 18%,
+            rgba(108, 76, 255, .62) 33%,
+            rgba(190, 81, 255, .55) 46%,
+            rgba(73, 125, 255, .46) 58%,
+            transparent 78%
+        );
+    animation: cloudV6D 21s ease-in-out infinite alternate;
+}
+
+/* 第五层：远处蓝紫色星云 */
+.cosmic .nebula-cloud-e {
+    width: 100vw;
+    height: 55vw;
+    top: 48%;
+    left: 20%;
+    opacity: .66;
+    filter: blur(23px);
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(89, 104, 255, .5) 0%,
+            rgba(113, 64, 219, .34) 32%,
+            transparent 70%);
+    animation: cloudV6E 38s ease-in-out infinite alternate;
+}
+
+/* 第六层：近景紫色云雾 */
+.cosmic .nebula-cloud-f {
+    width: 85vw;
+    height: 48vw;
+    top: -12%;
+    left: 43%;
+    opacity: .7;
+    filter: blur(19px);
+    background:
+        radial-gradient(ellipse at 50% 50%,
+            rgba(150, 82, 255, .55) 0%,
+            rgba(72, 116, 255, .36) 33%,
+            transparent 69%);
+    animation: cloudV6F 34s ease-in-out infinite alternate;
+}
+
+/* 不同方向、不同速度的运动 */
+@keyframes cloudV6A {
+    0% { transform: translate(-9vw, -4vh) rotate(-14deg) scale(.78); }
+    50% { transform: translate(4vw, 6vh) rotate(5deg) scale(1.13); }
+    100% { transform: translate(14vw, -3vh) rotate(17deg) scale(.94); }
+}
+
+@keyframes cloudV6B {
+    0% { transform: translate(9vw, 6vh) rotate(13deg) scale(1.16); }
+    50% { transform: translate(-5vw, -5vh) rotate(-6deg) scale(.86); }
+    100% { transform: translate(-14vw, 4vh) rotate(-16deg) scale(1.13); }
+}
+
+@keyframes cloudV6C {
+    0% { transform: translate(-5vw, 9vh) rotate(9deg) scale(.85); }
+    100% { transform: translate(14vw, -8vh) rotate(-14deg) scale(1.22); }
+}
+
+@keyframes cloudV6D {
+    0% { transform: translate(-13vw, -8vh) rotate(-9deg) scaleX(.78); }
+    100% { transform: translate(16vw, 10vh) rotate(9deg) scaleX(1.18); }
+}
+
+@keyframes cloudV6E {
+    0% { transform: translate(11vw, -6vh) scale(.82); }
+    100% { transform: translate(-13vw, 8vh) scale(1.23); }
+}
+
+@keyframes cloudV6F {
+    0% { transform: translate(-8vw, 7vh) rotate(11deg) scale(1.12); }
+    100% { transform: translate(11vw, -9vh) rotate(-13deg) scale(.84); }
+}
+
+/* 六层云团错开明暗变化 */
+.cosmic .nebula-cloud-a { animation-duration: 24s; }
+.cosmic .nebula-cloud-b { animation-duration: 31s; }
+.cosmic .nebula-cloud-c { animation-duration: 27s; }
+.cosmic .nebula-cloud-d { animation-duration: 21s; }
+.cosmic .nebula-cloud-e { animation-duration: 38s; }
+.cosmic .nebula-cloud-f { animation-duration: 34s; }
+
+/* 小屏幕适配 */
+@media (max-width: 900px) {
+    .cosmic .nebula-cloud {
+        width: 140vw;
+        height: 100vw;
+    }
+}
+
+/* 尊重系统减少动态效果设置 */
+@media (prefers-reduced-motion: reduce) {
+    .cosmic .nebula-cloud {
+        animation: none !important;
+    }
+}
+
+/* ===== COSMIC NEBULA V6 END ===== */

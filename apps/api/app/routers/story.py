@@ -184,7 +184,11 @@ def plan_episodes(project_id: int, db: Session = Depends(get_db)):
 
     # 保留原章节顺序；超长章节允许拆成两集，不自动把短章节拆碎。
     old = db.query(EpisodePlan).filter(EpisodePlan.project_id == project_id).all()
+    # Replanning invalidates dependent shots and asset links; remove them explicitly
+    # rather than leaving records attached to deleted episode IDs.
     for item in old:
+        db.query(StoryboardShot).filter(StoryboardShot.episode_id == item.id).delete(synchronize_session=False)
+        db.query(StoryAssetLink).filter(StoryAssetLink.episode_id == item.id).delete(synchronize_session=False)
         db.delete(item)
     db.flush()
 
@@ -264,7 +268,10 @@ def reorder_episodes(project_id: int, payload: EpisodeReorder, db: Session = Dep
         EpisodePlan.project_id == project_id
     ).all()
     lookup = {x.id: x for x in episodes}
-    if set(payload.episode_ids) != set(lookup.keys()):
+    if (
+        len(payload.episode_ids) != len(set(payload.episode_ids))
+        or set(payload.episode_ids) != set(lookup.keys())
+    ):
         raise HTTPException(400, "排序列表必须包含该项目全部分集，且不能重复")
     for index, episode_id in enumerate(payload.episode_ids, start=1):
         lookup[episode_id].sort_order = index
@@ -301,6 +308,13 @@ def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends
             {StoryAssetLink.episode_id: first.id}
         )
         db.delete(item)
+    db.flush()
+    remaining = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number, EpisodePlan.id).all()
+    for index, item in enumerate(remaining, start=1):
+        item.sort_order = index
+        item.episode_number = index
     db.commit()
     return {"success": True, "merged_episode_id": first.id}
 
@@ -314,9 +328,11 @@ def split_episode(episode_id: int, db: Session = Depends(get_db)):
     if len(text.strip()) < 2:
         raise HTTPException(400, "原始内容太短，无法拆分")
     midpoint = len(text) // 2
-    split_at = text.find("\n", midpoint - 500, midpoint + 500)
+    split_at = text.find("\n", max(0, midpoint - 500), min(len(text), midpoint + 500))
     if split_at < 0:
         split_at = midpoint
+    else:
+        split_at += 1
 
     second = EpisodePlan(
         project_id=episode.project_id,
@@ -338,6 +354,7 @@ def split_episode(episode_id: int, db: Session = Depends(get_db)):
     later = db.query(EpisodePlan).filter(
         EpisodePlan.project_id == episode.project_id,
         EpisodePlan.id != episode.id,
+        EpisodePlan.id != second.id,
         EpisodePlan.sort_order >= second.sort_order
     ).all()
     for item in later:
@@ -415,6 +432,13 @@ def link_asset(shot_id: int, payload: AssetLinkInput, db: Session = Depends(get_
     asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
     if not shot or not asset:
         raise HTTPException(404, "分镜或视觉素材不存在")
+    existing = db.query(StoryAssetLink).filter(
+        StoryAssetLink.shot_id == shot_id,
+        StoryAssetLink.asset_id == payload.asset_id,
+        StoryAssetLink.role == payload.role,
+    ).first()
+    if existing:
+        return {"success": True, "link_id": existing.id, "existing": True}
     link = StoryAssetLink(
         project_id=shot.project_id,
         episode_id=shot.episode_id,

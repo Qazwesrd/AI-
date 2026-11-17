@@ -3,6 +3,9 @@ import os
 import subprocess
 import urllib.request
 import urllib.error
+import ipaddress
+import socket
+from urllib.parse import urlparse
 from pathlib import Path
 from cryptography.fernet import Fernet
 
@@ -53,18 +56,51 @@ def http_json(url, api_key, method="POST", body=None, timeout=300):
         raise RuntimeError(f"无法连接远程 API: {exc}") from exc
 
 
-def http_download(url, destination, api_key=None):
+def _validate_public_https_url(url):
+    parsed = urlparse(str(url))
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("远程媒体地址必须使用 HTTPS")
+    if parsed.username or parsed.password:
+        raise ValueError("远程媒体地址不能包含用户名或密码")
+    host = parsed.hostname
+    if host.lower() in {"localhost", "localhost.localdomain"}:
+        raise ValueError("不允许访问本机地址")
+    try:
+        addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ValueError("无法解析远程媒体服务器地址") from exc
+    if not addresses:
+        raise ValueError("远程媒体服务器没有可用地址")
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if not ip.is_global:
+            raise ValueError("远程媒体地址解析到非公网 IP，已阻止请求")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_https_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def http_download(url, destination, api_key=None, max_bytes=2 * 1024 * 1024 * 1024):
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
+    _validate_public_https_url(url)
     request = urllib.request.Request(url, headers=headers)
+    opener = urllib.request.build_opener(_SafeRedirectHandler)
     try:
-        with urllib.request.urlopen(request, timeout=600) as response:
+        with opener.open(request, timeout=600) as response:
             with open(destination, "wb") as output:
+                total = 0
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("远程媒体文件超过允许的下载大小")
                     output.write(chunk)
     except Exception:
         if os.path.exists(destination):

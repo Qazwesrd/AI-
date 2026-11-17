@@ -35,7 +35,7 @@ def get_provider(db, provider_name, confirm_paid=False):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise HTTPException(403, "全局网络调用开关已关闭")
 
-    paid = bool(getattr(config, "paid", True))
+    paid = True
     if paid:
         if not getattr(runtime, "paid_api_allowed", False):
             raise HTTPException(403, "付费 API 总授权未开启")
@@ -89,7 +89,7 @@ class VideoTaskInput(BaseModel):
     task_id_field: str = "id"
     video_url_field: str = "video_url"
     status_field: str = "status"
-    extra_payload: dict = {}
+    extra_payload: dict = Field(default_factory=dict)
 
 
 @router.post("/video/tasks")
@@ -143,6 +143,16 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
     if not task or task.task_type != "video":
         raise HTTPException(404, "视频任务不存在")
+    if task.result_path and Path(task.result_path).is_file():
+        task.status = "completed"
+        task.error = None
+        db.commit()
+        return {
+            "task_id": task.id,
+            "status": "completed",
+            "result_path": task.result_path,
+            "already_downloaded": True,
+        }
 
     config, key, base = get_provider(
         db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
@@ -157,7 +167,7 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
         task.status = status
 
         video_url = value_at(result, settings.get("video_url_field", "video_url"))
-        if video_url:
+        if video_url and not (task.result_path and Path(task.result_path).is_file()):
             filename = f"video_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
             destination = VIDEO_DIR / filename
             http_download(str(video_url), destination)
@@ -372,42 +382,58 @@ class RenderInput(BaseModel):
     subtitle_path: Optional[str] = None
     music_volume: float = Field(default=0.25, ge=0, le=2)
     original_volume: float = Field(default=1.0, ge=0, le=2)
-    width: int = 1920
-    height: int = 1080
+    width: int = Field(default=1920, ge=256, le=3840)
+    height: int = Field(default=1080, ge=256, le=3840)
 
 
 @router.post("/render")
 def render_video(data: RenderInput):
+    output = None
     try:
         video = safe_storage_file(data.video_path)
         output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
         if not output_name.lower().endswith(".mp4"):
             output_name += ".mp4"
+        if data.width % 2 or data.height % 2:
+            raise HTTPException(400, "输出宽度和高度必须是偶数")
         output = VIDEO_DIR / f"{uuid.uuid4().hex}_{output_name}"
 
         args = ["-i", str(video)]
         audio = safe_storage_file(data.audio_path) if data.audio_path else None
         subtitle = safe_storage_file(data.subtitle_path) if data.subtitle_path else None
 
+        video_info = probe_media(video)
+        has_original_audio = any(
+            stream.get("codec_type") == "audio"
+            for stream in video_info.get("streams", [])
+        )
         if audio:
             args += ["-i", str(audio)]
-            filter_complex = (
-                f"[0:a]volume={data.original_volume}[original];"
-                f"[1:a]volume={data.music_volume}[music];"
-                "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]"
-            )
+            if has_original_audio:
+                filter_complex = (
+                    f"[0:a]volume={data.original_volume}[original];"
+                    f"[1:a]volume={data.music_volume}[music];"
+                    "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]"
+                )
+            else:
+                filter_complex = f"[1:a]volume={data.music_volume}[mix]"
             args += ["-filter_complex", filter_complex, "-map", "0:v:0",
                      "-map", "[mix]", "-shortest"]
         else:
-            args += ["-map", "0:v:0", "-map", "0:a?"]
+            args += ["-map", "0:v:0"]
+            if has_original_audio:
+                args += ["-map", "0:a:0"]
+            else:
+                args += ["-an"]
 
+        video_filters = [
+            f"scale={data.width}:{data.height}:force_original_aspect_ratio=decrease",
+            f"pad={data.width}:{data.height}:(ow-iw)/2:(oh-ih)/2",
+        ]
         if subtitle:
             escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
-            args += ["-vf", f"subtitles='{escaped}'"]
-
-        args += [
-            "-vf" if not subtitle else "-metadata", 
-        ] if False else []
+            video_filters.append(f"subtitles='{escaped}'")
+        args += ["-vf", ",".join(video_filters)]
 
         args += [
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
@@ -417,6 +443,8 @@ def render_video(data: RenderInput):
         return {"status": "completed", "output": str(output),
                 "size": output.stat().st_size}
     except Exception as exc:
+        if output and output.exists():
+            output.unlink()
         raise HTTPException(500, f"视频合成失败：{exc}")
 
 

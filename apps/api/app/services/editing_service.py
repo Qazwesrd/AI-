@@ -1,13 +1,15 @@
 import json
 import re
 import uuid
+import math
+import shutil
 import subprocess
 import urllib.request
 import urllib.error
 from pathlib import Path
 
 from app.services.media_service import (
-    STORAGE, VIDEO_DIR, safe_storage_file, run_ffmpeg
+    STORAGE, VIDEO_DIR, safe_storage_file, run_ffmpeg, probe_media
 )
 
 EDIT_DIR = STORAGE / "edit-jobs"
@@ -43,7 +45,7 @@ def get_ai_config(db, provider_name):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise RuntimeError("全局网络调用开关已关闭")
 
-    paid = bool(getattr(config, "paid", True))
+    paid = True
     if paid and not getattr(runtime, "paid_api_allowed", False):
         raise RuntimeError("付费 API 总授权未开启")
 
@@ -174,14 +176,28 @@ def validate_plan(plan, allowed_files):
         if str(path.resolve()) not in allowed:
             raise ValueError(f"第 {index} 个片段使用了未授权的输入文件")
 
-        start = float(segment.get("start", 0))
-        end = float(segment.get("end", 0))
+        try:
+            start = float(segment.get("start", 0))
+            end = float(segment.get("end", 0))
+        except (TypeError, ValueError):
+            raise ValueError(f"第 {index} 个片段时间必须是数字")
 
+        if not math.isfinite(start) or not math.isfinite(end):
+            raise ValueError(f"第 {index} 个片段时间不能是 NaN 或无穷大")
         if start < 0 or end <= start:
             raise ValueError(f"第 {index} 个片段时间范围无效")
-
         if end - start > 7200:
             raise ValueError(f"第 {index} 个片段时长超过限制")
+
+        try:
+            media_info = probe_media(path)
+            source_duration = float(media_info.get("format", {}).get("duration", 0))
+        except Exception as exc:
+            raise ValueError(f"第 {index} 个源视频无法读取时长：{exc}") from exc
+        if source_duration <= 0 or end > source_duration + 0.05:
+            raise ValueError(
+                f"第 {index} 个片段结束时间 {end:.2f}s 超出源视频时长 {source_duration:.2f}s"
+            )
 
         validated.append({
             "file_path": str(path),
@@ -203,79 +219,79 @@ def validate_plan(plan, allowed_files):
         "width": width,
         "height": height,
         "subtitle_text": str(plan.get("subtitle_text", ""))[:10000],
-        "notes": plan.get("notes", [])
+        "notes": plan.get("notes", []) if isinstance(plan.get("notes", []), list) else []
     }
 
 
 def execute_edit_plan(plan, subtitle_path=None, audio_path=None):
     work = EDIT_DIR / uuid.uuid4().hex
     work.mkdir(parents=True, exist_ok=True)
+    output = None
 
-    clips = []
+    try:
+        clips = []
+        for index, segment in enumerate(plan["segments"]):
+            output_clip = work / f"segment_{index:04d}.mp4"
+            duration = float(segment["end"]) - float(segment["start"])
+            args = [
+                "-ss", str(segment["start"]),
+                "-i", segment["file_path"],
+                "-t", str(duration),
+                "-vf",
+                f"scale={plan['width']}:{plan['height']}:force_original_aspect_ratio=decrease,"
+                f"pad={plan['width']}:{plan['height']}:(ow-iw)/2:(oh-ih)/2",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "21",
+                "-c:a", "aac",
+                "-ar", "48000",
+                "-ac", "2",
+                "-avoid_negative_ts", "make_zero",
+                "-movflags", "+faststart",
+                str(output_clip)
+            ]
+            run_ffmpeg(args)
+            clips.append(output_clip)
 
-    for index, segment in enumerate(plan["segments"]):
-        output = work / f"segment_{index:04d}.mp4"
-        duration = segment["end"] - segment["start"]
+        concat_file = work / "concat.txt"
+        concat_file.write_text(
+            "".join(
+                "file '" + str(item).replace("\\", "/").replace("'", "'\\''") + "'\n"
+                for item in clips
+            ),
+            encoding="utf-8"
+        )
 
-        args = [
-            "-ss", str(segment["start"]),
-            "-i", segment["file_path"],
-            "-t", str(duration),
-            "-vf",
-            f"scale={plan['width']}:{plan['height']}:force_original_aspect_ratio=decrease,"
-            f"pad={plan['width']}:{plan['height']}:(ow-iw)/2:(oh-ih)/2",
+        output = VIDEO_DIR / f"ai_edit_{uuid.uuid4().hex}.mp4"
+        args = ["-f", "concat", "-safe", "0", "-i", str(concat_file)]
+
+        audio = safe_storage_file(audio_path) if audio_path else None
+        subtitle = safe_storage_file(subtitle_path) if subtitle_path else None
+        if audio:
+            args += ["-i", str(audio)]
+
+        if subtitle:
+            escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
+            args += ["-vf", f"subtitles='{escaped}'"]
+
+        if audio:
+            args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        else:
+            args += ["-map", "0:v:0", "-map", "0:a?"]
+
+        args += [
             "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "21",
+            "-preset", "medium",
+            "-crf", "20",
             "-c:a", "aac",
-            "-ar", "48000",
-            "-ac", "2",
-            "-avoid_negative_ts", "make_zero",
             "-movflags", "+faststart",
             str(output)
         ]
         run_ffmpeg(args)
-        clips.append(output)
-
-    concat_file = work / "concat.txt"
-    concat_file.write_text(
-        "".join("file '" + str(x).replace("\\", "/").replace("'", "'\\''") + "'\n"
-                for x in clips),
-        encoding="utf-8"
-    )
-
-    output = VIDEO_DIR / f"ai_edit_{uuid.uuid4().hex}.mp4"
-
-    args = [
-        "-f", "concat",
-        "-safe", "0",
-        "-i", str(concat_file)
-    ]
-
-    audio = safe_storage_file(audio_path) if audio_path else None
-    if audio:
-        args += ["-i", str(audio)]
-
-    subtitle = safe_storage_file(subtitle_path) if subtitle_path else None
-
-    if subtitle:
-        escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
-        args += ["-vf", f"subtitles='{escaped}'"]
-
-    if audio:
-        args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
-    else:
-        args += ["-map", "0:v:0", "-map", "0:a?"]
-
-    args += [
-        "-c:v", "libx264",
-        "-preset", "medium",
-        "-crf", "20",
-        "-c:a", "aac",
-        "-movflags", "+faststart",
-        str(output)
-    ]
-
-    run_ffmpeg(args)
-
-    return str(output), output.stat().st_size
+        return str(output), output.stat().st_size
+    except Exception:
+        if output and output.exists():
+            output.unlink()
+        raise
+    finally:
+        shutil.rmtree(work, ignore_errors=True)

@@ -22,7 +22,7 @@ const presets = [
   { id: "openai", name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", paid: true, purpose: "text" },
   { id: "grok", name: "Grok", url: "https://api.x.ai/v1", model: "grok-3-mini", paid: true, purpose: "text" },
   { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
-  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: false, purpose: "text" },
+  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: true, purpose: "text" },
 ];
 
 export default function AICenterPage() {
@@ -166,7 +166,7 @@ export default function AICenterPage() {
                       <span className="font-semibold">{p.name}</span>
                       <span className={`text-xs ${saved?.enabled ? "text-emerald-300" : "text-gray-400"}`}>{saved?.enabled ? "已启用" : "未启用"}</span>
                     </div>
-                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {p.paid ? "付费服务" : "免费额度/需核实"}</div>
+                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {p.paid ? "需付费授权与本次确认" : "免费额度/需核实"}</div>
                   </button>
                 );
               })}
@@ -196,11 +196,11 @@ export default function AICenterPage() {
                 <button onClick={removeProvider} className="rounded-lg border border-red-400/30 px-5 py-2 text-red-300">删除配置</button>
               </div>
               <p className="mt-4 text-xs leading-6 text-purple-300">
-                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。豆包视觉生成后续使用独立图片生成适配器。
+                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。视觉生成接口要求所选模型支持 images/generations；请按服务商官方文档填写模型名称和 API 地址。
               </p>
             </section>
 
-            <section className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
+            <section id="usage-logs" className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
               <h2 className="mb-4 text-lg font-bold">最近调用记录</h2>
               <div className="max-h-72 space-y-2 overflow-y-auto">
                 {logs.map((log) => (

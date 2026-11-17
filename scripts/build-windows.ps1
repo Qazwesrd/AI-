@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 # Automatically locate the project root.
 $Root = Split-Path -Parent $PSScriptRoot
@@ -29,6 +29,34 @@ if (!(Test-Path "$Desktop\node_modules\electron-builder")) {
 if (!(Test-Path "$Web\node_modules")) {
     throw "Web node_modules not found."
 }
+
+# Validate source code before producing an installer.
+Write-Host "[0/4] Running source validation..."
+& $Python -m compileall -q "$Api\app"
+Check-ExitCode "Python source compilation failed"
+
+$FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
+$FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
+$SystemFfmpeg = (Get-Command ffmpeg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$SystemFfprobe = (Get-Command ffprobe.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+
+if (!(Test-Path $FfmpegSource) -or (Get-Item $FfmpegSource).Length -lt 1MB) {
+    if ($SystemFfmpeg) {
+        New-Item -ItemType Directory -Path (Split-Path $FfmpegSource) -Force | Out-Null
+        Copy-Item $SystemFfmpeg $FfmpegSource -Force
+    } else {
+        throw "FFmpeg executable is missing or is a Git LFS pointer. Install FFmpeg and add it to PATH."
+    }
+}
+if (!(Test-Path $FfprobeSource) -or (Get-Item $FfprobeSource).Length -lt 1MB) {
+    if ($SystemFfprobe) {
+        New-Item -ItemType Directory -Path (Split-Path $FfprobeSource) -Force | Out-Null
+        Copy-Item $SystemFfprobe $FfprobeSource -Force
+    } else {
+        throw "FFmpeg executable is missing or is a Git LFS pointer. Install FFmpeg and add it to PATH."
+    }
+}
+
 
 Write-Host "[1/4] Checking PyInstaller..."
 
@@ -81,6 +109,9 @@ Write-Host "API executable created."
 Write-Host "[3/4] Building Next.js frontend..."
 
 Set-Location $Web
+
+npx tsc --noEmit
+Check-ExitCode "TypeScript validation failed"
 
 npm run build
 Check-ExitCode "Next.js build failed"
