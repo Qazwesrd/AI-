@@ -25,7 +25,7 @@ from app.services.media_service import (
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
 
 
-def get_provider(db, provider_name, confirm_paid=False):
+def get_provider(db, provider_name, confirm_paid=False, check_paid=True):
     config = db.query(AIProviderConfig).filter(
         AIProviderConfig.provider == provider_name
     ).first()
@@ -42,7 +42,7 @@ def get_provider(db, provider_name, confirm_paid=False):
     # 按服务商配置的计费属性区分免费与付费服务。
     # 未知计费状态沿用模型默认值 True，默认阻止调用，避免意外扣费。
     paid = bool(getattr(config, "paid", True))
-    if paid:
+    if paid and check_paid:
         if not getattr(runtime, "paid_api_allowed", False):
             raise HTTPException(403, "付费 API 总授权未开启")
         if not confirm_paid:
@@ -286,32 +286,62 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
     outcomes = []
     for task in matched:
         try:
+            # 任务提交时已完成付费授权；轮询结果本身不再创建新任务，不应因用户后来关闭付费开关而丢失查询能力。
             config, key, base = get_provider(
-                db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
+                db, task.provider, bool((task.request_data or {}).get("confirm_paid")),
+                check_paid=False,
             )
             meta = task.request_data or {}
             path = meta.get("status_path_template", "/videos/{task_id}").replace(
                 "{task_id}", str(task.remote_task_id)
             )
             result = http_json(base + "/" + path.lstrip("/"), key, method="GET")
-            status = str(value_at(result, meta.get("status_field", "status")) or "processing").lower()
+            remote_status = str(
+                value_at(result, meta.get("status_field", "status")) or "processing"
+            ).strip().lower()
             task.result_data = result
-            task.status = status
             video_url = value_at(result, meta.get("video_url_field", "video_url"))
-            if video_url:
+
+            # 不同视频平台使用 success/succeeded/completed 等不同状态；
+            # 只有真正下载到本地文件后才标记 completed，避免“远端完成但本地无文件”导致无法重试。
+            failed_states = {"failed", "error", "cancelled", "canceled", "rejected"}
+            completed_states = {"completed", "complete", "success", "succeeded", "finished", "done"}
+            if remote_status in failed_states:
+                task.status = "failed"
+                task.error = str(
+                    value_at(result, "error.message")
+                    or value_at(result, "message")
+                    or "视频服务商报告任务失败"
+                )[:1500]
+            elif video_url:
                 filename = f"episode_{episode_id}_shot_{meta.get('shot_id')}_{uuid.uuid4().hex[:8]}.mp4"
                 destination = VIDEO_DIR / filename
                 http_download(str(video_url), destination)
+                if not destination.is_file() or destination.stat().st_size < 1024:
+                    destination.unlink(missing_ok=True)
+                    raise RuntimeError("视频服务返回的文件为空或无效")
                 task.result_path = str(destination)
                 task.status = "completed"
+                task.error = ""
+                db.add(MediaFile(
+                    name=filename, category="video", file_path=str(destination),
+                    mime_type="video/mp4", file_size=destination.stat().st_size,
+                ))
                 shot = db.query(StoryboardShot).filter(
                     StoryboardShot.id == meta.get("shot_id")
                 ).first()
                 if shot:
                     shot.status = "video_ready"
+            elif remote_status in completed_states:
+                # 服务商状态已完成但暂时未给出视频地址，继续允许用户再次轮询。
+                task.status = "awaiting_video_url"
+            else:
+                task.status = remote_status if remote_status in {
+                    "queued", "pending", "submitted", "processing", "running"
+                } else "processing"
             db.commit()
             outcomes.append({"task_id": task.id, "shot_number": meta.get("shot_number"),
-                             "status": task.status, "error": ""})
+                             "status": task.status, "error": task.error or ""})
         except Exception as exc:
             task.error = str(exc)[:1500]
             db.commit()
