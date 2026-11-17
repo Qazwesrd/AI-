@@ -1,5 +1,7 @@
 import json
 import re
+import hashlib
+from datetime import datetime, timedelta
 import urllib.request
 import urllib.error
 
@@ -8,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.novel import Novel, AnalysisItem
+from app.models.novel import Novel, AnalysisItem, NovelAnalysisJob
 from app.models.studio import AIProviderConfig, AIUsageLog
 from app.routers.studio import runtime, decrypt_key
 
@@ -647,6 +649,27 @@ def deduplicate_character_items(items):
     return result
 
 
+@router.get("/novels/{novel_id}/analysis-progress")
+def get_novel_analysis_progress(novel_id: int, db: Session = Depends(get_db)):
+    job = db.query(NovelAnalysisJob).filter(
+        NovelAnalysisJob.novel_id == novel_id
+    ).order_by(NovelAnalysisJob.id.desc()).first()
+    if not job:
+        return {"has_job": False, "status": "not_started"}
+    return {
+        "has_job": True,
+        "job_id": job.id,
+        "status": job.status,
+        "completed_chunks": job.completed_chunks,
+        "total_chunks": job.total_chunks,
+        "progress_percent": round(
+            job.completed_chunks / job.total_chunks * 100, 1
+        ) if job.total_chunks else 0,
+        "last_error": job.last_error or "",
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+    }
+
+
 @router.post("/novels/{novel_id}/analyze-ai")
 def analyze_novel_with_ai(
     novel_id: int,
@@ -698,9 +721,54 @@ def analyze_novel_with_ai(
     if not chunks:
         raise HTTPException(400, "小说正文为空")
 
-    all_items = []
+    source_payload = "\\n".join(
+        f"{chapter.chapter_number}|{chapter.title}|{chapter.content or ''}"
+        for chapter in chapters
+    )
+    source_signature = hashlib.sha256(source_payload.encode("utf-8")).hexdigest()
+
+    job = db.query(NovelAnalysisJob).filter(
+        NovelAnalysisJob.novel_id == novel_id,
+        NovelAnalysisJob.source_signature == source_signature,
+        NovelAnalysisJob.provider == config.provider,
+        NovelAnalysisJob.model == config.model,
+    ).order_by(NovelAnalysisJob.id.desc()).first()
+
+    if job is None:
+        job = NovelAnalysisJob(
+            novel_id=novel_id,
+            source_signature=source_signature,
+            provider=config.provider,
+            model=config.model,
+            status="pending",
+            total_chunks=len(chunks),
+            completed_chunks=0,
+            chunk_results={},
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+    if job.status == "running":
+        updated = job.updated_at or job.created_at or datetime.utcnow()
+        if datetime.utcnow() - updated < timedelta(minutes=15):
+            raise HTTPException(409, "该小说已有分析任务正在执行，请勿重复点击；可稍后查看进度或继续。")
+        job.status = "partial"
+        job.last_error = "检测到上次进程中断，已安全恢复为可续作状态"
+        db.commit()
+
+    saved_results = dict(job.chunk_results or {})
+    if job.total_chunks != len(chunks):
+        job.total_chunks = len(chunks)
+    job.status = "running"
+    job.last_error = ""
+    db.commit()
 
     for index, chunk in enumerate(chunks, start=1):
+        chunk_key = str(index)
+        if chunk_key in saved_results:
+            continue
+
         try:
             result_items = analyze_chunk(
                 config,
@@ -709,31 +777,43 @@ def analyze_novel_with_ai(
                 f"第{index}/{len(chunks)}段",
             )
 
+            saved_results[chunk_key] = result_items
+            job.chunk_results = dict(saved_results)
+            job.completed_chunks = len(saved_results)
+            job.status = "partial"
+            job.last_error = ""
+            job.updated_at = datetime.utcnow()
+
             db.add(AIUsageLog(
                 provider=config.provider,
                 model=config.model,
                 task="novel_deep_analysis",
                 status="success",
-                detail=f"小说：{novel.title}；分析片段：{index}/{len(chunks)}",
+                detail=f"小说：{novel.title}；分析片段：{index}/{len(chunks)}；任务：{job.id}",
             ))
             db.commit()
 
-            all_items.extend(result_items)
-
         except Exception as exc:
+            job.status = "partial"
+            job.last_error = str(exc)[:2000]
+            job.completed_chunks = len(saved_results)
             db.add(AIUsageLog(
                 provider=config.provider,
                 model=config.model,
                 task="novel_deep_analysis",
                 status="failed",
-                detail=str(exc)[:2000],
+                detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1500]}",
             ))
             db.commit()
 
             raise HTTPException(
                 502,
-                f"第{index}/{len(chunks)}段AI分析失败：{exc}。已有确认数据不会被删除。",
+                f"第{index}/{len(chunks)}段分析失败。已保存{len(saved_results)}/{len(chunks)}段；再次点击AI深度分析将从未完成片段继续，不会重复调用已完成片段。错误：{exc}",
             ) from exc
+
+    all_items = []
+    for index in range(1, len(chunks) + 1):
+        all_items.extend(saved_results.get(str(index), []))
 
     merged_items = merge_analysis_items(all_items)
 
@@ -802,7 +882,11 @@ def analyze_novel_with_ai(
             created.append(row)
 
         db.commit()
-
+        job.status = "completed"
+        job.completed_chunks = len(chunks)
+        job.last_error = ""
+        job.updated_at = datetime.utcnow()
+        db.commit()
 
         for row in created:
             db.refresh(row)
@@ -813,6 +897,9 @@ def analyze_novel_with_ai(
             "provider": config.provider,
             "model": config.model,
             "chunk_count": len(chunks),
+            "job_id": job.id,
+            "completed_chunks": job.completed_chunks,
+            "total_chunks": job.total_chunks,
             "total": len(created),
             "message": (
                 f"AI深度分析完成。使用{config.display_name}，"
