@@ -69,6 +69,7 @@ export default function VisualStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
+  const [confirm3dPaid, setConfirm3dPaid] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -271,7 +272,7 @@ export default function VisualStudioPage() {
     try {
       const response = await fetch(API + "/api/visual/assets/" + asset.id + "/model3d/tripo", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "tripo3d", model: "v3.1-20260211", texture: true, pbr: true, texture_quality: "detailed", geometry_quality: "standard", confirm_paid: confirmPaid }),
+        body: JSON.stringify({ provider: "tripo3d", model: "v3.1-20260211", texture: true, pbr: true, texture_quality: "detailed", geometry_quality: "standard", confirm_paid: confirm3dPaid }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "3D 模型任务提交失败");
@@ -490,7 +491,12 @@ export default function VisualStudioPage() {
                 <div className="mt-3 flex flex-wrap gap-2">
                   {!item.confirmed && <button className="rounded-lg border border-amber-300/30 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-900/30" disabled={busy} onClick={() => confirmAsset(item)}>审核通过并确认素材</button>}
                   <button className="rounded-lg border border-sky-300/20 px-3 py-1.5 text-xs hover:bg-sky-900/40" disabled={busy} onClick={() => generateProfessionalPrompt(item.id)}>生成专业提示词</button>
-                  {item.confirmed && <button className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" disabled={busy} onClick={() => generateEditable3D(item)}>生成真实3D模型（Tripo）</button>}
+                  {item.confirmed && (
+                    <>
+                      <label className="flex items-center gap-1 text-xs text-amber-200"><input type="checkbox" checked={confirm3dPaid} onChange={e => setConfirm3dPaid(e.target.checked)} />确认本次 3D 生成可能收费</label>
+                      <button className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30 disabled:opacity-50" disabled={busy} onClick={() => generateEditable3D(item)}>生成真实3D模型（Tripo）</button>
+                    </>
+                  )}
                   {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" disabled={busy} onClick={() => refreshEditable3D(item)}>查询/下载3D模型</button>}
                   {item.data?.model3d?.path && <a className="rounded-lg border border-green-300/30 px-3 py-1.5 text-xs text-green-200 hover:bg-green-900/30" href={API + "/api/visual/models3d/" + encodeURIComponent(item.data.model3d.path.split(/[\\/]/).pop() || "")} target="_blank" rel="noreferrer">下载 GLB 模型</a>}
                   <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs hover:bg-purple-900/50" disabled={busy} onClick={() => createViewBatch(item.id)}>创建多视角任务</button>
