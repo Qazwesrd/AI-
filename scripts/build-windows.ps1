@@ -18,6 +18,18 @@ function Check-ExitCode {
 Write-Host "========== WINDOWS BUILD START =========="
 Write-Host "Project root: $Root"
 
+if (!(Test-Path $Python)) {
+    throw "Python virtual environment not found."
+}
+
+if (!(Test-Path "$Desktop\node_modules\electron-builder")) {
+    throw "electron-builder dependency not found."
+}
+
+if (!(Test-Path "$Web\node_modules")) {
+    throw "Web node_modules not found."
+}
+
 # Validate source code before producing an installer.
 Write-Host "[0/4] Running source validation..."
 & $Python -m compileall -q "$Api\app"
@@ -25,8 +37,8 @@ Check-ExitCode "Python source compilation failed"
 
 $FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
 $FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
-$SystemFfmpeg = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-$SystemFfprobe = (Get-Command ffprobe.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$SystemFfmpeg = (Get-Command ffmpeg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+$SystemFfprobe = (Get-Command ffprobe.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 
 if (!(Test-Path $FfmpegSource) -or (Get-Item $FfmpegSource).Length -lt 1MB) {
     if ($SystemFfmpeg) {
@@ -45,17 +57,6 @@ if (!(Test-Path $FfprobeSource) -or (Get-Item $FfprobeSource).Length -lt 1MB) {
     }
 }
 
-if (!(Test-Path $Python)) {
-    throw "Python virtual environment not found."
-}
-
-if (!(Test-Path "$Desktop\node_modules\electron-builder")) {
-    throw "electron-builder dependency not found."
-}
-
-if (!(Test-Path "$Web\node_modules")) {
-    throw "Web node_modules not found."
-}
 
 Write-Host "[1/4] Checking PyInstaller..."
 
