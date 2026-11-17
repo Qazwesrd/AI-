@@ -727,9 +727,16 @@ def refresh_tripo_3d_model(task_id: int, confirm_paid: bool = False, db: Session
         result = _tripo_json(base + "/tasks/" + remote_id, api_key, method="GET")
         remote = result.get("data") or {}
         status = str(remote.get("status") or "running").lower()
+        asset = db.query(VisualAsset).filter(VisualAsset.id == task.asset_id).first()
+        asset_data = dict(asset.data) if asset and isinstance(asset.data, dict) else {}
+        model_task_data = dict(asset_data.get("model3d_task") or {})
+        model_task_data["status"] = status
+        model_task_data["progress"] = remote.get("progress")
+        model_task_data["last_checked_at"] = datetime.utcnow().isoformat()
         if status in ("failed", "cancelled", "canceled"):
             task.status = "failed"
             task.error = str(remote.get("message") or remote.get("error") or "Tripo 3D 任务失败")[:2000]
+            model_task_data["error"] = task.error
         elif status == "success":
             output = remote.get("output") or {}
             model_url = output.get("model_url")
@@ -747,7 +754,6 @@ def refresh_tripo_3d_model(task_id: int, confirm_paid: bool = False, db: Session
             task.status = "completed"
             task.finished_at = datetime.utcnow()
             task.error = ""
-            asset = db.query(VisualAsset).filter(VisualAsset.id == task.asset_id).first()
             if asset:
                 data = dict(asset.data) if isinstance(asset.data, dict) else {}
                 data["model3d"] = {
@@ -756,10 +762,18 @@ def refresh_tripo_3d_model(task_id: int, confirm_paid: bool = False, db: Session
                     "preview_url": output.get("rendered_image_url"),
                     "credits_consumed": remote.get("credits_consumed"),
                 }
+                model_task_data["status"] = "completed"
+                model_task_data["progress"] = 100
+                model_task_data["completed_at"] = datetime.utcnow().isoformat()
+                data["model3d_task"] = model_task_data
                 asset.data = data
                 asset.updated_at = datetime.utcnow()
         else:
             task.status = "running"
+        if asset and task.status != "completed":
+            asset_data["model3d_task"] = model_task_data
+            asset.data = asset_data
+            asset.updated_at = datetime.utcnow()
         db.commit()
         return {
             "success": task.status != "failed", "task_id": task.id, "status": task.status,
