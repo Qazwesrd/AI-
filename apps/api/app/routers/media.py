@@ -345,20 +345,53 @@ def render_episode_from_shots(
             clips.append(safe_storage_file(task.result_path))
     if missing:
         raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
-    concat_file = VIDEO_DIR / f"concat_{uuid.uuid4().hex}.txt"
-    output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", output_name)
+    output_name = re.sub(r"[^a-zA-Z0-9_\\-\\u4e00-\\u9fff]", "_", output_name)
     if not output_name.lower().endswith(".mp4"):
         output_name += ".mp4"
     output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
     try:
-        concat_file.write_text(
-            "".join("file '" + str(path).replace("'", "'\\''") + "'\n" for path in clips),
-            encoding="utf-8"
+        # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
+        ffmpeg_args = []
+        filters = []
+        concat_labels = []
+        input_index = 0
+        for index, clip in enumerate(clips):
+            info = probe_media(clip)
+            streams = info.get("streams", [])
+            duration = float((info.get("format") or {}).get("duration") or shots[index].duration_seconds or 5)
+            duration = max(1.0, duration)
+            ffmpeg_args += ["-i", str(clip)]
+            filters.append(
+                f"[{input_index}:v:0]scale=1920:1080:force_original_aspect_ratio=decrease,"
+                f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,"
+                f"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]"
+            )
+            has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+            if has_audio:
+                filters.append(
+                    f"[{input_index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+                    f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+                )
+            else:
+                input_index += 1
+                ffmpeg_args += [
+                    "-f", "lavfi", "-t", str(duration), "-i",
+                    "anullsrc=channel_layout=stereo:sample_rate=48000",
+                ]
+                filters.append(
+                    f"[{input_index}:a:0]atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+                )
+            concat_labels.append(f"[v{index}][a{index}]")
+            input_index += 1
+        filters.append(
+            "".join(concat_labels) + f"concat=n={len(clips)}:v=1:a=1[vout][aout]"
         )
-        run_ffmpeg([
-            "-f", "concat", "-safe", "0", "-i", str(concat_file),
+        run_ffmpeg(ffmpeg_args + [
+            "-filter_complex", ";".join(filters),
+            "-map", "[vout]", "-map", "[aout]",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-c:a", "aac", "-movflags", "+faststart", str(output)
+            "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
+            str(output),
         ])
         subtitle_lines = []
         elapsed = 0.0
@@ -395,8 +428,7 @@ def render_episode_from_shots(
     except Exception as exc:
         output.unlink(missing_ok=True)
         raise HTTPException(500, "分集视频合成失败：" + str(exc))
-    finally:
-        concat_file.unlink(missing_ok=True)
+
 
 
 @router.post("/video/tasks")
