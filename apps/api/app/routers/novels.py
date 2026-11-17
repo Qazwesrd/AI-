@@ -369,8 +369,20 @@ def confirm_analysis(novel_id: int, db: Session = Depends(get_db)):
     items = db.query(AnalysisItem).filter(
         AnalysisItem.novel_id == novel_id
     ).all()
+    confirmed_count = 0
+    stale_count = 0
     for item in items:
+        data = item.data if isinstance(item.data, dict) else {}
+        if data.get("source_stale"):
+            stale_count += 1
+            continue
         item.confirmed = True
+        confirmed_count += 1
     db.commit()
-    return {"success": True, "confirmed_count": len(items)}
+    return {
+        "success": True,
+        "confirmed_count": confirmed_count,
+        "stale_skipped": stale_count,
+        "message": f"已确认 {confirmed_count} 条当前版本解析结果，跳过 {stale_count} 条旧版本过期记录。",
+    }
 
