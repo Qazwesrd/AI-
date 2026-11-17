@@ -303,52 +303,78 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
     batch_end = min(cursor + 3, len(chapters))
     try:
         api_key = decrypt_key(provider.encrypted_api_key)
+        batch_chapters = []
         for chapter_index in range(cursor, batch_end):
             chapter = chapters[chapter_index]
             source = get_chapter_content(chapter)
-            title = get_chapter_title(chapter)
             if source.strip():
-                prompt = (
-                    "你是资深影视编剧和漫剧分集导演。阅读整章原文，决定本章应改编为1集还是2集。"
-                    "必须根据剧情完整性、冲突转折、场景变化、人物弧线和约2分钟单集节奏判断，禁止按字数机械对半切。"
-                    "如果一集能完整表达本章核心剧情，返回1集；只有剧情确实过长且存在自然戏剧断点时才返回2集。"
-                    "若拆为2集，split_quote 必须是原文中连续、逐字一致的一段短句，作为第二集开始位置。"
-                    "只返回 JSON：{\"episode_count\":1或2,\"split_quote\":\"原文精确句子或空字符串\","
-                    "\"synopsis\":\"本章剧情摘要\",\"episode1_title\":\"标题\","
-                    "\"episode1_synopsis\":\"上集摘要\",\"episode2_title\":\"下集标题\","
-                    "\"episode2_synopsis\":\"下集摘要\"}。"
-                    "小说章节标题：" + title + "\n小说原文：\n" + source[:24000]
-                )
-                body = json.dumps({"model": provider.model, "temperature": 0.2, "messages": [
-                    {"role": "system", "content": "严格输出 JSON，不要 Markdown，不要编造原文没有的剧情。"},
-                    {"role": "user", "content": prompt},
-                ]}, ensure_ascii=False).encode("utf-8")
-                request = urllib.request.Request(
-                    provider.base_url.rstrip("/") + "/chat/completions",
-                    data=body,
-                    headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(request, timeout=240) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                raw = result["choices"][0]["message"]["content"]
-                if isinstance(raw, list):
-                    raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
-                raw = str(raw).strip()
-                if raw.startswith("```json"):
-                    raw = raw[7:].strip()
-                elif raw.startswith("```"):
-                    raw = raw[3:].strip()
-                if raw.endswith("```"):
-                    raw = raw[:-3].strip()
-                try:
-                    decision = json.loads(raw)
-                except json.JSONDecodeError:
-                    left, right = raw.find("{"), raw.rfind("}")
-                    if left < 0 or right <= left:
-                        raise ValueError("AI 分集规划返回的 JSON 无效")
-                    decision = json.loads(raw[left:right + 1])
+                batch_chapters.append({
+                    "chapter_index": chapter_index,
+                    "title": get_chapter_title(chapter),
+                    "content": source[:18000],
+                })
 
+        decisions_by_index = {}
+        if batch_chapters:
+            prompt = (
+                "你是资深影视编剧和漫剧分集导演。下面一次提供多章小说，请逐章独立判断每章应改编为1集还是2集。"
+                "必须依据剧情完整性、冲突转折、场景变化、人物弧线和约2分钟单集节奏判断，禁止按字数机械对半切。"
+                "若一集能完整表达本章核心剧情，返回1集；只有剧情确实过长且存在自然戏剧断点时才返回2集。"
+                "若拆为2集，split_quote必须是原文中连续、逐字一致的一段短句，作为第二集开始位置。"
+                "每章都必须返回一条结果，chapter_index必须与输入完全一致。"
+                "只返回JSON：{\\"chapters\\":[{\\"chapter_index\\":0,\\"episode_count\\":1,\\"split_quote\\":\\"\\","
+                "\\"synopsis\\":\\"本章剧情摘要\\",\\"episode1_title\\":\\"标题\\","
+                "\\"episode1_synopsis\\":\\"上集摘要\\",\\"episode2_title\\":\\"下集标题\\","
+                "\\"episode2_synopsis\\":\\"下集摘要\\"}]}"
+                "\\n章节原文数据：\\n" + json.dumps(batch_chapters, ensure_ascii=False)
+            )
+            body = json.dumps({"model": provider.model, "temperature": 0.2, "messages": [
+                {"role": "system", "content": "严格输出JSON，不要Markdown；每个输入章节都必须有对应结果，不得混淆章节编号，不得编造剧情。"},
+                {"role": "user", "content": prompt},
+            ]}, ensure_ascii=False).encode("utf-8")
+            request = urllib.request.Request(
+                provider.base_url.rstrip("/") + "/chat/completions",
+                data=body,
+                headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=300) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            raw = result["choices"][0]["message"]["content"]
+            if isinstance(raw, list):
+                raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
+            raw = str(raw).strip()
+            if raw.startswith("```json"):
+                raw = raw[7:].strip()
+            elif raw.startswith("```"):
+                raw = raw[3:].strip()
+            if raw.endswith("```"):
+                raw = raw[:-3].strip()
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                left, right = raw.find("{"), raw.rfind("}")
+                if left < 0 or right <= left:
+                    raise ValueError("AI 分集规划返回的 JSON 无效")
+                parsed = json.loads(raw[left:right + 1])
+            decisions = parsed.get("chapters") if isinstance(parsed, dict) else None
+            if not isinstance(decisions, list):
+                raise ValueError("AI分集规划没有返回chapters数组")
+            for item in decisions:
+                if isinstance(item, dict):
+                    try:
+                        decisions_by_index[int(item.get("chapter_index"))] = item
+                    except (TypeError, ValueError):
+                        continue
+
+        for chapter_index in range(cursor, batch_end):
+            chapter = chapters[chapter_index]
+            source = get_chapter_content(chapter)
+            if source.strip():
+                decision = decisions_by_index.get(chapter_index)
+                if not decision:
+                    raise ValueError(f"AI未返回第{chapter_index + 1}章的规划结果")
+                title = get_chapter_title(chapter)
                 count = 2 if int(decision.get("episode_count", 1)) == 2 else 1
                 quote = str(decision.get("split_quote", "")).strip()
                 split_at = source.find(quote) if count == 2 and quote else -1
@@ -371,7 +397,6 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                     ))
                     episode_number += 1
 
-            # 每章都记录断点并提交，已完成章节不会因后续失败而回滚。
             progress.update({
                 "status": "running",
                 "chapter_cursor": chapter_index + 1,
