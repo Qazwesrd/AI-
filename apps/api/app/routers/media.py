@@ -791,8 +791,23 @@ def generate_episode_voice_track(
     ).order_by(MediaTask.id.desc()).all()
     for prior in prior_tasks:
         prior_meta = prior.request_data if isinstance(prior.request_data, dict) else {}
-        if prior.provider == data.provider and prior.model == data.model and prior_meta.get("voice") == data.voice and prior_meta.get("episode_id") == episode_id and prior_meta.get("shot_id") and prior.result_path and Path(prior.result_path).is_file():
-            generated.setdefault(prior_meta["shot_id"], Path(prior.result_path))
+        prior_shot_id = prior_meta.get("shot_id")
+        current_shot = next((item for item in shots if item.id == prior_shot_id), None)
+        current_dialogue = (current_shot.dialogue or "").strip() if current_shot else None
+        if (
+            prior.status == "completed"
+            and prior.provider == data.provider
+            and prior.model == data.model
+            and prior_meta.get("voice") == data.voice
+            and float(prior_meta.get("speed", 1.0)) == float(data.speed)
+            and prior_meta.get("episode_id") == episode_id
+            and prior_shot_id
+            and current_dialogue
+            and prior.prompt == current_dialogue
+            and prior.result_path
+            and Path(prior.result_path).is_file()
+        ):
+            generated.setdefault(prior_shot_id, Path(prior.result_path))
     failures = []
     blocked_shots = set()
     for shot in shots:
@@ -864,7 +879,8 @@ def generate_episode_voice_track(
                 task_type="episode_speech", provider=data.provider, model=data.model,
                 status="completed", prompt=text_value, result_path=str(destination),
                 request_data={"episode_id": episode_id, "shot_id": shot.id,
-                              "shot_number": shot.shot_number, "voice": data.voice},
+                              "shot_number": shot.shot_number, "voice": data.voice,
+                              "speed": data.speed},
             ))
             db.add(MediaFile(
                 name=filename, category="audio", file_path=str(destination),
