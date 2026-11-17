@@ -18,7 +18,7 @@ type TaskItem = {
   summary: string;
   context: string;
   error: string;
-  result_path: string;
+  result_available: boolean;
   progress?: number;
   completed_chunks?: number;
   total_chunks?: number;
@@ -29,6 +29,7 @@ type TaskItem = {
 type TaskResponse = {
   items: TaskItem[];
   total: number;
+  has_more: boolean;
   counts: Record<string, number>;
   by_source: Record<string, Record<string, number>>;
   note: string;
@@ -67,10 +68,12 @@ function formatTime(value: string | null) {
 export default function TasksPage() {
   const [items, setItems] = useState<TaskItem[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [bySource, setBySource] = useState<Record<string, Record<string, number>>>({});
   const [source, setSource] = useState("all");
   const [status, setStatus] = useState("all");
   const [keyword, setKeyword] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
@@ -78,7 +81,7 @@ export default function TasksPage() {
   const loadTasks = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: "100", offset: "0" });
+      const params = new URLSearchParams({ limit: "100", offset: String(offset) });
       if (source !== "all") params.set("task_type", source);
       if (status !== "all") params.set("status", status);
       if (keyword.trim()) params.set("q", keyword.trim());
@@ -88,7 +91,8 @@ export default function TasksPage() {
       const result = data as TaskResponse;
       setItems(result.items || []);
       setCounts(result.counts || {});
-      setBySource(result.by_source || {});
+      setTotal(result.total || 0);
+      setHasMore(Boolean(result.has_more));
       setUpdatedAt(result.generated_at || "");
       setMessage(result.note || "");
     } catch (error) {
@@ -96,7 +100,7 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [source, status, keyword]);
+  }, [source, status, keyword, offset]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
@@ -136,18 +140,18 @@ export default function TasksPage() {
         </div>
 
         <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/45 p-4 md:grid-cols-[1fr_180px_180px_auto]">
-          <input value={keyword} onChange={event => setKeyword(event.target.value)}
+          <input value={keyword} onChange={event => { setKeyword(event.target.value); setOffset(0); }}
             onKeyDown={event => { if (event.key === "Enter") void loadTasks(); }}
             placeholder="搜索任务、模型、小说名称或错误信息"
             className="min-w-0 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-purple-300/50" />
-          <select value={source} onChange={event => setSource(event.target.value)}
+          <select value={source} onChange={event => { setSource(event.target.value); setOffset(0); }}
             className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
             <option value="all">全部模块</option>
             <option value="analysis">小说解析</option>
             <option value="image">视觉生成</option>
             <option value="media">视频与配音</option>
           </select>
-          <select value={status} onChange={event => setStatus(event.target.value)}
+          <select value={status} onChange={event => { setStatus(event.target.value); setOffset(0); }}
             className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
             <option value="all">全部状态</option>
             <option value="active">进行中</option>
@@ -202,7 +206,19 @@ export default function TasksPage() {
             </div>
           )}
         </div>
-        <p className="mt-5 text-center text-xs text-slate-500">最近 500 条/类任务 · {updatedAt ? `数据刷新时间：${formatTime(updatedAt)}` : ""}</p>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/35 p-3">
+          <span className="text-xs text-slate-400">
+            当前显示 {total === 0 ? 0 : offset + 1}–{Math.min(offset + items.length, total)} 条，共 {total} 条匹配记录；每类最多读取最近 500 条
+          </span>
+          <div className="flex items-center gap-2">
+            <button disabled={offset === 0 || loading} onClick={() => setOffset(value => Math.max(0, value - 100))}
+              className="rounded-lg border border-white/15 px-3 py-2 text-xs disabled:opacity-40">上一页</button>
+            <span className="text-xs text-slate-400">第 {Math.floor(offset / 100) + 1} 页</span>
+            <button disabled={!hasMore || loading} onClick={() => setOffset(value => value + 100)}
+              className="rounded-lg border border-white/15 px-3 py-2 text-xs disabled:opacity-40">下一页</button>
+          </div>
+        </div>
+        <p className="mt-3 text-center text-xs text-slate-500">{updatedAt ? `数据刷新时间：${formatTime(updatedAt)}` : ""}</p>
       </div>
     </main>
   );
