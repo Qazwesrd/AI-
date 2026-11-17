@@ -129,6 +129,12 @@ export default function NovelsPage() {
       return;
     }
 
+    if (selected.chapter_count > 0 && !confirm(
+      `当前小说已有 ${selected.chapter_count} 章。重新导入会替换现有章节内容，是否继续？建议先备份项目。`
+    )) {
+      return;
+    }
+
     setLoading(true);
     setMessage("正在上传并解析小说，请稍候……");
 
