@@ -130,21 +130,17 @@ def generate_episode_shot_videos(
     if config.purpose not in ("video", "media", "text"):
         raise HTTPException(400, "所选服务商用途不适用于视频生成")
 
-    assets = db.query(VisualAsset).filter(
-        VisualAsset.confirmed == True
+    links = db.query(StoryAssetLink).filter(
+        StoryAssetLink.project_id == project.id,
+        StoryAssetLink.episode_id == episode_id,
     ).all()
-    asset_context = []
+    linked_ids = {link.asset_id for link in links}
+    assets = db.query(VisualAsset).filter(VisualAsset.confirmed == True).all()
+    asset_by_id = {}
     for asset in assets:
         asset_data = asset.data if isinstance(asset.data, dict) else {}
-        if asset_data.get("source_novel_id") not in (None, project.novel_id):
-            continue
-        description = "；".join(x for x in [
-            asset.name, asset.description, asset.appearance,
-            asset.clothing, asset.consistency_prompt
-        ] if x)
-        if description:
-            asset_context.append(description[:1200])
-    asset_context = asset_context[:40]
+        if asset_data.get("source_novel_id") == project.novel_id or asset.id in linked_ids:
+            asset_by_id[asset.id] = asset
 
     existing = db.query(MediaTask).filter(
         MediaTask.task_type == "storyboard_video"
@@ -173,8 +169,23 @@ def generate_episode_shot_videos(
             "音效：" + str(shot.sound_effects),
             "视觉提示词：" + str(shot.image_prompt),
         ]
-        if asset_context:
-            prompt_parts.append("角色/场景/道具统一设定（供画面一致性参考）：" + "；".join(asset_context))
+        shot_links = [link for link in links if link.shot_id == shot.id]
+        shot_asset_ids = {link.asset_id for link in shot_links}
+        if shot.scene_asset_id:
+            shot_asset_ids.add(shot.scene_asset_id)
+        shot_assets = []
+        for asset_id in shot_asset_ids:
+            asset = asset_by_id.get(asset_id)
+            if not asset:
+                continue
+            description = "；".join(x for x in [
+                asset.name, asset.description, asset.appearance,
+                asset.clothing, asset.consistency_prompt
+            ] if x)
+            if description:
+                shot_assets.append(description[:1200])
+        if shot_assets:
+            prompt_parts.append("本镜头已关联视觉素材设定，必须保持外观一致：" + "；".join(shot_assets))
         prompt = "\n".join(x for x in prompt_parts if x and not x.endswith("："))[:20000]
         payload = {
             "model": data.model,
