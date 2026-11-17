@@ -30,7 +30,11 @@ type Task = {
 const categories = [
   { key: "characters", label: "人物角色" },
   { key: "scenes", label: "场景环境" },
-  { key: "props", label: "物品道具" },
+  { key: "props", label: "普通道具" },
+  { key: "weapons", label: "武器与刀具" },
+  { key: "costumes", label: "服装与装备" },
+  { key: "buildings", label: "建筑与地标" },
+  { key: "special_items", label: "特殊物品" },
 ];
 
 const styles = [
