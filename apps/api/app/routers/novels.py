@@ -180,7 +180,8 @@ async def import_txt(
         "filename": filename,
         "chapter_count": len(parts),
         "word_count": len(re.sub(r"\s+", "", text)),
-        "chapters": [chapter_dict(x) for x in item.chapters],
+        # Avoid returning every chapter body in a single response for large novels.
+        "message": "小说正文已导入，章节列表请通过章节接口读取。",
     }
 
 @router.get("/novels/{novel_id}/chapters")
