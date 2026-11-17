@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type Novel = { id: number; title?: string; name?: string };
-type Project = { id: number; novel_id: number; name: string; adaptation_style: string; status: string };
+type Project = { id: number; novel_id: number; name: string; adaptation_style: string; status: string; generation_blocked?: boolean; source_change_notice?: { status?: string; detected_at?: string } | null };
 type Episode = {
   id: number; episode_number: number; title: string; source_text: string;
   synopsis: string; screenplay: string; duration_seconds: number; status: string;
@@ -32,6 +32,7 @@ export default function StoryboardPage() {
   const [assets, setAssets] = useState<VisualAsset[]>([]);
   const [novelId, setNovelId] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [episodeId, setEpisodeId] = useState<number | null>(null);
   const [projectName, setProjectName] = useState("");
   const [style, setStyle] = useState(styles[0]);
@@ -85,6 +86,7 @@ export default function StoryboardPage() {
   async function loadProject(id: number) {
     const result = await request(`/api/story/projects/${id}`);
     setProjectId(id);
+    setSelectedProject(result.project || null);
     setEpisodes(result.episodes);
     setEpisodeId(null);
     setShots([]);
@@ -384,12 +386,18 @@ export default function StoryboardPage() {
           <h2 className="text-xl font-semibold">改编项目与自动分集</h2>
           <select className={`${field} max-w-sm`} value={projectId ?? ""} onChange={e => e.target.value && loadProject(Number(e.target.value))}>
             <option value="">选择已有改编项目</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}（#{p.id}）</option>)}
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}（#{p.id}）{p.status === "source_changed" ? " · 原文已更新/已暂停" : ""}</option>)}
           </select>
         </div>
+        {selectedProject?.generation_blocked && (
+          <div className="mb-4 rounded-xl border border-red-400/40 bg-red-950/40 p-4 text-sm text-red-100">
+            <strong>原文版本已更新，当前项目已暂停制作</strong>
+            <p className="mt-2 leading-6">此项目的分集、剧本和分镜属于重新导入前的旧版本。为防止新旧剧情混用，系统已阻止继续规划、生成剧本、视频、配音和成片。旧项目与已有成果全部保留。请在上方选择当前小说，新建一个改编项目并重新规划。</p>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={!projectId || busy} onClick={planEpisodesAI}>AI智能分集规划</button>
-          <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy} onClick={planEpisodes}>按章节建立草案</button>
+          <button className={button} disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodesAI}>AI智能分集规划</button>
+          <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodes}>按章节建立草案</button>
           <button className="rounded-xl border border-sky-300/30 bg-sky-800/60 px-4 py-2 text-sm" disabled={episodes.length < 2} onClick={mergeEpisodes}>合并前两集</button>
         </div>
         <p className="mt-2 text-xs text-slate-400">AI分集规划每批处理最多3章并逐章保存；中断后再次点击可从已保存进度继续。</p>
@@ -404,10 +412,10 @@ export default function StoryboardPage() {
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
-                <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
-                <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
-                <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
+                <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
+                <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
+                <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
+                <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, -1)}>上移</button>
