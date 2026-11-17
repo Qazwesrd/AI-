@@ -140,6 +140,22 @@ export default function StoryboardPage() {
     }
   }
 
+  async function generateEpisodeScriptAI(episode: Episode) {
+    const approved = window.confirm("将调用已启用的文本 AI，根据本集原著生成影视剧本和对应分镜。若当前模型属于付费服务，可能产生 API 费用。是否继续？");
+    if (!approved) return;
+    setBusy(true);
+    try {
+      const result = await request(`/api/story/episodes/${episode.id}/generate-ai`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm_paid: true }),
+      });
+      if (projectId) await loadProject(projectId);
+      await loadShots(episode.id);
+      setMessage(result.message || "AI剧本与分镜生成完成");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AI生成失败");
+    } finally { setBusy(false); }
+  }
   async function updateEpisode(episode: Episode, patch: Partial<Episode>) {
     try {
       await request(`/api/story/episodes/${episode.id}`, {
@@ -297,6 +313,7 @@ export default function StoryboardPage() {
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
+                <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, -1)}>上移</button>
