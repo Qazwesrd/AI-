@@ -77,7 +77,13 @@ function waitForApi(timeout = 120000) {
       }
 
       const health = await requestHealth();
-      if (health) {
+      if (
+        health &&
+        health.status === "ok" &&
+        Array.isArray(health.loaded_routers) &&
+        health.loaded_routers.length >= 6 &&
+        (!Array.isArray(health.missing_routers) || health.missing_routers.length === 0)
+      ) {
         clearInterval(timer);
         resolve(health);
         return;
