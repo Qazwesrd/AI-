@@ -23,6 +23,7 @@ const presets = [
   { id: "grok", name: "Grok", url: "https://api.x.ai/v1", model: "grok-3-mini", paid: true, purpose: "text" },
   { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
   { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: false, purpose: "text" },
+  { id: "custom_video", name: "自定义视频生成服务商", url: "", model: "", paid: true, purpose: "video" },
 ];
 
 export default function AICenterPage() {
@@ -167,7 +168,7 @@ export default function AICenterPage() {
                       <span className="font-semibold">{p.name}</span>
                       <span className={`text-xs ${saved?.enabled ? "text-emerald-300" : "text-gray-400"}`}>{saved?.enabled ? "已启用" : "未启用"}</span>
                     </div>
-                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {(providers.find((x) => x.provider === p.id)?.paid ?? p.paid) ? "需付费授权与本次确认" : "按免费服务调用"}</div>
+                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : p.purpose === "video" ? "视频生成" : p.purpose === "audio" ? "语音生成" : "文本与分析"} · {(providers.find((x) => x.provider === p.id)?.paid ?? p.paid) ? "需付费授权与本次确认" : "按免费服务调用"}</div>
                   </button>
                 );
               })}
@@ -204,7 +205,7 @@ export default function AICenterPage() {
                 <button onClick={removeProvider} className="rounded-lg border border-red-400/30 px-5 py-2 text-red-300">删除配置</button>
               </div>
               <p className="mt-4 text-xs leading-6 text-purple-300">
-                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。视觉生成接口要求所选模型支持 images/generations；请按服务商官方文档填写模型名称和 API 地址。
+                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。视频生成服务请在“自定义视频生成服务商”中配置官方 API 地址、模型名称和密钥；视频任务接口格式需在分镜中心按服务商文档填写。
               </p>
             </section>
 
