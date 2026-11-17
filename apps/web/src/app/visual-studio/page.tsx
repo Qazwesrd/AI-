@@ -221,6 +221,22 @@ export default function VisualStudioPage() {
   }
 
 
+  async function manageTask(id: number, action: "pause" | "resume" | "retry" | "cancel") {
+    setBusy(true);
+    try {
+      const response = await fetch(`${API}/api/visual/tasks/${id}/${action}`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "任务操作失败");
+      setMessage(result.message || `任务 #${id} 已${({ pause: "暂停", resume: "恢复", retry: "重新排队", cancel: "取消" } as const)[action]}`);
+      await loadTasks();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "任务操作失败");
+      await loadTasks();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function generateProfessionalPrompt(assetId: number) {
     setBusy(true);
     try {
@@ -526,7 +542,20 @@ export default function VisualStudioPage() {
               </div>
               <span className="text-xs text-purple-300">{task.status}</span>
               {task.status === "pending" && (
-                <button className={button} disabled={busy} onClick={() => runTask(task.id)}>执行生成</button>
+                <>
+                  <button className={button} disabled={busy} onClick={() => runTask(task.id)}>执行生成</button>
+                  <button className={button} disabled={busy} onClick={() => manageTask(task.id, "pause")}>暂停</button>
+                  <button className={button} disabled={busy} onClick={() => manageTask(task.id, "cancel")}>取消</button>
+                </>
+              )}
+              {task.status === "paused" && (
+                <>
+                  <button className={button} disabled={busy} onClick={() => manageTask(task.id, "resume")}>继续</button>
+                  <button className={button} disabled={busy} onClick={() => manageTask(task.id, "cancel")}>取消</button>
+                </>
+              )}
+              {(task.status === "failed" || task.status === "cancelled") && (
+                <button className={button} disabled={busy} onClick={() => manageTask(task.id, "retry")}>重新排队</button>
               )}
             </div>
           ))}
