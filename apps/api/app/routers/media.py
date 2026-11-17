@@ -250,17 +250,11 @@ def generate_episode_shot_videos(
                     raise ValueError("所选视觉素材没有可用参考图片")
                 set_nested_value(payload, data.reference_image_field, data_uri)
                 reference_image_attached = True
-            result = http_json(
-                base + "/" + data.create_path.lstrip("/"),
-                key, body=payload, timeout=300
-            )
-            remote_id = value_at(result, data.task_id_field)
-            if not remote_id:
-                raise RuntimeError("视频服务未返回任务编号，请检查任务 ID 返回字段配置")
+            # 先持久化“正在提交”记录，再请求第三方，防止网络超时/进程退出后
+            # 因本地没有任务记录而再次点击，造成重复付费提交。
             task = MediaTask(
                 task_type="storyboard_video", provider=data.provider,
-                model=data.model, status="submitted", prompt=prompt,
-                remote_task_id=str(remote_id),
+                model=data.model, status="submitting", prompt=prompt,
                 request_data={
                     "base_url": base,
                     "status_path_template": data.status_path_template,
@@ -278,14 +272,39 @@ def generate_episode_shot_videos(
                     "reference_asset_name": reference_asset.name if reference_asset else None,
                     "reference_image_field": data.reference_image_field if reference_image_attached else None,
                 },
-                result_data=result,
             )
             db.add(task)
             db.commit()
             db.refresh(task)
-            shot.status = "video_submitted"
-            created.append({"task_id": task.id, "shot_id": shot.id,
-                            "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
+
+            try:
+                result = http_json(
+                    base + "/" + data.create_path.lstrip("/"),
+                    key, body=payload, timeout=300
+                )
+                remote_id = value_at(result, data.task_id_field)
+                if not remote_id:
+                    raise RuntimeError("服务商已返回响应，但未找到任务编号；提交结果不确定，请先到服务商控制台核对")
+                task.remote_task_id = str(remote_id)
+                task.result_data = result
+                task.status = "submitted"
+                task.error = None
+                db.commit()
+                shot.status = "video_submitted"
+                created.append({"task_id": task.id, "shot_id": shot.id,
+                                "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
+            except Exception as exc:
+                # 超时或连接中断时无法判断服务商是否已接单，保留未知状态并阻止自动重复提交。
+                task.status = "submission_unknown"
+                task.error = (
+                    "提交结果不确定：请先在视频服务商控制台核对是否已创建任务；"
+                    "确认不存在后再人工重新提交。原始错误：" + str(exc)
+                )[:2000]
+                db.commit()
+                shot.status = "video_submission_unknown"
+                failures.append({"task_id": task.id, "shot_id": shot.id,
+                                 "shot_number": shot.shot_number,
+                                 "status": task.status, "error": task.error})
         except Exception as exc:
             db.rollback()
             failures.append({"shot_id": shot.id, "shot_number": shot.shot_number,
@@ -324,6 +343,8 @@ def list_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
                 "provider": task.provider, "model": task.model,
                 "status": task.status, "remote_task_id": task.remote_task_id,
                 "result_path": task.result_path, "error": task.error,
+                "created_at": task.created_at.isoformat() if task.created_at else None,
+                "updated_at": task.updated_at.isoformat() if task.updated_at else None,
             })
     return rows
 
@@ -339,7 +360,7 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
     matched = []
     for task in tasks:
         meta = task.request_data if isinstance(task.request_data, dict) else {}
-        if meta.get("episode_id") == episode_id and task.status not in ("completed", "failed"):
+        if meta.get("episode_id") == episode_id and task.status not in ("completed", "failed", "cancelled", "submission_unknown"):
             matched.append(task)
     outcomes = []
     for task in matched:
