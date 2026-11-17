@@ -61,3 +61,25 @@ class AnalysisItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     novel = relationship("Novel", back_populates="analysis_items")
+
+
+class NovelAnalysisJob(Base):
+    """可恢复的长篇小说分段分析任务；独立新表，不修改既有业务表结构。"""
+    __tablename__ = "novel_analysis_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    novel_id: Mapped[int] = mapped_column(
+        ForeignKey("novels.id", ondelete="CASCADE"), index=True
+    )
+    source_signature: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(80), default="")
+    model: Mapped[str] = mapped_column(String(200), default="")
+    status: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    completed_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    chunk_results: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
+    )
