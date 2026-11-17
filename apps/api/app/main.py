@@ -17,6 +17,7 @@ ROUTER_MODULES = [
     "app.routers.story",
     "app.routers.media",
     "app.routers.video_editor",
+    "app.routers.ai_workflow",
 ]
 _loaded_routers: list[str] = []
 _router_errors: dict[str, str] = {}
