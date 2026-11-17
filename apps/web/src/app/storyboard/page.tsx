@@ -135,13 +135,14 @@ export default function StoryboardPage() {
       let latest: { episodes?: Episode[]; message?: string; processed_chapters?: number; total_chapters?: number } | null = null;
       let batches = 0;
       while (!done && batches < 400) {
-        latest = await request(`/api/story/projects/${projectId}/plan-ai`, {
+        const batchResult = await request(`/api/story/projects/${projectId}/plan-ai`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ confirm_paid: true }),
         });
-        done = Boolean((latest as { done?: boolean }).done);
-        setEpisodes(latest.episodes || []);
-        setMessage(latest.message || "AI分集规划处理中");
+        latest = batchResult;
+        done = Boolean(batchResult.done);
+        setEpisodes(batchResult.episodes || []);
+        setMessage(batchResult.message || "AI分集规划处理中");
         batches += 1;
       }
       if (!done) throw new Error("已达到单次连续执行批次数上限；当前进度已保存，再次点击即可继续。");
