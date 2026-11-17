@@ -6,11 +6,12 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type Asset = {
   id: number;
-  filename: string;
+  name: string;
   category: string;
   mime_type: string;
   file_size: number;
   description: string;
+  url: string;
   url: string;
 };
 
@@ -31,10 +32,10 @@ export default function AssetsPage() {
   const [loading, setLoading] = useState(false);
 
   async function refresh() {
-    const response = await fetch(`${API}/api/assets${category === "all" ? "" : `?category=${category}`}`);
+    const response = await fetch(`${API}/api/media/files${category === "all" ? "" : `?category=${encodeURIComponent(category)}`}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "读取素材失败");
-    setAssets(data.items || []);
+    setAssets(Array.isArray(data) ? data : []);
   }
 
   useEffect(() => {
@@ -50,9 +51,8 @@ export default function AssetsPage() {
     try {
       const form = new FormData();
       form.append("file", file);
-      form.append("category", uploadCategory);
       form.append("description", description);
-      const response = await fetch(`${API}/api/assets/upload`, { method: "POST", body: form });
+      const response = await fetch(`${API}/api/media/files/upload?category=${encodeURIComponent(uploadCategory)}`, { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "上传失败");
       setFile(null);
@@ -68,7 +68,7 @@ export default function AssetsPage() {
 
   async function remove(id: number) {
     if (!confirm("确定删除这份素材吗？")) return;
-    const response = await fetch(`${API}/api/assets/${id}`, { method: "DELETE" });
+    const response = await fetch(`${API}/api/media/files/${id}`, { method: "DELETE" });
     if (!response.ok) {
       setMessage("删除失败");
       return;
@@ -108,7 +108,7 @@ export default function AssetsPage() {
           <button onClick={upload} disabled={loading} className="mt-4 rounded-lg bg-purple-600 px-6 py-2 font-semibold disabled:opacity-50">
             {loading ? "上传中..." : "上传到本地素材库"}
           </button>
-          <p className="mt-3 text-xs text-purple-300">文件保存在本地 storage/assets 目录。当前单文件上限为 2 GB。</p>
+          <p className="mt-3 text-xs text-purple-300">文件保存在本地素材目录。当前单文件上限为 2 GB。</p>
         </section>
 
         <section className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
@@ -123,7 +123,7 @@ export default function AssetsPage() {
             {assets.map((asset) => (
               <article key={asset.id} className="rounded-xl border border-purple-400/20 bg-black/20 p-4">
                 <div className="text-2xl">{asset.category === "image" ? "🖼️" : asset.category === "audio" ? "🎵" : asset.category === "video" ? "🎬" : "📦"}</div>
-                <h3 className="mt-3 break-all font-semibold">{asset.filename}</h3>
+                <h3 className="mt-3 break-all font-semibold">{asset.name}</h3>
                 <p className="mt-1 text-xs text-purple-300">{sizeText(asset.file_size)} · {asset.category}</p>
                 <p className="mt-2 break-words text-xs text-purple-200">{asset.description}</p>
                 <div className="mt-4 flex gap-4 text-sm">
