@@ -22,6 +22,7 @@ ROUTER_MODULES = [
     "app.routers.ai_novel_analysis",
     "app.routers.publishing",
     "app.routers.publishing_uploads",
+    "app.routers.tasks",
 ]
 
 _loaded_routers: list[str] = []
