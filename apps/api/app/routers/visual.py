@@ -556,12 +556,238 @@ def create_asset_view_tasks(asset_id: int, provider: str = "doubao", size: str =
     return {"success": True, "asset_id": asset.id, "tasks": created, "count": len(created), "message": f"已创建 {len(created)} 个视角图片任务，尚未调用外部 AI。请在任务队列中逐项主动执行。"}
 
 
+
+class TripoModelInput(BaseModel):
+    provider: str = "tripo3d"
+    model: str = "v3.1-20260211"
+    texture: bool = True
+    pbr: bool = True
+    texture_quality: str = "detailed"
+    geometry_quality: str = "standard"
+    confirm_paid: bool = False
+
+
+def _tripo_provider(db, provider_name, confirm_paid):
+    runtime = get_runtime(db)
+    if not runtime["network_enabled"]:
+        raise HTTPException(403, "全局网络调用开关已关闭")
+    provider = db.query(AIProviderConfig).filter(AIProviderConfig.provider == provider_name).first()
+    if not provider or not provider.enabled:
+        raise HTTPException(400, f"{provider_name} 服务商尚未配置或启用")
+    if getattr(provider, "purpose", "image") not in ("image", "3d", "media"):
+        raise HTTPException(400, "该服务商用途必须设置为图像、3D 或媒体")
+    if not provider.encrypted_api_key:
+        raise HTTPException(400, "请先保存 3D 服务商 API Key")
+    if bool(getattr(provider, "paid", True)):
+        if not runtime["paid_api_allowed"]:
+            raise HTTPException(403, "3D 模型生成属于付费 API，请先开启付费 API 总授权")
+        if not confirm_paid:
+            raise HTTPException(403, "本次 3D 模型生成可能产生费用，必须明确确认")
+    base = (provider.base_url or "https://openapi.tripo3d.ai/v3").rstrip("/")
+    if not base.startswith("https://"):
+        raise HTTPException(400, "3D 服务商必须使用 HTTPS Base URL")
+    return provider, decrypt_key(provider.encrypted_api_key), base
+
+
+def _tripo_json(url, api_key, body=None, method="POST", timeout=300):
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None,
+        headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if result.get("code", 0) not in (0, None):
+        raise RuntimeError("Tripo API 错误：" + str(result.get("message") or result.get("code")))
+    return result
+
+
+def _tripo_upload_image(path, api_key, base):
+    path = Path(path).resolve()
+    if not path.is_file() or path.stat().st_size > 20 * 1024 * 1024:
+        raise ValueError("三视图图片不存在或超过 Tripo 20 MB 上传限制")
+    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    if mime not in ("image/png", "image/jpeg", "image/webp"):
+        raise ValueError("Tripo 仅接受 PNG、JPEG、WebP 参考图片")
+    boundary = "----AIComicStudio" + os.urandom(12).hex()
+    filename = path.name.replace('"', "")
+    content = path.read_bytes()
+    body = (
+        ("--" + boundary + "\r\n").encode()
+        + f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode()
+        + f"Content-Type: {mime}\r\n\r\n".encode()
+        + content + ("\r\n--" + boundary + "--\r\n").encode()
+    )
+    request = urllib.request.Request(
+        base + "/files", data=body,
+        headers={"Authorization": "Bearer " + api_key, "Content-Type": "multipart/form-data; boundary=" + boundary},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=300) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if result.get("code", 0) != 0:
+        raise RuntimeError("Tripo 图片上传失败：" + str(result.get("message") or result.get("code")))
+    token = (result.get("data") or {}).get("file_token")
+    if not token:
+        raise RuntimeError("Tripo 图片上传未返回 file_token")
+    return token
+
+
+def _safe_visual_view_path(raw_path):
+    candidate = Path(raw_path).resolve()
+    allowed = [ASSET_DIR.resolve(), REFERENCE_DIR.resolve()]
+    if not any(candidate == root or root in candidate.parents for root in allowed):
+        raise ValueError("三视图文件路径不在视觉素材目录内")
+    if not candidate.is_file():
+        raise ValueError("三视图图片文件不存在")
+    return candidate
+
+
+@router.post("/assets/{asset_id}/model3d/tripo")
+def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session = Depends(get_db)):
+    asset = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(404, "素材不存在")
+    if not asset.confirmed:
+        raise HTTPException(409, "请先确认人物/场景/道具设定，再生成三维模型")
+    provider, api_key, base = _tripo_provider(db, payload.provider, payload.confirm_paid)
+    data = asset.data if isinstance(asset.data, dict) else {}
+    views = data.get("generated_views") if isinstance(data.get("generated_views"), dict) else {}
+    front = views.get("view_front") or {}
+    side = views.get("view_side") or {}
+    back = views.get("view_back") or {}
+    front_path = front.get("path") if isinstance(front, dict) else None
+    side_path = side.get("path") if isinstance(side, dict) else None
+    back_path = back.get("path") if isinstance(back, dict) else None
+    if not front_path and asset.image_path:
+        front_path = asset.image_path
+    if not front_path:
+        raise HTTPException(409, "缺少正面参考图，请先生成并确认正面视图")
+    if not side_path and not back_path:
+        raise HTTPException(409, "至少还需要侧面或背面图片；请先生成完整三视图")
+    try:
+        front_file = _safe_visual_view_path(front_path)
+        tokens = {"front": _tripo_upload_image(front_file, api_key, base)}
+        if side_path:
+            tokens["right"] = _tripo_upload_image(_safe_visual_view_path(side_path), api_key, base)
+        if back_path:
+            tokens["back"] = _tripo_upload_image(_safe_visual_view_path(back_path), api_key, base)
+        inputs = [{view: token} for view, token in tokens.items()]
+        body = {
+            "inputs": inputs,
+            "model": payload.model,
+            "texture": payload.texture,
+            "pbr": payload.pbr if payload.texture else False,
+            "texture_quality": payload.texture_quality,
+            "geometry_quality": payload.geometry_quality,
+        }
+        result = _tripo_json(base + "/generation/multiview-to-model", api_key, body)
+        remote_id = (result.get("data") or {}).get("task_id")
+        if not remote_id:
+            raise RuntimeError("Tripo 未返回三维生成任务编号")
+        task = ImageTask(
+            asset_id=asset.id, provider=payload.provider, model=payload.model,
+            task_type="model3d_multiview", prompt=f"多视图生成 3D 模型：{asset.name}",
+            size="GLB", status="submitted",
+            result_url="tripo-task:" + str(remote_id),
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        data = dict(asset.data) if isinstance(asset.data, dict) else {}
+        data["model3d_task"] = {
+            "task_id": task.id, "provider": payload.provider, "model": payload.model,
+            "status": "submitted", "remote_task_id": str(remote_id),
+            "submitted_at": datetime.utcnow().isoformat(),
+            "input_views": list(tokens.keys()), "format": "GLB",
+        }
+        asset.data = data
+        db.commit()
+        return {"success": True, "task_id": task.id, "remote_task_id": str(remote_id), "status": "submitted", "input_views": list(tokens.keys()), "message": "已将三视图上传并提交真实 3D 模型生成任务；请稍后查询任务。"}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1600]
+        raise HTTPException(502, f"Tripo API HTTP {exc.code}：{detail}") from exc
+    except Exception as exc:
+        raise HTTPException(502, "提交 Tripo 3D 任务失败：" + str(exc)[:1600]) from exc
+
+
+@router.post("/tasks/{task_id}/refresh-model3d")
+def refresh_tripo_3d_model(task_id: int, confirm_paid: bool = False, db: Session = Depends(get_db)):
+    task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+    if not task or not task.task_type.startswith("model3d_"):
+        raise HTTPException(404, "3D 模型任务不存在")
+    if task.status == "completed":
+        return {"success": True, "task_id": task.id, "status": task.status, "result_path": task.result_path}
+    remote_id = (task.result_url or "").removeprefix("tripo-task:")
+    if not remote_id or remote_id == task.result_url:
+        raise HTTPException(409, "3D 任务缺少远程任务编号")
+    provider, api_key, base = _tripo_provider(db, task.provider, confirm_paid)
+    try:
+        result = _tripo_json(base + "/tasks/" + remote_id, api_key, method="GET")
+        remote = result.get("data") or {}
+        status = str(remote.get("status") or "running").lower()
+        if status in ("failed", "cancelled", "canceled"):
+            task.status = "failed"
+            task.error = str(remote.get("message") or remote.get("error") or "Tripo 3D 任务失败")[:2000]
+        elif status == "success":
+            output = remote.get("output") or {}
+            model_url = output.get("model_url")
+            if not model_url:
+                raise RuntimeError("Tripo 已完成，但没有返回 model_url")
+            filename = f"visual_asset_{task.asset_id}_task_{task.id}.glb"
+            destination = ASSET_DIR / filename
+            http_download(model_url, destination, max_bytes=500 * 1024 * 1024)
+            with destination.open("rb") as model_file:
+                if model_file.read(4) != b"glTF":
+                    destination.unlink(missing_ok=True)
+                    raise RuntimeError("服务商返回文件不是有效的 GLB 模型")
+            task.result_path = str(destination)
+            task.result_url = model_url
+            task.status = "completed"
+            task.finished_at = datetime.utcnow()
+            task.error = ""
+            asset = db.query(VisualAsset).filter(VisualAsset.id == task.asset_id).first()
+            if asset:
+                data = dict(asset.data) if isinstance(asset.data, dict) else {}
+                data["model3d"] = {
+                    "task_id": task.id, "provider": task.provider, "model": task.model,
+                    "format": "GLB", "path": str(destination), "downloaded_at": datetime.utcnow().isoformat(),
+                    "preview_url": output.get("rendered_image_url"),
+                    "credits_consumed": remote.get("credits_consumed"),
+                }
+                asset.data = data
+                asset.updated_at = datetime.utcnow()
+        else:
+            task.status = "running"
+        db.commit()
+        return {
+            "success": task.status != "failed", "task_id": task.id, "status": task.status,
+            "progress": remote.get("progress"), "result_path": task.result_path,
+            "error": task.error or "",
+        }
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:1600]
+        raise HTTPException(502, f"Tripo 查询失败 HTTP {exc.code}：{detail}") from exc
+    except Exception as exc:
+        raise HTTPException(502, "查询/下载 3D 模型失败：" + str(exc)[:1600]) from exc
+
+
+@router.get("/models3d/{filename}")
+def get_3d_model(filename: str):
+    from fastapi.responses import FileResponse
+    path = (ASSET_DIR / Path(filename).name).resolve()
+    if not path.is_file() or ASSET_DIR.resolve() not in path.parents or path.suffix.lower() != ".glb":
+        raise HTTPException(404, "GLB 模型不存在")
+    return FileResponse(path, media_type="model/gltf-binary", filename=path.name)
+
+
 @router.get("/capabilities")
 def visual_capabilities():
     return {
         "image_reference_generation": {"available": True, "formats": ["PNG", "JPG", "WEBP"], "note": "生成的是二维视觉参考图，不是可编辑三维网格。"},
         "three_view_generation": {"available": True, "views": ["front", "side", "back"], "scene_views": ["wide", "eye_level", "side", "overview"]},
-        "editable_3d_model": {"available": False, "formats": ["GLB", "GLTF"], "note": "当前仓库尚未配置可验证的图像/文本转3D服务商适配器；不会伪造模型文件。"},
+        "editable_3d_model": {"available": True, "provider": "tripo3d", "formats": ["GLB"], "modes": ["multiview-to-model"], "note": "需用户自行配置 Tripo API Key；调用受网络开关、付费授权和逐次确认控制。"},
         "asset_consistency": {"available": True, "features": ["stable_asset_id", "confirmed_lock", "chapter_evolution_history", "positive_negative_prompt", "source_novel_link"]},
         "execution_policy": {"requires_network_switch": True, "paid_calls_require_global_authorization_and_per_task_confirmation": True},
     }
