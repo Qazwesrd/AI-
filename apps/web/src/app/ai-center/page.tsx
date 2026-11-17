@@ -22,7 +22,7 @@ const presets = [
   { id: "openai", name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", paid: true, purpose: "text" },
   { id: "grok", name: "Grok", url: "https://api.x.ai/v1", model: "grok-3-mini", paid: true, purpose: "text" },
   { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
-  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: true, purpose: "text" },
+  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: false, purpose: "text" },
 ];
 
 export default function AICenterPage() {
@@ -68,6 +68,7 @@ export default function AICenterPage() {
     setModel(item.model);
     setApiKey("");
     const old = providers.find((x) => x.provider === item.id);
+    setSelected({ ...item, paid: old?.paid ?? item.paid });
     setEnabled(old?.enabled || false);
   }
 
@@ -166,7 +167,7 @@ export default function AICenterPage() {
                       <span className="font-semibold">{p.name}</span>
                       <span className={`text-xs ${saved?.enabled ? "text-emerald-300" : "text-gray-400"}`}>{saved?.enabled ? "已启用" : "未启用"}</span>
                     </div>
-                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {p.paid ? "需付费授权与本次确认" : "免费额度/需核实"}</div>
+                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {(providers.find((x) => x.provider === p.id)?.paid ?? p.paid) ? "需付费授权与本次确认" : "按免费服务调用"}</div>
                   </button>
                 );
               })}
@@ -190,6 +191,13 @@ export default function AICenterPage() {
               <label className="mt-4 flex items-center gap-3 text-sm">
                 <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
                 启用此服务商
+              </label>
+              <label className="mt-3 flex items-start gap-3 text-sm">
+                <input type="checkbox" checked={selected.paid} onChange={(e) => setSelected({ ...selected, paid: e.target.checked })} />
+                <span>
+                  此服务商/当前模型属于付费服务
+                  <span className="mt-1 block text-xs text-purple-300">默认按付费处理。只有已核实当前套餐或免费额度确实不收费时才取消勾选；免费额度耗尽后可能转为收费，请以服务商账单规则为准。</span>
+                </span>
               </label>
               <div className="mt-5 flex flex-wrap gap-3">
                 <button onClick={save} className="rounded-lg bg-purple-600 px-5 py-2 font-semibold">保存配置</button>
