@@ -322,7 +322,10 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
 
 @router.post("/video/episodes/{episode_id}/render")
 def render_episode_from_shots(
-    episode_id: int, output_name: str = "episode.mp4", db: Session = Depends(get_db)
+    episode_id: int, output_name: str = "episode.mp4",
+    music_path: Optional[str] = None,
+    music_volume: float = 0.18,
+    db: Session = Depends(get_db)
 ):
     """将本集已下载的镜头统一规格后合成为初版成片，并生成对白字幕文件。"""
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
@@ -401,7 +404,7 @@ def render_episode_from_shots(
             "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
             str(output),
         ])
-        # Mix an optional generated episode dialogue track with the original clip audio.
+        # Mix generated dialogue and optional background music with original shot sound.
         speech_tasks = db.query(MediaTask).filter(
             MediaTask.task_type == "episode_speech_track"
         ).order_by(MediaTask.id.desc()).all()
@@ -411,12 +414,25 @@ def render_episode_from_shots(
             if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
                 speech_path = safe_storage_file(speech_task.result_path)
                 break
-        if speech_path:
+        music = safe_storage_file(music_path) if music_path else None
+        if speech_path or music:
             mixed_output = output.with_name(output.stem + "_mixed.mp4")
-            run_ffmpeg([
-                "-i", str(output), "-i", str(speech_path),
-                "-filter_complex",
-                "[0:a]volume=0.35[original];[1:a]volume=1.0[voice];[original][voice]amix=inputs=2:duration=first:dropout_transition=2[mix]",
+            mix_args = ["-i", str(output)]
+            mix_filters = ["[0:a]volume=0.35[original]"]
+            mix_labels = ["[original]"]
+            mix_index = 1
+            if speech_path:
+                mix_args += ["-i", str(speech_path)]
+                mix_filters.append(f"[{mix_index}:a]volume=1.0[voice]")
+                mix_labels.append("[voice]")
+                mix_index += 1
+            if music:
+                mix_args += ["-stream_loop", "-1", "-i", str(music)]
+                mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
+                mix_labels.append("[music]")
+            mix_filters.append("".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2[mix]")
+            run_ffmpeg(mix_args + [
+                "-filter_complex", ";".join(mix_filters),
                 "-map", "0:v:0", "-map", "[mix]",
                 "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_output),
             ])
