@@ -446,8 +446,10 @@ def resume_image_task(task_id: int, db: Session = Depends(get_db)):
 @router.post("/tasks/{task_id}/retry")
 def retry_image_task(task_id: int, db: Session = Depends(get_db)):
     task = _get_image_task_or_404(task_id, db)
+    if task.task_type.startswith("model3d_"):
+        raise HTTPException(409, "3D任务重试可能再次产生费用，请回到素材卡片重新提交，并重新确认本次付费调用")
     if task.status not in ("failed", "cancelled"):
-        raise HTTPException(409, "只有失败或已取消的任务可以重试")
+        raise HTTPException(409, "只有失败或已取消的图片任务可以重试")
     task.status = "pending"
     task.error = ""
     task.result_path = ""
@@ -624,7 +626,7 @@ def create_asset_view_tasks(asset_id: int, provider: str = "doubao", size: str =
     }
     asset.data = data
     db.commit()
-    return {"success": True, "asset_id": asset.id, "tasks": created, "count": len(created), "message": f"已创建 {len(created)} 个视角图片任务，尚未调用外部 AI。请在任务队列中逐项主动执行。"}
+    return {"success": True, "asset_id": asset.id, "tasks": created, "count": len(created), "message": f"本次处理 {len(created)} 个视角任务（新建 {sum(1 for item in created if not item.get('existing'))} 个，复用 {sum(1 for item in created if item.get('existing'))} 个）。尚未调用外部 AI，请在任务队列中逐项主动执行。"}
 
 
 
