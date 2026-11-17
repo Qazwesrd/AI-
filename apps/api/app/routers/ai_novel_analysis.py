@@ -657,12 +657,6 @@ def analyze_novel_with_ai(
     if not settings.network_enabled:
         raise HTTPException(403, "网络调用总开关尚未开启")
 
-    if not settings.paid_api_allowed:
-        raise HTTPException(403, "尚未开启付费API授权")
-
-    if not payload.confirm_paid:
-        raise HTTPException(403, "本次AI分析尚未获得付费调用确认")
-
     config = choose_provider(db)
 
     if not config:
@@ -670,6 +664,15 @@ def analyze_novel_with_ai(
             400,
             "没有找到已启用且配置完整的文本AI模型。请先到AI设置配置DeepSeek、OpenAI、Grok、Gemini或其他文本模型。",
         )
+
+    # 仅对明确标记为付费的服务要求付费总授权和本次确认。
+    # 免费服务无需打开付费授权；计费属性缺失时默认按付费处理。
+    is_paid = bool(getattr(config, "paid", True))
+    if is_paid and not settings.paid_api_allowed:
+        raise HTTPException(403, "该文本模型属于付费服务，尚未开启付费API总授权")
+
+    if is_paid and not payload.confirm_paid:
+        raise HTTPException(403, "本次AI分析可能产生费用，尚未获得明确确认")
 
     try:
         api_key = decrypt_key(config.encrypted_api_key)
