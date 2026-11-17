@@ -295,6 +295,8 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
     ).first()
     if not provider or not provider.enabled:
         raise HTTPException(400, f"{task.provider} 服务商尚未配置或未启用")
+    if getattr(provider, "purpose", "text") != "image":
+        raise HTTPException(400, "所选服务商用途不是图像生成，请在 AI 管理中心选择图像服务商")
     if not provider.encrypted_api_key:
         raise HTTPException(400, "服务商尚未保存 API Key")
     if bool(getattr(provider, "paid", True)):
