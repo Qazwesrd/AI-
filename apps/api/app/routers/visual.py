@@ -567,7 +567,7 @@ class TripoModelInput(BaseModel):
     confirm_paid: bool = False
 
 
-def _tripo_provider(db, provider_name, confirm_paid):
+def _tripo_provider(db, provider_name, confirm_paid, check_paid=True):
     runtime = get_runtime(db)
     if not runtime["network_enabled"]:
         raise HTTPException(403, "全局网络调用开关已关闭")
@@ -578,7 +578,7 @@ def _tripo_provider(db, provider_name, confirm_paid):
         raise HTTPException(400, "该服务商用途必须设置为图像、3D 或媒体")
     if not provider.encrypted_api_key:
         raise HTTPException(400, "请先保存 3D 服务商 API Key")
-    if bool(getattr(provider, "paid", True)):
+    if bool(getattr(provider, "paid", True)) and check_paid:
         if not runtime["paid_api_allowed"]:
             raise HTTPException(403, "3D 模型生成属于付费 API，请先开启付费 API 总授权")
         if not confirm_paid:
@@ -722,7 +722,7 @@ def refresh_tripo_3d_model(task_id: int, confirm_paid: bool = False, db: Session
     remote_id = (task.result_url or "").removeprefix("tripo-task:")
     if not remote_id or remote_id == task.result_url:
         raise HTTPException(409, "3D 任务缺少远程任务编号")
-    provider, api_key, base = _tripo_provider(db, task.provider, confirm_paid)
+    provider, api_key, base = _tripo_provider(db, task.provider, confirm_paid, check_paid=False)
     try:
         result = _tripo_json(base + "/tasks/" + remote_id, api_key, method="GET")
         remote = result.get("data") or {}
