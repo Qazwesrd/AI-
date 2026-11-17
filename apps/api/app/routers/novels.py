@@ -162,12 +162,36 @@ async def import_txt(
     item.source_text = text
     item.title = item.title or Path(filename).stem
 
-    # Keep old screenplay content, but mark it for review after source replacement.
+    # Keep all previous analysis and visual assets, but mark analysis records as
+    # belonging to the previous source revision. Confirmed records are preserved.
+    affected_analysis = db.query(AnalysisItem).filter(
+        AnalysisItem.novel_id == novel_id
+    ).all()
+    stale_count = 0
+    stale_at = __import__("datetime").datetime.utcnow().isoformat()
+    for analysis in affected_analysis:
+        data = dict(analysis.data) if isinstance(analysis.data, dict) else {}
+        if not data.get("source_stale"):
+            data["source_stale"] = True
+            data["source_stale_at"] = stale_at
+            data["source_stale_reason"] = "novel_reimported"
+            analysis.data = data
+            stale_count += 1
+
+    # Keep old screenplay content, but block further generation until reviewed.
     affected_projects = db.query(StoryProject).filter(
         StoryProject.novel_id == novel_id
     ).all()
     for project in affected_projects:
         project.status = "source_changed"
+        settings = dict(project.settings) if isinstance(project.settings, dict) else {}
+        settings["source_change_notice"] = {
+            "status": "pending_review",
+            "detected_at": stale_at,
+            "reason": "novel_reimported",
+            "stale_analysis_count": stale_count,
+        }
+        project.settings = settings
 
     for old in list(item.chapters):
         db.delete(old)
@@ -189,6 +213,7 @@ async def import_txt(
         "chapter_count": len(parts),
         "word_count": len(re.sub(r"\s+", "", text)),
         "outdated_story_projects": len(affected_projects),
+        "stale_analysis_items": stale_count,
         # Avoid returning every chapter body in a single response for large novels.
         "message": "小说正文已导入，章节列表请通过章节接口读取；已有剧本项目已标记为需要复核。",
     }
