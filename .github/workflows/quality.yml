@@ -21,6 +21,10 @@ jobs:
           pip install -r apps/api/requirements.txt
       - name: Compile all Python sources
         run: python -m compileall -q apps/api
+      - name: Smoke test API router imports
+        working-directory: apps/api
+        run: |
+          python -c "from app.main import app, _loaded_routers, _router_errors; assert not _router_errors, _router_errors; assert len(_loaded_routers) == 9, _loaded_routers; print('API router import smoke test passed:', len(_loaded_routers))"
 
   frontend:
     runs-on: ubuntu-latest
