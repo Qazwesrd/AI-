@@ -196,7 +196,7 @@ export default function AICenterPage() {
                 <button onClick={removeProvider} className="rounded-lg border border-red-400/30 px-5 py-2 text-red-300">删除配置</button>
               </div>
               <p className="mt-4 text-xs leading-6 text-purple-300">
-                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。豆包视觉生成后续使用独立图片生成适配器。
+                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。视觉生成接口要求所选模型支持 images/generations；请按服务商官方文档填写模型名称和 API 地址。
               </p>
             </section>
 
