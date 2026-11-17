@@ -45,6 +45,8 @@ export default function StoryboardPage() {
   const [videoStatusPath, setVideoStatusPath] = useState("/videos/{task_id}");
   const [videoIdField, setVideoIdField] = useState("id");
   const [videoUrlField, setVideoUrlField] = useState("video_url");
+  const [videoReferenceMode, setVideoReferenceMode] = useState<"none" | "data_uri">("none");
+  const [videoReferenceField, setVideoReferenceField] = useState("image");
   const [speechProvider, setSpeechProvider] = useState("openai");
   const [speechModel, setSpeechModel] = useState("");
   const [speechVoice, setSpeechVoice] = useState("alloy");
@@ -208,7 +210,7 @@ export default function StoryboardPage() {
       while (!done && batches < 12) {
         const result = await request("/api/media/video/episodes/" + episode.id + "/generate", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: videoProvider, model: videoModel, batch_size: 3, confirm_paid: videoPaidConfirmed, create_path: videoCreatePath, status_path_template: videoStatusPath, task_id_field: videoIdField, video_url_field: videoUrlField, status_field: "status", aspect_ratio: "16:9" }),
+          body: JSON.stringify({ provider: videoProvider, model: videoModel, batch_size: 3, confirm_paid: videoPaidConfirmed, create_path: videoCreatePath, status_path_template: videoStatusPath, task_id_field: videoIdField, video_url_field: videoUrlField, status_field: "status", aspect_ratio: "16:9", reference_image_mode: videoReferenceMode, reference_image_field: videoReferenceField }),
         });
         totalCreated += (result.created || []).length;
         done = Boolean(result.done);
@@ -438,6 +440,17 @@ export default function StoryboardPage() {
           <input className={field} value={videoStatusPath} onChange={e => setVideoStatusPath(e.target.value)} placeholder="查询任务路径，保留 {task_id}" />
           <input className={field} value={videoIdField} onChange={e => setVideoIdField(e.target.value)} placeholder="任务编号返回字段" />
           <input className={field} value={videoUrlField} onChange={e => setVideoUrlField(e.target.value)} placeholder="视频 URL 返回字段" />
+        </div>
+        <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3">
+          <label className="mb-2 block text-xs font-semibold text-cyan-100">分镜参考图输入（仅适用于明确支持 JSON Base64 Data URI 的视频 API）</label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <select className={field} value={videoReferenceMode} onChange={e => setVideoReferenceMode(e.target.value as "none" | "data_uri")}>
+              <option value="none">关闭参考图（纯文字提示词）</option>
+              <option value="data_uri">发送已关联素材图片（Data URI）</option>
+            </select>
+            <input className={field} value={videoReferenceField} onChange={e => setVideoReferenceField(e.target.value)} placeholder="图片字段名，例如 image 或 input.image" />
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-400">开启后会从本镜头关联的已确认视觉素材中选择一张图片，优先人物、其次场景和道具，作为 Base64 Data URI 发送。服务商必须明确支持这种字段和格式；不支持时请保持关闭。单张图片上限 8 MB。不会自动上传到第三方图床。</p>
         </div>
         <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={videoPaidConfirmed} onChange={e => setVideoPaidConfirmed(e.target.checked)} />我已确认本次镜头视频生成可能产生费用</label>
         <div className="mt-5 border-t border-purple-300/15 pt-4">
