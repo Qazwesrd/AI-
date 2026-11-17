@@ -682,6 +682,8 @@ def generate_episode_voice_track(
                 pass
 
     config, key, base = get_provider(db, data.provider, data.confirm_paid)
+    if getattr(config, "purpose", "text") not in ("text", "audio", "speech"):
+        raise HTTPException(400, "所选服务商用途不支持语音合成，请选择文本或语音服务商")
     generated = {}
     speech_durations = {}
     prior_tasks = db.query(MediaTask).filter(
@@ -838,6 +840,8 @@ def generate_episode_voice_track(
 @router.post("/speech/generate")
 def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
     config, key, base = get_provider(db, data.provider, data.confirm_paid)
+    if getattr(config, "purpose", "text") not in ("text", "audio", "speech"):
+        raise HTTPException(400, "所选服务商用途不支持语音合成，请选择文本或语音服务商")
 
     payload = {
         "model": data.model,
