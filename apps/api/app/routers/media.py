@@ -318,7 +318,7 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
 def render_episode_from_shots(
     episode_id: int, output_name: str = "episode.mp4", db: Session = Depends(get_db)
 ):
-    """将本集已下载的镜头按分镜顺序无损拼接成初版成片。"""
+    """将本集已下载的镜头统一规格后合成为初版成片，并生成对白字幕文件。"""
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
@@ -345,7 +345,7 @@ def render_episode_from_shots(
             clips.append(safe_storage_file(task.result_path))
     if missing:
         raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
-    output_name = re.sub(r"[^a-zA-Z0-9_\\-\\u4e00-\\u9fff]", "_", output_name)
+    output_name = re.sub(r"[^a-zA-Z0-9_-]", "_", output_name)
     if not output_name.lower().endswith(".mp4"):
         output_name += ".mp4"
     output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
@@ -354,12 +354,14 @@ def render_episode_from_shots(
         ffmpeg_args = []
         filters = []
         concat_labels = []
+        actual_durations = []
         input_index = 0
         for index, clip in enumerate(clips):
             info = probe_media(clip)
             streams = info.get("streams", [])
             duration = float((info.get("format") or {}).get("duration") or shots[index].duration_seconds or 5)
             duration = max(1.0, duration)
+            actual_durations.append(duration)
             ffmpeg_args += ["-i", str(clip)]
             filters.append(
                 f"[{input_index}:v:0]scale=1920:1080:force_original_aspect_ratio=decrease,"
@@ -396,8 +398,7 @@ def render_episode_from_shots(
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
-        for shot in shots:
-            duration = max(1.0, float(shot.duration_seconds or 5))
+        for shot, duration in zip(shots, actual_durations):
             dialogue = (shot.dialogue or "").strip()
             if dialogue:
                 subtitle_lines.extend([
@@ -411,7 +412,7 @@ def render_episode_from_shots(
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
-            subtitle_file.write_text("\\n".join(subtitle_lines), encoding="utf-8-sig")
+            subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
             subtitle_path = str(subtitle_file)
             db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
         db.add(MediaFile(
