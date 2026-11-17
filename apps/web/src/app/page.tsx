@@ -5,7 +5,7 @@ const features = [
     title: "AI漫剧制作",
     description: "导入小说，自动识别人物、场景和道具，生成剧本、分镜与漫剧视频。",
     action: "开始制作",
-    href: "#"
+    href: "/novels"
   },
   {
     number: "02",
@@ -13,7 +13,7 @@ const features = [
     title: "AI智能剪辑",
     description: "上传原视频，根据文字要求自动剪辑；也可以直接根据文字生成视频。",
     action: "开始剪辑",
-    href: "#"
+    href: "/video-editor"
   },
   {
     number: "03",
@@ -21,7 +21,7 @@ const features = [
     title: "剧本与智能分镜",
     description: "小说自动改编剧本，智能规划镜头、动作、对白和场景。",
     action: "开始创作",
-    href: "#"
+    href: "/storyboard"
   },
   {
     number: "04",
@@ -29,7 +29,7 @@ const features = [
     title: "三维视觉素材",
     description: "生成人物三视图、场景与道具视觉素材，保持角色形象一致。",
     action: "开始生成",
-    href: "#"
+    href: "/visual-studio"
   }
 ];
 
@@ -38,29 +38,29 @@ const navigation = [
     title: "创作空间",
     items: [
       ["✍️", "小说创作", "/novels"],
-      ["📁", "项目管理"],
-      ["👤", "人物角色", "/characters"],
-      ["🏞️", "场景设定", "/scenes"],
-      ["💎", "道具素材", "/props"],
-      ["🌌", "世界观设定", "/world"]
+      ["📁", "项目管理", "/novels"],
+      ["👤", "人物角色", "/visual-studio"],
+      ["🏞️", "场景设定", "/visual-studio"],
+      ["💎", "道具素材", "/visual-studio"],
+      ["🌌", "世界观设定", "/novels"]
     ]
   },
   {
     title: "AI创作中心",
     items: [
-      ["🎬", "AI漫剧制作"],
-      ["✂️", "AI视频剪辑"],
-      ["📜", "剧本与分镜"],
-      ["🧊", "三维素材生成"]
+      ["🎬", "AI漫剧制作", "/novels"],
+      ["✂️", "AI视频剪辑", "/video-editor"],
+      ["📜", "剧本与分镜", "/storyboard"],
+      ["🧊", "三维素材生成", "/visual-studio"]
     ]
   },
   {
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
-      ["📊", "AI使用统计"],
+      ["📊", "AI使用统计", "/ai-center"],
       ["🗄️", "素材库", "/assets"],
-      ["🔧", "系统设置"]
+      ["🔧", "系统设置", "/ai-center"]
     ]
   }
 ];
@@ -68,6 +68,7 @@ const navigation = [
 export default function Home() {
   return (
     <main className="cosmic min-h-screen">
+      <div className="black-hole" aria-hidden="true" />
       <div className="nebula nebula-one" />
       <div className="nebula nebula-two" />
             <div className="nebula-cloud nebula-cloud-a" />
@@ -113,14 +114,14 @@ export default function Home() {
                 {group.title}
               </div>
 
-              {group.items.map(([icon, title]) => (
+              {group.items.map((item) => (
                 <a
-                  href="#"
-                  key={title}
+                  href={item[2]}
+                  key={item[1]}
                   className="nav-item"
                 >
-                  <span>{icon}</span>
-                  {title}
+                  <span>{item[0]}</span>
+                  {item[1]}
                 </a>
               ))}
             </div>
@@ -233,25 +234,26 @@ export default function Home() {
                   AI将帮助你完成从剧本到视频的创作。
                 </p>
 
-                <button className="primary-button">
+                <a href="/novels" className="primary-button inline-block text-center">
                   ＋ 创建新项目
-                </button>
+                </a>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
                 {[
-                  ["📖", "小说解析"],
-                  ["👥", "人物识别"],
-                  ["🎞️", "智能分镜"],
-                  ["🎥", "视频生成"]
-                ].map(([icon, name]) => (
-                  <div
+                  ["📖", "小说解析", "/novels"],
+                  ["👥", "人物识别", "/visual-studio"],
+                  ["🎞️", "智能分镜", "/storyboard"],
+                  ["🎥", "视频生成", "/media-studio"]
+                ].map(([icon, name, href]) => (
+                  <a
+                    href={href}
                     key={name}
-                    className="rounded-xl bg-purple-900/30 border border-purple-500/20 p-4 text-center"
+                    className="rounded-xl bg-purple-900/30 border border-purple-500/20 p-4 text-center hover:border-purple-300/70 transition-colors"
                   >
                     <div className="text-2xl mb-2">{icon}</div>
                     <div className="text-xs text-purple-200">{name}</div>
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>
