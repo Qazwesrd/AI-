@@ -221,7 +221,7 @@ export default function VisualStudioPage() {
       const response = await fetch(API + "/api/visual/assets/" + assetId + "/prompt");
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "提示词生成失败");
-      setPrompt(result.positive_prompt + "\\n\\n负面提示词：" + result.negative_prompt);
+      setPrompt(result.positive_prompt + "\n\n负面提示词：" + result.negative_prompt);
       setSelectedAsset(assetId);
       setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
     } catch (error) {
