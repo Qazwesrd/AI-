@@ -304,8 +304,8 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
             raw = result["choices"][0]["message"]["content"]
             if isinstance(raw, list):
                 raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
-            raw = re.sub(r"^```(?:json)?\\s*", "", str(raw).strip())
-            raw = re.sub(r"\\s*```$", "", raw)
+            raw = re.sub(r"^```(?:json)?\s*", "", str(raw).strip())
+            raw = re.sub(r"\s*```$", "", raw)
             try:
                 decision = json.loads(raw)
             except json.JSONDecodeError:
@@ -402,8 +402,8 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         raw = result["choices"][0]["message"]["content"]
         if isinstance(raw, list):
             raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
-        raw = re.sub(r"^```(?:json)?\\s*", "", str(raw).strip())
-        raw = re.sub(r"\\s*```$", "", raw)
+        raw = re.sub(r"^```(?:json)?\s*", "", str(raw).strip())
+        raw = re.sub(r"\s*```$", "", raw)
         try:
             generated = json.loads(raw)
         except json.JSONDecodeError:
