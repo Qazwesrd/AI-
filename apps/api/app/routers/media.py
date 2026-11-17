@@ -101,6 +101,7 @@ class VideoTaskInput(BaseModel):
 class EpisodeVideoInput(BaseModel):
     provider: str
     model: str
+    batch_size: int = Field(default=3, ge=1, le=6)
     confirm_paid: bool = False
     create_path: str = "/videos/generations"
     status_path_template: str = "/videos/{task_id}"
@@ -153,11 +154,10 @@ def generate_episode_shot_videos(
         if (task.request_data or {}).get("episode_id") == episode_id
         and task.status not in ("failed", "cancelled")
     }
+    pending_shots = [shot for shot in shots if shot.id not in submitted]
+    batch_shots = pending_shots[:data.batch_size]
     created, skipped, failures = [], [], []
-    for shot in shots:
-        if shot.id in submitted:
-            skipped.append(shot.id)
-            continue
+    for shot in batch_shots:
         prompt_parts = [
             "制作一段用于漫剧的连续镜头视频。整体风格：" + str(project.adaptation_style),
             "分集：" + str(episode.title),
@@ -234,13 +234,17 @@ def generate_episode_shot_videos(
                              "error": str(exc)[:1200]})
     episode.status = "video_generating" if created or skipped else "video_failed"
     db.commit()
+    remaining = max(0, len(pending_shots) - len(batch_shots))
+    done = remaining == 0 and not failures
     return {
         "success": not failures,
+        "done": done,
+        "remaining": remaining,
         "episode_id": episode_id,
         "created": created,
         "skipped_existing": skipped,
         "failures": failures,
-        "message": f"已提交 {len(created)} 个镜头视频任务，跳过 {len(skipped)} 个已有任务，失败 {len(failures)} 个。"
+        "message": f"本批提交 {len(created)} 个镜头视频任务，失败 {len(failures)} 个，尚有 {remaining} 个未处理镜头。"
     }
 
 
