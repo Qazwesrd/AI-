@@ -200,7 +200,25 @@ def list_chapters(novel_id: int, db: Session = Depends(get_db)):
     items = db.query(Chapter).filter(
         Chapter.novel_id == novel_id
     ).order_by(Chapter.chapter_number).all()
-    return {"items": [chapter_dict(x) for x in items], "total": len(items)}
+    # Return directory metadata only. Chapter bodies are fetched on demand so
+    # very long novels do not transfer hundreds of full chapters at once.
+    return {
+        "items": [{
+            "id": x.id,
+            "novel_id": x.novel_id,
+            "chapter_number": x.chapter_number,
+            "title": x.title,
+            "word_count": x.word_count,
+        } for x in items],
+        "total": len(items),
+    }
+
+@router.get("/chapters/{chapter_id}")
+def get_chapter(chapter_id: int, db: Session = Depends(get_db)):
+    item = db.query(Chapter).filter(Chapter.id == chapter_id).first()
+    if not item:
+        raise HTTPException(404, "章节不存在")
+    return chapter_dict(item)
 
 @router.put("/chapters/{chapter_id}")
 def update_chapter(
