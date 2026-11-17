@@ -1,0 +1,343 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+
+type Novel = { id: number; title?: string; name?: string };
+type Project = { id: number; novel_id: number; name: string; adaptation_style: string; status: string };
+type Episode = {
+  id: number; episode_number: number; title: string; source_text: string;
+  synopsis: string; screenplay: string; duration_seconds: number; status: string;
+};
+type Shot = {
+  id: number; shot_number: number; scene_name: string; shot_type: string;
+  camera_movement: string; duration_seconds: number; visual_description: string;
+  character_actions: string; dialogue: string; sound_effects: string; image_prompt: string;
+};
+type VisualAsset = { id: number; category: string; name: string; description: string };
+
+const styles = [
+  "3D动漫电影风格", "真人电影风格", "2D动漫风格",
+  "国风漫画风格", "水墨动画风格", "自定义参考图风格",
+];
+
+export default function StoryboardPage() {
+  const [novels, setNovels] = useState<Novel[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [episodes, setEpisodes] = useState<Episode[]>([]);
+  const [shots, setShots] = useState<Shot[]>([]);
+  const [assets, setAssets] = useState<VisualAsset[]>([]);
+  const [novelId, setNovelId] = useState("");
+  const [projectId, setProjectId] = useState<number | null>(null);
+  const [episodeId, setEpisodeId] = useState<number | null>(null);
+  const [projectName, setProjectName] = useState("");
+  const [style, setStyle] = useState(styles[0]);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const [shotForm, setShotForm] = useState({
+    scene_name: "", shot_type: "中景", camera_movement: "固定镜头",
+    duration_seconds: 5, visual_description: "", character_actions: "",
+    dialogue: "", sound_effects: "", image_prompt: "",
+  });
+
+  const panel = "rounded-2xl border border-purple-300/20 bg-slate-950/65 p-5 shadow-xl shadow-purple-950/20";
+  const field = "w-full rounded-xl border border-purple-300/20 bg-slate-900/80 px-3 py-2.5 text-sm text-white outline-none focus:border-purple-400";
+  const button = "rounded-xl border border-purple-300/30 bg-purple-600/80 px-4 py-2 text-sm font-medium text-white transition hover:bg-purple-500 disabled:opacity-50";
+
+  async function request(path: string, options?: RequestInit) {
+    const response = await fetch(`${API}${path}`, options);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.detail || "请求失败");
+    return result;
+  }
+
+  async function loadBase() {
+    try {
+      const [n, p, a] = await Promise.all([
+        request("/api/story/novels"),
+        request("/api/story/projects"),
+        request("/api/story/assets"),
+      ]);
+      setNovels(n);
+      setProjects(p);
+      setAssets(a);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取数据失败");
+    }
+  }
+
+  async function loadProject(id: number) {
+    const result = await request(`/api/story/projects/${id}`);
+    setProjectId(id);
+    setEpisodes(result.episodes);
+    setEpisodeId(null);
+    setShots([]);
+  }
+
+  async function loadShots(id: number) {
+    const result = await request(`/api/story/episodes/${id}/shots`);
+    setShots(result);
+    setEpisodeId(id);
+  }
+
+  useEffect(() => { loadBase(); }, []);
+
+  async function createProject() {
+    if (!novelId) return setMessage("请先选择小说");
+    setBusy(true);
+    try {
+      const result = await request("/api/story/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          novel_id: Number(novelId),
+          name: projectName || "小说漫剧改编项目",
+          adaptation_style: style,
+          target_duration: 120,
+          min_duration: 90,
+          max_duration: 150,
+        }),
+      });
+      setMessage("改编项目已创建");
+      await loadBase();
+      await loadProject(result.project.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "创建失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function planEpisodes() {
+    if (!projectId) return setMessage("请先选择剧本项目");
+    setBusy(true);
+    try {
+      const result = await request(`/api/story/projects/${projectId}/plan`, { method: "POST" });
+      setEpisodes(result.episodes);
+      setMessage(result.message);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "分集规划失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateEpisode(episode: Episode, patch: Partial<Episode>) {
+    try {
+      await request(`/api/story/episodes/${episode.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (projectId) await loadProject(projectId);
+      setMessage("分集信息已保存");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存失败");
+    }
+  }
+
+  async function splitEpisode(id: number) {
+    try {
+      await request(`/api/story/episodes/${id}/split`, { method: "POST" });
+      if (projectId) await loadProject(projectId);
+      setMessage("分集已拆分");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "拆分失败");
+    }
+  }
+
+  async function mergeEpisodes() {
+    if (!projectId || episodes.length < 2) return;
+    const ids = episodes.slice(0, 2).map(x => x.id);
+    try {
+      await request(`/api/story/projects/${projectId}/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episode_ids: ids, title: "合并分集" }),
+      });
+      await loadProject(projectId);
+      setMessage("前两集已合并");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "合并失败");
+    }
+  }
+
+  async function moveEpisode(index: number, direction: number) {
+    if (!projectId) return;
+    const next = [...episodes];
+    const target = index + direction;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    try {
+      await request(`/api/story/projects/${projectId}/reorder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episode_ids: next.map(x => x.id) }),
+      });
+      await loadProject(projectId);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "排序失败");
+    }
+  }
+
+  async function addShot() {
+    if (!episodeId) return setMessage("请先选择分集");
+    try {
+      await request(`/api/story/episodes/${episodeId}/shots`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...shotForm,
+          shot_number: shots.length + 1,
+          sort_order: shots.length + 1,
+        }),
+      });
+      await loadShots(episodeId);
+      setMessage("分镜镜头已保存");
+      setShotForm({
+        scene_name: "", shot_type: "中景", camera_movement: "固定镜头",
+        duration_seconds: 5, visual_description: "", character_actions: "",
+        dialogue: "", sound_effects: "", image_prompt: "",
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "创建分镜失败");
+    }
+  }
+
+  async function deleteShot(id: number) {
+    try {
+      await request(`/api/story/shots/${id}`, { method: "DELETE" });
+      if (episodeId) await loadShots(episodeId);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除镜头失败");
+    }
+  }
+
+  async function linkAsset(shot: Shot, assetId: number) {
+    try {
+      await request(`/api/story/shots/${shot.id}/assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id: assetId, role: "visual" }),
+      });
+      setMessage(`已将素材关联到镜头 #${shot.shot_number}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材关联失败");
+    }
+  }
+
+  return (
+    <main className="min-h-screen space-y-6 p-6 text-white">
+      <header>
+        <div className="text-sm text-purple-300">AI COMIC STUDIO / STORYBOARD</div>
+        <h1 className="mt-2 text-3xl font-bold">剧本改编与智能分镜中心</h1>
+        <p className="mt-2 text-sm text-slate-300">小说 → 分集规划 → 影视剧本 → 镜头分镜 → 视觉素材匹配</p>
+      </header>
+
+      {message && <div className="rounded-xl border border-purple-300/20 bg-purple-950/50 p-3 text-sm text-purple-100">{message}</div>}
+
+      <section className={panel}>
+        <h2 className="mb-4 text-xl font-semibold">创建小说改编项目</h2>
+        <div className="grid gap-3 md:grid-cols-2">
+          <select className={field} value={novelId} onChange={e => setNovelId(e.target.value)}>
+            <option value="">选择已导入的小说</option>
+            {novels.map(n => <option key={n.id} value={n.id}>{n.title || n.name || `小说 #${n.id}`}</option>)}
+          </select>
+          <input className={field} value={projectName} onChange={e => setProjectName(e.target.value)} placeholder="改编项目名称" />
+          <select className={field} value={style} onChange={e => setStyle(e.target.value)}>
+            {styles.map(s => <option key={s}>{s}</option>)}
+          </select>
+          <div className="rounded-xl border border-purple-300/15 bg-slate-900/70 p-3 text-sm text-slate-300">
+            单集目标 120 秒；允许 90–150 秒。每章初步规划为 1 集，超长章节可拆为 2 集。
+          </div>
+        </div>
+        <button className={`${button} mt-4`} disabled={busy} onClick={createProject}>创建改编项目</button>
+      </section>
+
+      <section className={panel}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-xl font-semibold">改编项目与自动分集</h2>
+          <select className={`${field} max-w-sm`} value={projectId ?? ""} onChange={e => e.target.value && loadProject(Number(e.target.value))}>
+            <option value="">选择已有改编项目</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}（#{p.id}）</option>)}
+          </select>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className={button} disabled={!projectId || busy} onClick={planEpisodes}>生成初步分集计划</button>
+          <button className="rounded-xl border border-sky-300/30 bg-sky-800/60 px-4 py-2 text-sm" disabled={episodes.length < 2} onClick={mergeEpisodes}>合并前两集</button>
+        </div>
+        <p className="mt-2 text-xs text-slate-400">当前自动分集按章节长度进行初步规划；AI剧情理解、剧本改编将在后续 AI 编排阶段接入。</p>
+        <div className="mt-4 space-y-3">
+          {episodes.map((ep, index) => (
+            <article key={ep.id} className={`rounded-xl border p-4 ${episodeId === ep.id ? "border-purple-400 bg-purple-950/40" : "border-purple-300/15 bg-slate-900/70"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button className="text-left font-semibold hover:text-purple-300" onClick={() => loadShots(ep.id)}>
+                  第 {ep.episode_number} 集：{ep.title}
+                </button>
+                <span className="text-xs text-slate-400">{ep.duration_seconds} 秒 · {ep.status}</span>
+              </div>
+              <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
+                <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
+                <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, -1)}>上移</button>
+                <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, 1)}>下移</button>
+                <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => updateEpisode(ep, { duration_seconds: Math.min(150, ep.duration_seconds + 10) })}>时长 +10 秒</button>
+              </div>
+            </article>
+          ))}
+          {episodes.length === 0 && <p className="text-sm text-slate-400">选择或创建项目后，生成分集计划。</p>}
+        </div>
+      </section>
+
+      <section className={panel}>
+        <h2 className="mb-4 text-xl font-semibold">分镜镜头编辑器</h2>
+        {!episodeId ? (
+          <p className="text-sm text-slate-400">请先在上方选择一集，进入镜头编辑。</p>
+        ) : (
+          <>
+            <div className="grid gap-3 md:grid-cols-2">
+              <input className={field} placeholder="场景名称" value={shotForm.scene_name} onChange={e => setShotForm({ ...shotForm, scene_name: e.target.value })} />
+              <select className={field} value={shotForm.shot_type} onChange={e => setShotForm({ ...shotForm, shot_type: e.target.value })}>
+                {["远景", "全景", "中景", "近景", "特写", "大特写", "俯拍", "仰拍", "主观镜头"].map(x => <option key={x}>{x}</option>)}
+              </select>
+              <select className={field} value={shotForm.camera_movement} onChange={e => setShotForm({ ...shotForm, camera_movement: e.target.value })}>
+                {["固定镜头", "推进", "拉远", "横移", "跟拍", "环绕", "摇镜头", "升降", "手持"].map(x => <option key={x}>{x}</option>)}
+              </select>
+              <input className={field} type="number" min="1" max="120" value={shotForm.duration_seconds} onChange={e => setShotForm({ ...shotForm, duration_seconds: Number(e.target.value) })} placeholder="镜头时长（秒）" />
+              <textarea className={`${field} md:col-span-2`} rows={2} placeholder="画面内容、构图、光线、环境" value={shotForm.visual_description} onChange={e => setShotForm({ ...shotForm, visual_description: e.target.value })} />
+              <textarea className={field} rows={2} placeholder="人物动作、表情、走位" value={shotForm.character_actions} onChange={e => setShotForm({ ...shotForm, character_actions: e.target.value })} />
+              <textarea className={field} rows={2} placeholder="对白 / 旁白" value={shotForm.dialogue} onChange={e => setShotForm({ ...shotForm, dialogue: e.target.value })} />
+              <textarea className={field} rows={2} placeholder="音效与环境声" value={shotForm.sound_effects} onChange={e => setShotForm({ ...shotForm, sound_effects: e.target.value })} />
+              <textarea className={`${field} md:col-span-2`} rows={3} placeholder="供图片或视频模型使用的镜头提示词" value={shotForm.image_prompt} onChange={e => setShotForm({ ...shotForm, image_prompt: e.target.value })} />
+            </div>
+            <button className={`${button} mt-3`} onClick={addShot}>保存分镜镜头</button>
+          </>
+        )}
+        <div className="mt-5 space-y-3">
+          {shots.map(shot => (
+            <article key={shot.id} className="rounded-xl border border-purple-300/15 bg-slate-900/70 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-semibold">镜头 {shot.shot_number} · {shot.shot_type} · {shot.camera_movement}</h3>
+                <button className="text-xs text-red-300" onClick={() => deleteShot(shot.id)}>删除</button>
+              </div>
+              <p className="mt-2 text-sm text-slate-300">{shot.visual_description || "尚未填写画面描述"}</p>
+              <p className="mt-1 text-xs text-slate-400">场景：{shot.scene_name || "未指定"} · 时长：{shot.duration_seconds} 秒</p>
+              {shot.dialogue && <p className="mt-2 text-sm text-purple-200">对白：{shot.dialogue}</p>}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-400">关联视觉素材：</span>
+                <select className="max-w-xs rounded-lg border border-purple-300/20 bg-slate-950 px-2 py-1 text-xs" defaultValue="" onChange={e => e.target.value && linkAsset(shot, Number(e.target.value))}>
+                  <option value="">选择人物/场景/道具</option>
+                  {assets.map(a => <option key={a.id} value={a.id}>{a.name}（{a.category}）</option>)}
+                </select>
+              </div>
+            </article>
+          ))}
+          {episodeId && shots.length === 0 && <p className="text-sm text-slate-400">当前分集还没有分镜镜头。</p>}
+        </div>
+      </section>
+    </main>
+  );
+}

@@ -1,0 +1,1952 @@
+﻿AI漫剧制作大师 - 集中诊断报告
+诊断时间: 2026-11-17 13:25:29
+项目路径: D:\AI漫剧制作大师
+
+========== 目录检查: apps\api ==========
+存在
+
+========== 目录检查: apps\api\app ==========
+存在
+
+========== 目录检查: apps\api\app\routers ==========
+存在
+
+========== 目录检查: apps\api\app\services ==========
+存在
+
+========== 目录检查: apps\web ==========
+存在
+
+========== 目录检查: apps\web\src\app ==========
+存在
+
+========== 目录检查: apps\desktop ==========
+存在
+
+========== 目录检查: scripts ==========
+存在
+
+========== 目录检查: storage ==========
+存在
+
+========== 文件: apps\api\requirements.txt ==========
+存在
+
+========== 文件: apps\api\build_entry.py ==========
+存在
+
+========== 文件: apps\api\app\main.py ==========
+存在
+
+========== 文件: apps\api\app\database.py ==========
+存在
+
+========== 文件: apps\api\app\routers\novels.py ==========
+存在
+
+========== 文件: apps\api\app\routers\studio.py ==========
+存在
+
+========== 文件: apps\api\app\routers\visual.py ==========
+存在
+
+========== 文件: apps\api\app\routers\story.py ==========
+存在
+
+========== 文件: apps\api\app\routers\media.py ==========
+存在
+
+========== 文件: apps\api\app\routers\video_editor.py ==========
+存在
+
+========== 文件: apps\api\app\services\media_service.py ==========
+存在
+
+========== 文件: apps\web\package.json ==========
+存在
+
+========== 文件: apps\web\next.config.ts ==========
+存在
+
+========== 文件: apps\web\src\lib\api-config.ts ==========
+缺失
+
+========== 文件: apps\desktop\package.json ==========
+存在
+
+========== 文件: apps\desktop\main.cjs ==========
+存在
+
+========== 文件: apps\desktop\preload.cjs ==========
+存在
+
+========== 文件: scripts\build-windows.ps1 ==========
+存在
+
+========== 运行环境 ==========
+Node: v26.13.0
+NPM: 11.20.0
+Python: Python 3.12.10
+PowerShell: 5.1.26100.9843
+
+========== 前端 package.json ==========
+scripts:
+{
+    "dev":  "next dev",
+    "build":  "next build",
+    "start":  "next start",
+    "lint":  "eslint"
+}
+dependencies:
+{
+    "next":  "16.4.6",
+    "react":  "19.3.0",
+    "react-dom":  "19.3.0"
+}
+
+========== 桌面端打包配置 ==========
+版本: 1.0.0
+脚本:
+{
+    "api":  "cd ..\\api \u0026\u0026 .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
+    "dev":  "concurrently -k \"npm --prefix ../web run dev\" \"npm run api\" \"wait-on tcp:3000 tcp:8000 \u0026\u0026 electron .\"",
+    "build:desktop":  "electron-builder --win nsis",
+    "build:windows":  "powershell -ExecutionPolicy Bypass -File ../../scripts/build-windows.ps1",
+    "start:desktop":  "electron ."
+}
+Build:
+{
+    "appId":  "com.aicomic.studio",
+    "productName":  "AI婕墽鍒朵綔澶у笀",
+    "directories":  {
+                        "output":  "release"
+                    },
+    "files":  [
+                  "main.cjs",
+                  "preload.cjs",
+                  "package.json"
+              ],
+    "extraResources":  [
+                           {
+                               "from":  "../api/dist/ai-comic-api.exe",
+                               "to":  "api/ai-comic-api.exe"
+                           },
+                           {
+                               "from":  "../web/.next/standalone",
+                               "to":  "web"
+                           },
+                           {
+                               "from":  "../web/.next/static",
+                               "to":  "web/.next/static"
+                           },
+                           {
+                               "from":  "../web/public",
+                               "to":  "web/public"
+                           }
+                       ],
+    "win":  {
+                "artifactName":  "${productName}-Setup-${version}.${ext}",
+                "target":  [
+                               "nsis"
+                           ]
+            },
+    "nsis":  {
+                 "createDesktopShortcut":  true,
+                 "shortcutName":  "AI婕墽鍒朵綔澶у笀",
+                 "allowToChangeInstallationDirectory":  true,
+                 "oneClick":  false,
+                 "createStartMenuShortcut":  true
+             },
+    "artifactName":  "${productName}-Setup-${version}.${ext}"
+}
+
+========== 源码内容: apps\desktop\main.cjs ==========
+const { app, BrowserWindow, dialog } = require("electron");
+const { spawn } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+const net = require("net");
+
+let mainWindow = null;
+let apiProcess = null;
+let webProcess = null;
+let quitting = false;
+
+const API_PORT = 8000;
+const WEB_PORT = 3000;
+
+function waitForPort(port, timeout = 120000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+
+    function check() {
+      const socket = new net.Socket();
+      socket.setTimeout(1500);
+
+      socket.once("connect", () => {
+        socket.destroy();
+        resolve(true);
+      });
+
+      socket.once("error", () => {
+        socket.destroy();
+        if (Date.now() - start > timeout) {
+          reject(new Error(`绛夊緟绔彛 ${port} 瓒呮椂`));
+        } else {
+          setTimeout(check, 1000);
+        }
+      });
+
+      socket.once("timeout", () => {
+        socket.destroy();
+        if (Date.now() - start > timeout) {
+          reject(new Error(`绛夊緟绔彛 ${port} 瓒呮椂`));
+        } else {
+          setTimeout(check, 1000);
+        }
+      });
+
+      socket.connect(port, "127.0.0.1");
+    }
+
+    check();
+  });
+}
+
+function startProductionServices() {
+  const resources = process.resourcesPath;
+  const apiExe = path.join(resources, "api", "ai-comic-api.exe");
+  const webServer = path.join(resources, "web", "server.js");
+  const dataDir = app.getPath("userData");
+
+  fs.mkdirSync(dataDir, { recursive: true });
+
+  if (!fs.existsSync(apiExe)) {
+    throw new Error(`鎵句笉鍒板悗绔▼搴忥細${apiExe}`);
+  }
+
+  if (!fs.existsSync(webServer)) {
+    throw new Error(`鎵句笉鍒板墠绔▼搴忥細${webServer}`);
+  }
+
+  apiProcess = spawn(apiExe, [], {
+    cwd: resources,
+    windowsHide: true,
+    env: {
+      ...process.env,
+      APP_DATA_DIR: dataDir,
+      PYTHONUNBUFFERED: "1",
+      FFMPEG_PATH: process.env.FFMPEG_PATH || "ffmpeg",
+      FFPROBE_PATH: process.env.FFPROBE_PATH || "ffprobe"
+    }
+  });
+
+  apiProcess.on("error", error => {
+    console.error("鍚庣鍚姩澶辫触锛?, error);
+  });
+
+  apiProcess.stdout?.on("data", data => {
+    console.log("[API]", data.toString());
+  });
+
+  apiProcess.stderr?.on("data", data => {
+    console.error("[API]", data.toString());
+  });
+
+  webProcess = spawn(process.execPath, [webServer], {
+    cwd: path.join(resources, "web"),
+    windowsHide: true,
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PORT: String(WEB_PORT),
+      HOSTNAME: "127.0.0.1",
+      NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:8000"
+    }
+  });
+
+  webProcess.on("error", error => {
+    console.error("鍓嶇鍚姩澶辫触锛?, error);
+  });
+
+  webProcess.stdout?.on("data", data => {
+    console.log("[WEB]", data.toString());
+  });
+
+  webProcess.stderr?.on("data", data => {
+    console.error("[WEB]", data.toString());
+  });
+}
+
+async function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1600,
+    height: 950,
+    minWidth: 1100,
+    minHeight: 700,
+    show: false,
+    autoHideMenuBar: true,
+    backgroundColor: "#10091f",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  if (app.isPackaged) {
+    startProductionServices();
+
+    await waitForPort(API_PORT);
+    await waitForPort(WEB_PORT);
+
+    await mainWindow.loadURL("http://127.0.0.1:3000");
+  } else {
+    await mainWindow.loadURL("http://127.0.0.1:3000");
+  }
+}
+
+function stopServices() {
+  for (const child of [webProcess, apiProcess]) {
+    if (child && !child.killed) {
+      try {
+        child.kill();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  }
+}
+
+app.whenReady().then(async () => {
+  try {
+    await createWindow();
+  } catch (error) {
+    dialog.showErrorBox(
+      "AI婕墽鍒朵綔澶у笀鍚姩澶辫触",
+      String(error.message || error)
+    );
+    app.quit();
+  }
+});
+
+app.on("before-quit", () => {
+  quitting = true;
+  stopServices();
+});
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0 && !quitting) {
+    createWindow();
+  }
+});
+
+
+========== 源码内容: apps\desktop\preload.cjs ==========
+const { contextBridge } = require("electron");
+
+contextBridge.exposeInMainWorld("desktopAPI", {
+  platform: process.platform,
+  isDesktop: true
+});
+
+
+========== 源码内容: apps\api\app\database.py ==========
+import os
+from pathlib import Path
+from importlib import import_module
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+Base = declarative_base()
+
+APP_ROOT = Path(__file__).resolve().parents[3]
+DATA_ROOT = Path(os.environ.get("APP_DATA_DIR", str(APP_ROOT)))
+ROOT_DIR = DATA_ROOT
+STORAGE_DIR = DATA_ROOT / "storage"
+STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+DATABASE_PATH = STORAGE_DIR / "ai_comic_studio.db"
+
+engine = create_engine(
+    f"sqlite:///{DATABASE_PATH.as_posix()}",
+    connect_args={"check_same_thread": False},
+    future=True
+)
+
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+MODEL_MODULES = [
+    "app.models.novel",
+    "app.models.studio",
+    "app.models.visual",
+    "app.models.story",
+    "app.models.media",
+    "app.models.editing",
+]
+
+
+def init_database():
+    print("正在注册数据库模型……")
+
+    for module_name in MODEL_MODULES:
+        try:
+            import_module(module_name)
+            print(f"[模型已注册] {module_name}")
+        except ModuleNotFoundError as exc:
+            if exc.name == module_name:
+                print(f"[跳过不存在的模型] {module_name}")
+            else:
+                print(f"[模型依赖错误] {module_name}: {exc}")
+                raise
+
+    Base.metadata.create_all(bind=engine)
+    print(f"[数据库初始化完成] {DATABASE_PATH}")
+
+    return True
+
+
+
+========== 源码内容: apps\api\app\main.py ==========
+import importlib
+import logging
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.database import init_database
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ai_comic_studio")
+
+app = FastAPI(
+    title="AI婕墽鍒朵綔澶у笀 API",
+    description="灏忚鏀圭紪銆丄I鍒涗綔銆佽瑙夌礌鏉愩€佸垎闀溿€佽棰戠敓浜т笌鍓緫",
+    version="1.0.0"
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+ROUTER_MODULES = [
+    "app.routers.novels",
+    "app.routers.studio",
+    "app.routers.visual",
+    "app.routers.story",
+    "app.routers.media",
+    "app.routers.video_editor",
+]
+
+_loaded_routers = []
+
+
+def register_routers():
+    for module_name in ROUTER_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+            router = getattr(module, "router", None)
+
+            if router is None:
+                router = getattr(module, "api_router", None)
+
+            if router is None:
+                logger.warning("妯″潡娌℃湁鎵惧埌 router锛?s", module_name)
+                continue
+
+            app.include_router(router)
+            _loaded_routers.append(module_name)
+            logger.info("璺敱娉ㄥ唽鎴愬姛锛?s", module_name)
+
+        except ModuleNotFoundError as exc:
+            if exc.name == module_name:
+                logger.warning("璺敱妯″潡涓嶅瓨鍦紝璺宠繃锛?s", module_name)
+            else:
+                logger.exception("璺敱渚濊禆瀵煎叆澶辫触锛?s", module_name)
+
+        except Exception:
+            logger.exception("璺敱鍔犺浇澶辫触锛?s", module_name)
+
+
+register_routers()
+
+
+@app.on_event("startup")
+def startup_event():
+    init_database()
+    logger.info("AI婕墽鍒朵綔澶у笀 API 宸插惎鍔?)
+
+
+@app.get("/")
+def root():
+    return {
+        "application": "AI婕墽鍒朵綔澶у笀",
+        "status": "running",
+        "version": "1.0.0"
+    }
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "database": "initialized",
+        "loaded_routers": _loaded_routers
+    }
+
+
+@app.get("/api/system/modules")
+def system_modules():
+    return {
+        "loaded_routers": _loaded_routers,
+        "available_routers": ROUTER_MODULES
+    }
+
+
+========== 源码内容: apps\api\app\routers\studio.py ==========
+import os
+import uuid
+import json
+import urllib.request
+import urllib.error
+from pathlib import Path
+from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet, InvalidToken
+from app.database import get_db, ROOT_DIR
+from app.models.studio import (
+    StudioResource, AIProviderConfig, AIRuntimeSetting,
+    AIUsageLog, MediaAsset
+)
+
+router = APIRouter(prefix="/api", tags=["AI绠＄悊涓庣礌鏉愪腑蹇?])
+
+SECRET_DIR = ROOT_DIR / "storage" / "secrets"
+SECRET_DIR.mkdir(parents=True, exist_ok=True)
+KEY_FILE = SECRET_DIR / "local.key"
+ASSET_DIR = ROOT_DIR / "storage" / "assets"
+ASSET_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_cipher():
+    if not KEY_FILE.exists():
+        KEY_FILE.write_bytes(Fernet.generate_key())
+    return Fernet(KEY_FILE.read_bytes())
+
+def encrypt_key(value):
+    if not value:
+        return ""
+    return get_cipher().encrypt(value.encode("utf-8")).decode("utf-8")
+
+def decrypt_key(value):
+    if not value:
+        return ""
+    try:
+        return get_cipher().decrypt(value.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        raise HTTPException(500, "API瀵嗛挜瑙ｅ瘑澶辫触锛岃妫€鏌ユ湰鍦板瘑閽ユ枃浠?)
+
+def runtime(db):
+    row = db.query(AIRuntimeSetting).first()
+    if not row:
+        row = AIRuntimeSetting(network_enabled=False, paid_api_allowed=False)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+def provider_dict(x):
+    return {
+        "id": x.id,
+        "provider": x.provider,
+        "display_name": x.display_name,
+        "base_url": x.base_url,
+        "model": x.model,
+        "enabled": x.enabled,
+        "paid": x.paid,
+        "purpose": x.purpose,
+        "has_api_key": bool(x.encrypted_api_key),
+    }
+
+def resource_dict(x):
+    return {
+        "id": x.id,
+        "category": x.category,
+        "name": x.name,
+        "description": x.description,
+        "data": x.data or {},
+        "image_path": x.image_path,
+        "confirmed": x.confirmed,
+        "created_at": x.created_at.isoformat() if x.created_at else None,
+    }
+
+def asset_dict(x):
+    return {
+        "id": x.id,
+        "filename": x.filename,
+        "category": x.category,
+        "mime_type": x.mime_type,
+        "file_size": x.file_size,
+        "description": x.description,
+        "url": f"/api/assets/{x.id}/download",
+        "created_at": x.created_at.isoformat() if x.created_at else None,
+    }
+
+class ProviderInput(BaseModel):
+    provider: str
+    display_name: str
+    base_url: str
+    model: str
+    api_key: str = ""
+    enabled: bool = False
+    paid: bool = True
+    purpose: str = "text"
+
+class RuntimeInput(BaseModel):
+    network_enabled: bool
+    paid_api_allowed: bool
+
+class ResourceInput(BaseModel):
+    name: str
+    description: str = ""
+    data: dict = {}
+    image_path: str = ""
+    confirmed: bool = False
+
+class ResourceUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    data: dict | None = None
+    image_path: str | None = None
+    confirmed: bool | None = None
+
+class ChatInput(BaseModel):
+    provider: str
+    messages: list[dict]
+    confirm_paid: bool = False
+    task: str = "chat"
+
+@router.get("/ai/providers")
+def list_providers(db: Session = Depends(get_db)):
+    items = db.query(AIProviderConfig).order_by(AIProviderConfig.id).all()
+    return {"items": [provider_dict(x) for x in items]}
+
+@router.post("/ai/providers")
+def save_provider(payload: ProviderInput, db: Session = Depends(get_db)):
+    provider_id = payload.provider.strip().lower()
+    if not provider_id:
+        raise HTTPException(400, "鏈嶅姟鍟嗘爣璇嗕笉鑳戒负绌?)
+
+    item = db.query(AIProviderConfig).filter(
+        AIProviderConfig.provider == provider_id
+    ).first()
+
+    if not item:
+        item = AIProviderConfig(provider=provider_id)
+        db.add(item)
+
+    item.display_name = payload.display_name
+    item.base_url = payload.base_url.rstrip("/")
+    item.model = payload.model
+    item.enabled = payload.enabled
+    item.paid = payload.paid
+    item.purpose = payload.purpose
+
+    if payload.api_key.strip():
+        item.encrypted_api_key = encrypt_key(payload.api_key.strip())
+
+    db.commit()
+    db.refresh(item)
+    return provider_dict(item)
+
+@router.delete("/ai/providers/{provider}")
+def delete_provider(provider: str, db: Session = Depends(get_db)):
+    item = db.query(AIProviderConfig).filter(
+        AIProviderConfig.provider == provider
+    ).first()
+    if not item:
+        raise HTTPException(404, "妯″瀷閰嶇疆涓嶅瓨鍦?)
+    db.delete(item)
+    db.commit()
+    return {"success": True}
+
+@router.get("/ai/runtime")
+def get_runtime(db: Session = Depends(get_db)):
+    x = runtime(db)
+    return {
+        "network_enabled": x.network_enabled,
+        "paid_api_allowed": x.paid_api_allowed,
+    }
+
+@router.put("/ai/runtime")
+def update_runtime(payload: RuntimeInput, db: Session = Depends(get_db)):
+    x = runtime(db)
+    x.network_enabled = payload.network_enabled
+    x.paid_api_allowed = payload.paid_api_allowed
+    db.commit()
+    return {
+        "success": True,
+        "network_enabled": x.network_enabled,
+        "paid_api_allowed": x.paid_api_allowed,
+    }
+
+@router.get("/ai/usage-logs")
+def usage_logs(db: Session = Depends(get_db)):
+    items = db.query(AIUsageLog).order_by(
+        AIUsageLog.created_at.desc()
+    ).limit(200).all()
+    return {
+        "items": [{
+            "id": x.id,
+            "provider": x.provider,
+            "model": x.model,
+            "task": x.task,
+            "status": x.status,
+            "detail": x.detail,
+            "created_at": x.created_at.isoformat(),
+        } for x in items]
+    }
+
+@router.post("/ai/chat")
+def ai_chat(payload: ChatInput, db: Session = Depends(get_db)):
+    settings = runtime(db)
+    config = db.query(AIProviderConfig).filter(
+        AIProviderConfig.provider == payload.provider.lower()
+    ).first()
+
+    if not settings.network_enabled:
+        raise HTTPException(403, "缃戠粶璋冪敤鎬诲紑鍏冲凡鍏抽棴")
+    if not config or not config.enabled:
+        raise HTTPException(400, "妯″瀷涓嶅瓨鍦ㄦ垨灏氭湭鍚敤")
+    if not config.base_url or not config.model or not config.encrypted_api_key:
+        raise HTTPException(400, "璇峰厛瀹屾暣閰嶇疆妯″瀷鍦板潃銆佹ā鍨嬪悕绉板拰 API 瀵嗛挜")
+    if config.paid and not (settings.paid_api_allowed and payload.confirm_paid):
+        raise HTTPException(403, "璇ユā鍨嬫爣璁颁负浠樿垂鏈嶅姟锛屽繀椤诲紑鍚粯璐规巿鏉冨苟鍦ㄦ湰娆¤姹傛槑纭‘璁?)
+
+    api_key = decrypt_key(config.encrypted_api_key)
+    url = config.base_url.rstrip("/") + "/chat/completions"
+    body = json.dumps({
+        "model": config.model,
+        "messages": payload.messages,
+    }).encode("utf-8")
+
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        db.add(AIUsageLog(
+            provider=config.provider,
+            model=config.model,
+            task=payload.task,
+            status="success",
+            detail="璇锋眰鎴愬姛",
+        ))
+        db.commit()
+        return {
+            "success": True,
+            "provider": config.provider,
+            "model": config.model,
+            "result": result,
+        }
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:3000]
+        db.add(AIUsageLog(
+            provider=config.provider,
+            model=config.model,
+            task=payload.task,
+            status="failed",
+            detail=detail,
+        ))
+        db.commit()
+        raise HTTPException(exc.code, f"妯″瀷鏈嶅姟杩斿洖閿欒锛歿detail}")
+    except Exception as exc:
+        db.add(AIUsageLog(
+            provider=config.provider,
+            model=config.model,
+            task=payload.task,
+            status="failed",
+            detail=str(exc)[:2000],
+        ))
+        db.commit()
+        raise HTTPException(502, f"妯″瀷璇锋眰澶辫触锛歿str(exc)}")
+
+RESOURCE_CATEGORIES = {
+    "characters", "relationships", "scenes", "props", "world",
+    "events", "scripts", "storyboards"
+}
+
+@router.get("/studio/{category}")
+def list_resources(category: str, db: Session = Depends(get_db)):
+    if category not in RESOURCE_CATEGORIES:
+        raise HTTPException(404, "涓嶆敮鎸佺殑绱犳潗鍒嗙被")
+    items = db.query(StudioResource).filter(
+        StudioResource.category == category
+    ).order_by(StudioResource.updated_at.desc()).all()
+    return {"items": [resource_dict(x) for x in items], "total": len(items)}
+
+@router.post("/studio/{category}")
+def create_resource(
+    category: str,
+    payload: ResourceInput,
+    db: Session = Depends(get_db),
+):
+    if category not in RESOURCE_CATEGORIES:
+        raise HTTPException(404, "涓嶆敮鎸佺殑绱犳潗鍒嗙被")
+    item = StudioResource(
+        category=category,
+        name=payload.name.strip(),
+        description=payload.description,
+        data=payload.data,
+        image_path=payload.image_path,
+        confirmed=payload.confirmed,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return resource_dict(item)
+
+@router.put("/studio/items/{item_id}")
+def update_resource(
+    item_id: int,
+    payload: ResourceUpdate,
+    db: Session = Depends(get_db),
+):
+    item = db.query(StudioResource).filter(
+        StudioResource.id == item_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "绱犳潗璁板綍涓嶅瓨鍦?)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(item, key, value)
+    db.commit()
+    db.refresh(item)
+    return resource_dict(item)
+
+@router.delete("/studio/items/{item_id}")
+def delete_resource(item_id: int, db: Session = Depends(get_db)):
+    item = db.query(StudioResource).filter(
+        StudioResource.id == item_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "绱犳潗璁板綍涓嶅瓨鍦?)
+    db.delete(item)
+    db.commit()
+    return {"success": True}
+
+@router.post("/assets/upload")
+async def upload_asset(
+    file: UploadFile = File(...),
+    category: str = Form("other"),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    allowed = {"image", "audio", "video", "other"}
+    if category not in allowed:
+        raise HTTPException(400, "绱犳潗鍒嗙被鏃犳晥")
+
+    original = Path(file.filename or "upload.bin").name
+    suffix = Path(original).suffix.lower()
+    stored = f"{uuid.uuid4().hex}{suffix}"
+    destination = ASSET_DIR / stored
+
+    size = 0
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > 2 * 1024 * 1024 * 1024:
+                    raise HTTPException(413, "鍗曚釜绱犳潗鏂囦欢涓嶈兘瓒呰繃 2 GB")
+                output.write(chunk)
+
+        item = MediaAsset(
+            filename=original,
+            stored_name=stored,
+            category=category,
+            mime_type=file.content_type or "",
+            file_size=size,
+            file_path=str(destination),
+            description=description,
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return asset_dict(item)
+    except Exception:
+        if destination.exists():
+            destination.unlink()
+        raise
+
+@router.get("/assets")
+def list_assets(category: str | None = None, db: Session = Depends(get_db)):
+    query = db.query(MediaAsset)
+    if category:
+        query = query.filter(MediaAsset.category == category)
+    items = query.order_by(MediaAsset.created_at.desc()).limit(1000).all()
+    return {"items": [asset_dict(x) for x in items], "total": len(items)}
+
+@router.get("/assets/{asset_id}/download")
+def download_asset(asset_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import FileResponse
+    item = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+    if not item or not Path(item.file_path).exists():
+        raise HTTPException(404, "鏂囦欢涓嶅瓨鍦?)
+    return FileResponse(
+        item.file_path,
+        media_type=item.mime_type or "application/octet-stream",
+        filename=item.filename,
+    )
+
+@router.delete("/assets/{asset_id}")
+def delete_asset(asset_id: int, db: Session = Depends(get_db)):
+    item = db.query(MediaAsset).filter(MediaAsset.id == asset_id).first()
+    if not item:
+        raise HTTPException(404, "绱犳潗涓嶅瓨鍦?)
+    path = Path(item.file_path)
+    if path.exists():
+        path.unlink()
+    db.delete(item)
+    db.commit()
+    return {"success": True}
+
+
+========== 源码内容: apps\api\app\routers\visual.py ==========
+import os
+import json
+import base64
+import mimetypes
+import urllib.request
+import urllib.error
+from pathlib import Path
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet, InvalidToken
+
+from app.database import get_db, ROOT_DIR
+from app.models.visual import VisualAsset, ImageTask
+from app.models.studio import AIProviderConfig, AIRuntimeSetting
+
+router = APIRouter(prefix="/api/visual", tags=["AI视觉素材"])
+
+ROOT = ROOT_DIR
+ASSET_DIR = ROOT / "storage" / "visual-assets"
+REFERENCE_DIR = ROOT / "storage" / "reference-images"
+ASSET_DIR.mkdir(parents=True, exist_ok=True)
+REFERENCE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+class AssetInput(BaseModel):
+    category: str
+    name: str
+    description: str = ""
+    appearance: str = ""
+    clothing: str = ""
+    personality: str = ""
+    consistency_prompt: str = ""
+    style: str = "3D动漫电影风格"
+    data: dict = {}
+
+
+class GenerateInput(BaseModel):
+    asset_id: Optional[int] = None
+    provider: str = "doubao"
+    task_type: str = "character"
+    prompt: str
+    size: str = "2K"
+    confirm_paid: bool = False
+
+
+def decrypt_key(encrypted):
+    if not encrypted:
+        return ""
+    key_file = ROOT / "storage" / "secrets" / "local.key"
+    if not key_file.exists():
+        raise HTTPException(400, "本地加密密钥不存在，无法读取服务商 API Key")
+    try:
+        key = key_file.read_bytes()
+        return Fernet(key).decrypt(encrypted.encode()).decode()
+    except (InvalidToken, ValueError):
+        raise HTTPException(400, "API Key 解密失败，请重新保存服务商配置")
+
+
+def get_runtime(db):
+    setting = db.query(AIRuntimeSetting).first()
+    if not setting:
+        return {"network_enabled": False, "paid_api_allowed": False}
+    return {
+        "network_enabled": bool(setting.network_enabled),
+        "paid_api_allowed": bool(setting.paid_api_allowed),
+    }
+
+
+@router.get("/assets")
+def list_assets(category: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(VisualAsset)
+    if category:
+        query = query.filter(VisualAsset.category == category)
+    items = query.order_by(VisualAsset.created_at.desc()).all()
+    return [{
+        "id": x.id,
+        "category": x.category,
+        "name": x.name,
+        "description": x.description,
+        "appearance": x.appearance,
+        "clothing": x.clothing,
+        "personality": x.personality,
+        "consistency_prompt": x.consistency_prompt,
+        "style": x.style,
+        "image_path": x.image_path,
+        "reference_path": x.reference_path,
+        "confirmed": x.confirmed,
+        "data": x.data or {},
+        "created_at": x.created_at.isoformat() if x.created_at else None,
+    } for x in items]
+
+
+@router.post("/assets")
+def create_asset(payload: AssetInput, db: Session = Depends(get_db)):
+    allowed = {"characters", "scenes", "props"}
+    if payload.category not in allowed:
+        raise HTTPException(400, "素材分类只支持 characters、scenes、props")
+    item = VisualAsset(**payload.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"success": True, "id": item.id}
+
+
+@router.put("/assets/{asset_id}")
+def update_asset(asset_id: int, payload: AssetInput, db: Session = Depends(get_db)):
+    item = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+    if not item:
+        raise HTTPException(404, "素材不存在")
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+    item.updated_at = datetime.utcnow()
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/assets/{asset_id}")
+def delete_asset(asset_id: int, db: Session = Depends(get_db)):
+    item = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+    if not item:
+        raise HTTPException(404, "素材不存在")
+    db.delete(item)
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/references")
+async def upload_reference(
+    file: UploadFile = File(...),
+    asset_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db)
+):
+    suffix = Path(file.filename or "reference.png").suffix[:12] or ".png"
+    filename = f"reference_{datetime.now().strftime('%Y%m%d%H%M%S%f')}{suffix}"
+    destination = REFERENCE_DIR / filename
+    content = await file.read()
+    if len(content) > 100 * 1024 * 1024:
+        raise HTTPException(413, "参考图片不能超过 100 MB")
+    destination.write_bytes(content)
+
+    if asset_id:
+        item = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+        if not item:
+            raise HTTPException(404, "指定素材不存在")
+        item.reference_path = str(destination)
+        db.commit()
+
+    return {"success": True, "filename": filename, "path": str(destination)}
+
+
+@router.get("/references/{filename}")
+def get_reference(filename: str):
+    from fastapi.responses import FileResponse
+    path = (REFERENCE_DIR / Path(filename).name).resolve()
+    if not path.exists() or REFERENCE_DIR.resolve() not in path.parents:
+        raise HTTPException(404, "参考图片不存在")
+    return FileResponse(path)
+
+
+@router.get("/tasks")
+def list_tasks(db: Session = Depends(get_db)):
+    tasks = db.query(ImageTask).order_by(ImageTask.created_at.desc()).limit(100).all()
+    return [{
+        "id": x.id,
+        "asset_id": x.asset_id,
+        "provider": x.provider,
+        "model": x.model,
+        "task_type": x.task_type,
+        "prompt": x.prompt,
+        "status": x.status,
+        "result_path": x.result_path,
+        "result_url": x.result_url,
+        "error": x.error,
+        "created_at": x.created_at.isoformat() if x.created_at else None,
+    } for x in tasks]
+
+
+@router.post("/tasks")
+def create_task(payload: GenerateInput, db: Session = Depends(get_db)):
+    if not payload.prompt.strip():
+        raise HTTPException(400, "图片提示词不能为空")
+    if payload.asset_id:
+        asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
+        if not asset:
+            raise HTTPException(404, "关联素材不存在")
+
+    task = ImageTask(
+        asset_id=payload.asset_id,
+        provider=payload.provider,
+        task_type=payload.task_type,
+        prompt=payload.prompt.strip(),
+        size=payload.size,
+        status="pending",
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {"success": True, "task_id": task.id, "status": task.status}
+
+
+@router.post("/tasks/{task_id}/run")
+def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get_db)):
+    task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "图片任务不存在")
+    if task.status == "completed":
+        return {"success": True, "task_id": task.id, "status": task.status, "result_path": task.result_path}
+    if task.status == "running":
+        raise HTTPException(409, "任务正在执行")
+
+    runtime = get_runtime(db)
+    if not runtime["network_enabled"]:
+        raise HTTPException(403, "网络调用总开关已关闭，请先到 AI 管理中心开启")
+    
+    provider = db.query(AIProviderConfig).filter(
+        AIProviderConfig.provider == task.provider
+    ).first()
+    if not provider or not provider.enabled:
+        raise HTTPException(400, f"{task.provider} 服务商尚未配置或未启用")
+    if not provider.encrypted_api_key:
+        raise HTTPException(400, "服务商尚未保存 API Key")
+    if bool(provider.paid) and (not runtime["paid_api_allowed"] or not confirm_paid):
+        raise HTTPException(403, "该服务商可能产生费用。请开启付费授权，并在本次任务中明确确认")
+
+    task.status = "running"
+    task.error = ""
+    db.commit()
+
+    try:
+        api_key = decrypt_key(provider.encrypted_api_key)
+        base_url = (provider.base_url or "").rstrip("/")
+        if not base_url:
+            raise ValueError("服务商 Base URL 未配置")
+
+        # 豆包 Ark 图片生成接口采用 OpenAI 风格的 images/generations 请求格式。
+        endpoint = base_url if base_url.endswith("/images/generations") else base_url + "/images/generations"
+        body = {
+            "model": provider.model,
+            "prompt": task.prompt,
+            "size": task.size,
+            "response_format": "url",
+        }
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=300) as response:
+            result = json.loads(response.read().decode("utf-8"))
+
+        data = result.get("data") or []
+        if not data:
+            raise ValueError("图片服务没有返回图片数据：" + json.dumps(result, ensure_ascii=False)[:1000])
+
+        first = data[0]
+        image_url = first.get("url", "")
+        b64_data = first.get("b64_json", "")
+
+        if b64_data:
+            image_bytes = base64.b64decode(b64_data)
+            filename = f"image_task_{task.id}.png"
+            output = ASSET_DIR / filename
+            output.write_bytes(image_bytes)
+            task.result_path = str(output)
+        elif image_url:
+            task.result_url = image_url
+            download_request = urllib.request.Request(image_url)
+            with urllib.request.urlopen(download_request, timeout=300) as response:
+                image_bytes = response.read()
+            filename = f"image_task_{task.id}.png"
+            output = ASSET_DIR / filename
+            output.write_bytes(image_bytes)
+            task.result_path = str(output)
+        else:
+            raise ValueError("服务商返回结果中没有图片 URL 或 b64_json")
+
+        task.model = provider.model
+        task.status = "completed"
+        task.finished_at = datetime.utcnow()
+
+        if task.asset_id:
+            asset = db.query(VisualAsset).filter(VisualAsset.id == task.asset_id).first()
+            if asset:
+                asset.image_path = task.result_path
+                asset.updated_at = datetime.utcnow()
+
+        db.commit()
+        return {
+            "success": True,
+            "task_id": task.id,
+            "status": task.status,
+            "result_path": task.result_path,
+            "result_url": task.result_url,
+        }
+
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:2000]
+        task.status = "failed"
+        task.error = f"图片服务 HTTP {exc.code}: {detail}"
+        db.commit()
+        raise HTTPException(502, task.error)
+    except Exception as exc:
+        task.status = "failed"
+        task.error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(500, task.error)
+
+
+@router.get("/files/{filename}")
+def get_visual_file(filename: str):
+    from fastapi.responses import FileResponse
+    path = (ASSET_DIR / Path(filename).name).resolve()
+    if not path.exists() or ASSET_DIR.resolve() not in path.parents:
+        raise HTTPException(404, "图片文件不存在")
+    return FileResponse(path)
+
+
+@router.post("/assets/{asset_id}/confirm")
+def confirm_asset(asset_id: int, db: Session = Depends(get_db)):
+    item = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+    if not item:
+        raise HTTPException(404, "素材不存在")
+    item.confirmed = True
+    db.commit()
+    return {"success": True, "confirmed": True}
+
+
+
+========== 源码内容: apps\api\app\routers\story.py ==========
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from sqlalchemy.inspection import inspect as sa_inspect
+
+from app.database import get_db
+from app.models.novel import Novel, Chapter
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
+from app.models.visual import VisualAsset
+
+router = APIRouter(prefix="/api/story", tags=["鍓ф湰鏀圭紪涓庢櫤鑳藉垎闀?])
+
+
+def serialize_model(obj):
+    result = {}
+    for column in sa_inspect(obj.__class__).mapper.column_attrs:
+        value = getattr(obj, column.key)
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        result[column.key] = value
+    return result
+
+
+def chapter_value(chapter, candidates, default=""):
+    for name in candidates:
+        if hasattr(chapter, name):
+            value = getattr(chapter, name)
+            if value is not None and value != "":
+                return value
+    return default
+
+
+def get_chapter_content(chapter):
+    return str(chapter_value(
+        chapter,
+        ["content", "body", "text", "chapter_content", "original_text"],
+        ""
+    ))
+
+
+def get_chapter_title(chapter):
+    return str(chapter_value(
+        chapter,
+        ["title", "name", "chapter_title"],
+        f"绗瑊chapter.id}绔?
+    ))
+
+
+def get_novel_chapters(db, novel_id):
+    chapters = db.query(Chapter).all()
+    result = []
+    for chapter in chapters:
+        chapter_novel_id = chapter_value(
+            chapter, ["novel_id", "book_id"], None
+        )
+        if chapter_novel_id is not None and int(chapter_novel_id) == int(novel_id):
+            result.append(chapter)
+
+    result.sort(key=lambda x: chapter_value(
+        x, ["chapter_number", "chapter_index", "order", "sort_order", "id"], x.id
+    ))
+    return result
+
+
+class ProjectInput(BaseModel):
+    novel_id: int
+    name: str
+    adaptation_style: str = "3D鍔ㄦ极鐢靛奖椋庢牸"
+    target_duration: int = 120
+    min_duration: int = 90
+    max_duration: int = 150
+    settings: dict = Field(default_factory=dict)
+
+
+class EpisodeUpdate(BaseModel):
+    title: Optional[str] = None
+    synopsis: Optional[str] = None
+    screenplay: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    sort_order: Optional[int] = None
+    status: Optional[str] = None
+
+
+class EpisodeReorder(BaseModel):
+    episode_ids: list[int]
+
+
+class EpisodeMerge(BaseModel):
+    episode_ids: list[int]
+    title: str = ""
+
+
+class ShotInput(BaseModel):
+    shot_number: int = 1
+    scene_name: str = ""
+    shot_type: str = "涓櫙"
+    camera_movement: str = "鍥哄畾闀滃ご"
+    duration_seconds: float = 5
+    visual_description: str = ""
+    character_actions: str = ""
+    dialogue: str = ""
+    sound_effects: str = ""
+    image_prompt: str = ""
+    character_ids: list[int] = Field(default_factory=list)
+    scene_asset_id: Optional[int] = None
+    prop_ids: list[int] = Field(default_factory=list)
+    status: str = "draft"
+    sort_order: int = 0
+
+
+class AssetLinkInput(BaseModel):
+    asset_id: int
+    role: str = "character"
+
+
+@router.get("/novels")
+def list_novels(db: Session = Depends(get_db)):
+    novels = db.query(Novel).all()
+    return [serialize_model(x) for x in novels]
+
+
+@router.get("/novels/{novel_id}/chapters")
+def list_novel_chapters(novel_id: int, db: Session = Depends(get_db)):
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404, "灏忚涓嶅瓨鍦?)
+
+    chapters = get_novel_chapters(db, novel_id)
+    return [{
+        "id": x.id,
+        "title": get_chapter_title(x),
+        "content": get_chapter_content(x),
+        "word_count": len(get_chapter_content(x).strip()),
+    } for x in chapters]
+
+
+@router.post("/projects")
+def create_project(payload: ProjectInput, db: Session = Depends(get_db)):
+    novel = db.query(Novel).filter(Novel.id == payload.novel_id).first()
+    if not novel:
+        raise HTTPException(404, "灏忚涓嶅瓨鍦?)
+    if payload.min_duration > payload.max_duration:
+        raise HTTPException(400, "鍗曢泦鏈€鐭椂闀夸笉鑳藉ぇ浜庢渶闀挎椂闀?)
+
+    project = StoryProject(**payload.model_dump())
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return {"success": True, "project": serialize_model(project)}
+
+
+@router.get("/projects")
+def list_projects(db: Session = Depends(get_db)):
+    items = db.query(StoryProject).order_by(StoryProject.created_at.desc()).all()
+    return [serialize_model(x) for x in items]
+
+
+@router.get("/projects/{project_id}")
+def get_project(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "鍓ф湰椤圭洰涓嶅瓨鍦?)
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number).all()
+    return {
+        "project": serialize_model(project),
+        "episodes": [serialize_model(x) for x in episodes],
+    }
+
+
+@router.post("/projects/{project_id}/plan")
+def plan_episodes(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "鍓ф湰椤圭洰涓嶅瓨鍦?)
+
+    chapters = get_novel_chapters(db, project.novel_id)
+    if not chapters:
+        raise HTTPException(400, "璇ュ皬璇存病鏈夋壘鍒扮珷鑺傚唴瀹癸紝鏃犳硶瑙勫垝鍒嗛泦")
+
+    # 淇濈暀鍘熺珷鑺傞『搴忥紱瓒呴暱绔犺妭鍏佽鎷嗘垚涓ら泦锛屼笉鑷姩鎶婄煭绔犺妭鎷嗙銆?    old = db.query(EpisodePlan).filter(EpisodePlan.project_id == project_id).all()
+    for item in old:
+        db.delete(item)
+    db.flush()
+
+    episode_number = 1
+    for chapter in chapters:
+        content = get_chapter_content(chapter)
+        title = get_chapter_title(chapter)
+        if not content.strip():
+            continue
+
+        # 鐢ㄧ珷鑺傚唴瀹归暱搴︿及绠楀垎闆嗭紱姝ゅ鏄垵姝ヨ鍒掕鍒欙紝涓嶅啋鍏?AI 鍓ф儏鍒嗘瀽銆?        split = len(content) > 9000
+        parts = [content[:len(content)//2], content[len(content)//2:]] if split else [content]
+
+        for part_index, part in enumerate(parts):
+            suffix = f"锛堜笅锛? if split and part_index == 1 else (f"锛堜笂锛? if split else "")
+            episode = EpisodePlan(
+                project_id=project_id,
+                episode_number=episode_number,
+                title=f"{title}{suffix}",
+                source_chapter_ids=[chapter.id],
+                source_text=part,
+                synopsis="寰?AI 鏍规嵁鍘熻憲鍐呭鎻愮偧鍓ф儏鎽樿",
+                screenplay="寰?AI 鏀圭紪涓哄奖瑙嗗墽鏈?,
+                duration_seconds=project.target_duration,
+                status="planned",
+                sort_order=episode_number,
+            )
+            db.add(episode)
+            episode_number += 1
+
+    project.status = "planned"
+    project.updated_at = datetime.utcnow()
+    db.commit()
+
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).order_by(EpisodePlan.sort_order).all()
+
+    return {
+        "success": True,
+        "message": "鍒濇鍒嗛泦璁″垝宸插缓绔嬨€傚墽鎯呮憳瑕佸拰鍓ф湰姝ｆ枃浠嶉渶 AI 鏀圭紪銆?,
+        "episode_count": len(episodes),
+        "episodes": [serialize_model(x) for x in episodes],
+    }
+
+
+@router.put("/episodes/{episode_id}")
+def update_episode(episode_id: int, payload: EpisodeUpdate, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        if key == "duration_seconds" and (value < 1 or value > 3600):
+            raise HTTPException(400, "鍗曢泦鏃堕暱蹇呴』鍦?1 鍒?3600 绉掍箣闂?)
+        setattr(episode, key, value)
+    episode.updated_at = datetime.utcnow()
+    db.commit()
+    return {"success": True, "episode": serialize_model(episode)}
+
+
+@router.delete("/episodes/{episode_id}")
+def delete_episode(episode_id: int, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+    db.query(StoryboardShot).filter(StoryboardShot.episode_id == episode_id).delete()
+    db.query(StoryAssetLink).filter(StoryAssetLink.episode_id == episode_id).delete()
+    db.delete(episode)
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/projects/{project_id}/reorder")
+def reorder_episodes(project_id: int, payload: EpisodeReorder, db: Session = Depends(get_db)):
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).all()
+    lookup = {x.id: x for x in episodes}
+    if set(payload.episode_ids) != set(lookup.keys()):
+        raise HTTPException(400, "鎺掑簭鍒楄〃蹇呴』鍖呭惈璇ラ」鐩叏閮ㄥ垎闆嗭紝涓斾笉鑳介噸澶?)
+    for index, episode_id in enumerate(payload.episode_ids, start=1):
+        lookup[episode_id].sort_order = index
+        lookup[episode_id].episode_number = index
+    db.commit()
+    return {"success": True}
+
+
+@router.post("/projects/{project_id}/merge")
+def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends(get_db)):
+    if len(payload.episode_ids) < 2:
+        raise HTTPException(400, "鑷冲皯閫夋嫨涓ら泦鎵嶈兘鍚堝苟")
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id,
+        EpisodePlan.id.in_(payload.episode_ids)
+    ).order_by(EpisodePlan.sort_order).all()
+    if len(episodes) != len(set(payload.episode_ids)):
+        raise HTTPException(400, "鍒嗛泦涓嶅瓨鍦ㄦ垨涓嶅睘浜庤椤圭洰")
+
+    first = episodes[0]
+    first.title = payload.title.strip() or " + ".join(x.title for x in episodes)
+    first.source_text = "\n\n".join(x.source_text or "" for x in episodes)
+    first.source_chapter_ids = list(dict.fromkeys(
+        chapter_id for x in episodes for chapter_id in (x.source_chapter_ids or [])
+    ))
+    first.duration_seconds = min(
+        3600, sum(x.duration_seconds for x in episodes)
+    )
+    for item in episodes[1:]:
+        db.query(StoryboardShot).filter(StoryboardShot.episode_id == item.id).update(
+            {StoryboardShot.episode_id: first.id}
+        )
+        db.query(StoryAssetLink).filter(StoryAssetLink.episode_id == item.id).update(
+            {StoryAssetLink.episode_id: first.id}
+        )
+        db.delete(item)
+    db.commit()
+    return {"success": True, "merged_episode_id": first.id}
+
+
+@router.post("/episodes/{episode_id}/split")
+def split_episode(episode_id: int, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+    text = episode.source_text or ""
+    if len(text.strip()) < 2:
+        raise HTTPException(400, "鍘熷鍐呭澶煭锛屾棤娉曟媶鍒?)
+    midpoint = len(text) // 2
+    split_at = text.find("\n", midpoint - 500, midpoint + 500)
+    if split_at < 0:
+        split_at = midpoint
+
+    second = EpisodePlan(
+        project_id=episode.project_id,
+        episode_number=episode.episode_number + 1,
+        title=episode.title + "锛堜笅锛?,
+        source_chapter_ids=episode.source_chapter_ids or [],
+        source_text=text[split_at:],
+        synopsis="寰?AI 鎻愮偧鍓ф儏鎽樿",
+        screenplay="寰?AI 鏀圭紪鍓ф湰",
+        duration_seconds=episode.duration_seconds,
+        status="planned",
+        sort_order=episode.sort_order + 1,
+    )
+    episode.title = episode.title + "锛堜笂锛?
+    episode.source_text = text[:split_at]
+    db.add(second)
+    db.flush()
+
+    later = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == episode.project_id,
+        EpisodePlan.id != episode.id,
+        EpisodePlan.sort_order >= second.sort_order
+    ).all()
+    for item in later:
+        item.sort_order += 1
+        item.episode_number += 1
+
+    db.commit()
+    return {"success": True, "new_episode": serialize_model(second)}
+
+
+@router.get("/episodes/{episode_id}/shots")
+def list_shots(episode_id: int, db: Session = Depends(get_db)):
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+    return [serialize_model(x) for x in shots]
+
+
+@router.post("/episodes/{episode_id}/shots")
+def create_shot(episode_id: int, payload: ShotInput, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "鍒嗛泦涓嶅瓨鍦?)
+    shot = StoryboardShot(
+        project_id=episode.project_id,
+        episode_id=episode_id,
+        **payload.model_dump()
+    )
+    db.add(shot)
+    db.commit()
+    db.refresh(shot)
+    return {"success": True, "shot": serialize_model(shot)}
+
+
+@router.put("/shots/{shot_id}")
+def update_shot(shot_id: int, payload: ShotInput, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if not shot:
+        raise HTTPException(404, "鍒嗛暅闀滃ご涓嶅瓨鍦?)
+    for key, value in payload.model_dump().items():
+        setattr(shot, key, value)
+    shot.updated_at = datetime.utcnow()
+    db.commit()
+    return {"success": True}
+
+
+@router.delete("/shots/{shot_id}")
+def delete_shot(shot_id: int, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if not shot:
+        raise HTTPException(404, "鍒嗛暅闀滃ご涓嶅瓨鍦?)
+    db.query(StoryAssetLink).filter(StoryAssetLink.shot_id == shot_id).delete()
+    db.delete(shot)
+    db.commit()
+    return {"success": True}
+
+
+@router.get("/assets")
+def list_visual_assets(db: Session = Depends(get_db)):
+    items = db.query(VisualAsset).all()
+    return [{
+        "id": x.id,
+        "category": x.category,
+        "name": x.name,
+        "description": x.description,
+        "appearance": x.appearance,
+        "image_path": x.image_path,
+        "confirmed": x.confirmed,
+    } for x in items]
+
+
+@router.post("/shots/{shot_id}/assets")
+def link_asset(shot_id: int, payload: AssetLinkInput, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
+    if not shot or not asset:
+        raise HTTPException(404, "鍒嗛暅鎴栬瑙夌礌鏉愪笉瀛樺湪")
+    link = StoryAssetLink(
+        project_id=shot.project_id,
+        episode_id=shot.episode_id,
+        shot_id=shot.id,
+        asset_id=asset.id,
+        role=payload.role,
+    )
+    db.add(link)
+    db.commit()
+    return {"success": True, "link_id": link.id}
+
+
+@router.get("/shots/{shot_id}/assets")
+def get_shot_assets(shot_id: int, db: Session = Depends(get_db)):
+    links = db.query(StoryAssetLink).filter(StoryAssetLink.shot_id == shot_id).all()
+    result = []
+    for link in links:
+        asset = db.query(VisualAsset).filter(VisualAsset.id == link.asset_id).first()
+        if asset:
+            result.append({"role": link.role, "asset": serialize_model(asset)})
+    return result
+
+
+========== 源码内容: scripts\build-windows.ps1 ==========
+$ErrorActionPreference = "Stop"
+
+# Automatically locate the project root.
+$Root = Split-Path -Parent $PSScriptRoot
+$Api = Join-Path $Root "apps\api"
+$Web = Join-Path $Root "apps\web"
+$Desktop = Join-Path $Root "apps\desktop"
+$Python = Join-Path $Api ".venv\Scripts\python.exe"
+
+function Check-ExitCode {
+    param([string]$Message)
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Message. Exit code: $LASTEXITCODE"
+    }
+}
+
+Write-Host "========== WINDOWS BUILD START =========="
+Write-Host "Project root: $Root"
+
+if (!(Test-Path $Python)) {
+    throw "Python virtual environment not found."
+}
+
+if (!(Test-Path "$Desktop\node_modules\electron-builder")) {
+    throw "electron-builder dependency not found."
+}
+
+if (!(Test-Path "$Web\node_modules")) {
+    throw "Web node_modules not found."
+}
+
+Write-Host "[1/4] Checking PyInstaller..."
+
+& $Python -m pip show pyinstaller *> $null
+
+if ($LASTEXITCODE -ne 0) {
+    & $Python -m pip install pyinstaller
+    Check-ExitCode "PyInstaller installation failed"
+}
+
+Write-Host "[2/4] Building API executable..."
+
+Set-Location $Api
+
+New-Item -ItemType Directory -Path "$Api\dist" -Force | Out-Null
+New-Item -ItemType Directory -Path "$Api\build\pyinstaller" -Force | Out-Null
+
+$PyInstallerArgs = @(
+    "-m", "PyInstaller",
+    "--noconfirm",
+    "--clean",
+    "--onefile",
+    "--name", "ai-comic-api",
+    "--distpath", "$Api\dist",
+    "--workpath", "$Api\build\pyinstaller",
+    "--specpath", "$Api\build",
+    "--paths", $Api,
+    "--collect-submodules", "app",
+    "--collect-all", "uvicorn",
+    "--collect-all", "fastapi",
+    "--collect-all", "starlette",
+    "--collect-all", "sqlalchemy",
+    "--collect-all", "pydantic",
+    "--collect-all", "cryptography",
+    "--collect-all", "multipart",
+    "$Api\build_entry.py"
+)
+
+& $Python @PyInstallerArgs
+Check-ExitCode "API packaging failed"
+
+$ApiExe = "$Api\dist\ai-comic-api.exe"
+
+if (!(Test-Path $ApiExe)) {
+    throw "API executable was not generated."
+}
+
+Write-Host "API executable created."
+
+Write-Host "[3/4] Building Next.js frontend..."
+
+Set-Location $Web
+
+npm run build
+Check-ExitCode "Next.js build failed"
+
+if (!(Test-Path "$Web\.next\standalone\server.js")) {
+    throw "Next.js standalone server.js not found."
+}
+
+if (!(Test-Path "$Web\.next\static")) {
+    throw "Next.js static directory not found."
+}
+
+Write-Host "Frontend standalone build created."
+
+Write-Host "[4/4] Building Electron installer..."
+
+Set-Location $Desktop
+
+npm run build:desktop
+Check-ExitCode "Electron installer build failed"
+
+$Release = Join-Path $Desktop "release"
+
+if (!(Test-Path $Release)) {
+    throw "Release directory not found."
+}
+
+$Installers = @(Get-ChildItem $Release -File -Filter "*.exe")
+
+if ($Installers.Count -eq 0) {
+    throw "No installer EXE was generated."
+}
+
+Write-Host "========== BUILD SUCCESS =========="
+
+foreach ($Installer in $Installers) {
+    Write-Host $Installer.FullName
+    Write-Host ("Size: {0} MB" -f [math]::Round($Installer.Length / 1MB, 2))
+}
+
+Set-Location $Root
+
+========== 构建产物: apps\web\.next\standalone\server.js ==========
+存在
+
+========== 构建产物: apps\web\.next\standalone\node_modules\next\package.json ==========
+存在
+
+========== 构建产物: apps\web\.next\standalone\node_modules\next\dist\server\next-server.js ==========
+存在
+
+========== 构建产物: apps\web\.next\static ==========
+存在
+
+========== 构建产物: apps\web\public ==========
+存在
+
+========== 构建产物: apps\api\dist\ai-comic-api.exe ==========
+存在
+
+========== 构建产物: apps\desktop\release ==========
+存在
+
+========== 安装包内部: app.asar ==========
+存在
+
+========== 安装包内部: api\ai-comic-api.exe ==========
+存在
+
+========== 安装包内部: web\server.js ==========
+存在
+
+========== 安装包内部: web\node_modules\next\package.json ==========
+缺失
+
+========== 安装包内部: web\.next\static ==========
+存在
+
+========== Python 已安装依赖 ==========
+Package                   Version
+------------------------- ---------
+altgraph                  0.17.5
+annotated-doc             0.0.6
+annotated-types           0.8.0
+anyio                     4.16.0
+cffi                      2.1.1
+click                     8.5.1
+cryptography              50.0.2
+fastapi                   0.163.1
+h11                       0.16.0
+httptools                 0.9.0
+idna                      3.20
+opentelemetry-api         1.45.2
+packaging                 26.3
+pefile                    2024.8.26
+pip                       26.3
+pycparser                 3.12
+pydantic                  2.14.3
+pydantic_core             2.50.4
+pydantic-settings         2.16.3
+pyinstaller               6.22.3
+pyinstaller-hooks-contrib 2026.10
+python-dotenv             1.2.4
+python-multipart          0.0.33
+pywin32-ctypes            0.2.3
+PyYAML                    6.0.3
+setuptools                84.2.1
+SQLAlchemy                2.1.8
+starlette                 1.10.0
+typing_extensions         4.16.0
+typing-inspection         0.4.5
+uvicorn                   0.54.0
+watchfiles                1.3.0
+websockets                17.4
+
+========== 端口 3000 ==========
+当前没有监听进程
+
+========== 端口 8000 ==========
+当前没有监听进程
+
+========== FFmpeg 检查 ==========
+ffmpeg: C:\ffmpeg-8.1.2-essentials_build\bin\ffmpeg.exe
+ffprobe: C:\ffmpeg-8.1.2-essentials_build\bin\ffprobe.exe
+
+========== 环境配置文件 ==========
+apps\web\.env : 不存在
+apps\web\.env.local : 存在（内容未读取）
+apps\api\.env : 不存在
+.env : 不存在
