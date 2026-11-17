@@ -652,6 +652,7 @@ def generate_episode_voice_track(
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
+    ensure_episode_source_current(db, episode)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
