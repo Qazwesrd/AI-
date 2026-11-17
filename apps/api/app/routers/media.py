@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
+from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink
+from app.models.visual import VisualAsset
 from app.models.studio import AIProviderConfig, AIRuntimeSetting
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
@@ -92,6 +94,199 @@ class VideoTaskInput(BaseModel):
     video_url_field: str = "video_url"
     status_field: str = "status"
     extra_payload: dict = Field(default_factory=dict)
+
+
+class EpisodeVideoInput(BaseModel):
+    provider: str
+    model: str
+    confirm_paid: bool = False
+    create_path: str = "/videos/generations"
+    status_path_template: str = "/videos/{task_id}"
+    task_id_field: str = "id"
+    video_url_field: str = "video_url"
+    status_field: str = "status"
+    aspect_ratio: str = "16:9"
+    extra_payload: dict = Field(default_factory=dict)
+
+
+@router.post("/video/episodes/{episode_id}/generate")
+def generate_episode_shot_videos(
+    episode_id: int, data: EpisodeVideoInput, db: Session = Depends(get_db)
+):
+    """按分镜逐镜头提交视频任务；任务与镜头 ID 持久关联，失败可单镜头重试。"""
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+    if not shots:
+        raise HTTPException(400, "本集尚无分镜，请先生成剧本与分镜")
+
+    config, key, base = get_provider(db, data.provider, data.confirm_paid)
+    if config.purpose not in ("video", "media", "text"):
+        raise HTTPException(400, "所选服务商用途不适用于视频生成")
+
+    assets = db.query(VisualAsset).filter(
+        VisualAsset.confirmed == True
+    ).all()
+    asset_context = []
+    for asset in assets:
+        asset_data = asset.data if isinstance(asset.data, dict) else {}
+        if asset_data.get("source_novel_id") not in (None, project.novel_id):
+            continue
+        description = "；".join(x for x in [
+            asset.name, asset.description, asset.appearance,
+            asset.clothing, asset.consistency_prompt
+        ] if x)
+        if description:
+            asset_context.append(description[:1200])
+    asset_context = asset_context[:40]
+
+    existing = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).all()
+    submitted = {
+        (task.request_data or {}).get("shot_id")
+        for task in existing
+        if (task.request_data or {}).get("episode_id") == episode_id
+        and task.status not in ("failed", "cancelled")
+    }
+    created, skipped, failures = [], [], []
+    for shot in shots:
+        if shot.id in submitted:
+            skipped.append(shot.id)
+            continue
+        prompt_parts = [
+            "制作一段用于漫剧的连续镜头视频。整体风格：" + str(project.adaptation_style),
+            "分集：" + str(episode.title),
+            "镜头：" + str(shot.shot_number),
+            "场景：" + str(shot.scene_name),
+            "景别：" + str(shot.shot_type),
+            "运镜：" + str(shot.camera_movement),
+            "画面：" + str(shot.visual_description),
+            "角色动作：" + str(shot.character_actions),
+            "对白/旁白：" + str(shot.dialogue),
+            "音效：" + str(shot.sound_effects),
+            "视觉提示词：" + str(shot.image_prompt),
+        ]
+        if asset_context:
+            prompt_parts.append("角色/场景/道具统一设定（供画面一致性参考）：" + "；".join(asset_context))
+        prompt = "\n".join(x for x in prompt_parts if x and not x.endswith("："))[:20000]
+        payload = {
+            "model": data.model,
+            "prompt": prompt,
+            "duration": max(1, min(60, int(round(shot.duration_seconds or 5)))),
+            "aspect_ratio": data.aspect_ratio,
+            **data.extra_payload,
+        }
+        try:
+            result = http_json(
+                base + "/" + data.create_path.lstrip("/"),
+                key, body=payload, timeout=300
+            )
+            remote_id = value_at(result, data.task_id_field)
+            if not remote_id:
+                raise RuntimeError("视频服务未返回任务编号，请检查任务 ID 返回字段配置")
+            task = MediaTask(
+                task_type="storyboard_video", provider=data.provider,
+                model=data.model, status="submitted", prompt=prompt,
+                remote_task_id=str(remote_id),
+                request_data={
+                    "base_url": base,
+                    "status_path_template": data.status_path_template,
+                    "video_url_field": data.video_url_field,
+                    "status_field": data.status_field,
+                    "confirm_paid": data.confirm_paid,
+                    "episode_id": episode_id,
+                    "project_id": project.id,
+                    "shot_id": shot.id,
+                    "shot_number": shot.shot_number,
+                    "duration": payload["duration"],
+                },
+                result_data=result,
+            )
+            db.add(task)
+            db.commit()
+            db.refresh(task)
+            shot.status = "video_submitted"
+            created.append({"task_id": task.id, "shot_id": shot.id,
+                            "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
+        except Exception as exc:
+            db.rollback()
+            failures.append({"shot_id": shot.id, "shot_number": shot.shot_number,
+                             "error": str(exc)[:1200]})
+    episode.status = "video_generating" if created or skipped else "video_failed"
+    db.commit()
+    return {
+        "success": not failures,
+        "episode_id": episode_id,
+        "created": created,
+        "skipped_existing": skipped,
+        "failures": failures,
+        "message": f"已提交 {len(created)} 个镜头视频任务，跳过 {len(skipped)} 个已有任务，失败 {len(failures)} 个。"
+    }
+
+
+@router.post("/video/episodes/{episode_id}/render")
+def render_episode_from_shots(
+    episode_id: int, output_name: str = "episode.mp4", db: Session = Depends(get_db)
+):
+    """将本集已下载的镜头按分镜顺序无损拼接成初版成片。"""
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+    if not shots:
+        raise HTTPException(400, "本集没有分镜")
+    tasks = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).all()
+    by_shot = {}
+    for task in tasks:
+        metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        if metadata.get("episode_id") == episode_id and metadata.get("shot_id"):
+            by_shot[metadata["shot_id"]] = task
+    clips = []
+    missing = []
+    for shot in shots:
+        task = by_shot.get(shot.id)
+        if not task or not task.result_path or not Path(task.result_path).is_file():
+            missing.append(shot.shot_number)
+        else:
+            clips.append(safe_storage_file(task.result_path))
+    if missing:
+        raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
+    concat_file = VIDEO_DIR / f"concat_{uuid.uuid4().hex}.txt"
+    output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", output_name)
+    if not output_name.lower().endswith(".mp4"):
+        output_name += ".mp4"
+    output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
+    try:
+        concat_file.write_text(
+            "".join("file '" + str(path).replace("'", "'\\''") + "'\n" for path in clips),
+            encoding="utf-8"
+        )
+        run_ffmpeg([
+            "-f", "concat", "-safe", "0", "-i", str(concat_file),
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-c:a", "aac", "-movflags", "+faststart", str(output)
+        ])
+        episode.status = "rendered"
+        db.commit()
+        return {"success": True, "episode_id": episode_id,
+                "output": str(output), "size": output.stat().st_size,
+                "clip_count": len(clips), "duration_target": episode.duration_seconds}
+    except Exception as exc:
+        output.unlink(missing_ok=True)
+        raise HTTPException(500, "分集视频合成失败：" + str(exc))
+    finally:
+        concat_file.unlink(missing_ok=True)
 
 
 @router.post("/video/tasks")
