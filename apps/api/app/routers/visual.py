@@ -248,7 +248,7 @@ def list_tasks(db: Session = Depends(get_db)):
         "id": x.id,
         "asset_id": x.asset_id,
         "provider": x.provider,
-        "model": x.model,
+        "model": (x.data or {}).get("model", "") if isinstance(getattr(x, "data", None), dict) else "",
         "task_type": x.task_type,
         "prompt": x.prompt,
         "status": x.status,
@@ -364,7 +364,6 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         else:
             raise ValueError("服务商返回结果中没有图片 URL 或 b64_json")
 
-        task.model = provider.model
         task.status = "completed"
         task.finished_at = datetime.utcnow()
 
@@ -687,7 +686,7 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
         if not remote_id:
             raise RuntimeError("Tripo 未返回三维生成任务编号")
         task = ImageTask(
-            asset_id=asset.id, provider=payload.provider, model=payload.model,
+            asset_id=asset.id, provider=payload.provider,
             task_type="model3d_multiview", prompt=f"多视图生成 3D 模型：{asset.name}",
             size="GLB", status="submitted",
             result_url="tripo-task:" + str(remote_id),
@@ -757,7 +756,7 @@ def refresh_tripo_3d_model(task_id: int, confirm_paid: bool = False, db: Session
             if asset:
                 data = dict(asset.data) if isinstance(asset.data, dict) else {}
                 data["model3d"] = {
-                    "task_id": task.id, "provider": task.provider, "model": task.model,
+                    "task_id": task.id, "provider": task.provider, "model": model_task_data.get("model", ""),
                     "format": "GLB", "path": str(destination), "downloaded_at": datetime.utcnow().isoformat(),
                     "preview_url": output.get("rendered_image_url"),
                     "credits_consumed": remote.get("credits_consumed"),
