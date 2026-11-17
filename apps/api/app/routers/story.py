@@ -484,7 +484,7 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         "剧本必须包含场景、动作、表情、走位、对白、旁白和转场；分镜必须逐段覆盖剧本，不得遗漏关键剧情。"
         "每个镜头必须写明景别、运镜、画面构图、角色动作、场景、对白/旁白、音效和可直接用于图像模型的提示词。"
         "画面风格：" + style + "。目标时长约" + str(target) + "秒，成片允许90至150秒。生成10至24个镜头，镜头时长合计尽量接近目标时长。"
-        "输出简体中文 JSON，不要 Markdown，格式：{\"title\":\"标题\",\"synopsis\":\"剧情摘要\",\"screenplay\":\"分场影视剧本\",\"shots\":[{\"scene_name\":\"场景\",\"shot_type\":\"景别\",\"camera_movement\":\"运镜\",\"duration_seconds\":5,\"visual_description\":\"画面\",\"character_actions\":\"动作表情走位\",\"dialogue\":\"对白旁白\",\"sound_effects\":\"音效\",\"image_prompt\":\"图像模型提示词\"}]}。"
+        "输出简体中文 JSON，不要 Markdown，格式：{\"title\":\"标题\",\"synopsis\":\"剧情摘要\",\"screenplay\":\"分场影视剧本\",\"shots\":[{\"scene_name\":\"场景名称，尽量与已识别场景素材名称一致\",\"character_names\":[\"本镜头出场人物素材名称\"],\"prop_names\":[\"本镜头出现的武器/道具/特殊物品素材名称\"],\"shot_type\":\"景别\",\"camera_movement\":\"运镜\",\"duration_seconds\":5,\"visual_description\":\"画面\",\"character_actions\":\"动作表情走位\",\"dialogue\":\"对白旁白\",\"sound_effects\":\"音效\",\"image_prompt\":\"图像模型提示词\"}]}。"
         "小说章节原文：\n" + source
     )
     try:
@@ -520,6 +520,14 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         episode.screenplay = screenplay[:100000]
         episode.status = "scripted"
         created = 0
+        novel_id = project.novel_id if project else None
+        visual_assets = db.query(VisualAsset).filter(VisualAsset.confirmed == True).all()
+        asset_lookup = {}
+        for asset in visual_assets:
+            asset_data = asset.data if isinstance(asset.data, dict) else {}
+            if novel_id is not None and asset_data.get("source_novel_id") not in (None, novel_id):
+                continue
+            asset_lookup.setdefault((asset.category, asset.name.strip().casefold()), asset)
         for index, shot in enumerate(shots[:24], 1):
             if not isinstance(shot, dict):
                 continue
@@ -527,9 +535,25 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
                 duration = float(shot.get("duration_seconds", 5) or 5)
             except (TypeError, ValueError):
                 duration = 5.0
+            scene_name = str(shot.get("scene_name", "")).strip()
+            character_names = shot.get("character_names") if isinstance(shot.get("character_names"), list) else []
+            prop_names = shot.get("prop_names") if isinstance(shot.get("prop_names"), list) else []
+            character_assets = [
+                asset_lookup.get(("characters", str(name).strip().casefold()))
+                for name in character_names if str(name).strip()
+            ]
+            prop_assets = []
+            for name in prop_names:
+                normalized = str(name).strip().casefold()
+                for category in ("weapons", "props", "special_items"):
+                    found = asset_lookup.get((category, normalized))
+                    if found:
+                        prop_assets.append(found)
+                        break
+            scene_asset = asset_lookup.get(("scenes", scene_name.casefold())) if scene_name else None
             row = StoryboardShot(
                 project_id=episode.project_id, episode_id=episode.id, shot_number=index, sort_order=index,
-                scene_name=str(shot.get("scene_name", ""))[:300],
+                scene_name=scene_name[:300],
                 shot_type=str(shot.get("shot_type", "中景"))[:100],
                 camera_movement=str(shot.get("camera_movement", "固定镜头"))[:100],
                 duration_seconds=max(1.0, min(60.0, duration)),
@@ -538,8 +562,22 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
                 dialogue=str(shot.get("dialogue", ""))[:10000],
                 sound_effects=str(shot.get("sound_effects", ""))[:5000],
                 image_prompt=str(shot.get("image_prompt", ""))[:12000],
+                character_ids=[asset.id for asset in character_assets if asset],
+                prop_ids=list(dict.fromkeys(asset.id for asset in prop_assets)),
+                scene_asset_id=scene_asset.id if scene_asset else None,
             )
             db.add(row)
+            db.flush()
+            for asset in character_assets:
+                if asset:
+                    db.add(StoryAssetLink(project_id=episode.project_id, episode_id=episode.id,
+                                          shot_id=row.id, asset_id=asset.id, role="character"))
+            for asset in prop_assets:
+                db.add(StoryAssetLink(project_id=episode.project_id, episode_id=episode.id,
+                                      shot_id=row.id, asset_id=asset.id, role="prop"))
+            if scene_asset:
+                db.add(StoryAssetLink(project_id=episode.project_id, episode_id=episode.id,
+                                      shot_id=row.id, asset_id=scene_asset.id, role="scene"))
             created += 1
         if created == 0:
             raise ValueError("AI返回的分镜列表没有有效镜头")
