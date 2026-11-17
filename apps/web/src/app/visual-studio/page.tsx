@@ -244,7 +244,7 @@ export default function VisualStudioPage() {
 
   async function addEvolution(asset: Asset) {
     const chapter = window.prompt("变化发生的章节号：");
-    if (!chapter || !/^[1-9]\\d*$/.test(chapter)) return;
+    if (!chapter || !/^[1-9]\d*$/.test(chapter)) return;
     const event = window.prompt("记录剧情事件/变化：");
     if (!event || !event.trim()) return;
     const changeType = window.prompt("变化类型（状态变化/损坏/升级/易主/外观变化）：", "状态变化") || "状态变化";
