@@ -45,7 +45,7 @@ def get_ai_config(db, provider_name):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise RuntimeError("全局网络调用开关已关闭")
 
-    paid = bool(getattr(config, "paid", True))
+    paid = config.provider.lower() != "cloudflare"
     if paid and not getattr(runtime, "paid_api_allowed", False):
         raise RuntimeError("付费 API 总授权未开启")
 
