@@ -24,6 +24,7 @@ const presets = [
   { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
   { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: false, purpose: "text" },
   { id: "custom_video", name: "自定义视频生成服务商", url: "", model: "", paid: true, purpose: "video" },
+  { id: "tripo3d", name: "Tripo AI 三维模型", url: "https://openapi.tripo3d.ai/v3", model: "v3.1-20260211", paid: true, purpose: "3d" },
 ];
 
 export default function AICenterPage() {
@@ -168,7 +169,7 @@ export default function AICenterPage() {
                       <span className="font-semibold">{p.name}</span>
                       <span className={`text-xs ${saved?.enabled ? "text-emerald-300" : "text-gray-400"}`}>{saved?.enabled ? "已启用" : "未启用"}</span>
                     </div>
-                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : p.purpose === "video" ? "视频生成" : p.purpose === "audio" ? "语音生成" : "文本与分析"} · {(providers.find((x) => x.provider === p.id)?.paid ?? p.paid) ? "需付费授权与本次确认" : "按免费服务调用"}</div>
+                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : p.purpose === "3d" ? "三维模型生成" : p.purpose === "video" ? "视频生成" : p.purpose === "audio" ? "语音生成" : "文本与分析"} · {(providers.find((x) => x.provider === p.id)?.paid ?? p.paid) ? "需付费授权与本次确认" : "按免费服务调用"}</div>
                   </button>
                 );
               })}
