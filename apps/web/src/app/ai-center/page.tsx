@@ -166,7 +166,7 @@ export default function AICenterPage() {
                       <span className="font-semibold">{p.name}</span>
                       <span className={`text-xs ${saved?.enabled ? "text-emerald-300" : "text-gray-400"}`}>{saved?.enabled ? "已启用" : "未启用"}</span>
                     </div>
-                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {p.paid ? "付费服务" : "免费额度/需核实"}</div>
+                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : "文本与分析"} · {p.paid ? "需付费授权与本次确认" : "免费额度/需核实"}</div>
                   </button>
                 );
               })}
