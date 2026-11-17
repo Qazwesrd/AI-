@@ -197,6 +197,10 @@ export default function VisualStudioPage() {
   return (
     <main className="min-h-screen space-y-6 p-6 text-white">
       <header>
+        <a
+          href="/"
+          className="mb-5 inline-flex items-center gap-2 rounded-xl border border-purple-300/30 bg-purple-950/60 px-4 py-2.5 text-sm font-medium text-white transition hover:border-purple-300/70 hover:bg-purple-800/60"
+        >← 返回主页</a>
         <div className="text-sm text-purple-300">AI COMIC STUDIO / VISUAL LAB</div>
         <h1 className="mt-2 text-3xl font-bold">AI视觉素材生产中心</h1>
         <p className="mt-2 text-sm text-slate-300">

@@ -176,21 +176,35 @@ export default function NovelsPage() {
 
   async function analyze() {
     if (!selected) return;
+
+    const approved = window.confirm(
+      "即将调用已配置的文本AI模型进行小说深度分析。\n\n" +
+      "本次可能按文本长度分多次请求，并产生API费用。\n" +
+      "请确认已在AI设置中开启网络调用和付费API授权。\n\n" +
+      "是否继续？"
+    );
+
+    if (!approved) return;
+
     setLoading(true);
+    setMessage("正在调用AI模型分析小说，请稍候……");
+
     try {
-      const data = await request(`/api/novels/${selected.id}/analyze`, {
+      const data = await request(`/api/novels/${selected.id}/analyze-ai`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm_paid: true }),
       });
+
       const result = await request(`/api/novels/${selected.id}/analysis`);
       setAnalysis(result.items || []);
-      setMessage(data.message || "初步解析完成");
+      setMessage(data.message || "AI深度分析完成");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "解析失败");
+      setMessage(error instanceof Error ? error.message : "AI分析失败");
     } finally {
       setLoading(false);
     }
   }
-
   async function confirmAnalysis() {
     if (!selected) return;
     try {

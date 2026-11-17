@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain } = require("electron");
 const { spawn, execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -72,7 +72,7 @@ function waitForApi(timeout = 120000) {
     const timer = setInterval(async () => {
       if (apiProcess && apiProcess.exitCode !== null) {
         clearInterval(timer);
-        reject(new Error("本地 API 服务提前退出，请检查日志。"));
+        reject(new Error("Local API service exited before becoming ready. Check the application logs."));
         return;
       }
 
@@ -91,7 +91,7 @@ function waitForApi(timeout = 120000) {
 
       if (Date.now() - started > timeout) {
         clearInterval(timer);
-        reject(new Error("等待本地 API 健康检查超时。"));
+        reject(new Error("Local API health check timed out."));
       }
     }, 800);
   });
@@ -104,7 +104,7 @@ function waitForWeb(timeout = 120000) {
     const timer = setInterval(() => {
       if (webProcess && webProcess.exitCode !== null) {
         clearInterval(timer);
-        reject(new Error("Next.js 服务提前退出，请检查日志。"));
+        reject(new Error("A local application service failed."));
         return;
       }
 
@@ -117,7 +117,7 @@ function waitForWeb(timeout = 120000) {
       req.on("error", () => {
         if (Date.now() - started > timeout) {
           clearInterval(timer);
-          reject(new Error("等待前端服务超时。"));
+          reject(new Error("A local application service failed."));
         }
       });
     }, 800);
@@ -168,7 +168,7 @@ function startProductionServices() {
 
   for (const file of [apiExe, webServer, webNodeModules, ffmpeg, ffprobe]) {
     if (!fs.existsSync(file)) {
-      throw new Error(`安装包缺少必要文件：${file}`);
+      throw new Error(`瀹夎鍖呯己灏戝繀瑕佹枃浠讹細${file}`);
     }
   }
 
@@ -231,7 +231,7 @@ async function createWindow() {
 
     if (!apiPortFree || !webPortFree) {
       throw new Error(
-        "软件需要使用本地 8000 和 3000 端口，但端口已被其他程序占用。请关闭占用程序后重新启动。"
+        "The application requires local ports 8000 and 3000. They are already in use. Close the conflicting processes and restart the application."
       );
     }
 
@@ -251,13 +251,13 @@ async function createWindow() {
 if (gotLock) {
   app.whenReady().then(createWindow).catch(async (error) => {
     startupFailed = true;
-    console.error("应用启动失败：", error);
+    console.error("Application startup failed:", error);
     stopServices();
 
     await dialog.showMessageBox({
       type: "error",
       title: "AI漫剧制作大师启动失败",
-      message: "软件无法正常启动",
+      message: "应用启动失败，请检查本地 API 和前端服务。",
       detail: String(error.message || error)
     });
 
@@ -279,3 +279,61 @@ if (gotLock) {
     }
   });
 }
+
+// AI漫剧制作大师：视频与封面文件选择
+const { ipcMain: publishingIpcMain, dialog: publishingDialog } = require("electron");
+
+publishingIpcMain.handle("publishing:select-file", async (_event, kind) => {
+    const filters = kind === "cover"
+        ? [{ name: "图片文件", extensions: ["png", "jpg", "jpeg", "webp"] }]
+        : [{ name: "视频文件", extensions: ["mp4", "mov", "mkv", "webm", "avi"] }];
+
+    const result = await publishingDialog.showOpenDialog({
+        title: kind === "cover" ? "选择视频封面" : "选择发布视频",
+        properties: ["openFile"],
+        filters
+    });
+
+    if (result.canceled || !result.filePaths.length) {
+        return null;
+    }
+
+    return result.filePaths[0];
+});
+
+
+// Publishing center: native desktop file picker.
+ipcMain.handle("dialog:openFile", async (_event, options = {}) => {
+  const allowed = {
+    video: ["mp4", "mov", "mkv", "webm", "avi"],
+    cover: ["png", "jpg", "jpeg", "webp"]
+  };
+
+  const requested = Array.isArray(options.filters) ? options.filters : [];
+  const extensions = requested
+    .flatMap(item => Array.isArray(item.extensions) ? item.extensions : [])
+    .map(item => String(item).toLowerCase())
+    .filter(item => /^[a-z0-9]+$/.test(item));
+
+  const safeExtensions = extensions.filter(item =>
+    Object.values(allowed).some(group => group.includes(item))
+  );
+
+  if (!safeExtensions.length) {
+    throw new Error("不支持的文件格式");
+  }
+
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [{
+      name: "支持的文件",
+      extensions: safeExtensions
+    }]
+  });
+
+  if (result.canceled || !result.filePaths.length) {
+    return null;
+  }
+
+  return result.filePaths[0];
+});

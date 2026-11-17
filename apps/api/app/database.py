@@ -65,3 +65,6 @@ def init_database():
 
     return True
 
+# Publishing models registration
+import app.models.publishing
+

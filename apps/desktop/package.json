@@ -1,76 +1,76 @@
 {
-    "name": "ai-comic-studio-desktop",
-    "version": "1.0.2",
-    "private": true,
-    "description": "AI漫剧制作大师 Windows Desktop",
-    "main": "main.cjs",
-    "scripts": {
-        "api": "cd ..\\api && .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
-        "dev": "concurrently -k \"npm --prefix ../web run dev\" \"npm run api\" \"wait-on tcp:3000 tcp:8000 && electron .\"",
-        "build:desktop": "electron-builder --win nsis",
-        "build:windows": "powershell -ExecutionPolicy Bypass -File ../../scripts/build-windows.ps1",
-        "start:desktop": "electron ."
-    },
-    "devDependencies": {
-        "concurrently": "^10.0.7",
-        "electron": "^45.3.2",
-        "wait-on": "^9.5.1",
-        "electron-builder": "^26.0.12"
-    },
-    "build": {
-        "appId": "com.aicomic.studio",
-        "productName": "AI漫剧制作大师",
-        "directories": {
-            "output": "release"
-        },
-        "files": [
-            "main.cjs",
-            "preload.cjs",
-            "package.json"
-        ],
-        "extraResources": [
-            {
-                "to": "api/ai-comic-api.exe",
-                "from": "../api/dist/ai-comic-api.exe"
-            },
-            {
-                "to": "web",
-                "from": "../web/.next/standalone"
-            },
-            {
-                "to": "web/node_modules",
-                "from": "../web/.next/standalone/node_modules"
-            },
-            {
-                "to": "web/.next/static",
-                "from": "../web/.next/static"
-            },
-            {
-                "to": "web/public",
-                "from": "../web/public"
-            },
-            {
-                "to": "media/ffmpeg.exe",
-                "from": "build-resources/ffmpeg/ffmpeg.exe"
-            },
-            {
-                "to": "media/ffprobe.exe",
-                "from": "build-resources/ffmpeg/ffprobe.exe"
-            }
-        ],
-        "win": {
-            "artifactName": "${productName}-Setup-${version}.${ext}",
-            "target": [
-                "nsis"
-            ]
-        },
-        "nsis": {
-            "createDesktopShortcut": true,
-            "shortcutName": "AI漫剧制作大师",
-            "allowToChangeInstallationDirectory": true,
-            "oneClick": false,
-            "createStartMenuShortcut": true
-        },
-        "artifactName": "${productName}-Setup-${version}.${ext}"
-    }
+    "name":  "ai-comic-studio-desktop",
+    "version":  "1.0.2",
+    "private":  true,
+    "description":  "AI漫剧制作大师 Windows 桌面应用",
+    "main":  "main.cjs",
+    "scripts":  {
+                    "api":  "cd ..\\api \u0026\u0026 .venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload",
+                    "dev":  "concurrently -k \"npm --prefix ../web run dev\" \"npm run api\" \"wait-on tcp:3000 tcp:8000 \u0026\u0026 electron .\"",
+                    "build:desktop":  "electron-builder --win nsis",
+                    "build:windows":  "powershell -ExecutionPolicy Bypass -File ../../scripts/build-windows.ps1",
+                    "start:desktop":  "electron ."
+                },
+    "devDependencies":  {
+                            "concurrently":  "^10.0.7",
+                            "electron":  "^45.3.2",
+                            "wait-on":  "^9.5.1",
+                            "electron-builder":  "^26.0.12"
+                        },
+    "build":  {
+                  "appId":  "com.aicomic.studio",
+                  "productName":  "AI漫剧制作大师",
+                  "directories":  {
+                                      "output":  "release"
+                                  },
+                  "files":  [
+                                "main.cjs",
+                                "preload.cjs",
+                                "package.json"
+                            ],
+                  "extraResources":  [
+                                         {
+                                             "to":  "api/ai-comic-api.exe",
+                                             "from":  "../api/dist/ai-comic-api.exe"
+                                         },
+                                         {
+                                             "to":  "web",
+                                             "from":  "../web/.next/standalone"
+                                         },
+                                         {
+                                             "to":  "web/node_modules",
+                                             "from":  "../web/.next/standalone/node_modules"
+                                         },
+                                         {
+                                             "to":  "web/.next/static",
+                                             "from":  "../web/.next/static"
+                                         },
+                                         {
+                                             "to":  "web/public",
+                                             "from":  "../web/public"
+                                         },
+                                         {
+                                             "to":  "media/ffmpeg.exe",
+                                             "from":  "build-resources/ffmpeg/ffmpeg.exe"
+                                         },
+                                         {
+                                             "to":  "media/ffprobe.exe",
+                                             "from":  "build-resources/ffmpeg/ffprobe.exe"
+                                         }
+                                     ],
+                  "win":  {
+                              "artifactName":  "${productName}-Setup-${version}.${ext}",
+                              "target":  [
+                                             "nsis"
+                                         ]
+                          },
+                  "nsis":  {
+                               "createDesktopShortcut":  true,
+                               "shortcutName":  "AI漫剧制作大师",
+                               "allowToChangeInstallationDirectory":  true,
+                               "oneClick":  false,
+                               "createStartMenuShortcut":  true
+                           },
+                  "artifactName":  "${productName}-Setup-${version}.${ext}"
+              }
 }
