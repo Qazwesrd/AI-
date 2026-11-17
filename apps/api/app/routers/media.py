@@ -35,7 +35,9 @@ def get_provider(db, provider_name, confirm_paid=False):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise HTTPException(403, "全局网络调用开关已关闭")
 
-    paid = True
+    # 按服务商配置的计费属性区分免费与付费服务。
+    # 未知计费状态沿用模型默认值 True，默认阻止调用，避免意外扣费。
+    paid = bool(getattr(config, "paid", True))
     if paid:
         if not getattr(runtime, "paid_api_allowed", False):
             raise HTTPException(403, "付费 API 总授权未开启")
