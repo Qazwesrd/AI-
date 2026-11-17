@@ -214,6 +214,56 @@ export default function VisualStudioPage() {
     }
   }
 
+
+  async function generateProfessionalPrompt(assetId: number) {
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/visual/assets/" + assetId + "/prompt");
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "提示词生成失败");
+      setPrompt(result.positive_prompt + "\\n\\n负面提示词：" + result.negative_prompt);
+      setSelectedAsset(assetId);
+      setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "提示词生成失败");
+    } finally { setBusy(false); }
+  }
+
+  async function createViewBatch(assetId: number) {
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/visual/assets/" + assetId + "/views?provider=doubao", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "创建多视角任务失败");
+      setMessage(result.message);
+      await loadTasks();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "创建多视角任务失败");
+    } finally { setBusy(false); }
+  }
+
+  async function addEvolution(asset: Asset) {
+    const chapter = window.prompt("变化发生的章节号：");
+    if (!chapter || !/^[1-9]\\d*$/.test(chapter)) return;
+    const event = window.prompt("记录剧情事件/变化：");
+    if (!event || !event.trim()) return;
+    const changeType = window.prompt("变化类型（状态变化/损坏/升级/易主/外观变化）：", "状态变化") || "状态变化";
+    const appearanceAfter = window.prompt("变化后的外观（可留空）：", "") || "";
+    setBusy(true);
+    try {
+      const response = await fetch(API + "/api/visual/assets/" + asset.id + "/evolution", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chapter_number: Number(chapter), event, change_type: changeType, appearance_after: appearanceAfter }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "记录变化失败");
+      setMessage("已记录第 " + chapter + " 章变化，共 " + result.history_count + " 条。");
+      await loadAssets();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "记录变化失败");
+    } finally { setBusy(false); }
+  }
+
   async function uploadReference(file?: File) {
     if (!file) return;
     const form = new FormData();
@@ -380,6 +430,13 @@ export default function VisualStudioPage() {
                 >
                   使用此素材生成图片
                 </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button className="rounded-lg border border-sky-300/20 px-3 py-1.5 text-xs hover:bg-sky-900/40" disabled={busy} onClick={() => generateProfessionalPrompt(item.id)}>生成专业提示词</button>
+                  <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs hover:bg-purple-900/50" disabled={busy} onClick={() => createViewBatch(item.id)}>创建多视角任务</button>
+                  {(item.category === "props" || item.category === "weapons" || item.category === "special_items" || item.category === "costumes") && (
+                    <button className="rounded-lg border border-amber-300/20 px-3 py-1.5 text-xs hover:bg-amber-900/30" disabled={busy} onClick={() => addEvolution(item)}>记录剧情变化</button>
+                  )}
+                </div>
               </article>
             ))}
           </div>
