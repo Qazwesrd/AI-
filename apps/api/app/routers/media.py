@@ -394,6 +394,12 @@ def render_episode_from_shots(
                 )
             concat_labels.append(f"[v{index}][a{index}]")
             input_index += 1
+        total_video_duration = sum(actual_durations)
+        if total_video_duration < 90 or total_video_duration > 150:
+            raise HTTPException(
+                400,
+                f"本集镜头视频总时长为 {total_video_duration:.1f} 秒，必须控制在 90–150 秒；请调整镜头时长或视频生成设置后再合成。",
+            )
         filters.append(
             "".join(concat_labels) + f"concat=n={len(clips)}:v=1:a=1[vout][aout]"
         )
@@ -469,6 +475,9 @@ def render_episode_from_shots(
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
                 "subtitle_count": subtitle_index - 1}
+    except HTTPException:
+        output.unlink(missing_ok=True)
+        raise
     except Exception as exc:
         output.unlink(missing_ok=True)
         raise HTTPException(500, "分集视频合成失败：" + str(exc))
