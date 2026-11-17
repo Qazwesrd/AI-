@@ -231,6 +231,78 @@ def generate_episode_shot_videos(
     }
 
 
+@router.get("/video/episodes/{episode_id}/tasks")
+def list_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    tasks = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).order_by(MediaTask.id.asc()).all()
+    rows = []
+    for task in tasks:
+        meta = task.request_data if isinstance(task.request_data, dict) else {}
+        if meta.get("episode_id") == episode_id:
+            rows.append({
+                "id": task.id, "shot_id": meta.get("shot_id"),
+                "shot_number": meta.get("shot_number"),
+                "provider": task.provider, "model": task.model,
+                "status": task.status, "remote_task_id": task.remote_task_id,
+                "result_path": task.result_path, "error": task.error,
+            })
+    return rows
+
+
+@router.post("/video/episodes/{episode_id}/refresh")
+def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    tasks = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).all()
+    matched = []
+    for task in tasks:
+        meta = task.request_data if isinstance(task.request_data, dict) else {}
+        if meta.get("episode_id") == episode_id and task.status not in ("completed", "failed"):
+            matched.append(task)
+    outcomes = []
+    for task in matched:
+        try:
+            config, key, base = get_provider(
+                db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
+            )
+            meta = task.request_data or {}
+            path = meta.get("status_path_template", "/videos/{task_id}").replace(
+                "{task_id}", str(task.remote_task_id)
+            )
+            result = http_json(base + "/" + path.lstrip("/"), key, method="GET")
+            status = str(value_at(result, meta.get("status_field", "status")) or "processing").lower()
+            task.result_data = result
+            task.status = status
+            video_url = value_at(result, meta.get("video_url_field", "video_url"))
+            if video_url:
+                filename = f"episode_{episode_id}_shot_{meta.get('shot_id')}_{uuid.uuid4().hex[:8]}.mp4"
+                destination = VIDEO_DIR / filename
+                http_download(str(video_url), destination)
+                task.result_path = str(destination)
+                task.status = "completed"
+                shot = db.query(StoryboardShot).filter(
+                    StoryboardShot.id == meta.get("shot_id")
+                ).first()
+                if shot:
+                    shot.status = "video_ready"
+            db.commit()
+            outcomes.append({"task_id": task.id, "shot_number": meta.get("shot_number"),
+                             "status": task.status, "error": ""})
+        except Exception as exc:
+            task.error = str(exc)[:1500]
+            db.commit()
+            outcomes.append({"task_id": task.id, "shot_number": meta.get("shot_number"),
+                             "status": task.status, "error": task.error})
+    return {"episode_id": episode_id, "checked": len(outcomes), "tasks": outcomes}
+
+
 @router.post("/video/episodes/{episode_id}/render")
 def render_episode_from_shots(
     episode_id: int, output_name: str = "episode.mp4", db: Session = Depends(get_db)
