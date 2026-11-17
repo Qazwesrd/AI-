@@ -1,8 +1,6 @@
-import tempfile
 import unittest
 import zipfile
 from io import BytesIO
-from pathlib import Path
 
 from app.document_import import decode_text, docx_text, epub_text, extract_document_text
 from app.routers.novels import split_chapters
@@ -10,14 +8,14 @@ from app.routers.novels import split_chapters
 
 class DocumentImportTests(unittest.TestCase):
     def test_decode_utf8_bom(self):
-        self.assertEqual(decode_text("\\ufeff第一章\\n正文".encode("utf-8")), "第一章\\n正文")
+        self.assertEqual(decode_text("\ufeff第一章\n正文".encode("utf-8")), "第一章\n正文")
 
     def test_decode_gb18030(self):
-        text = "第一章\\n这是中文正文"
+        text = "第一章\n这是中文正文"
         self.assertEqual(decode_text(text.encode("gb18030")), text)
 
     def test_split_chinese_chapters(self):
-        source = "序章\\n开头\\n第1章 初遇\\n第一段\\n第2章 再见\\n第二段"
+        source = "序章\n开头\n第1章 初遇\n第一段\n第2章 再见\n第二段"
         chapters = split_chapters(source)
         self.assertEqual(len(chapters), 3)
         self.assertEqual(chapters[0][0], "序章")
@@ -25,7 +23,7 @@ class DocumentImportTests(unittest.TestCase):
         self.assertIn("第二段", chapters[2][1])
 
     def test_split_english_chapters(self):
-        chapters = split_chapters("Chapter 1: Start\\nHello\\nChapter 2: End\\nBye")
+        chapters = split_chapters("Chapter 1: Start\nHello\nChapter 2: End\nBye")
         self.assertEqual(len(chapters), 2)
         self.assertEqual(chapters[0][0], "Chapter 1: Start")
         self.assertEqual(chapters[1][0], "Chapter 2: End")
