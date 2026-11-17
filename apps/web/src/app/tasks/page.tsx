@@ -32,6 +32,7 @@ type TaskResponse = {
   counts: Record<string, number>;
   by_source: Record<string, Record<string, number>>;
   note: string;
+  generated_at: string;
 };
 
 const statusNames: Record<string, string> = {
