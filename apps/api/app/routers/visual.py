@@ -289,7 +289,7 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
             task.result_url = image_url
             filename = f"image_task_{task.id}.png"
             output = ASSET_DIR / filename
-            http_download(image_url, output)
+            http_download(image_url, output, max_bytes=100 * 1024 * 1024)
             task.result_path = str(output)
         else:
             raise ValueError("服务商返回结果中没有图片 URL 或 b64_json")
