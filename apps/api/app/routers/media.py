@@ -2,6 +2,8 @@ import os
 import uuid
 import json
 import re
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Optional
 
@@ -550,6 +552,131 @@ class SpeechInput(BaseModel):
     response_format: str = "mp3"
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
     confirm_paid: bool = False
+
+
+class EpisodeSpeechInput(BaseModel):
+    provider: str
+    model: str
+    voice: str = "alloy"
+    confirm_paid: bool = False
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+
+@router.post("/speech/episodes/{episode_id}/generate")
+def generate_episode_voice_track(
+    episode_id: int, data: EpisodeSpeechInput, db: Session = Depends(get_db)
+):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+    if not shots:
+        raise HTTPException(400, "本集没有分镜")
+    config, key, base = get_provider(db, data.provider, data.confirm_paid)
+    generated = {}
+    failures = []
+    for shot in shots:
+        text_value = (shot.dialogue or "").strip()
+        if not text_value:
+            continue
+        if len(text_value) > 4096:
+            failures.append({"shot_number": shot.shot_number, "error": "单镜头对白超过4096字符，请先拆分对白"})
+            continue
+        filename = f"episode_{episode_id}_shot_{shot.id}_{uuid.uuid4().hex[:8]}.mp3"
+        destination = AUDIO_DIR / filename
+        payload = {
+            "model": data.model, "input": text_value,
+            "voice": data.voice, "response_format": "mp3",
+            "speed": data.speed,
+        }
+        request = urllib.request.Request(
+            base + "/audio/speech",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                with destination.open("wb") as output:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+            if destination.stat().st_size < 128:
+                raise RuntimeError("语音服务返回的音频文件为空或无效")
+            generated[shot.id] = destination
+            db.add(MediaTask(
+                task_type="episode_speech", provider=data.provider, model=data.model,
+                status="completed", prompt=text_value, result_path=str(destination),
+                request_data={"episode_id": episode_id, "shot_id": shot.id,
+                              "shot_number": shot.shot_number, "voice": data.voice},
+            ))
+            db.add(MediaFile(
+                name=filename, category="audio", file_path=str(destination),
+                mime_type="audio/mpeg", file_size=destination.stat().st_size,
+            ))
+            db.commit()
+        except Exception as exc:
+            destination.unlink(missing_ok=True)
+            db.rollback()
+            failures.append({"shot_number": shot.shot_number, "error": str(exc)[:1000]})
+
+    if not generated:
+        raise HTTPException(502, "本集没有成功生成任何对白语音：" + json.dumps(failures, ensure_ascii=False)[:2000])
+
+    # 为没有对白的镜头补静音，并按分镜时长拼成与视频时间线一致的语音轨。
+    ffmpeg_args = []
+    filters = []
+    labels = []
+    input_index = 0
+    for index, shot in enumerate(shots):
+        audio_path = generated.get(shot.id)
+        duration = max(1.0, float(shot.duration_seconds or 5))
+        if audio_path:
+            ffmpeg_args += ["-i", str(audio_path)]
+        else:
+            ffmpeg_args += [
+                "-f", "lavfi", "-t", str(duration), "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000",
+            ]
+        filters.append(
+            f"[{input_index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
+            f"apad,atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+        )
+        labels.append(f"[a{index}]")
+        input_index += 1
+    filters.append("".join(labels) + f"concat=n={len(shots)}:v=0:a=1[aout]")
+    track_path = AUDIO_DIR / f"episode_{episode_id}_voice_{uuid.uuid4().hex[:8]}.mp3"
+    try:
+        run_ffmpeg(ffmpeg_args + [
+            "-filter_complex", ";".join(filters), "-map", "[aout]",
+            "-c:a", "libmp3lame", "-q:a", "3", str(track_path),
+        ])
+        task = MediaTask(
+            task_type="episode_speech_track", provider=data.provider, model=data.model,
+            status="completed", prompt=f"第{episode.episode_number}集对白配音",
+            result_path=str(track_path),
+            request_data={"episode_id": episode_id, "voice": data.voice,
+                          "shot_count": len(generated), "aligned_to_storyboard": True},
+        )
+        db.add(task)
+        db.add(MediaFile(
+            name=track_path.name, category="audio", file_path=str(track_path),
+            mime_type="audio/mpeg", file_size=track_path.stat().st_size,
+        ))
+        db.commit()
+    except Exception as exc:
+        track_path.unlink(missing_ok=True)
+        raise HTTPException(500, "对白语音合成失败：" + str(exc))
+    return {
+        "success": not failures, "episode_id": episode_id,
+        "voice_track": str(track_path), "generated_shots": len(generated),
+        "failures": failures,
+        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，失败 {len(failures)} 个。",
+    }
 
 
 @router.post("/speech/generate")
