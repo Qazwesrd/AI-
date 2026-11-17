@@ -185,7 +185,14 @@ def control_unified_task(
                 409,
                 "媒体任务暂不支持本地强制暂停、取消或自动重试；请使用所属模块的安全控制流程",
             )
-        return refresh_video_task(task_id, db)
+        result = refresh_video_task(task_id, db)
+        return {
+            "task_id": task_id,
+            "status": result.get("status", "unknown"),
+            "result_available": bool(result.get("result_path")),
+            "polling_skipped": bool(result.get("polling_skipped")),
+            "error": result.get("error"),
+        }
 
     if source == "analysis":
         raise HTTPException(
