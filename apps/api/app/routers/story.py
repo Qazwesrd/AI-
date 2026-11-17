@@ -349,6 +349,117 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
     episodes = db.query(EpisodePlan).filter(EpisodePlan.project_id == project_id).order_by(EpisodePlan.sort_order).all()
     return {"success": True, "message": "AI 已根据剧情结构完成分集规划；每章可规划为1集或在自然剧情断点拆为2集。", "episode_count": len(episodes), "episodes": [serialize_model(x) for x in episodes]}
 
+@router.post("/episodes/{episode_id}/generate-ai")
+def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    if not (episode.source_text or "").strip():
+        raise HTTPException(400, "本集原著内容为空")
+    if db.query(StoryboardShot).filter(StoryboardShot.episode_id == episode_id).count():
+        raise HTTPException(409, "本集已有分镜。请先备份现有成果，再决定是否清除后重新生成。")
+    runtime = db.query(AIRuntimeSetting).first()
+    if not runtime or not runtime.network_enabled:
+        raise HTTPException(403, "网络调用总开关尚未开启")
+    providers = db.query(AIProviderConfig).filter(
+        AIProviderConfig.enabled == True, AIProviderConfig.purpose == "text",
+        AIProviderConfig.base_url != "", AIProviderConfig.model != "",
+        AIProviderConfig.encrypted_api_key != "",
+    ).all()
+    priority = {"deepseek": 0, "openai": 1, "xai": 2, "grok": 2, "gemini": 3, "cloudflare": 4}
+    providers.sort(key=lambda item: priority.get(item.provider.lower(), 99))
+    if not providers:
+        raise HTTPException(400, "没有已启用的文本 AI 模型，请先完成 AI 管理中心配置")
+    provider = providers[0]
+    paid = bool(getattr(provider, "paid", True))
+    if paid and not runtime.paid_api_allowed:
+        raise HTTPException(403, "当前模型属于付费服务，请先开启付费 API 总授权")
+    if paid and not payload.confirm_paid:
+        raise HTTPException(403, "本次剧本与分镜生成可能产生费用，尚未确认")
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    style = project.adaptation_style if project else "3D动漫电影风格"
+    target = project.target_duration if project else 120
+    source = (episode.source_text or "")[:28000]
+    prompt = (
+        "你是专业影视编剧、漫剧导演和分镜师。把原著改编成可直接制作的短篇漫剧。"
+        "忠实保留原著核心含义、人物身份关系、剧情因果、关键事件和人物立场；允许压缩重复描写，不得擅自改结局或编造关键事实。"
+        "剧本必须包含场景、动作、表情、走位、对白、旁白和转场；分镜必须逐段覆盖剧本，不得遗漏关键剧情。"
+        "每个镜头必须写明景别、运镜、画面构图、角色动作、场景、对白/旁白、音效和可直接用于图像模型的提示词。"
+        "画面风格：" + style + "。目标时长约" + str(target) + "秒，成片允许90至150秒。生成10至24个镜头，镜头时长合计尽量接近目标时长。"
+        "输出简体中文 JSON，不要 Markdown，格式：{\"title\":\"标题\",\"synopsis\":\"剧情摘要\",\"screenplay\":\"分场影视剧本\",\"shots\":[{\"scene_name\":\"场景\",\"shot_type\":\"景别\",\"camera_movement\":\"运镜\",\"duration_seconds\":5,\"visual_description\":\"画面\",\"character_actions\":\"动作表情走位\",\"dialogue\":\"对白旁白\",\"sound_effects\":\"音效\",\"image_prompt\":\"图像模型提示词\"}]}。"
+        "小说章节原文：\n" + source
+    )
+    try:
+        api_key = decrypt_key(provider.encrypted_api_key)
+        body = json.dumps({"model": provider.model, "temperature": 0.35, "messages": [
+            {"role": "system", "content": "你只输出符合结构的 JSON，不输出 Markdown。"},
+            {"role": "user", "content": prompt},
+        ]}, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(provider.base_url.rstrip("/") + "/chat/completions", data=body,
+            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(request, timeout=360) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        raw = result["choices"][0]["message"]["content"]
+        if isinstance(raw, list):
+            raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
+        raw = re.sub(r"^```(?:json)?\\s*", "", str(raw).strip())
+        raw = re.sub(r"\\s*```$", "", raw)
+        try:
+            generated = json.loads(raw)
+        except json.JSONDecodeError:
+            left, right = raw.find("{"), raw.rfind("}")
+            if left < 0 or right <= left:
+                raise ValueError("AI返回的剧本/分镜JSON无效")
+            generated = json.loads(raw[left:right + 1])
+        shots = generated.get("shots")
+        if not isinstance(shots, list) or not shots:
+            raise ValueError("AI未生成有效分镜镜头")
+        screenplay = str(generated.get("screenplay", "")).strip()
+        if not screenplay:
+            raise ValueError("AI未生成影视剧本正文")
+        episode.title = str(generated.get("title") or episode.title)[:300]
+        episode.synopsis = str(generated.get("synopsis") or episode.synopsis)[:12000]
+        episode.screenplay = screenplay[:100000]
+        episode.status = "scripted"
+        created = 0
+        for index, shot in enumerate(shots[:24], 1):
+            if not isinstance(shot, dict):
+                continue
+            try:
+                duration = float(shot.get("duration_seconds", 5) or 5)
+            except (TypeError, ValueError):
+                duration = 5.0
+            row = StoryboardShot(
+                project_id=episode.project_id, episode_id=episode.id, shot_number=index, sort_order=index,
+                scene_name=str(shot.get("scene_name", ""))[:300],
+                shot_type=str(shot.get("shot_type", "中景"))[:100],
+                camera_movement=str(shot.get("camera_movement", "固定镜头"))[:100],
+                duration_seconds=max(1.0, min(60.0, duration)),
+                visual_description=str(shot.get("visual_description", ""))[:10000],
+                character_actions=str(shot.get("character_actions", ""))[:10000],
+                dialogue=str(shot.get("dialogue", ""))[:10000],
+                sound_effects=str(shot.get("sound_effects", ""))[:5000],
+                image_prompt=str(shot.get("image_prompt", ""))[:12000],
+            )
+            db.add(row)
+            created += 1
+        if created == 0:
+            raise ValueError("AI返回的分镜列表没有有效镜头")
+        db.add(AIUsageLog(provider=provider.provider, model=provider.model, task="episode_screenplay_storyboard", status="success", detail="分集：" + episode.title + "；镜头数：" + str(created)))
+        db.commit()
+        return {"success": True, "episode_id": episode.id, "provider": provider.provider, "model": provider.model, "shot_count": created, "message": "AI影视剧本和分镜生成完成，共" + str(created) + "个镜头。"}
+    except urllib.error.HTTPError as exc:
+        db.rollback()
+        detail = exc.read().decode("utf-8", errors="replace")[:2000]
+        db.add(AIUsageLog(provider=provider.provider, model=provider.model, task="episode_screenplay_storyboard", status="failed", detail=detail))
+        db.commit()
+        raise HTTPException(502, "AI剧本生成接口错误 HTTP " + str(exc.code) + "：" + detail) from exc
+    except Exception as exc:
+        db.rollback()
+        db.add(AIUsageLog(provider=provider.provider, model=provider.model, task="episode_screenplay_storyboard", status="failed", detail=str(exc)[:2000]))
+        db.commit()
+        raise HTTPException(502, "AI剧本与分镜生成失败：" + str(exc)) from exc
+
 @router.put("/episodes/{episode_id}")
 def update_episode(episode_id: int, payload: EpisodeUpdate, db: Session = Depends(get_db)):
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
