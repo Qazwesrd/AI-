@@ -294,6 +294,10 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         return {"success": True, "task_id": task.id, "status": task.status, "result_path": task.result_path}
     if task.status == "running":
         raise HTTPException(409, "任务正在执行")
+    if task.status == "paused":
+        raise HTTPException(409, "任务已暂停，请先恢复任务")
+    if task.status == "cancelled":
+        raise HTTPException(409, "任务已取消，请先点击重试")
 
     runtime = get_runtime(db)
     if not runtime["network_enabled"]:
@@ -410,6 +414,58 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         task.error = str(exc)[:2000]
         db.commit()
         raise HTTPException(500, task.error)
+
+
+def _get_image_task_or_404(task_id: int, db: Session):
+    task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "图片任务不存在")
+    return task
+
+
+@router.post("/tasks/{task_id}/pause")
+def pause_image_task(task_id: int, db: Session = Depends(get_db)):
+    task = _get_image_task_or_404(task_id, db)
+    if task.status != "pending":
+        raise HTTPException(409, "只有尚未开始的待执行任务可以暂停；正在执行或已提交给第三方的任务不能在本地强制中断")
+    task.status = "paused"
+    db.commit()
+    return {"success": True, "task_id": task.id, "status": task.status}
+
+
+@router.post("/tasks/{task_id}/resume")
+def resume_image_task(task_id: int, db: Session = Depends(get_db)):
+    task = _get_image_task_or_404(task_id, db)
+    if task.status != "paused":
+        raise HTTPException(409, "只有已暂停的任务可以恢复")
+    task.status = "pending"
+    db.commit()
+    return {"success": True, "task_id": task.id, "status": task.status}
+
+
+@router.post("/tasks/{task_id}/retry")
+def retry_image_task(task_id: int, db: Session = Depends(get_db)):
+    task = _get_image_task_or_404(task_id, db)
+    if task.status not in ("failed", "cancelled"):
+        raise HTTPException(409, "只有失败或已取消的任务可以重试")
+    task.status = "pending"
+    task.error = ""
+    task.result_path = ""
+    task.result_url = ""
+    task.finished_at = None
+    db.commit()
+    return {"success": True, "task_id": task.id, "status": task.status, "message": "任务已重新加入待执行队列；不会自动调用 AI。请再次手动执行并确认费用。"}
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_image_task(task_id: int, db: Session = Depends(get_db)):
+    task = _get_image_task_or_404(task_id, db)
+    if task.status not in ("pending", "paused", "failed"):
+        raise HTTPException(409, "当前任务已开始执行或已提交第三方，不能通过本地取消接口保证中断；请在服务商控制台检查远程任务")
+    task.status = "cancelled"
+    task.error = task.error or "用户取消任务"
+    db.commit()
+    return {"success": True, "task_id": task.id, "status": task.status}
 
 
 @router.get("/files/{filename}")
@@ -536,6 +592,19 @@ def create_asset_view_tasks(asset_id: int, provider: str = "doubao", size: str =
         ]
     created = []
     for task_type, view_instruction in views:
+        active = db.query(ImageTask).filter(
+            ImageTask.asset_id == asset.id,
+            ImageTask.task_type == task_type,
+            ImageTask.status.in_(("pending", "running", "submitted", "paused")),
+        ).order_by(ImageTask.id.desc()).first()
+        if active:
+            created.append({
+                "task_id": active.id,
+                "task_type": task_type,
+                "status": active.status,
+                "existing": True,
+            })
+            continue
         task = ImageTask(
             asset_id=asset.id, provider=provider, task_type=task_type,
             prompt=f"{prompt_data['positive_prompt']}视角要求：{view_instruction}。负面提示词：{prompt_data['negative_prompt']}",
