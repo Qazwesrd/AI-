@@ -58,9 +58,9 @@ const navigation = [
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
-      ["📊", "AI使用统计", "/ai-center"],
+      ["📊", "AI调用记录", "/ai-center#usage-logs"],
       ["🗄️", "素材库", "/assets"],
-      ["🔧", "系统设置", "/ai-center"]
+      ["🔧", "网络与付费权限", "/ai-center"]
     ]
   }
 ];
