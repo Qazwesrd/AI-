@@ -35,7 +35,7 @@ def get_provider(db, provider_name, confirm_paid=False):
     if not runtime or not getattr(runtime, "network_enabled", False):
         raise HTTPException(403, "全局网络调用开关已关闭")
 
-    paid = config.provider.lower() != "cloudflare"
+    paid = True
     if paid:
         if not getattr(runtime, "paid_api_allowed", False):
             raise HTTPException(403, "付费 API 总授权未开启")
