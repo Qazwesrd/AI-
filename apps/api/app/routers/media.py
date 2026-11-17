@@ -655,8 +655,35 @@ def generate_episode_voice_track(
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
     if not shots:
         raise HTTPException(400, "本集没有分镜")
+
+    # Prefer the real generated clip duration over the planned storyboard duration.
+    # This keeps the voice timeline aligned with the video that will actually be rendered.
+    clip_durations = {}
+    video_tasks = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).order_by(MediaTask.id.desc()).all()
+    for video_task in video_tasks:
+        meta = video_task.request_data if isinstance(video_task.request_data, dict) else {}
+        shot_id = meta.get("shot_id")
+        if (
+            meta.get("episode_id") == episode_id
+            and shot_id not in clip_durations
+            and video_task.status == "completed"
+            and video_task.result_path
+            and Path(video_task.result_path).is_file()
+        ):
+            try:
+                info = probe_media(video_task.result_path)
+                clip_durations[shot_id] = max(
+                    1.0, float((info.get("format") or {}).get("duration") or 0)
+                )
+            except Exception:
+                # Fall back to the authored shot duration if a provider file cannot be probed.
+                pass
+
     config, key, base = get_provider(db, data.provider, data.confirm_paid)
     generated = {}
+    speech_durations = {}
     prior_tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "episode_speech"
     ).order_by(MediaTask.id.desc()).all()
@@ -666,6 +693,26 @@ def generate_episode_voice_track(
             generated.setdefault(prior_meta["shot_id"], Path(prior.result_path))
     failures = []
     for shot in shots:
+        existing_audio = generated.get(shot.id)
+        if existing_audio:
+            try:
+                info = probe_media(existing_audio)
+                speech_duration = float((info.get("format") or {}).get("duration") or 0)
+                target_duration = clip_durations.get(
+                    shot.id, max(1.0, float(shot.duration_seconds or 5))
+                )
+                if speech_duration > target_duration * 1.5:
+                    generated.pop(shot.id, None)
+                    existing_audio.unlink(missing_ok=True)
+                    failures.append({
+                        "shot_number": shot.shot_number,
+                        "error": f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；为避免截断台词，请拆分对白或延长镜头。",
+                    })
+                else:
+                    speech_durations[shot.id] = speech_duration
+            except Exception as exc:
+                generated.pop(shot.id, None)
+                failures.append({"shot_number": shot.shot_number, "error": f"无法读取已有配音时长：{exc}"})
         if shot.id in generated:
             continue
         text_value = (shot.dialogue or "").strip()
@@ -697,7 +744,18 @@ def generate_episode_voice_track(
                         output.write(chunk)
             if destination.stat().st_size < 128:
                 raise RuntimeError("语音服务返回的音频文件为空或无效")
+            audio_info = probe_media(destination)
+            speech_duration = float((audio_info.get("format") or {}).get("duration") or 0)
+            target_duration = clip_durations.get(
+                shot.id, max(1.0, float(shot.duration_seconds or 5))
+            )
+            if speech_duration > target_duration * 1.5:
+                raise RuntimeError(
+                    f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；"
+                    "请拆分对白或延长镜头，系统不会直接截断台词。"
+                )
             generated[shot.id] = destination
+            speech_durations[shot.id] = speech_duration
             db.add(MediaTask(
                 task_type="episode_speech", provider=data.provider, model=data.model,
                 status="completed", prompt=text_value, result_path=str(destination),
@@ -724,17 +782,23 @@ def generate_episode_voice_track(
     input_index = 0
     for index, shot in enumerate(shots):
         audio_path = generated.get(shot.id)
-        duration = max(1.0, float(shot.duration_seconds or 5))
+        duration = clip_durations.get(
+            shot.id, max(1.0, float(shot.duration_seconds or 5))
+        )
         if audio_path:
             ffmpeg_args += ["-i", str(audio_path)]
+            speech_duration = speech_durations.get(shot.id, 0.0)
+            speed_ratio = speech_duration / duration if duration > 0 else 1.0
+            tempo = f"atempo={min(1.5, max(1.0, speed_ratio)):.4f}," if speed_ratio > 1.02 else ""
         else:
+            tempo = ""
             ffmpeg_args += [
                 "-f", "lavfi", "-t", str(duration), "-i",
                 "anullsrc=channel_layout=stereo:sample_rate=48000",
             ]
         filters.append(
             f"[{input_index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-            f"apad,atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+            f"{tempo}apad,atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
         )
         labels.append(f"[a{index}]")
         input_index += 1
