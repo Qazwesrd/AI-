@@ -49,6 +49,8 @@ export default function NovelsPage() {
   const [genre, setGenre] = useState("奇幻");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [aiProvider, setAiProvider] = useState("deepseek");
+  const [confirmPaid, setConfirmPaid] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   async function request(path: string, options?: RequestInit) {
@@ -168,6 +170,44 @@ export default function NovelsPage() {
       setMessage(data.message || "初步解析完成");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "解析失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function analyzeWithAI() {
+    if (!selected) return;
+    if (!confirmPaid) {
+      setMessage("请先勾选本次 AI 付费调用确认。");
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await request(`/api/ai-workflow/novels/${selected.id}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: aiProvider, confirm_paid: true }),
+      });
+      const result = await request(`/api/novels/${selected.id}/analysis`);
+      setAnalysis(result.items || []);
+      setMessage(`AI 深度分析完成：新增 ${data.items_created} 条识别结果。请核对后确认。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "AI 深度分析失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function syncVisualAssets() {
+    if (!selected) return;
+    setLoading(true);
+    try {
+      const data = await request(`/api/ai-workflow/novels/${selected.id}/sync-visual-assets`, {
+        method: "POST",
+      });
+      setMessage(`已同步 ${data.created_count} 个确认素材到视觉素材库。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "素材同步失败");
     } finally {
       setLoading(false);
     }
@@ -330,7 +370,20 @@ export default function NovelsPage() {
                       导入 TXT 小说
                     </button>
                     <button onClick={analyze} disabled={loading || chapters.length === 0} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
-                      ✨ 初步解析小说
+                      初步线索提取
+                    </button>
+                    <select value={aiProvider} onChange={e => setAiProvider(e.target.value)} className="rounded-xl border border-purple-400/30 bg-[#211338] px-3 py-2 text-sm">
+                      <option value="deepseek">DeepSeek</option>
+                      <option value="openai">OpenAI</option>
+                      <option value="gemini">Gemini</option>
+                      <option value="doubao">豆包</option>
+                    </select>
+                    <label className="flex items-center gap-2 text-xs text-amber-200">
+                      <input type="checkbox" checked={confirmPaid} onChange={e => setConfirmPaid(e.target.checked)} />
+                      确认本次 AI 调用可能产生费用
+                    </label>
+                    <button onClick={analyzeWithAI} disabled={loading || chapters.length === 0 || !confirmPaid} className="rounded-xl bg-fuchsia-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">
+                      ✨ AI 深度分析
                     </button>
                   </div>
                 </div>
@@ -385,11 +438,16 @@ export default function NovelsPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-lg font-bold">🔎 小说解析结果</h3>
-                      <p className="mt-1 text-xs text-purple-300">先进行基础线索提取，后续接入 AI 模型进行深度分析。</p>
+                      <p className="mt-1 text-xs text-purple-300">支持本地线索提取与真实 AI 深度分析；确认后可同步人物、场景和道具到视觉素材库。</p>
                     </div>
-                    <button onClick={confirmAnalysis} disabled={analysis.length === 0} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">
-                      确认全部结果
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={confirmAnalysis} disabled={analysis.length === 0} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">
+                        确认全部结果
+                      </button>
+                      <button onClick={syncVisualAssets} disabled={!analysis.some(x => x.confirmed) || loading} className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">
+                        同步已确认视觉素材
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                     {analysis.map((item) => (
