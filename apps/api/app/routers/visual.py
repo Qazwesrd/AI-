@@ -15,6 +15,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from app.database import get_db, ROOT_DIR
 from app.models.visual import VisualAsset, ImageTask
+from app.models.novel import Novel, AnalysisItem
 from app.models.studio import AIProviderConfig, AIRuntimeSetting
 from app.services.media_service import http_download
 
@@ -94,6 +95,57 @@ def list_assets(category: Optional[str] = None, db: Session = Depends(get_db)):
         "created_at": x.created_at.isoformat() if x.created_at else None,
     } for x in items]
 
+
+@router.post("/assets/import-analysis/{novel_id}")
+def import_novel_analysis_assets(novel_id: int, db: Session = Depends(get_db)):
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404, "小说不存在")
+    category_map = {
+        "character": "characters", "scene": "scenes", "prop": "props",
+        "weapon": "weapons", "costume": "costumes",
+        "architecture": "buildings", "special_item": "special_items",
+    }
+    rows = db.query(AnalysisItem).filter(AnalysisItem.novel_id == novel_id).all()
+    created, updated, skipped = 0, 0, 0
+    for row in rows:
+        target = category_map.get(row.category)
+        if not target:
+            skipped += 1
+            continue
+        existing = db.query(VisualAsset).filter(
+            VisualAsset.category == target, VisualAsset.name == row.name,
+        ).first()
+        data = row.data if isinstance(row.data, dict) else {}
+        appearance = str(data.get("appearance") or data.get("visual_description") or data.get("look") or "")
+        clothing = str(data.get("clothing") or data.get("costume") or data.get("equipment") or "")
+        personality = str(data.get("personality") or data.get("temperament") or "")
+        consistency = str(data.get("consistency_prompt") or data.get("visual_consistency") or appearance)
+        merged_data = dict(data)
+        merged_data["source_novel_id"] = novel_id
+        merged_data["source_analysis_item_id"] = row.id
+        if existing:
+            if not existing.confirmed:
+                existing.description = row.description or existing.description
+                existing.appearance = appearance or existing.appearance
+                existing.clothing = clothing or existing.clothing
+                existing.personality = personality or existing.personality
+                existing.consistency_prompt = consistency or existing.consistency_prompt
+                existing.data = merged_data
+                existing.confirmed = bool(row.confirmed)
+                updated += 1
+            else:
+                skipped += 1
+            continue
+        db.add(VisualAsset(
+            category=target, name=row.name, description=row.description or "",
+            appearance=appearance, clothing=clothing, personality=personality,
+            consistency_prompt=consistency, style="3D动漫电影风格",
+            data=merged_data, confirmed=bool(row.confirmed),
+        ))
+        created += 1
+    db.commit()
+    return {"success": True, "novel_id": novel_id, "created": created, "updated": updated, "skipped": skipped, "total_analysis_items": len(rows), "message": "已将小说 AI 分析结果同步到视觉资产库；已确认的视觉资产不会被覆盖。"}
 
 @router.post("/assets")
 def create_asset(payload: AssetInput, db: Session = Depends(get_db)):
