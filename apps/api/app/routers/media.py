@@ -338,7 +338,7 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
 @router.post("/video/tasks/{task_id}/refresh")
 def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
     task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-    if not task or task.task_type != "video":
+    if not task or task.task_type not in ("video", "storyboard_video"):
         raise HTTPException(404, "视频任务不存在")
     if task.result_path and Path(task.result_path).is_file():
         task.status = "completed"
@@ -388,7 +388,7 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
 @router.get("/video/tasks")
 def list_video_tasks(db: Session = Depends(get_db)):
     tasks = db.query(MediaTask).filter(
-        MediaTask.task_type == "video"
+        MediaTask.task_type.in_(("video", "storyboard_video"))
     ).order_by(MediaTask.id.desc()).limit(200).all()
     return [{
         "id": t.id, "provider": t.provider, "model": t.model,
