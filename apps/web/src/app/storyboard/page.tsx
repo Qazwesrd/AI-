@@ -37,7 +37,7 @@ export default function StoryboardPage() {
   const [style, setStyle] = useState(styles[0]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [videoProvider, setVideoProvider] = useState("doubao");
+  const [videoProvider, setVideoProvider] = useState("custom_video");
   const [videoModel, setVideoModel] = useState("");
   const [videoPaidConfirmed, setVideoPaidConfirmed] = useState(false);
   const [videoCreatePath, setVideoCreatePath] = useState("/videos/generations");
