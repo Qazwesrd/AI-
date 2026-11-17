@@ -22,7 +22,7 @@ const presets = [
   { id: "openai", name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", paid: true, purpose: "text" },
   { id: "grok", name: "Grok", url: "https://api.x.ai/v1", model: "grok-3-mini", paid: true, purpose: "text" },
   { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
-  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: false, purpose: "text" },
+  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: true, purpose: "text" },
 ];
 
 export default function AICenterPage() {
