@@ -371,7 +371,21 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         if task.asset_id:
             asset = db.query(VisualAsset).filter(VisualAsset.id == task.asset_id).first()
             if asset:
-                asset.image_path = task.result_path
+                data = dict(asset.data) if isinstance(asset.data, dict) else {}
+                generated_views = dict(data.get("generated_views") or {})
+                generated_views[task.task_type] = {
+                    "task_id": task.id,
+                    "path": task.result_path,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "provider": task.provider,
+                    "model": provider.model,
+                }
+                data["generated_views"] = generated_views
+                asset.data = data
+                if task.task_type in ("character", "scene", "props", "weapons", "costumes", "buildings", "special_items"):
+                    asset.image_path = task.result_path
+                elif not asset.image_path:
+                    asset.image_path = task.result_path
                 asset.updated_at = datetime.utcnow()
 
         db.commit()
