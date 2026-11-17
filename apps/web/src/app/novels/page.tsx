@@ -86,6 +86,15 @@ export default function NovelsPage() {
     loadNovels();
   }, []);
 
+  async function selectChapter(chapter: Chapter) {
+    try {
+      const detail = await request(`/api/chapters/${chapter.id}`);
+      setCurrentChapter(detail);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取章节正文失败");
+    }
+  }
+
   async function createNovel() {
     if (!title.trim()) {
       setMessage("请先填写小说名称");
@@ -380,7 +389,7 @@ export default function NovelsPage() {
                       {chapters.map((chapter) => (
                         <button
                           key={chapter.id}
-                          onClick={() => setCurrentChapter(chapter)}
+                          onClick={() => selectChapter(chapter)}
                           className={`w-full rounded-lg border p-3 text-left ${
                             currentChapter?.id === chapter.id
                               ? "border-purple-300 bg-purple-700/30"
