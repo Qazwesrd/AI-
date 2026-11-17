@@ -606,7 +606,7 @@ def generate_episode_voice_track(
     ).order_by(MediaTask.id.desc()).all()
     for prior in prior_tasks:
         prior_meta = prior.request_data if isinstance(prior.request_data, dict) else {}
-        if prior_meta.get("episode_id") == episode_id and prior_meta.get("shot_id") and prior.result_path and Path(prior.result_path).is_file():
+        if prior.provider == data.provider and prior.model == data.model and prior_meta.get("voice") == data.voice and prior_meta.get("episode_id") == episode_id and prior_meta.get("shot_id") and prior.result_path and Path(prior.result_path).is_file():
             generated.setdefault(prior_meta["shot_id"], Path(prior.result_path))
     failures = []
     for shot in shots:
