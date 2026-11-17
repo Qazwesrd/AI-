@@ -124,6 +124,7 @@ def generate_episode_shot_videos(
     project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
     if not project:
         raise HTTPException(404, "剧本项目不存在")
+    ensure_episode_source_current(db, episode)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
@@ -362,6 +363,7 @@ def render_episode_from_shots(
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
+    ensure_episode_source_current(db, episode)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
