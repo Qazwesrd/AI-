@@ -77,6 +77,7 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
+  const [busyTask, setBusyTask] = useState<string | null>(null);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -103,6 +104,26 @@ export default function TasksPage() {
   }, [source, status, keyword, offset]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
+
+  const runAction = async (task: TaskItem, action: string) => {
+    const actionNames: Record<string, string> = {
+      pause: "暂停", resume: "恢复", retry: "重新排队", cancel: "取消", refresh: "刷新远程状态",
+    };
+    if (["retry", "cancel"].includes(action) &&
+        !window.confirm(`确定要${actionNames[action]}此任务吗？${action === "retry" ? "重新排队不会自动调用 AI，也不会自动扣费。" : ""}`)) return;
+    setBusyTask(task.id);
+    try {
+      const response = await fetch(`${API}/api/tasks/${task.source}/${task.source_id}/${action}`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "任务操作失败");
+      setMessage(data.message || `任务已执行：${actionNames[action]}`);
+      await loadTasks();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "任务操作失败");
+    } finally {
+      setBusyTask(null);
+    }
+  };
 
   const cards = [
     { key: "total", label: "全部任务", value: counts.total || 0 },
@@ -196,7 +217,29 @@ export default function TasksPage() {
                   {task.error && <p className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-red-950/30 p-2 text-xs text-red-200">{task.error}</p>}
                   <p className="mt-2 text-[11px] text-slate-500">最近更新：{formatTime(task.updated_at)}</p>
                 </div>
-                <Link href={taskHref(task)} className="shrink-0 rounded-lg border border-purple-300/25 px-3 py-2 text-xs text-purple-200 hover:bg-purple-950/50">打开所属模块 ↗</Link>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  {task.source === "image" && task.status === "pending" && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "pause")}
+                      className="rounded-lg border border-white/15 px-3 py-2 text-xs disabled:opacity-40">暂停</button>
+                  )}
+                  {task.source === "image" && task.status === "paused" && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "resume")}
+                      className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">恢复</button>
+                  )}
+                  {task.source === "image" && ["failed", "cancelled"].includes(task.status) && !task.type.startsWith("model3d_") && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "retry")}
+                      className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-200 disabled:opacity-40">重新排队</button>
+                  )}
+                  {task.source === "image" && ["pending", "paused", "failed"].includes(task.status) && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "cancel")}
+                      className="rounded-lg border border-red-300/25 px-3 py-2 text-xs text-red-200 disabled:opacity-40">取消</button>
+                  )}
+                  {task.source === "media" && ["video", "storyboard_video"].includes(task.type) && !["completed", "failed", "cancelled", "submission_unknown"].includes(task.status) && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "refresh")}
+                      className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">刷新状态</button>
+                  )}
+                  <Link href={taskHref(task)} className="rounded-lg border border-purple-300/25 px-3 py-2 text-xs text-purple-200 hover:bg-purple-950/50">打开所属模块 ↗</Link>
+                </div>
               </div>
             </article>
           ))}
