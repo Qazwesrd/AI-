@@ -55,6 +55,18 @@ def get_chapter_title(chapter):
     ))
 
 
+def ensure_project_source_current(project):
+    if project.status == "source_changed":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "检测到小说原文已重新导入，当前剧本项目属于旧版本。为避免使用旧分集、剧本和分镜继续生成，"
+                "本项目的 AI 分集规划、剧本和后续制作已暂停。请保留此旧项目作为历史版本，"
+                "并基于当前小说新建改编项目后重新规划；旧项目和已有成果不会被自动删除。"
+            ),
+        )
+
+
 def get_novel_chapters(db, novel_id):
     chapters = db.query(Chapter).all()
     result = []
@@ -172,8 +184,12 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
     episodes = db.query(EpisodePlan).filter(
         EpisodePlan.project_id == project_id
     ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number).all()
+    result = serialize_model(project)
+    settings = result.get("settings") if isinstance(result.get("settings"), dict) else {}
+    result["source_change_notice"] = settings.get("source_change_notice")
+    result["generation_blocked"] = project.status == "source_changed"
     return {
-        "project": serialize_model(project),
+        "project": result,
         "episodes": [serialize_model(x) for x in episodes],
     }
 
@@ -183,6 +199,7 @@ def plan_episodes(project_id: int, db: Session = Depends(get_db)):
     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
     if not project:
         raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
 
     chapters = get_novel_chapters(db, project.novel_id)
     if not chapters:
@@ -251,6 +268,7 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
     if not project:
         raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
 
     runtime = db.query(AIRuntimeSetting).first()
     if not runtime or not runtime.network_enabled:
@@ -475,6 +493,8 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
     if paid and not payload.confirm_paid:
         raise HTTPException(403, "本次剧本与分镜生成可能产生费用，尚未确认")
     project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if project:
+        ensure_project_source_current(project)
     style = project.adaptation_style if project else "3D动漫电影风格"
     target = project.target_duration if project else 120
     source = (episode.source_text or "")[:28000]
