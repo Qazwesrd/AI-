@@ -434,8 +434,8 @@ def analyze_chunk(config, api_key, content, chapter_label):
 }
 
 category 只能使用：
-character, relationship, scene, prop, costume,
-architecture, event, world, timeline。
+character, relationship, scene, prop, weapon, costume,
+architecture, special_item, event, world, timeline。
 
 没有可靠信息时返回空 items。
 """
