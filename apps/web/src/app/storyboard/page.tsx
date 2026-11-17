@@ -44,6 +44,10 @@ export default function StoryboardPage() {
   const [videoStatusPath, setVideoStatusPath] = useState("/videos/{task_id}");
   const [videoIdField, setVideoIdField] = useState("id");
   const [videoUrlField, setVideoUrlField] = useState("video_url");
+  const [speechProvider, setSpeechProvider] = useState("openai");
+  const [speechModel, setSpeechModel] = useState("");
+  const [speechVoice, setSpeechVoice] = useState("alloy");
+  const [speechPaidConfirmed, setSpeechPaidConfirmed] = useState(false);
 
   const [shotForm, setShotForm] = useState({
     scene_name: "", shot_type: "中景", camera_movement: "固定镜头",
@@ -203,6 +207,19 @@ export default function StoryboardPage() {
     finally { setBusy(false); }
   }
 
+  async function generateEpisodeSpeech(episode: Episode) {
+    if (!speechModel.trim()) return setMessage("请填写已开通的语音模型 ID");
+    if (!window.confirm("将按每个分镜的对白/旁白生成语音，并按镜头时长合成整集配音轨。语音 API 可能产生费用，是否继续？")) return;
+    setBusy(true);
+    try {
+      const result = await request("/api/media/speech/episodes/" + episode.id + "/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: speechProvider, model: speechModel, voice: speechVoice, confirm_paid: speechPaidConfirmed }),
+      });
+      setMessage(result.message || "本集对白配音完成");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "本集配音失败"); }
+    finally { setBusy(false); }
+  }
   async function renderEpisodeVideo(episode: Episode) {
     if (!window.confirm("只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
     setBusy(true);
@@ -371,6 +388,7 @@ export default function StoryboardPage() {
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
                 <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
+                <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
@@ -396,6 +414,15 @@ export default function StoryboardPage() {
           <input className={field} value={videoUrlField} onChange={e => setVideoUrlField(e.target.value)} placeholder="视频 URL 返回字段" />
         </div>
         <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={videoPaidConfirmed} onChange={e => setVideoPaidConfirmed(e.target.checked)} />我已确认本次镜头视频生成可能产生费用</label>
+        <div className="mt-5 border-t border-purple-300/15 pt-4">
+          <h3 className="mb-3 text-sm font-semibold">对白配音配置</h3>
+          <div className="grid gap-3 md:grid-cols-3">
+            <input className={field} value={speechProvider} onChange={e => setSpeechProvider(e.target.value)} placeholder="语音服务商 ID" />
+            <input className={field} value={speechModel} onChange={e => setSpeechModel(e.target.value)} placeholder="语音模型 ID" />
+            <input className={field} value={speechVoice} onChange={e => setSpeechVoice(e.target.value)} placeholder="声音 ID" />
+          </div>
+          <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={speechPaidConfirmed} onChange={e => setSpeechPaidConfirmed(e.target.checked)} />我已确认本次配音可能产生费用</label>
+        </div>
       </section>
 
       <section className={panel}>
