@@ -83,7 +83,7 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def http_download(url, destination, api_key=None):
+def http_download(url, destination, api_key=None, max_bytes=2 * 1024 * 1024 * 1024):
     headers = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -93,10 +93,14 @@ def http_download(url, destination, api_key=None):
     try:
         with opener.open(request, timeout=600) as response:
             with open(destination, "wb") as output:
+                total = 0
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("远程媒体文件超过允许的下载大小")
                     output.write(chunk)
     except Exception:
         if os.path.exists(destination):
