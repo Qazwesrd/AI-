@@ -1,4 +1,6 @@
 import os
+import base64
+import mimetypes
 import uuid
 import json
 import re
@@ -110,7 +112,39 @@ class EpisodeVideoInput(BaseModel):
     video_url_field: str = "video_url"
     status_field: str = "status"
     aspect_ratio: str = "16:9"
+    # 仅对明确支持 JSON data URI 图片输入的服务商启用；默认关闭以兼容纯文生视频接口。
+    reference_image_mode: str = Field(default="none", pattern="^(none|data_uri)$")
+    reference_image_field: str = Field(default="image", min_length=1, max_length=120)
+    reference_image_max_mb: int = Field(default=8, ge=1, le=12)
     extra_payload: dict = Field(default_factory=dict)
+
+
+def set_nested_value(target, dotted_path, value):
+    parts = dotted_path.split(".")
+    if not parts or any(not part or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part) for part in parts):
+        raise ValueError("参考图字段路径格式无效")
+    current = target
+    for part in parts[:-1]:
+        if part not in current:
+            current[part] = {}
+        if not isinstance(current[part], dict):
+            raise ValueError("参考图字段路径与额外请求参数冲突")
+        current = current[part]
+    current[parts[-1]] = value
+
+
+def make_reference_image_data_uri(asset, max_mb):
+    if not asset or not asset.image_path:
+        return None
+    path = safe_storage_file(asset.image_path)
+    size = path.stat().st_size
+    if size <= 0 or size > max_mb * 1024 * 1024:
+        raise ValueError(f"素材 {asset.name} 图片大小超过 {max_mb} MB 上限或文件为空")
+    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    if mime not in ("image/png", "image/jpeg", "image/webp"):
+        raise ValueError(f"素材 {asset.name} 图片格式不支持：{mime}")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return "data:" + mime + ";base64," + encoded
 
 
 @router.post("/video/episodes/{episode_id}/generate")
@@ -178,6 +212,7 @@ def generate_episode_shot_videos(
         if shot.scene_asset_id:
             shot_asset_ids.add(shot.scene_asset_id)
         shot_assets = []
+        reference_candidates = []
         for asset_id in shot_asset_ids:
             asset = asset_by_id.get(asset_id)
             if not asset:
@@ -188,6 +223,8 @@ def generate_episode_shot_videos(
             ] if x)
             if description:
                 shot_assets.append(description[:1200])
+            if asset.image_path:
+                reference_candidates.append(asset)
         if shot_assets:
             prompt_parts.append("本镜头已关联视觉素材设定，必须保持外观一致：" + "；".join(shot_assets))
         prompt = "\n".join(x for x in prompt_parts if x and not x.endswith("："))[:20000]
@@ -198,7 +235,21 @@ def generate_episode_shot_videos(
             "aspect_ratio": data.aspect_ratio,
             **data.extra_payload,
         }
+        reference_asset = None
+        reference_image_attached = False
         try:
+            if data.reference_image_mode == "data_uri":
+                if not reference_candidates:
+                    raise ValueError("已启用参考图输入，但本镜头关联的已确认素材没有可用图片")
+                # 优先使用角色参考图，其次场景，再使用道具，减少把道具图误当人物参考。
+                priority = {"characters": 0, "scenes": 1, "weapons": 2, "props": 3, "special_items": 4, "costumes": 5}
+                reference_candidates.sort(key=lambda item: (priority.get(item.category, 9), item.id))
+                reference_asset = reference_candidates[0]
+                data_uri = make_reference_image_data_uri(reference_asset, data.reference_image_max_mb)
+                if not data_uri:
+                    raise ValueError("所选视觉素材没有可用参考图片")
+                set_nested_value(payload, data.reference_image_field, data_uri)
+                reference_image_attached = True
             result = http_json(
                 base + "/" + data.create_path.lstrip("/"),
                 key, body=payload, timeout=300
@@ -221,6 +272,11 @@ def generate_episode_shot_videos(
                     "shot_id": shot.id,
                     "shot_number": shot.shot_number,
                     "duration": payload["duration"],
+                    "reference_image_mode": data.reference_image_mode,
+                    "reference_image_attached": reference_image_attached,
+                    "reference_asset_id": reference_asset.id if reference_asset else None,
+                    "reference_asset_name": reference_asset.name if reference_asset else None,
+                    "reference_image_field": data.reference_image_field if reference_image_attached else None,
                 },
                 result_data=result,
             )
