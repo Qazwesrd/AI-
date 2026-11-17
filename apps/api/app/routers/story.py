@@ -322,10 +322,10 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                 "若一集能完整表达本章核心剧情，返回1集；只有剧情确实过长且存在自然戏剧断点时才返回2集。"
                 "若拆为2集，split_quote必须是原文中连续、逐字一致的一段短句，作为第二集开始位置。"
                 "每章都必须返回一条结果，chapter_index必须与输入完全一致。"
-                "只返回JSON：{\\"chapters\\":[{\\"chapter_index\\":0,\\"episode_count\\":1,\\"split_quote\\":\\"\\","
-                "\\"synopsis\\":\\"本章剧情摘要\\",\\"episode1_title\\":\\"标题\\","
-                "\\"episode1_synopsis\\":\\"上集摘要\\",\\"episode2_title\\":\\"下集标题\\","
-                "\\"episode2_synopsis\\":\\"下集摘要\\"}]}"
+                '只返回JSON：{"chapters":[{"chapter_index":0,"episode_count":1,"split_quote":"",'
+                '"synopsis":"本章剧情摘要","episode1_title":"标题",'
+                '"episode1_synopsis":"上集摘要","episode2_title":"下集标题",'
+                '"episode2_synopsis":"下集摘要"}]}'
                 "\\n章节原文数据：\\n" + json.dumps(batch_chapters, ensure_ascii=False)
             )
             body = json.dumps({"model": provider.model, "temperature": 0.2, "messages": [
