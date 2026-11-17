@@ -150,7 +150,7 @@ export default function NovelsPage() {
       setCurrentChapter(null);
       await loadNovels();
       await openNovel(selected);
-      setMessage(`导入成功：${data.chapter_count ?? 0} 章，共 ${data.word_count ?? 0} 字`);
+      setMessage(`导入成功：${data.chapter_count ?? 0} 章，共 ${data.word_count ?? 0} 字${data.outdated_story_projects ? `；${data.outdated_story_projects} 个旧剧本项目已标记为需要复核` : ""}`);
       if (fileRef.current) fileRef.current.value = "";
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "小说导入失败，请检查文件格式或后端服务");
