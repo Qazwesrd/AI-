@@ -46,6 +46,7 @@ export default function NovelsPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisItem[]>([]);
+  const [analysisProgress, setAnalysisProgress] = useState<{ status: string; completed_chunks: number; total_chunks: number; progress_percent: number; last_error?: string } | null>(null);
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("奇幻");
   const [loading, setLoading] = useState(false);
@@ -72,12 +73,14 @@ export default function NovelsPage() {
     setSelected(novel);
     setCurrentChapter(null);
     try {
-      const [chapterData, analysisData] = await Promise.all([
+      const [chapterData, analysisData, progressData] = await Promise.all([
         request(`/api/novels/${novel.id}/chapters`),
         request(`/api/novels/${novel.id}/analysis`),
+        request(`/api/novels/${novel.id}/analysis-progress`),
       ]);
       setChapters(chapterData.items || []);
       setAnalysis(analysisData.items || []);
+      setAnalysisProgress(progressData.has_job ? progressData : null);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取失败");
     }
@@ -213,10 +216,22 @@ export default function NovelsPage() {
       });
 
       const result = await request(`/api/novels/${selected.id}/analysis`);
+      const progress = await request(`/api/novels/${selected.id}/analysis-progress`);
       setAnalysis(result.items || []);
+      setAnalysisProgress(progress.has_job ? progress : null);
       setMessage(data.message || "AI深度分析完成");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "AI分析失败");
+      try {
+        const progress = await request(`/api/novels/${selected.id}/analysis-progress`);
+        setAnalysisProgress(progress.has_job ? progress : null);
+        if (progress.has_job) {
+          setMessage(`分析已保留进度：${progress.completed_chunks}/${progress.total_chunks} 段（${progress.progress_percent}%）。再次点击分析即可从未完成部分继续。`);
+        } else {
+          setMessage(error instanceof Error ? error.message : "AI分析失败");
+        }
+      } catch {
+        setMessage(error instanceof Error ? error.message : "AI分析失败");
+      }
     } finally {
       setLoading(false);
     }
@@ -290,6 +305,18 @@ export default function NovelsPage() {
           </div>
         </header>
 
+        {analysisProgress && (
+          <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>AI分析进度：{analysisProgress.completed_chunks}/{analysisProgress.total_chunks} 段</span>
+              <span>{analysisProgress.progress_percent}% · {analysisProgress.status}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+              <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${analysisProgress.progress_percent}%` }} />
+            </div>
+            {analysisProgress.last_error && <p className="mt-2 text-xs text-amber-200">{analysisProgress.last_error}</p>}
+          </div>
+        )}
         {message && (
           <div className="mb-5 rounded-xl border border-purple-400/30 bg-purple-950/70 p-3 text-sm text-purple-100">
             {message}
