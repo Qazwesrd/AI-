@@ -16,6 +16,7 @@ storage/temp/
 out/
 release/
 repair-backups/
+repair-backup/
 .env.development
 .env.production
 .env.test
