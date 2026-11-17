@@ -195,16 +195,31 @@ export default function StoryboardPage() {
   }
   async function generateEpisodeVideos(episode: Episode) {
     if (!videoModel.trim()) return setMessage("请填写已开通的视频模型 ID");
-    if (!window.confirm("将为第" + episode.episode_number + "集的每个分镜分别提交视频生成请求。每个镜头都可能产生费用，是否继续？")) return;
+    if (!window.confirm("将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
     setBusy(true);
     try {
-      const result = await request("/api/media/video/episodes/" + episode.id + "/generate", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: videoProvider, model: videoModel, confirm_paid: videoPaidConfirmed, create_path: videoCreatePath, status_path_template: videoStatusPath, task_id_field: videoIdField, video_url_field: videoUrlField, status_field: "status", aspect_ratio: "16:9" }),
-      });
-      setMessage(result.message || "镜头视频任务已提交");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "提交镜头视频失败"); }
-    finally { setBusy(false); }
+      let done = false;
+      let batches = 0;
+      let totalCreated = 0;
+      while (!done && batches < 12) {
+        const result = await request("/api/media/video/episodes/" + episode.id + "/generate", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: videoProvider, model: videoModel, batch_size: 3, confirm_paid: videoPaidConfirmed, create_path: videoCreatePath, status_path_template: videoStatusPath, task_id_field: videoIdField, video_url_field: videoUrlField, status_field: "status", aspect_ratio: "16:9" }),
+        });
+        totalCreated += (result.created || []).length;
+        done = Boolean(result.done);
+        batches += 1;
+        await loadEpisodeVideoTasks(episode.id);
+        setMessage(result.message || "正在分批提交镜头视频任务");
+        if (result.failures?.length) {
+          throw new Error("有 " + result.failures.length + " 个镜头提交失败；已成功提交的任务已保存，请修正服务商配置后再次点击重试。");
+        }
+      }
+      if (!done) throw new Error("本次已达到批次上限，已提交任务全部保存，再次点击即可继续。");
+      setMessage("本集镜头视频任务提交完成，共提交 " + totalCreated + " 个任务。接下来查询任务状态并下载成片。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "提交镜头视频失败");
+    } finally { setBusy(false); }
   }
 
   async function generateEpisodeSpeech(episode: Episode) {
