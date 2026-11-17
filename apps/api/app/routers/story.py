@@ -327,8 +327,13 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                 raw = result["choices"][0]["message"]["content"]
                 if isinstance(raw, list):
                     raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
-                raw = re.sub(r"^\\x60{3}(?:json)?\\s*", "", str(raw).strip())
-                raw = re.sub(r"\\s*\\x60{3}$", "", raw)
+                raw = str(raw).strip()
+                if raw.startswith("```json"):
+                    raw = raw[7:].strip()
+                elif raw.startswith("```"):
+                    raw = raw[3:].strip()
+                if raw.endswith("```"):
+                    raw = raw[:-3].strip()
                 try:
                     decision = json.loads(raw)
                 except json.JSONDecodeError:
