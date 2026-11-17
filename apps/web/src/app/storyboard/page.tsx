@@ -35,6 +35,13 @@ export default function StoryboardPage() {
   const [style, setStyle] = useState(styles[0]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [videoProvider, setVideoProvider] = useState("doubao");
+  const [videoModel, setVideoModel] = useState("");
+  const [videoPaidConfirmed, setVideoPaidConfirmed] = useState(false);
+  const [videoCreatePath, setVideoCreatePath] = useState("/videos/generations");
+  const [videoStatusPath, setVideoStatusPath] = useState("/videos/{task_id}");
+  const [videoIdField, setVideoIdField] = useState("id");
+  const [videoUrlField, setVideoUrlField] = useState("video_url");
 
   const [shotForm, setShotForm] = useState({
     scene_name: "", shot_type: "中景", camera_movement: "固定镜头",
@@ -164,6 +171,29 @@ export default function StoryboardPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "AI生成失败");
     } finally { setBusy(false); }
+  }
+  async function generateEpisodeVideos(episode: Episode) {
+    if (!videoModel.trim()) return setMessage("请填写已开通的视频模型 ID");
+    if (!window.confirm("将为第" + episode.episode_number + "集的每个分镜分别提交视频生成请求。每个镜头都可能产生费用，是否继续？")) return;
+    setBusy(true);
+    try {
+      const result = await request("/api/media/video/episodes/" + episode.id + "/generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: videoProvider, model: videoModel, confirm_paid: videoPaidConfirmed, create_path: videoCreatePath, status_path_template: videoStatusPath, task_id_field: videoIdField, video_url_field: videoUrlField, status_field: "status", aspect_ratio: "16:9" }),
+      });
+      setMessage(result.message || "镜头视频任务已提交");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "提交镜头视频失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function renderEpisodeVideo(episode: Episode) {
+    if (!window.confirm("只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
+    setBusy(true);
+    try {
+      const result = await request("/api/media/video/episodes/" + episode.id + "/render", { method: "POST" });
+      setMessage("第" + episode.episode_number + "集初版视频已合成：" + result.output);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "视频合成失败"); }
+    finally { setBusy(false); }
   }
   async function updateEpisode(episode: Episode, patch: Partial<Episode>) {
     try {
@@ -323,6 +353,8 @@ export default function StoryboardPage() {
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
+                <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
+                <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, -1)}>上移</button>
@@ -333,6 +365,20 @@ export default function StoryboardPage() {
           ))}
           {episodes.length === 0 && <p className="text-sm text-slate-400">选择或创建项目后，生成分集计划。</p>}
         </div>
+      </section>
+
+      <section className={panel}>
+        <h2 className="mb-4 text-xl font-semibold">分镜视频生成配置</h2>
+        <p className="mb-3 text-xs text-slate-400">使用已在 AI 管理中心配置并启用的视频服务商，填写该服务商实际支持的模型 ID 和任务接口路径。当前会将分镜文字及已确认素材描述作为提示词；需要远程图片上传的专用图生视频接口还需按服务商协议单独适配。</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <input className={field} value={videoProvider} onChange={e => setVideoProvider(e.target.value)} placeholder="服务商 ID，例如 doubao" />
+          <input className={field} value={videoModel} onChange={e => setVideoModel(e.target.value)} placeholder="视频模型 ID（必填）" />
+          <input className={field} value={videoCreatePath} onChange={e => setVideoCreatePath(e.target.value)} placeholder="创建任务 API 路径" />
+          <input className={field} value={videoStatusPath} onChange={e => setVideoStatusPath(e.target.value)} placeholder="查询任务路径，保留 {task_id}" />
+          <input className={field} value={videoIdField} onChange={e => setVideoIdField(e.target.value)} placeholder="任务编号返回字段" />
+          <input className={field} value={videoUrlField} onChange={e => setVideoUrlField(e.target.value)} placeholder="视频 URL 返回字段" />
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={videoPaidConfirmed} onChange={e => setVideoPaidConfirmed(e.target.checked)} />我已确认本次镜头视频生成可能产生费用</label>
       </section>
 
       <section className={panel}>
