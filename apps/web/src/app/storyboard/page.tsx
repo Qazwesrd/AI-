@@ -16,6 +16,7 @@ type Shot = {
   character_actions: string; dialogue: string; sound_effects: string; image_prompt: string;
 };
 type VisualAsset = { id: number; category: string; name: string; description: string };
+type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string };
 
 const styles = [
   "3D动漫电影风格", "真人电影风格", "2D动漫风格",
@@ -27,6 +28,7 @@ export default function StoryboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
+  const [videoTasks, setVideoTasks] = useState<VideoTask[]>([]);
   const [assets, setAssets] = useState<VisualAsset[]>([]);
   const [novelId, setNovelId] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
@@ -87,6 +89,7 @@ export default function StoryboardPage() {
     const result = await request(`/api/story/episodes/${id}/shots`);
     setShots(result);
     setEpisodeId(id);
+    await loadEpisodeVideoTasks(id);
   }
 
   useEffect(() => { loadBase(); }, []);
@@ -171,6 +174,20 @@ export default function StoryboardPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "AI生成失败");
     } finally { setBusy(false); }
+  }
+  async function loadEpisodeVideoTasks(id: number) {
+    try { const rows = await request("/api/media/video/episodes/" + id + "/tasks"); setVideoTasks(rows); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "读取视频任务失败"); }
+  }
+
+  async function refreshEpisodeVideoTasks(id: number) {
+    setBusy(true);
+    try {
+      const result = await request("/api/media/video/episodes/" + id + "/refresh", { method: "POST" });
+      await loadEpisodeVideoTasks(id);
+      setMessage("已查询 " + result.checked + " 个镜头任务状态；请留意仍在排队或生成中的任务。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "查询视频任务失败"); }
+    finally { setBusy(false); }
   }
   async function generateEpisodeVideos(episode: Episode) {
     if (!videoModel.trim()) return setMessage("请填写已开通的视频模型 ID");
@@ -383,6 +400,24 @@ export default function StoryboardPage() {
 
       <section className={panel}>
         <h2 className="mb-4 text-xl font-semibold">分镜镜头编辑器</h2>
+        {episodeId && (
+          <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-950/30 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong className="text-sm">本集视频任务</strong>
+              <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => refreshEpisodeVideoTasks(episodeId)}>查询并下载已完成视频</button>
+            </div>
+            <div className="mt-2 space-y-2">
+              {videoTasks.map(task => (
+                <div key={task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-black/20 p-2 text-xs">
+                  <span>镜头 {task.shot_number} · {task.provider}/{task.model} · {task.status}</span>
+                  {task.result_path && <span className="break-all text-emerald-300">已下载到本地</span>}
+                  {task.error && <span className="text-red-300">{task.error}</span>}
+                </div>
+              ))}
+              {videoTasks.length === 0 && <p className="text-xs text-slate-400">尚未提交视频任务。</p>}
+            </div>
+          </div>
+        )}
         {!episodeId ? (
           <p className="text-sm text-slate-400">请先在上方选择一集，进入镜头编辑。</p>
         ) : (
