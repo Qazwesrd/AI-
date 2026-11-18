@@ -61,6 +61,7 @@ const groupStyles: Record<string, string> = {
 function taskHref(task: TaskItem) {
   if (task.source === "analysis") return "/novels";
   if (task.source === "image") return "/visual-studio";
+  if (task.type === "speech") return "/media-studio";
   return task.type === "video" ? "/video-editor" : "/storyboard";
 }
 
@@ -127,9 +128,11 @@ export default function TasksPage() {
     const actionNames: Record<string, string> = {
       pause: "暂停", resume: "恢复", retry: "重新排队", cancel: "取消", refresh: "刷新远程状态",
     };
-    const uncertainRetry = action === "retry" && task.status === "interrupted_unknown";
+    const uncertainRetry = action === "retry" && ["interrupted_unknown", "submission_unknown"].includes(task.status);
     const confirmation = uncertainRetry
-      ? "请先登录图像服务商控制台核对该任务。只有确认服务商没有创建任务、没有产生费用时，才能重新排队。是否已核对并确认？"
+      ? task.source === "media"
+        ? "请先核对语音服务商控制台和用量记录。只有确认没有对应远程任务或待结算请求后，才能解除重试保护。是否已核对并确认？"
+        : "请先登录图像服务商控制台核对该任务。只有确认服务商没有创建任务、没有产生费用时，才能重新排队。是否已核对并确认？"
       : `确定要${actionNames[action]}此任务吗？${action === "retry" ? "重新排队不会自动调用 AI，也不会自动扣费。" : ""}`;
     if (["retry", "cancel"].includes(action) && !window.confirm(confirmation)) return;
     setBusyTask(task.id);
@@ -225,7 +228,7 @@ export default function TasksPage() {
             {runtime.stale_leases.map(item => <div key={item.source + ":" + item.task_id} className="flex flex-wrap items-center justify-between gap-2 border-t border-white/5 py-2 text-xs">
               <span>{item.source} #{item.task_id} · 已占用 {Math.floor(item.age_seconds / 60)} 分钟</span>
               {(item.source === "image" || item.source === "image3d_asset" || item.source === "analysis" || item.source === "media") ? <button onClick={async () => {
-                if (!window.confirm((item.source === "media" ? "请先到视频服务商控制台核对该任务。" : item.source === "analysis" ? "请先核对文本模型服务商的请求记录。" : item.source === "image3d_asset" ? "请先到 Tripo 3D 服务商控制台核对该素材是否已经创建远程任务。" : "请先到图像服务商控制台核对。") + "只有确认没有仍在运行的远程任务、不会发生重复扣费，才能释放本地并发占用。确认已核实？")) return;
+                if (!window.confirm((item.source === "media" ? "请先到对应媒体服务商控制台核对该任务。" : item.source === "analysis" ? "请先核对文本模型服务商的请求记录。" : item.source === "image3d_asset" ? "请先到 Tripo 3D 服务商控制台核对该素材是否已经创建远程任务。" : "请先到图像服务商控制台核对。") + "只有确认没有仍在运行的远程任务、不会发生重复扣费，才能释放本地并发占用。确认已核实？")) return;
                 try {
                   const response = await fetch(API + "/api/tasks/runtime/leases/" + item.source + "/" + item.task_id + "/release?confirm_no_remote_job=true", {method:"POST"});
                   const data = await response.json();
@@ -369,6 +372,10 @@ export default function TasksPage() {
                   {task.source === "media" && ["video", "storyboard_video"].includes(task.type) && !["completed", "failed", "cancelled", "submission_unknown"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "refresh")}
                       className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">刷新状态</button>
+                  )}
+                  {task.source === "media" && ["speech", "episode_speech"].includes(task.type) && ["submission_unknown", "interrupted_unknown"].includes(task.status) && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "retry")}
+                      className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-200 disabled:opacity-40">核实后重新生成</button>
                   )}
                   <Link href={taskHref(task)} className="rounded-lg border border-purple-300/25 px-3 py-2 text-xs text-purple-200 hover:bg-purple-950/50">打开所属模块 ↗</Link>
                 </div>
