@@ -233,7 +233,7 @@ def list_unified_tasks(
             "provider": task.provider or "", "model": task.model or "",
             "summary": (task.prompt or "")[:180],
             "context": f"素材 #{task.asset_id}" if task.asset_id else "",
-            "error": (task.error or "")[:1200], "result_available": bool(task.result_path),
+            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path),
             "created_at": _iso(task.created_at), "updated_at": _iso(task.finished_at or task.created_at),
             "can_open": True,
         })
