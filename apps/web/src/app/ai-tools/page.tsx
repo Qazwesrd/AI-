@@ -150,21 +150,25 @@ export default function AIToolsPage() {
   }
 
   async function openTask(task: Task) {
-    await copyText(task.prompt);
     const target = tools.find((tool) => tool.id === task.toolId);
     if (!target) {
       setNotice("找不到该任务对应的 AI 工具，请检查工具配置。");
       return;
     }
     try {
-      const desktop = (window as Window & { desktopAPI?: { openExternal?: (url: string) => Promise<boolean> } }).desktopAPI;
-      if (desktop?.openExternal) {
-        await desktop.openExternal(target.url);
-      } else {
-        window.open(target.url, "_blank", "noopener,noreferrer");
+      const parsed = new URL(target.url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+        throw new Error("只允许 HTTP 或 HTTPS 网站地址");
       }
+      const desktop = (window as Window & { desktopAPI?: { openExternal?: (url: string) => Promise<boolean> } }).desktopAPI;
+      // Start navigation during the user gesture so normal-browser popup blockers do not suppress it.
+      const opening = desktop?.openExternal
+        ? desktop.openExternal(parsed.toString())
+        : Promise.resolve(window.open(parsed.toString(), "_blank", "noopener,noreferrer"));
+      await copyText(task.prompt);
+      await opening;
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "opened" } : item));
-      setNotice(`已打开 ${target.name}。请在网页中粘贴提示词并完成生成；本软件不会读取或绕过该网站的登录与验证码。`);
+      setNotice(`已打开 ${target.name}。提示词已复制，请在网页中粘贴并完成生成；本软件不会读取或绕过该网站的登录与验证码。`);
     } catch {
       setNotice("打开网页失败，请检查工具网址或默认浏览器设置。");
     }
