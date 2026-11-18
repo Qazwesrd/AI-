@@ -23,6 +23,8 @@ const presets: Tool[] = [
   { id: "chatgpt", name: "ChatGPT", category: "text", url: "https://chatgpt.com/", note: "剧本改编、对白润色、剧情分析" },
   { id: "deepseek", name: "DeepSeek", category: "text", url: "https://chat.deepseek.com/", note: "小说理解、长文本分析、剧本初稿" },
   { id: "gemini", name: "Google Gemini", category: "text", url: "https://gemini.google.com/", note: "文本分析与多模态辅助" },
+  { id: "chatgpt-storyboard", name: "ChatGPT（分镜规划）", category: "storyboard", url: "https://chatgpt.com/", note: "镜头拆分、景别、机位、动作和时长规划" },
+  { id: "deepseek-storyboard", name: "DeepSeek（分镜规划）", category: "storyboard", url: "https://chat.deepseek.com/", note: "剧本结构化与分镜表生成" },
   { id: "doubao", name: "豆包", category: "image", url: "https://www.doubao.com/", note: "人物、场景、道具图片生成；具体能力以账号页面为准" },
   { id: "jimeng", name: "即梦AI", category: "image", url: "https://jimeng.jianying.com/", note: "图片与创意视觉素材" },
   { id: "midjourney", name: "Midjourney", category: "image", url: "https://www.midjourney.com/", note: "风格化概念图与视觉探索" },
@@ -205,8 +207,22 @@ export default function AIToolsPage() {
   }
 
   function saveResult(task: Task) {
+    let normalizedResultUrl = "";
+    if (resultUrl.trim()) {
+      try {
+        const parsed = new URL(resultUrl.trim());
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+          setNotice("结果链接只允许 HTTP 或 HTTPS 地址。");
+          return;
+        }
+        normalizedResultUrl = parsed.toString();
+      } catch {
+        setNotice("结果链接格式不正确。");
+        return;
+      }
+    }
     setTasks((current) => current.map((item) => item.id === task.id
-      ? { ...item, status: "completed", resultText, resultUrl }
+      ? { ...item, status: "completed", resultText, resultUrl: normalizedResultUrl }
       : item));
     setActiveTaskId(null);
     setNotice("结果已保存到本机任务记录。图片和视频文件请先从 AI 网站下载，再到素材库导入。");
