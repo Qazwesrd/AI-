@@ -26,6 +26,8 @@ type TaskItem = {
   updated_at: string | null;
 };
 
+type RuntimeInfo = { max_concurrency: number; active_count: number; available_slots: number; leases: Array<{source:string;task_id:number;age_seconds:number;started_at:string|null}>; stale_leases: Array<{source:string;task_id:number;age_seconds:number}>; note?: string };
+
 type TaskResponse = {
   items: TaskItem[];
   total: number;
@@ -79,6 +81,9 @@ export default function TasksPage() {
   const [message, setMessage] = useState("");
   const [updatedAt, setUpdatedAt] = useState("");
   const [busyTask, setBusyTask] = useState<string | null>(null);
+  const [runtime, setRuntime] = useState<RuntimeInfo | null>(null);
+  const [runtimeLimit, setRuntimeLimit] = useState(2);
+  const [runtimeLogs, setRuntimeLogs] = useState<Array<{id:number;source:string;task_id:number;event:string;message:string;duration_seconds:number|null;created_at:string|null}>>([]);
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -97,6 +102,16 @@ export default function TasksPage() {
       setHasMore(Boolean(result.has_more));
       setUpdatedAt(result.generated_at || "");
       setMessage(result.note || "");
+      const [runtimeResponse, logsResponse] = await Promise.all([
+        fetch(`${API}/api/tasks/runtime`, { cache: "no-store" }),
+        fetch(`${API}/api/tasks/runtime/logs?limit=12`, { cache: "no-store" }),
+      ]);
+      if (runtimeResponse.ok) {
+        const runtimeData = await runtimeResponse.json() as RuntimeInfo;
+        setRuntime(runtimeData);
+        setRuntimeLimit(runtimeData.max_concurrency);
+      }
+      if (logsResponse.ok) setRuntimeLogs(await logsResponse.json());
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "任务列表加载失败，请检查 API 服务");
     } finally {
@@ -176,6 +191,41 @@ export default function TasksPage() {
           </div>
         </div>
 
+
+        <section className="mb-5 rounded-2xl border border-purple-300/15 bg-slate-950/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="font-semibold">任务执行资源</h2><p className="mt-1 text-xs text-slate-400">持久化并发控制已接入视觉图片生成；其他任务类型仍由所属模块控制。</p></div>
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-300">全局并发上限</span>
+              <select value={runtimeLimit} onChange={event => setRuntimeLimit(Number(event.target.value))} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
+                {[1,2,3,4,5,6,7,8].map(value => <option key={value} value={value}>{value}</option>)}
+              </select>
+              <button onClick={async () => {
+                try {
+                  const response = await fetch(API + "/api/tasks/runtime/concurrency", {
+                    method: "PUT", headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({max_concurrency: runtimeLimit}),
+                  });
+                  const data = await response.json();
+                  if (!response.ok) throw new Error(data.detail || "保存并发设置失败");
+                  setRuntime(data); setMessage("并发上限已保存");
+                } catch (error) { setMessage(error instanceof Error ? error.message : "保存失败"); }
+              }} className="rounded-lg border border-purple-300/30 px-3 py-2 text-xs text-purple-200">保存</button>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-slate-400">正在执行</p><p className="mt-1 text-xl">{runtime?.active_count ?? 0}</p></div>
+            <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-slate-400">可用并发位</p><p className="mt-1 text-xl">{runtime?.available_slots ?? runtimeLimit}</p></div>
+            <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-slate-400">待核实租约</p><p className="mt-1 text-xl">{runtime?.stale_leases?.length ?? 0}</p></div>
+          </div>
+          {runtime?.stale_leases?.length ? <p className="mt-3 text-xs text-amber-200">发现超过30分钟的执行租约：{runtime.stale_leases.map(item => item.source + " #" + item.task_id).join("、")}。系统不会自动释放，请先核对服务商执行状态。</p> : null}
+          {runtimeLogs.length > 0 && <div className="mt-3 border-t border-white/10 pt-3">
+            <p className="mb-2 text-xs text-slate-400">最近执行记录</p>
+            <div className="space-y-1">{runtimeLogs.slice(0,6).map(log => <p key={log.id} className="text-xs text-slate-400">
+              {log.source} #{log.task_id} · {log.event === "completed" ? "完成" : log.event === "failed" ? "失败" : "启动"} · {log.duration_seconds == null ? "执行中" : log.duration_seconds + " 秒"} · {log.message}
+            </p>)}</div>
+          </div>}
+        </section>
         <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
           {cards.map(card => (
             <div key={card.key} className="rounded-2xl border border-white/10 bg-slate-950/45 p-4 backdrop-blur">
