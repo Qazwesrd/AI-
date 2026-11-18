@@ -85,6 +85,18 @@ def value_at(data, dotted_path):
     return current
 
 
+def speech_task_is_in_flight(task):
+    return task.status in ("queued", "submitting", "submission_unknown", "interrupted_unknown")
+
+
+def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3", instructions=None):
+    return json.dumps({
+        "provider": provider, "model": model, "text": text, "voice": voice,
+        "speed": float(speed), "response_format": response_format,
+        "instructions": instructions or "",
+    }, ensure_ascii=False, sort_keys=True)
+
+
 class VideoTaskInput(BaseModel):
     provider: str
     model: str
@@ -767,6 +779,7 @@ class SpeechInput(BaseModel):
     response_format: str = "mp3"
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
     confirm_paid: bool = False
+    force_regenerate: bool = False
 
 
 class EpisodeSpeechInput(BaseModel):
@@ -821,17 +834,20 @@ def generate_episode_voice_track(
         raise HTTPException(400, "所选服务商用途不支持语音合成，请选择文本或语音服务商")
     generated = {}
     speech_durations = {}
+    failures = []
+    blocked_shots = set()
+    pending_tasks = {}
     prior_tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "episode_speech"
     ).order_by(MediaTask.id.desc()).all()
+    handled_shots = set()
     for prior in prior_tasks:
         prior_meta = prior.request_data if isinstance(prior.request_data, dict) else {}
         prior_shot_id = prior_meta.get("shot_id")
         current_shot = next((item for item in shots if item.id == prior_shot_id), None)
         current_dialogue = (current_shot.dialogue or "").strip() if current_shot else None
-        if (
-            prior.status == "completed"
-            and prior.provider == data.provider
+        matches = (
+            prior.provider == data.provider
             and prior.model == data.model
             and prior_meta.get("voice") == data.voice
             and float(prior_meta.get("speed", 1.0)) == float(data.speed)
@@ -839,12 +855,31 @@ def generate_episode_voice_track(
             and prior_shot_id
             and current_dialogue
             and prior.prompt == current_dialogue
+        )
+        if not matches or prior_shot_id in handled_shots:
+            continue
+        if (
+            prior.status == "completed"
             and prior.result_path
             and Path(prior.result_path).is_file()
         ):
-            generated.setdefault(prior_shot_id, Path(prior.result_path))
-    failures = []
-    blocked_shots = set()
+            generated[prior_shot_id] = Path(prior.result_path)
+            handled_shots.add(prior_shot_id)
+        elif prior.status == "pending":
+            # A pending task is known not to have reached the provider yet;
+            # reuse it instead of creating another local row after a restart.
+            pending_tasks[prior_shot_id] = prior
+            handled_shots.add(prior_shot_id)
+        elif speech_task_is_in_flight(prior):
+            blocked_shots.add(prior_shot_id)
+            handled_shots.add(prior_shot_id)
+            failures.append({
+                "shot_number": current_shot.shot_number,
+                "task_id": prior.id,
+                "status": prior.status,
+                "error": "该镜头已有配音任务正在排队、提交或等待人工核实；为避免重复扣费，本次不会再次调用语音服务商。",
+            })
+
     for shot in shots:
         existing_audio = generated.get(shot.id)
         if existing_audio:
@@ -888,7 +923,29 @@ def generate_episode_voice_track(
             headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
             method="POST",
         )
+        task = pending_tasks.get(shot.id)
+        if task is None:
+            task = MediaTask(
+                task_type="episode_speech", provider=data.provider, model=data.model,
+                status="pending", prompt=text_value,
+                request_data={"episode_id": episode_id, "shot_id": shot.id,
+                              "shot_number": shot.shot_number, "voice": data.voice,
+                              "speed": data.speed, "confirm_paid": data.confirm_paid},
+            )
+            db.add(task)
+            db.commit()
+            db.refresh(task)
+
+        lease_acquired = False
+        request_started = False
         try:
+            acquire_task_lease(db, "media", task.id, priority=2)
+            lease_acquired = True
+            task.status = "submitting"
+            task.error = None
+            db.commit()
+
+            request_started = True
             with urllib.request.urlopen(request, timeout=300) as response:
                 with destination.open("wb") as output:
                     while True:
@@ -908,24 +965,64 @@ def generate_episode_voice_track(
                     f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；"
                     "请拆分对白或延长镜头，系统不会直接截断台词。"
                 )
-            generated[shot.id] = destination
-            speech_durations[shot.id] = speech_duration
-            db.add(MediaTask(
-                task_type="episode_speech", provider=data.provider, model=data.model,
-                status="completed", prompt=text_value, result_path=str(destination),
-                request_data={"episode_id": episode_id, "shot_id": shot.id,
-                              "shot_number": shot.shot_number, "voice": data.voice,
-                              "speed": data.speed},
-            ))
+            task.status = "completed"
+            task.result_path = str(destination)
+            task.error = None
+            task.request_data = {
+                **(task.request_data if isinstance(task.request_data, dict) else {}),
+                "audio_duration": speech_duration,
+            }
             db.add(MediaFile(
                 name=filename, category="audio", file_path=str(destination),
                 mime_type="audio/mpeg", file_size=destination.stat().st_size,
             ))
             db.commit()
-        except Exception as exc:
-            destination.unlink(missing_ok=True)
+            release_task_lease(db, "media", task.id, True)
+            generated[shot.id] = destination
+            speech_durations[shot.id] = speech_duration
+        except HTTPException as exc:
             db.rollback()
-            failures.append({"shot_number": shot.shot_number, "error": str(exc)[:1000]})
+            task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+            if exc.status_code == 429:
+                if task:
+                    task.status = "queued"
+                    task.error = str(exc.detail)[:2000]
+                    db.commit()
+                failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                                 "status": "queued", "error": str(exc.detail)[:1000]})
+            elif exc.status_code == 409:
+                failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                                 "status": task.status if task else "unknown",
+                                 "error": "该配音任务已被另一个请求占用；没有再次调用语音服务商。"})
+            else:
+                if task:
+                    task.status = "submission_unknown" if request_started else "failed"
+                    task.error = (
+                        "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。"
+                        if request_started else str(exc.detail)
+                    )[:2000]
+                    db.commit()
+                if lease_acquired:
+                    release_task_lease(db, "media", task.id, False, task.error if task else str(exc.detail))
+                destination.unlink(missing_ok=True)
+                failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                                 "status": task.status if task else "failed", "error": str(exc.detail)[:1000]})
+        except Exception as exc:
+            db.rollback()
+            task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+            if task:
+                task.status = "submission_unknown" if request_started else "failed"
+                task.error = (
+                    "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。原始错误："
+                    if request_started else "语音请求尚未发出："
+                ) + str(exc)[:1500]
+                task.error = task.error[:2000]
+                db.commit()
+                if lease_acquired:
+                    release_task_lease(db, "media", task.id, False, task.error)
+            destination.unlink(missing_ok=True)
+            failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                             "status": task.status if task else "failed", "error": str(exc)[:1000]})
 
     if not generated:
         raise HTTPException(502, "本集没有成功生成任何对白语音：" + json.dumps(failures, ensure_ascii=False)[:2000])
