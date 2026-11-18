@@ -344,11 +344,13 @@ export default function VisualStudioPage() {
     if (!event || !event.trim()) return;
     const changeType = window.prompt("变化类型（状态变化/损坏/升级/易主/外观变化）：", "状态变化") || "状态变化";
     const appearanceAfter = window.prompt("变化后的外观（可留空）：", "") || "";
+    const clothingAfter = window.prompt("变化后的服装/装备（可留空）：", "") || "";
+    const holder = window.prompt("变化后的持有人（可留空）：", "") || "";
     setBusy(true);
     try {
       const response = await fetch(API + "/api/visual/assets/" + asset.id + "/evolution", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapter_number: Number(chapter), event, change_type: changeType, appearance_after: appearanceAfter }),
+        body: JSON.stringify({ chapter_number: Number(chapter), event, change_type: changeType, appearance_after: appearanceAfter, clothing_after: clothingAfter, holder }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "记录变化失败");
@@ -552,9 +554,8 @@ export default function VisualStudioPage() {
                   {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" disabled={busy} onClick={() => refreshEditable3D(item)}>查询/下载3D模型</button>}
                   {item.data?.model3d?.path && <a className="rounded-lg border border-green-300/30 px-3 py-1.5 text-xs text-green-200 hover:bg-green-900/30" href={API + "/api/visual/models3d/" + encodeURIComponent(item.data.model3d.path.split(/[\\/]/).pop() || "")} target="_blank" rel="noreferrer">下载 GLB 模型</a>}
                   <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs hover:bg-purple-900/50" disabled={busy} onClick={() => createViewBatch(item.id)}>创建多视角任务</button>
-                  {(item.category === "props" || item.category === "weapons" || item.category === "special_items" || item.category === "costumes") && (
-                    <button className="rounded-lg border border-amber-300/20 px-3 py-1.5 text-xs hover:bg-amber-900/30" disabled={busy} onClick={() => addEvolution(item)}>记录剧情变化</button>
-                  )}
+                  <button className="rounded-lg border border-amber-300/20 px-3 py-1.5 text-xs hover:bg-amber-900/30" disabled={busy} onClick={() => addEvolution(item)}>记录剧情变化</button>
+                  {item.data?.evolution_history?.length ? <span className="self-center text-xs text-amber-200">剧情变化 {item.data.evolution_history.length} 条</span> : null}
                 </div>
               </article>
             ))}
