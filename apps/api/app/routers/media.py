@@ -299,18 +299,25 @@ def generate_episode_shot_videos(
                 created.append({"task_id": task.id, "shot_id": shot.id,
                                 "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
             except Exception as exc:
-                # 超时或连接中断时无法判断服务商是否已接单，保留未知状态并阻止自动重复提交。
-                task.status = "submission_unknown"
-                task.error = (
-                    "提交结果不确定：请先在视频服务商控制台核对是否已创建任务；"
-                    "确认不存在后再人工重新提交。原始错误：" + str(exc)
-                )[:2000]
-                db.commit()
-                release_task_lease(db, "media", task.id, False, task.error)
-                shot.status = "video_submission_unknown"
-                failures.append({"task_id": task.id, "shot_id": shot.id,
-                                 "shot_number": shot.shot_number,
-                                 "status": task.status, "error": task.error})
+                if task.status == "pending":
+                    task.error = ("任务尚未提交，未调用视频服务商：" + str(exc))[:2000]
+                    db.commit()
+                    failures.append({"task_id": task.id, "shot_id": shot.id,
+                                     "shot_number": shot.shot_number,
+                                     "status": "pending", "error": task.error})
+                else:
+                    # 超时或连接中断时无法判断服务商是否已接单，保留未知状态并阻止自动重复提交。
+                    task.status = "submission_unknown"
+                    task.error = (
+                        "提交结果不确定：请先在视频服务商控制台核对是否已创建任务；"
+                        "确认不存在后再人工重新提交。原始错误：" + str(exc)
+                    )[:2000]
+                    db.commit()
+                    release_task_lease(db, "media", task.id, False, task.error)
+                    shot.status = "video_submission_unknown"
+                    failures.append({"task_id": task.id, "shot_id": shot.id,
+                                     "shot_number": shot.shot_number,
+                                     "status": task.status, "error": task.error})
         except Exception as exc:
             db.rollback()
             failures.append({"shot_id": shot.id, "shot_number": shot.shot_number,
@@ -649,13 +656,17 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
         return {"task_id": task.id, "remote_task_id": remote_id,
                 "status": task.status, "provider_response": result}
     except Exception as exc:
-        task.status = "submission_unknown"
-        task.error = (
-            "提交结果不确定：请先在视频服务商控制台核对是否已创建任务；"
-            "确认不存在后再人工重新提交。原始错误：" + str(exc)
-        )[:2000]
-        db.commit()
-        release_task_lease(db, "media", task.id, False, task.error)
+        if task.status == "pending":
+            task.error = ("任务尚未提交，未调用视频服务商：" + str(exc))[:2000]
+            db.commit()
+        else:
+            task.status = "submission_unknown"
+            task.error = (
+                "提交结果不确定：请先在视频服务商控制台核对是否已创建任务；"
+                "确认不存在后再人工重新提交。原始错误：" + str(exc)
+            )[:2000]
+            db.commit()
+            release_task_lease(db, "media", task.id, False, task.error)
         return {
             "success": False,
             "task_id": task.id,
