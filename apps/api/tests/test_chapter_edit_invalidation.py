@@ -8,6 +8,9 @@ from app.database import Base
 from app.models.novel import Novel, Chapter, AnalysisItem
 from app.models.story import StoryProject
 from app.routers.novels import ChapterUpdate, update_chapter
+from app.routers.story import AIPlanInput, generate_episode_script_and_shots
+from unittest.mock import Mock
+from fastapi import HTTPException
 
 
 class ChapterEditInvalidationTests(unittest.TestCase):
@@ -25,6 +28,20 @@ class ChapterEditInvalidationTests(unittest.TestCase):
         self.db.close()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
+
+    def test_episode_ai_generation_rejects_stale_project(self):
+        episode = Mock(project_id=7, source_text="原章节内容")
+        project = Mock(status="source_changed")
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [
+            episode,
+            project,
+        ]
+
+        with self.assertRaises(HTTPException) as raised:
+            generate_episode_script_and_shots(3, AIPlanInput(), db)
+
+        self.assertEqual(raised.exception.status_code, 409)
 
     def test_editing_chapter_marks_analysis_and_story_projects_stale(self):
         novel = Novel(title="测试小说", source_text="第一章\\n旧正文")
