@@ -792,7 +792,8 @@ def analyze_novel_with_ai(
             "确认没有对应请求或待结算费用后，执行“核实后续作”；系统不会自动重复调用。",
         )
 
-    acquire_task_lease(db, "analysis", job.id, priority=10)
+    job_id = job.id
+    acquire_task_lease(db, "analysis", job_id, priority=10)
     if job.total_chunks != len(chunks):
         job.total_chunks = len(chunks)
     job.status = "running"
@@ -862,7 +863,7 @@ def analyze_novel_with_ai(
                     detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1200]}",
                 ))
                 db.commit()
-            release_task_lease(db, "analysis", job.id, False, job.last_error if job else str(exc)[:2000])
+            release_task_lease(db, "analysis", job_id, False, job.last_error if job else str(exc)[:2000])
             if request_started:
                 raise HTTPException(
                     502,
