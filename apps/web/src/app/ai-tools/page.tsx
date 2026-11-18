@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type ToolCategory = "text" | "image" | "storyboard" | "video";
 type Tool = { id: string; name: string; category: ToolCategory; url: string; note: string; custom?: boolean };
+type ResultFile = { id: number; filename: string; size: number; downloadUrl: string };
 type Task = {
   id: string;
   title: string;
@@ -74,6 +75,7 @@ export default function AIToolsPage() {
   const [resultUrl, setResultUrl] = useState("");
   const [notice, setNotice] = useState("");
   const [apiReady, setApiReady] = useState(false);
+  const [taskFiles, setTaskFiles] = useState<Record<string, ResultFile[]>>({});
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
@@ -95,7 +97,14 @@ export default function AIToolsPage() {
           return [...merged.values()];
         });
       }
-      if (Array.isArray(taskData?.items) && taskData.items.length) setTasks(taskData.items);
+      if (Array.isArray(taskData?.items) && taskData.items.length) {
+        setTasks(taskData.items);
+        for (const item of taskData.items) {
+          void fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(item.id) + "/files").then((response) => response.ok ? response.json() : null).then((data) => {
+            if (Array.isArray(data?.items)) setTaskFiles((current) => ({ ...current, [item.id]: data.items }));
+          }).catch(() => undefined);
+        }
+      }
       setApiReady(true);
     });
   }, []);
@@ -268,6 +277,22 @@ export default function AIToolsPage() {
     setNotice("结果已保存到本机任务记录。图片和视频文件请先从 AI 网站下载，再到素材库导入。");
   }
 
+
+  async function uploadResultFile(task: Task, file?: File) {
+    if (!file) return;
+    const form = new FormData();
+    form.append("file", file);
+    try {
+      const response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id) + "/files", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "文件上传失败");
+      setTaskFiles((current) => ({ ...current, [task.id]: [data, ...(current[task.id] || [])] }));
+      setNotice("已将 " + file.name + " 保存到本机任务结果库。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "文件上传失败，请确认本地 API 正常运行。");
+    }
+  }
+
   function removeTask(taskId: string) {
     setTasks((current) => current.filter((task) => task.id !== taskId));
     if (activeTaskId === taskId) setActiveTaskId(null);
@@ -371,8 +396,21 @@ export default function AIToolsPage() {
                       <button onClick={() => void openTask(task)} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-medium hover:bg-violet-600">复制并打开网页</button>
                       <button onClick={() => { setActiveTaskId(task.id); setResultText(task.resultText); setResultUrl(task.resultUrl); }} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-xs text-emerald-200 hover:bg-emerald-950/30">登记生成结果</button>
                       <button onClick={() => removeTask(task.id)} className="rounded-lg border border-red-300/20 px-3 py-2 text-xs text-red-200 hover:bg-red-950/30">删除</button>
+                      <label className="cursor-pointer rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-950/30">
+                        导入生成文件
+                        <input type="file" className="hidden" accept="image/*,video/*,audio/*,.txt,.md,.json,.srt,.vtt,.pdf,.docx,.csv" onChange={(event) => { void uploadResultFile(task, event.target.files?.[0]); event.currentTarget.value = ""; }} />
+                      </label>
                     </div>
                   </div>
+                  {(taskFiles[task.id] || []).length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(taskFiles[task.id] || []).map((file) => (
+                        <a key={file.id} href={apiBase + file.downloadUrl} className="rounded-lg border border-cyan-300/20 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-950/30" download>
+                          {file.filename} · {(file.size / 1024 / 1024).toFixed(1)} MB
+                        </a>
+                      ))}
+                    </div>
+                  )}
                   {activeTaskId === task.id && (
                     <div className="mt-4 grid gap-3 border-t border-white/10 pt-4">
                       <label className="text-xs text-purple-200">生成结果文字 / 剧本 / 分镜内容
