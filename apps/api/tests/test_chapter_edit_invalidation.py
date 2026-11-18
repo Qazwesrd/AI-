@@ -163,10 +163,13 @@ class ChapterEditInvalidationTests(unittest.TestCase):
             try:
                 added = database_module._migrate_missing_columns()
                 self.assertTrue(any(item == "novels.description" for item in added))
-                columns = {
-                    row[1]
-                    for row in legacy_engine.connect().execute(text("PRAGMA table_info(novels)"))
-                }
+                with legacy_engine.connect() as connection:
+                    columns = {
+                        row[1]
+                        for row in connection.execute(
+                            text("PRAGMA table_info(novels)")
+                        )
+                    }
                 self.assertIn("description", columns)
             finally:
                 database_module.engine = old_engine
