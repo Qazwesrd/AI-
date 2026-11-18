@@ -391,6 +391,8 @@ def reconcile_stale_tasks(
         for key, state in list(states.items()):
             if state == "submitting":
                 states[key] = "submission_unknown"
+        if not states and job.completed_chunks < job.total_chunks:
+            states[str(job.completed_chunks + 1)] = "submission_unknown"
         job.chunk_results = _merge_analysis_chunk_payload(saved, states)
         if any(state in ("submission_unknown", "interrupted_unknown") for state in states.values()):
             job.status = "interrupted_unknown"
