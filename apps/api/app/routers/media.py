@@ -7,7 +7,7 @@ import re
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -18,7 +18,7 @@ from app.database import get_db
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink
 from app.models.visual import VisualAsset
-from app.models.studio import AIProviderConfig, AIRuntimeSetting
+from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
 from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
@@ -83,6 +83,18 @@ def value_at(data, dotted_path):
         if current is None:
             return None
     return current
+
+
+def speech_task_is_in_flight(task):
+    return task.status in ("queued", "submitting", "submission_unknown", "interrupted_unknown")
+
+
+def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3", instructions=None):
+    return json.dumps({
+        "provider": provider, "model": model, "text": text, "voice": voice,
+        "speed": float(speed), "response_format": response_format,
+        "instructions": instructions or "",
+    }, ensure_ascii=False, sort_keys=True)
 
 
 class VideoTaskInput(BaseModel):
@@ -764,9 +776,10 @@ class SpeechInput(BaseModel):
     text: str = Field(min_length=1, max_length=4096)
     voice: str = "alloy"
     instructions: Optional[str] = None
-    response_format: str = "mp3"
+    response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
     confirm_paid: bool = False
+    force_regenerate: bool = False
 
 
 class EpisodeSpeechInput(BaseModel):
@@ -821,17 +834,20 @@ def generate_episode_voice_track(
         raise HTTPException(400, "所选服务商用途不支持语音合成，请选择文本或语音服务商")
     generated = {}
     speech_durations = {}
+    failures = []
+    blocked_shots = set()
+    pending_tasks = {}
     prior_tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "episode_speech"
     ).order_by(MediaTask.id.desc()).all()
+    handled_shots = set()
     for prior in prior_tasks:
         prior_meta = prior.request_data if isinstance(prior.request_data, dict) else {}
         prior_shot_id = prior_meta.get("shot_id")
         current_shot = next((item for item in shots if item.id == prior_shot_id), None)
         current_dialogue = (current_shot.dialogue or "").strip() if current_shot else None
-        if (
-            prior.status == "completed"
-            and prior.provider == data.provider
+        matches = (
+            prior.provider == data.provider
             and prior.model == data.model
             and prior_meta.get("voice") == data.voice
             and float(prior_meta.get("speed", 1.0)) == float(data.speed)
@@ -839,12 +855,31 @@ def generate_episode_voice_track(
             and prior_shot_id
             and current_dialogue
             and prior.prompt == current_dialogue
+        )
+        if not matches or prior_shot_id in handled_shots:
+            continue
+        if (
+            prior.status == "completed"
             and prior.result_path
             and Path(prior.result_path).is_file()
         ):
-            generated.setdefault(prior_shot_id, Path(prior.result_path))
-    failures = []
-    blocked_shots = set()
+            generated[prior_shot_id] = Path(prior.result_path)
+            handled_shots.add(prior_shot_id)
+        elif prior.status == "pending":
+            # A pending task is known not to have reached the provider yet;
+            # reuse it instead of creating another local row after a restart.
+            pending_tasks[prior_shot_id] = prior
+            handled_shots.add(prior_shot_id)
+        elif speech_task_is_in_flight(prior):
+            blocked_shots.add(prior_shot_id)
+            handled_shots.add(prior_shot_id)
+            failures.append({
+                "shot_number": current_shot.shot_number,
+                "task_id": prior.id,
+                "status": prior.status,
+                "error": "该镜头已有配音任务正在排队、提交或等待人工核实；为避免重复扣费，本次不会再次调用语音服务商。",
+            })
+
     for shot in shots:
         existing_audio = generated.get(shot.id)
         if existing_audio:
@@ -888,7 +923,29 @@ def generate_episode_voice_track(
             headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
             method="POST",
         )
+        task = pending_tasks.get(shot.id)
+        if task is None:
+            task = MediaTask(
+                task_type="episode_speech", provider=data.provider, model=data.model,
+                status="pending", prompt=text_value,
+                request_data={"episode_id": episode_id, "shot_id": shot.id,
+                              "shot_number": shot.shot_number, "voice": data.voice,
+                              "speed": data.speed, "confirm_paid": data.confirm_paid},
+            )
+            db.add(task)
+            db.commit()
+            db.refresh(task)
+
+        lease_acquired = False
+        request_started = False
         try:
+            acquire_task_lease(db, "media", task.id, priority=2)
+            lease_acquired = True
+            task.status = "submitting"
+            task.error = None
+            db.commit()
+
+            request_started = True
             with urllib.request.urlopen(request, timeout=300) as response:
                 with destination.open("wb") as output:
                     while True:
@@ -908,24 +965,78 @@ def generate_episode_voice_track(
                     f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；"
                     "请拆分对白或延长镜头，系统不会直接截断台词。"
                 )
-            generated[shot.id] = destination
-            speech_durations[shot.id] = speech_duration
-            db.add(MediaTask(
-                task_type="episode_speech", provider=data.provider, model=data.model,
-                status="completed", prompt=text_value, result_path=str(destination),
-                request_data={"episode_id": episode_id, "shot_id": shot.id,
-                              "shot_number": shot.shot_number, "voice": data.voice,
-                              "speed": data.speed},
-            ))
+            task.status = "completed"
+            task.result_path = str(destination)
+            task.error = None
+            task.request_data = {
+                **(task.request_data if isinstance(task.request_data, dict) else {}),
+                "audio_duration": speech_duration,
+            }
             db.add(MediaFile(
                 name=filename, category="audio", file_path=str(destination),
                 mime_type="audio/mpeg", file_size=destination.stat().st_size,
             ))
+            db.add(AIUsageLog(
+                provider=data.provider, model=data.model, task="episode_speech",
+                status="completed", detail=f"分集：{episode_id}；镜头：{shot.id}；本地任务：{task.id}",
+            ))
             db.commit()
-        except Exception as exc:
-            destination.unlink(missing_ok=True)
+            release_task_lease(db, "media", task.id, True)
+            generated[shot.id] = destination
+            speech_durations[shot.id] = speech_duration
+        except HTTPException as exc:
             db.rollback()
-            failures.append({"shot_number": shot.shot_number, "error": str(exc)[:1000]})
+            task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+            if exc.status_code == 429:
+                if task:
+                    task.status = "queued"
+                    task.error = str(exc.detail)[:2000]
+                    db.commit()
+                failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                                 "status": "queued", "error": str(exc.detail)[:1000]})
+            elif exc.status_code == 409:
+                failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                                 "status": task.status if task else "unknown",
+                                 "error": "该配音任务已被另一个请求占用；没有再次调用语音服务商。"})
+            else:
+                if task:
+                    task.status = "submission_unknown" if request_started else "failed"
+                    task.error = (
+                        "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。"
+                        if request_started else str(exc.detail)
+                    )[:2000]
+                    if request_started:
+                        db.add(AIUsageLog(
+                            provider=data.provider, model=data.model, task="episode_speech",
+                            status="submission_unknown", detail=f"分集：{episode_id}；镜头：{shot.id}；本地任务：{task.id}；{str(exc.detail)[:1000]}",
+                        ))
+                    db.commit()
+                if lease_acquired:
+                    release_task_lease(db, "media", task.id, False, task.error if task else str(exc.detail))
+                destination.unlink(missing_ok=True)
+                failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                                 "status": task.status if task else "failed", "error": str(exc.detail)[:1000]})
+        except Exception as exc:
+            db.rollback()
+            task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+            if task:
+                task.status = "submission_unknown" if request_started else "failed"
+                task.error = (
+                    "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。原始错误："
+                    if request_started else "语音请求尚未发出："
+                ) + str(exc)[:1500]
+                task.error = task.error[:2000]
+                if request_started:
+                    db.add(AIUsageLog(
+                        provider=data.provider, model=data.model, task="episode_speech",
+                        status="submission_unknown", detail=f"分集：{episode_id}；镜头：{shot.id}；本地任务：{task.id}；{str(exc)[:1000]}",
+                    ))
+                db.commit()
+                if lease_acquired:
+                    release_task_lease(db, "media", task.id, False, task.error)
+            destination.unlink(missing_ok=True)
+            failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
+                             "status": task.status if task else "failed", "error": str(exc)[:1000]})
 
     if not generated:
         raise HTTPException(502, "本集没有成功生成任何对白语音：" + json.dumps(failures, ensure_ascii=False)[:2000])
@@ -1004,11 +1115,53 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
     if data.instructions:
         payload["instructions"] = data.instructions
 
+    fingerprint = speech_fingerprint(
+        data.provider, data.model, data.text, data.voice, data.speed,
+        data.response_format, data.instructions,
+    )
+    matching = db.query(MediaTask).filter(
+        MediaTask.task_type == "speech"
+    ).order_by(MediaTask.id.desc()).all()
+    task = None
+    for prior in matching:
+        meta = prior.request_data if isinstance(prior.request_data, dict) else {}
+        if meta.get("speech_fingerprint") != fingerprint:
+            continue
+        if prior.status == "completed" and prior.result_path and Path(prior.result_path).is_file() and not data.force_regenerate:
+            return {
+                "status": "completed", "task_id": prior.id,
+                "file": Path(prior.result_path).name, "path": prior.result_path,
+                "size": Path(prior.result_path).stat().st_size, "reused": True,
+                "message": "相同文本和语音参数已有有效配音，已复用原文件，没有再次调用 AI。",
+            }
+        if prior.status == "pending":
+            task = prior
+            break
+        if speech_task_is_in_flight(prior):
+            raise HTTPException(
+                409,
+                f"相同配音请求已有任务 #{prior.id}（{prior.status}）。"
+                "请先在统一任务中心查看或核实，不要再次点击生成，以免重复扣费。",
+            )
+
+    if task is None:
+        task = MediaTask(
+            task_type="speech", provider=data.provider, model=data.model,
+            status="pending", prompt=data.text,
+            request_data={
+                "speech_fingerprint": fingerprint,
+                "voice": data.voice, "speed": data.speed,
+                "response_format": data.response_format,
+                "instructions": data.instructions or "",
+                "confirm_paid": data.confirm_paid,
+            },
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
     filename = f"speech_{uuid.uuid4().hex}.{data.response_format}"
     destination = AUDIO_DIR / filename
-    import urllib.request
-    import urllib.error
-
     request = urllib.request.Request(
         base + "/audio/speech",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -1018,34 +1171,93 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
         },
         method="POST"
     )
+    lease_acquired = False
+    request_started = False
     try:
+        acquire_task_lease(db, "media", task.id, priority=2)
+        lease_acquired = True
+        task.status = "submitting"
+        task.error = None
+        db.commit()
+
+        request_started = True
         with urllib.request.urlopen(request, timeout=300) as response:
-            with open(destination, "wb") as output:
+            with destination.open("wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     output.write(chunk)
+        if not destination.is_file() or destination.stat().st_size < 128:
+            raise RuntimeError("语音服务返回的音频文件为空或无效")
 
-        media = MediaFile(
+        task.status = "completed"
+        task.result_path = str(destination)
+        task.error = None
+        db.add(MediaFile(
             name=filename, category="audio", file_path=str(destination),
             mime_type="audio/" + data.response_format,
             file_size=destination.stat().st_size
-        )
-        task = MediaTask(
-            task_type="speech", provider=data.provider, model=data.model,
-            status="completed", prompt=data.text, result_path=str(destination)
-        )
-        db.add(media)
-        db.add(task)
+        ))
+        db.add(AIUsageLog(
+            provider=data.provider, model=data.model, task="speech",
+            status="completed", detail=f"独立配音；本地任务：{task.id}；格式：{data.response_format}",
+        ))
         db.commit()
-        return {"status": "completed", "file": filename,
-                "path": str(destination), "size": destination.stat().st_size}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise HTTPException(502, f"语音 API 返回 HTTP {exc.code}: {detail[:1500]}")
+        release_task_lease(db, "media", task.id, True)
+        return {
+            "status": "completed", "task_id": task.id, "file": filename,
+            "path": str(destination), "size": destination.stat().st_size,
+            "reused": False,
+        }
+    except HTTPException as exc:
+        db.rollback()
+        task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+        if exc.status_code == 429:
+            if task:
+                task.status = "queued"
+                task.error = str(exc.detail)[:2000]
+                db.commit()
+            raise
+        if exc.status_code == 409:
+            # Another request owns this task lease. Do not change its state.
+            raise
+        if task:
+            task.status = "submission_unknown" if request_started else "failed"
+            task.error = (
+                "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。"
+                if request_started else str(exc.detail)
+            )[:2000]
+            if request_started:
+                db.add(AIUsageLog(
+                    provider=data.provider, model=data.model, task="speech",
+                    status="submission_unknown", detail=f"本地任务：{task.id}；{str(exc.detail)[:1000]}",
+                ))
+            db.commit()
+        if lease_acquired and task:
+            release_task_lease(db, "media", task.id, False, task.error)
+        destination.unlink(missing_ok=True)
+        raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc.detail}") from exc
     except Exception as exc:
-        raise HTTPException(502, f"语音生成失败：{exc}")
+        db.rollback()
+        task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+        if task:
+            task.status = "submission_unknown" if request_started else "failed"
+            task.error = (
+                "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。原始错误："
+                if request_started else "语音请求尚未发出："
+            ) + str(exc)[:1500]
+            task.error = task.error[:2000]
+            if request_started:
+                db.add(AIUsageLog(
+                    provider=data.provider, model=data.model, task="speech",
+                    status="submission_unknown", detail=f"本地任务：{task.id}；{str(exc)[:1000]}",
+                ))
+            db.commit()
+        if lease_acquired and task:
+            release_task_lease(db, "media", task.id, False, task.error)
+        destination.unlink(missing_ok=True)
+        raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc}") from exc
 
 
 @router.post("/files/upload")

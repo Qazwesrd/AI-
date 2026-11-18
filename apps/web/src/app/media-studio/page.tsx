@@ -25,6 +25,7 @@ export default function MediaStudioPage() {
   const [speechText, setSpeechText] = useState("");
   const [speechModel, setSpeechModel] = useState("");
   const [voice, setVoice] = useState("alloy");
+  const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
 
   async function loadTasks() {
@@ -78,12 +79,12 @@ export default function MediaStudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider, model: speechModel, text: speechText,
-          voice, confirm_paid: confirmPaid
+          voice, confirm_paid: confirmPaid, force_regenerate: forceRegenerate
         })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "配音失败");
-      setMessage(`配音完成：${data.file}`);
+      setMessage(`配音完成：任务 #${data.task_id} · ${data.file}${data.reused ? "（复用已有配音，未重复调用 AI）" : ""}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "配音失败");
     }
@@ -95,6 +96,9 @@ export default function MediaStudioPage() {
         <header>
           <h1 className="text-3xl font-bold">AI 视频与音频生产中心</h1>
           <p className="mt-2 text-white/60">视频生成、AI 配音、任务查询与媒体合成</p>
+          <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
+            查看统一任务中心（含配音任务）
+          </a>
         </header>
 
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
@@ -144,6 +148,11 @@ export default function MediaStudioPage() {
             <textarea value={speechText} onChange={e => setSpeechText(e.target.value)}
               rows={5} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3"
               placeholder="输入需要生成语音的台词或旁白" />
+            <label className="mb-4 flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={forceRegenerate}
+                onChange={e => setForceRegenerate(e.target.checked)} />
+              忽略已有相同配音并重新生成（可能再次收费）
+            </label>
             <button onClick={generateSpeech}
               className="rounded-xl bg-indigo-600 px-6 py-3 font-semibold hover:bg-indigo-500">
               生成配音
