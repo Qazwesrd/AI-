@@ -72,6 +72,13 @@ async def lifespan(application: FastAPI):
 
     init_database()
 
+    from app.services.task_runtime import inspect_startup_leases
+    lease_scan = inspect_startup_leases()
+    if lease_scan["stale_count"]:
+        logger.warning("Task runtime startup scan found %s stale leases (active=%s); none were auto-released.", lease_scan["stale_count"], lease_scan["active_count"])
+    elif lease_scan["active_count"]:
+        logger.warning("Task runtime startup scan found %s active lease(s) from a previous process; none were auto-released.", lease_scan["active_count"])
+
     logger.info(
         "AI Comic Studio API started. Registered routers: %s",
         len(_loaded_routers),
