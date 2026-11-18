@@ -31,14 +31,6 @@ const features = [
     action: "开始生成",
     href: "/visual-studio"
   },
-  {
-    number: "05",
-    icon: "🚀",
-    title: "多平台视频发布",
-    description: "管理国内外平台账号，批量准备视频、封面和发布文案，跟踪发布任务。",
-    action: "进入发布中心",
-    href: "/publishing"
-  }
 ];
 
 const navigation = [
@@ -63,13 +55,6 @@ const navigation = [
       ["🧭", "统一任务中心", "/tasks"],
       ["🌐", "AI网页工具协同中心", "/ai-tools"],
       ["🧠", "小说深度分析与剧情审核", "/ai-analysis"]
-    ]
-  },
-  {
-    title: "多媒体与发布",
-    items: [
-      ["🚀", "多平台发布中心", "/publishing"],
-      ["👤", "发布账号管理", "/publishing/accounts"]
     ]
   },
   {
@@ -192,8 +177,8 @@ export default function Home() {
             </p>
           </section>
 
-          {/* 四大功能卡片 */}
-          <section className="feature-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-4 mb-9">
+          {/* 核心创作功能卡片 */}
+          <section className="feature-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 mb-9">
             {features.map((feature) => (
               <article
                 key={feature.number}
