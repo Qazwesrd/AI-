@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("desktopAPI", {
   platform: process.platform,
-  isDesktop: true
+  isDesktop: true,
+  openExternal: (url) => ipcRenderer.invoke("external:open", url)
 });
 
 // AI漫剧制作大师：发布中心文件选择接口
