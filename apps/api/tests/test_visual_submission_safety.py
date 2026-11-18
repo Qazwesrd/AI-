@@ -38,6 +38,10 @@ class ImageSubmissionSafetyTests(unittest.TestCase):
         task = SimpleNamespace(status="submitted", result_url="tripo-task:remote-123")
         self.assertEqual(tripo_task_action(task), "reuse")
 
+    def test_submitted_3d_task_without_remote_id_requires_review(self):
+        task = SimpleNamespace(status="submitted", result_url="")
+        self.assertEqual(tripo_task_action(task), "review")
+
     def test_completed_tripo_task_can_be_replaced_by_a_new_explicit_submission(self):
         task = SimpleNamespace(status="completed", result_url="https://example.invalid/model.glb")
         self.assertEqual(tripo_task_action(task), "new")
