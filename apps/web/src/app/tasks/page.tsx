@@ -18,6 +18,7 @@ type TaskItem = {
   summary: string;
   context: string;
   error: string;
+  failure_diagnostic?: {category:string|null;guidance:string;confidence:string};
   result_available: boolean;
   progress?: number;
   completed_chunks?: number;
