@@ -114,7 +114,7 @@ def manually_release_stale_lease(
     ).first()
     if not lease:
         raise HTTPException(404, "没有找到活动执行租约")
-    age = (datetime.utcnow() - lease.started_at).total_seconds() if lease.started_at else 0
+    age = (datetime.utcnow() - (lease.heartbeat_at or lease.started_at)).total_seconds() if (lease.heartbeat_at or lease.started_at) else 0
     if age < 1800:
         raise HTTPException(409, "租约未超过30分钟保护期，暂不允许人工释放")
     if source == "analysis":
