@@ -261,6 +261,19 @@ def plan_episodes(project_id: int, db: Session = Depends(get_db)):
 
 class AIPlanInput(BaseModel):
     confirm_paid: bool = False
+    prompt_style: str = "professional"
+    additional_instructions: str = Field(default="", max_length=4000)
+
+
+PROMPT_STYLE_GUIDANCE = {
+    "professional": "采用专业影视工业化表达，强调结构完整、人物动机、场面调度、镜头可执行性和制作细节。",
+    "cinematic": "采用电影级叙事与视觉表达，强化戏剧张力、情绪递进、构图层次、光影氛围、镜头节奏和视听语言。",
+    "concise": "采用简洁明确的制作指令，避免空泛形容词，优先输出可执行的信息，不遗漏关键剧情和必要字段。",
+}
+
+
+def prompt_style_guidance(style: str) -> str:
+    return PROMPT_STYLE_GUIDANCE.get(style, PROMPT_STYLE_GUIDANCE["professional"])
 
 
 @router.post("/projects/{project_id}/plan-ai")
@@ -340,7 +353,9 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                 "若一集能完整表达本章核心剧情，返回1集；只有剧情确实过长且存在自然戏剧断点时才返回2集。"
                 "若拆为2集，split_quote必须是原文中连续、逐字一致的一段短句，作为第二集开始位置。"
                 "每章都必须返回一条结果，chapter_index必须与输入完全一致。"
-                '只返回JSON：{"chapters":[{"chapter_index":0,"episode_count":1,"split_quote":"",'
+                "提示词方案：" + prompt_style_guidance(payload.prompt_style) + "。"
+                + ("用户补充要求：" + payload.additional_instructions.strip() + "。" if payload.additional_instructions.strip() else "")
+                + '只返回JSON：{"chapters":[{"chapter_index":0,"episode_count":1,"split_quote":"",'
                 '"synopsis":"本章剧情摘要","episode1_title":"标题",'
                 '"episode1_synopsis":"上集摘要","episode2_title":"下集标题",'
                 '"episode2_synopsis":"下集摘要"}]}'
@@ -521,7 +536,9 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
     source = (episode.source_text or "")[:28000]
     prompt = (
         "你是专业影视编剧、漫剧导演和分镜师。把原著改编成可直接制作的短篇漫剧。"
-        "忠实保留原著核心含义、人物身份关系、剧情因果、关键事件和人物立场；允许压缩重复描写，不得擅自改结局或编造关键事实。"
+        "提示词方案：" + prompt_style_guidance(payload.prompt_style) + "。"
+        + ("用户补充要求：" + payload.additional_instructions.strip() + "。" if payload.additional_instructions.strip() else "")
+        + "忠实保留原著核心含义、人物身份关系、剧情因果、关键事件和人物立场；允许压缩重复描写，不得擅自改结局或编造关键事实。"
         "剧本必须包含场景、动作、表情、走位、对白、旁白和转场；分镜必须逐段覆盖剧本，不得遗漏关键剧情。"
         "每个镜头必须写明景别、运镜、画面构图、角色动作、场景、对白/旁白、音效和可直接用于图像模型的提示词。"
         "画面风格：" + style + "。目标时长约" + str(target) + "秒，成片允许90至150秒。生成10至24个镜头，镜头时长合计尽量接近目标时长。"

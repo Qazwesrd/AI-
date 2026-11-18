@@ -36,6 +36,8 @@ export default function StoryboardPage() {
   const [episodeId, setEpisodeId] = useState<number | null>(null);
   const [projectName, setProjectName] = useState("");
   const [style, setStyle] = useState(styles[0]);
+  const [promptStyle, setPromptStyle] = useState("professional");
+  const [additionalPromptInstructions, setAdditionalPromptInstructions] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [videoProvider, setVideoProvider] = useState("custom_video");
@@ -141,7 +143,11 @@ export default function StoryboardPage() {
       while (!done && batches < 400) {
         const batchResult = await request(`/api/story/projects/${projectId}/plan-ai`, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ confirm_paid: true }),
+          body: JSON.stringify({
+            confirm_paid: true,
+            prompt_style: promptStyle,
+            additional_instructions: additionalPromptInstructions,
+          }),
         });
         latest = batchResult;
         done = Boolean(batchResult.done);
@@ -176,7 +182,11 @@ export default function StoryboardPage() {
     try {
       const result = await request(`/api/story/episodes/${episode.id}/generate-ai`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm_paid: true }),
+        body: JSON.stringify({
+            confirm_paid: true,
+            prompt_style: promptStyle,
+            additional_instructions: additionalPromptInstructions,
+          }),
       });
       if (projectId) await loadProject(projectId);
       await loadShots(episode.id);
@@ -397,6 +407,18 @@ export default function StoryboardPage() {
             <p className="mt-2 leading-6">此项目的分集、剧本和分镜属于重新导入前的旧版本。为防止新旧剧情混用，系统已阻止继续规划、生成剧本、视频、配音和成片。旧项目与已有成果全部保留。请在上方选择当前小说，新建一个改编项目并重新规划。</p>
           </div>
         )}
+        <div className="mb-4 rounded-xl border border-fuchsia-300/20 bg-fuchsia-950/20 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-fuchsia-100">统一提示词方案（自动应用于分集规划、剧本与分镜）</h3>
+          <div className="grid gap-3 md:grid-cols-2">
+            <select className={field} value={promptStyle} onChange={e => setPromptStyle(e.target.value)}>
+              <option value="professional">专业详细：结构完整、制作细节明确</option>
+              <option value="cinematic">电影级叙事/视觉：强化戏剧张力与镜头语言</option>
+              <option value="concise">简洁：直接、清晰、可执行</option>
+            </select>
+            <textarea className={field} rows={2} value={additionalPromptInstructions} onChange={e => setAdditionalPromptInstructions(e.target.value)} placeholder="补充要求（可选），例如：对白更自然、加强悬念、保留原著名场面" />
+          </div>
+          <p className="mt-2 text-xs text-slate-400">点击 AI 任务时，软件会自动组合基础提示词、所选方案和补充要求；无需先单独生成提示词。不会自动把内容发送给网页版 AI。</p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <button className={button} disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodesAI}>AI智能分集规划</button>
           <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodes}>按章节建立草案</button>
