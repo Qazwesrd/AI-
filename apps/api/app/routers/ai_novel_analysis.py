@@ -769,6 +769,20 @@ def analyze_novel_with_ai(
 
     saved_results, chunk_states = split_chunk_state(job.chunk_results)
 
+    # Legacy jobs created before per-chunk state tracking may have an incomplete
+    # next chunk but no record of whether its provider request was accepted.
+    # Treat that one chunk as uncertain rather than silently charging again.
+    if (
+        not chunk_states
+        and len(saved_results) < len(chunks)
+        and job.status == "partial"
+        and bool(job.last_error)
+    ):
+        chunk_states[str(len(saved_results) + 1)] = "submission_unknown"
+        job.status = "interrupted_unknown"
+        job.chunk_results = merge_chunk_state(saved_results, chunk_states)
+        db.commit()
+
     if job.status == "running":
         updated = job.updated_at or job.created_at or datetime.utcnow()
         if datetime.utcnow() - updated < timedelta(minutes=15):
@@ -776,6 +790,8 @@ def analyze_novel_with_ai(
         for key, state in list(chunk_states.items()):
             if state == "submitting":
                 chunk_states[key] = "submission_unknown"
+        if not chunk_states and len(saved_results) < len(chunks):
+            chunk_states[str(len(saved_results) + 1)] = "submission_unknown"
         if unknown_chunk_keys(chunk_states):
             job.status = "interrupted_unknown"
             job.last_error = "检测到上次模型请求中断，无法确认服务商是否已受理或计费；请先核对用量记录。"
