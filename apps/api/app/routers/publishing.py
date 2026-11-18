@@ -126,11 +126,17 @@ def validate_media_path(raw_path: str, kind: str):
     except FileNotFoundError as exc:
         raise HTTPException(404, "素材文件不存在") from exc
     except (OSError, ValueError) as exc:
-        raise HTTPException(400, "素材必须位于应用素材存储目录内") from exc
+        label = "视频" if kind == "video" else "封面"
+        raise HTTPException(400, f"{label}必须位于应用素材存储目录内") from exc
 
     allowed = VIDEO_EXTENSIONS if kind == "video" else IMAGE_EXTENSIONS
     if path.suffix.lower() not in allowed:
-        raise HTTPException(400, "素材文件格式不支持")
+        detail = (
+            "视频仅支持 MP4、MOV、MKV、WEBM、AVI 格式"
+            if kind == "video"
+            else "封面仅支持 PNG、JPG、JPEG、WEBP 格式"
+        )
+        raise HTTPException(400, detail)
     return path
 
 
