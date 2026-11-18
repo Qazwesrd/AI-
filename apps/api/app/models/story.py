@@ -71,4 +71,6 @@ class StoryAssetLink(Base):
     shot_id = Column(Integer, nullable=True, index=True)
     asset_id = Column(Integer, nullable=False, index=True)
     role = Column(String(40), default="character")
+    chapter_number = Column(Integer, nullable=True, index=True)
+    state_snapshot = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
