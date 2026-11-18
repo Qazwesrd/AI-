@@ -18,6 +18,7 @@ from app.models.visual import VisualAsset, ImageTask
 from app.models.novel import Novel, AnalysisItem
 from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
 from app.services.media_service import http_download
+from app.services.task_runtime import acquire_task_lease, release_task_lease
 
 router = APIRouter(prefix="/api/visual", tags=["AI视觉素材"])
 
@@ -318,6 +319,7 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         if not confirm_paid:
             raise HTTPException(403, "本次图像生成可能产生费用，请明确确认后再执行")
 
+    lease = acquire_task_lease(db, "image", task.id)
     task.status = "running"
     task.error = ""
     db.commit()
@@ -395,6 +397,7 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
                 asset.updated_at = datetime.utcnow()
 
         db.commit()
+        release_task_lease(db, "image", task.id, True)
         return {
             "success": True,
             "task_id": task.id,
@@ -408,11 +411,13 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         task.status = "failed"
         task.error = f"图片服务 HTTP {exc.code}: {detail}"
         db.commit()
+        release_task_lease(db, "image", task.id, False, task.error)
         raise HTTPException(502, task.error)
     except Exception as exc:
         task.status = "failed"
         task.error = str(exc)[:2000]
         db.commit()
+        release_task_lease(db, "image", task.id, False, task.error)
         raise HTTPException(500, task.error)
 
 
