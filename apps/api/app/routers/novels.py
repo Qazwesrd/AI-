@@ -258,10 +258,49 @@ def update_chapter(
     if not item:
         raise HTTPException(404, "章节不存在")
     values = payload.model_dump(exclude_unset=True)
+    source_changed = any(
+        key in {"title", "content"} and value is not None and value != getattr(item, key)
+        for key, value in values.items()
+    )
     for key, value in values.items():
         if value is not None:
             setattr(item, key, value)
     item.word_count = len(re.sub(r"\s+", "", item.content))
+
+    if source_changed:
+        novel = db.query(Novel).filter(Novel.id == item.novel_id).first()
+        if novel:
+            chapters = db.query(Chapter).filter(
+                Chapter.novel_id == item.novel_id
+            ).order_by(Chapter.chapter_number).all()
+            novel.source_text = "\n\n".join(
+                f"{chapter.title}\n{chapter.content}" for chapter in chapters
+            )
+        stale_at = __import__("datetime").datetime.utcnow().isoformat()
+        analyses = db.query(AnalysisItem).filter(
+            AnalysisItem.novel_id == item.novel_id
+        ).all()
+        for analysis in analyses:
+            data = dict(analysis.data) if isinstance(analysis.data, dict) else {}
+            data["source_stale"] = True
+            data["source_stale_at"] = stale_at
+            data["source_stale_reason"] = "chapter_edited"
+            analysis.data = data
+
+        projects = db.query(StoryProject).filter(
+            StoryProject.novel_id == item.novel_id
+        ).all()
+        for project in projects:
+            project.status = "source_changed"
+            settings = dict(project.settings) if isinstance(project.settings, dict) else {}
+            settings["source_change_notice"] = {
+                "status": "pending_review",
+                "detected_at": stale_at,
+                "reason": "chapter_edited",
+                "stale_analysis_count": len(analyses),
+            }
+            project.settings = settings
+
     db.commit()
     db.refresh(item)
     return chapter_dict(item)
