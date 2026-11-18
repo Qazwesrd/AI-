@@ -300,11 +300,12 @@ def generate_episode_shot_videos(
                                 "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
             except Exception as exc:
                 if task.status == "pending":
-                    task.error = ("任务尚未提交，未调用视频服务商：" + str(exc))[:2000]
+                    task.status = "failed"
+                    task.error = ("任务尚未提交，未调用视频服务商，可在本集重新提交：" + str(exc))[:2000]
                     db.commit()
                     failures.append({"task_id": task.id, "shot_id": shot.id,
                                      "shot_number": shot.shot_number,
-                                     "status": "pending", "error": task.error})
+                                     "status": "failed", "error": task.error})
                 else:
                     # 超时或连接中断时无法判断服务商是否已接单，保留未知状态并阻止自动重复提交。
                     task.status = "submission_unknown"
@@ -657,7 +658,8 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
                 "status": task.status, "provider_response": result}
     except Exception as exc:
         if task.status == "pending":
-            task.error = ("任务尚未提交，未调用视频服务商：" + str(exc))[:2000]
+            task.status = "failed"
+            task.error = ("任务尚未提交，未调用视频服务商，可安全重新提交：" + str(exc))[:2000]
             db.commit()
         else:
             task.status = "submission_unknown"
