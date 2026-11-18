@@ -1101,11 +1101,53 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
     if data.instructions:
         payload["instructions"] = data.instructions
 
+    fingerprint = speech_fingerprint(
+        data.provider, data.model, data.text, data.voice, data.speed,
+        data.response_format, data.instructions,
+    )
+    matching = db.query(MediaTask).filter(
+        MediaTask.task_type == "speech"
+    ).order_by(MediaTask.id.desc()).all()
+    task = None
+    for prior in matching:
+        meta = prior.request_data if isinstance(prior.request_data, dict) else {}
+        if meta.get("speech_fingerprint") != fingerprint:
+            continue
+        if prior.status == "completed" and prior.result_path and Path(prior.result_path).is_file() and not data.force_regenerate:
+            return {
+                "status": "completed", "task_id": prior.id,
+                "file": Path(prior.result_path).name, "path": prior.result_path,
+                "size": Path(prior.result_path).stat().st_size, "reused": True,
+                "message": "相同文本和语音参数已有有效配音，已复用原文件，没有再次调用 AI。",
+            }
+        if prior.status == "pending":
+            task = prior
+            break
+        if speech_task_is_in_flight(prior):
+            raise HTTPException(
+                409,
+                f"相同配音请求已有任务 #{prior.id}（{prior.status}）。"
+                "请先在统一任务中心查看或核实，不要再次点击生成，以免重复扣费。",
+            )
+
+    if task is None:
+        task = MediaTask(
+            task_type="speech", provider=data.provider, model=data.model,
+            status="pending", prompt=data.text,
+            request_data={
+                "speech_fingerprint": fingerprint,
+                "voice": data.voice, "speed": data.speed,
+                "response_format": data.response_format,
+                "instructions": data.instructions or "",
+                "confirm_paid": data.confirm_paid,
+            },
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
     filename = f"speech_{uuid.uuid4().hex}.{data.response_format}"
     destination = AUDIO_DIR / filename
-    import urllib.request
-    import urllib.error
-
     request = urllib.request.Request(
         base + "/audio/speech",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -1115,34 +1157,79 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
         },
         method="POST"
     )
+    lease_acquired = False
+    request_started = False
     try:
+        acquire_task_lease(db, "media", task.id, priority=2)
+        lease_acquired = True
+        task.status = "submitting"
+        task.error = None
+        db.commit()
+
+        request_started = True
         with urllib.request.urlopen(request, timeout=300) as response:
-            with open(destination, "wb") as output:
+            with destination.open("wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     output.write(chunk)
+        if not destination.is_file() or destination.stat().st_size < 128:
+            raise RuntimeError("语音服务返回的音频文件为空或无效")
 
-        media = MediaFile(
+        task.status = "completed"
+        task.result_path = str(destination)
+        task.error = None
+        db.add(MediaFile(
             name=filename, category="audio", file_path=str(destination),
             mime_type="audio/" + data.response_format,
             file_size=destination.stat().st_size
-        )
-        task = MediaTask(
-            task_type="speech", provider=data.provider, model=data.model,
-            status="completed", prompt=data.text, result_path=str(destination)
-        )
-        db.add(media)
-        db.add(task)
+        ))
         db.commit()
-        return {"status": "completed", "file": filename,
-                "path": str(destination), "size": destination.stat().st_size}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise HTTPException(502, f"语音 API 返回 HTTP {exc.code}: {detail[:1500]}")
+        release_task_lease(db, "media", task.id, True)
+        return {
+            "status": "completed", "task_id": task.id, "file": filename,
+            "path": str(destination), "size": destination.stat().st_size,
+            "reused": False,
+        }
+    except HTTPException as exc:
+        db.rollback()
+        task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+        if exc.status_code == 429:
+            if task:
+                task.status = "queued"
+                task.error = str(exc.detail)[:2000]
+                db.commit()
+            raise
+        if exc.status_code == 409:
+            # Another request owns this task lease. Do not change its state.
+            raise
+        if task:
+            task.status = "submission_unknown" if request_started else "failed"
+            task.error = (
+                "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。"
+                if request_started else str(exc.detail)
+            )[:2000]
+            db.commit()
+        if lease_acquired and task:
+            release_task_lease(db, "media", task.id, False, task.error)
+        destination.unlink(missing_ok=True)
+        raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc.detail}") from exc
     except Exception as exc:
-        raise HTTPException(502, f"语音生成失败：{exc}")
+        db.rollback()
+        task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+        if task:
+            task.status = "submission_unknown" if request_started else "failed"
+            task.error = (
+                "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。原始错误："
+                if request_started else "语音请求尚未发出："
+            ) + str(exc)[:1500]
+            task.error = task.error[:2000]
+            db.commit()
+        if lease_acquired and task:
+            release_task_lease(db, "media", task.id, False, task.error)
+        destination.unlink(missing_ok=True)
+        raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc}") from exc
 
 
 @router.post("/files/upload")
