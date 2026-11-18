@@ -262,6 +262,23 @@ class AIAnalysisInput(BaseModel):
     confirm_paid: bool = False
 
 
+def split_chunk_state(chunk_results):
+    raw = dict(chunk_results or {})
+    states = raw.pop("__chunk_states__", {})
+    return raw, dict(states) if isinstance(states, dict) else {}
+
+
+def merge_chunk_state(saved_results, chunk_states):
+    return {**dict(saved_results or {}), "__chunk_states__": dict(chunk_states or {})}
+
+
+def unknown_chunk_keys(chunk_states):
+    return [
+        key for key, state in (chunk_states or {}).items()
+        if state in ("submitting", "submission_unknown", "interrupted_unknown")
+    ]
+
+
 def make_chunks(chapters, limit=14000):
     chunks = []
     current = ""
@@ -750,15 +767,31 @@ def analyze_novel_with_ai(
         db.commit()
         db.refresh(job)
 
+    saved_results, chunk_states = split_chunk_state(job.chunk_results)
+
     if job.status == "running":
         updated = job.updated_at or job.created_at or datetime.utcnow()
         if datetime.utcnow() - updated < timedelta(minutes=15):
             raise HTTPException(409, "该小说已有分析任务正在执行，请勿重复点击；可稍后查看进度或继续。")
-        job.status = "partial"
-        job.last_error = "检测到上次进程中断，已安全恢复为可续作状态"
+        for key, state in list(chunk_states.items()):
+            if state == "submitting":
+                chunk_states[key] = "submission_unknown"
+        if unknown_chunk_keys(chunk_states):
+            job.status = "interrupted_unknown"
+            job.last_error = "检测到上次模型请求中断，无法确认服务商是否已受理或计费；请先核对用量记录。"
+        else:
+            job.status = "partial"
+            job.last_error = "检测到上次进程在模型请求前中断，已安全恢复为可续作状态"
+        job.chunk_results = merge_chunk_state(saved_results, chunk_states)
         db.commit()
 
-    saved_results = dict(job.chunk_results or {})
+    if job.status == "interrupted_unknown" or unknown_chunk_keys(chunk_states):
+        raise HTTPException(
+            409,
+            f"该小说分析任务 #{job.id} 有片段提交结果不确定。请先在统一任务中心核对文本模型服务商用量记录，"
+            "确认没有对应请求或待结算费用后，执行“核实后续作”；系统不会自动重复调用。",
+        )
+
     acquire_task_lease(db, "analysis", job.id, priority=10)
     if job.total_chunks != len(chunks):
         job.total_chunks = len(chunks)
@@ -771,7 +804,17 @@ def analyze_novel_with_ai(
         if chunk_key in saved_results:
             continue
 
+        request_started = False
         try:
+            # Persist the exact chunk being submitted before contacting the provider.
+            chunk_states[chunk_key] = "submitting"
+            job.chunk_results = merge_chunk_state(saved_results, chunk_states)
+            job.status = "running"
+            job.updated_at = datetime.utcnow()
+            db.commit()
+            heartbeat_task_lease(db, "analysis", job.id)
+
+            request_started = True
             result_items = analyze_chunk(
                 config,
                 api_key,
@@ -780,7 +823,8 @@ def analyze_novel_with_ai(
             )
 
             saved_results[chunk_key] = result_items
-            job.chunk_results = dict(saved_results)
+            chunk_states[chunk_key] = "completed"
+            job.chunk_results = merge_chunk_state(saved_results, chunk_states)
             job.completed_chunks = len(saved_results)
             job.status = "partial"
             job.last_error = ""
@@ -797,22 +841,37 @@ def analyze_novel_with_ai(
             heartbeat_task_lease(db, "analysis", job.id)
 
         except Exception as exc:
-            job.status = "partial"
-            job.last_error = str(exc)[:2000]
-            job.completed_chunks = len(saved_results)
-            db.add(AIUsageLog(
-                provider=config.provider,
-                model=config.model,
-                task="novel_deep_analysis",
-                status="failed",
-                detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1500]}",
-            ))
-            db.commit()
-            release_task_lease(db, "analysis", job.id, False, job.last_error)
-
+            db.rollback()
+            job = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == job.id).first()
+            current_results, current_states = split_chunk_state(job.chunk_results if job else {})
+            current_states[chunk_key] = "submission_unknown" if request_started else "pending"
+            if job:
+                job.chunk_results = merge_chunk_state(current_results, current_states)
+                job.completed_chunks = len(current_results)
+                job.status = "interrupted_unknown" if request_started else "partial"
+                job.last_error = (
+                    f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。"
+                    if request_started else f"第{index}/{len(chunks)}段请求尚未发出：{str(exc)[:1600]}"
+                )
+                job.updated_at = datetime.utcnow()
+                db.add(AIUsageLog(
+                    provider=config.provider,
+                    model=config.model,
+                    task="novel_deep_analysis",
+                    status="submission_unknown" if request_started else "failed",
+                    detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1200]}",
+                ))
+                db.commit()
+            release_task_lease(db, "analysis", job.id, False, job.last_error if job else str(exc)[:2000])
+            if request_started:
+                raise HTTPException(
+                    502,
+                    f"第{index}/{len(chunks)}段分析结果不确定，已阻止自动重试。"
+                    f"请先核对服务商用量记录，再到统一任务中心人工确认。任务编号：{job.id if job else '未知'}",
+                ) from exc
             raise HTTPException(
                 502,
-                f"第{index}/{len(chunks)}段分析失败。已保存{len(saved_results)}/{len(chunks)}段；再次点击AI深度分析将从未完成片段继续，不会重复调用已完成片段。错误：{exc}",
+                f"第{index}/{len(chunks)}段分析请求尚未发出，已保存之前完成的片段；可再次点击继续。错误：{exc}",
             ) from exc
 
     all_items = []
