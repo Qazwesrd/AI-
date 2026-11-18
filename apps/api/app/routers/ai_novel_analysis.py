@@ -875,7 +875,7 @@ def analyze_novel_with_ai(
                 job.last_error = (
                     f"第{index}/{len(chunks)}段结果已保存，但本地任务心跳更新失败；可安全继续。"
                     if result_already_saved else (
-                        f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。"
+                        f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。诊断详情：{str(exc)[:900]}"
                         if request_started else f"第{index}/{len(chunks)}段请求尚未发出：{str(exc)[:1600]}"
                     )
                 )
