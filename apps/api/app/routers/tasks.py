@@ -11,7 +11,7 @@ from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog
-from app.services.task_runtime import runtime_snapshot
+from app.services.task_runtime import runtime_snapshot, release_task_lease
 from app.routers.visual import (
     pause_image_task,
     resume_image_task,
@@ -81,6 +81,39 @@ def set_task_concurrency(payload: ConcurrencyInput, db: Session = Depends(get_db
         control.updated_at = datetime.utcnow()
     db.commit()
     return runtime_snapshot(db)
+
+
+
+
+
+@router.post("/runtime/leases/{source}/{task_id}/release")
+def manually_release_stale_lease(
+    source: str,
+    task_id: int,
+    confirm_no_remote_job: bool = False,
+    db: Session = Depends(get_db),
+):
+    if not confirm_no_remote_job:
+        raise HTTPException(409, "必须先核对服务商控制台，并明确确认没有仍在运行的远程任务")
+    if source != "image":
+        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片任务租约")
+    task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "图片任务不存在")
+    if task.status == "running":
+        raise HTTPException(409, "请先执行中断扫描，将任务标记为待核实；不能释放仍标记为运行中的租约")
+    lease = db.query(TaskExecutionLease).filter(
+        TaskExecutionLease.source == source,
+        TaskExecutionLease.task_id == task_id,
+        TaskExecutionLease.status == "active",
+    ).first()
+    if not lease:
+        raise HTTPException(404, "没有找到活动执行租约")
+    age = (datetime.utcnow() - lease.started_at).total_seconds() if lease.started_at else 0
+    if age < 1800:
+        raise HTTPException(409, "租约未超过30分钟保护期，暂不允许人工释放")
+    release_task_lease(db, source, task_id, False, "用户核对服务商后人工释放遗留租约")
+    return {"success": True, "message": "遗留租约已释放；任务不会自动重试或调用 AI。请在所属模块确认后再手动执行。"}
 
 
 @router.get("/runtime/logs")
