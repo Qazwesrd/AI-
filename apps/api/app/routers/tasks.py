@@ -12,6 +12,7 @@ from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
 from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task
+from app.services.task_diagnostics import classify_task_error
 from app.routers.visual import (
     pause_image_task,
     resume_image_task,
@@ -219,7 +220,7 @@ def list_unified_tasks(
             "context": f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
                 f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
             ),
-            "error": (task.error or "")[:1200], "result_available": bool(task.result_path),
+            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path),
             "created_at": _iso(task.created_at), "updated_at": _iso(task.updated_at),
             "can_open": True,
         })
@@ -245,7 +246,7 @@ def list_unified_tasks(
             "provider": job.provider or "", "model": job.model or "",
             "summary": f"已完成 {job.completed_chunks}/{job.total_chunks} 个分析批次",
             "context": novel_title or f"小说 #{job.novel_id}",
-            "error": (job.last_error or "")[:1200], "result_available": False,
+            "error": (job.last_error or "")[:1200], "failure_diagnostic": classify_task_error(job.last_error), "result_available": False,
             "progress": round(job.completed_chunks * 100 / job.total_chunks) if job.total_chunks else 0,
             "completed_chunks": job.completed_chunks, "total_chunks": job.total_chunks,
             "created_at": _iso(job.created_at), "updated_at": _iso(job.updated_at),
