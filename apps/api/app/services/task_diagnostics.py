@@ -1,6 +1,3 @@
-import re
-
-
 def classify_task_error(error: str | None):
     """Best-effort local classification only; never treats text matching as proof of billing state."""
     value = (error or "").lower()
