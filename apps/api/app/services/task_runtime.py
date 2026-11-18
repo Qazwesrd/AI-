@@ -19,9 +19,12 @@ def _refresh_queue_ready(db):
         return
     # Recalculate readiness on every queue change so a newly arrived higher-priority
     # task can move ahead of a lower-priority task that has not started yet.
-    db.query(TaskQueueEntry).filter(
+    reset_count = db.query(TaskQueueEntry).filter(
         TaskQueueEntry.status == "ready_to_run"
-    ).update({TaskQueueEntry.status: "waiting", TaskQueueEntry.ready_at: None}, synchronize_session=False)
+    ).update(
+        {TaskQueueEntry.status: "waiting", TaskQueueEntry.ready_at: None},
+        synchronize_session="fetch",
+    )
     available = max(0, int(control.max_concurrency or 0) - int(control.active_count or 0))
     waiting = db.query(TaskQueueEntry).filter(
         TaskQueueEntry.status == "waiting"
@@ -35,7 +38,10 @@ def _refresh_queue_ready(db):
         entry.status = "ready_to_run"
         entry.ready_at = now
         entry.reason = "并发名额已空出，请回到所属模块手动确认并执行"
-    if waiting:
+    # Persist demotions as well as promotions. Without this commit, a queue
+    # snapshot taken while no slot is available could roll back the reset and
+    # leave stale ready_to_run rows in the database.
+    if reset_count or waiting:
         db.commit()
 
 
