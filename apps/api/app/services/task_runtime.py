@@ -26,14 +26,28 @@ def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
         db.rollback()
         raise HTTPException(429, "已达到全局任务并发上限，请等待其他任务完成后再执行")
 
+    existing = db.query(TaskExecutionLease).filter(
+        TaskExecutionLease.source == source, TaskExecutionLease.task_id == task_id
+    ).first()
+    if existing and existing.status == "active":
+        db.rollback()
+        raise HTTPException(409, "该任务已有执行租约，已阻止重复执行")
     token = uuid.uuid4().hex
     now = datetime.utcnow()
-    lease = TaskExecutionLease(
-        source=source, task_id=task_id, status="active",
-        priority=max(-100, min(100, int(priority))), owner_token=token,
-        started_at=now, heartbeat_at=now,
-    )
-    db.add(lease)
+    if existing:
+        existing.status = "active"
+        existing.priority = max(-100, min(100, int(priority)))
+        existing.owner_token = token
+        existing.started_at = now
+        existing.heartbeat_at = now
+        existing.finished_at = None
+        existing.error = ""
+    else:
+        db.add(TaskExecutionLease(
+            source=source, task_id=task_id, status="active",
+            priority=max(-100, min(100, int(priority))), owner_token=token,
+            started_at=now, heartbeat_at=now,
+        ))
     db.add(TaskExecutionLog(source=source, task_id=task_id, event="started", message="用户手动启动任务"))
     try:
         db.commit()
