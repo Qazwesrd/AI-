@@ -555,8 +555,27 @@ class PropEvolutionInput(BaseModel):
     event: str = Field(min_length=2, max_length=2000)
     change_type: str = Field(default="状态变化", max_length=80)
     appearance_after: str = Field(default="", max_length=4000)
+    clothing_after: str = Field(default="", max_length=4000)
     holder: str = Field(default="", max_length=300)
     confirmed: bool = False
+
+
+def resolve_asset_state(asset: VisualAsset, chapter_number: Optional[int] = None):
+    data = asset.data if isinstance(asset.data, dict) else {}
+    history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
+    applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
+    latest = applicable[-1] if applicable else {}
+    return {
+        "chapter_number": latest.get("chapter_number"),
+        "event": latest.get("event", ""),
+        "change_type": latest.get("change_type", "基础状态"),
+        "appearance": latest.get("appearance_after") or asset.appearance or "",
+        "clothing": latest.get("clothing_after") or asset.clothing or "",
+        "holder": latest.get("holder", ""),
+        "confirmed": bool(latest.get("confirmed", False)),
+        "is_evolved": bool(latest),
+    }
 
 
 @router.post("/assets/{asset_id}/evolution")
@@ -571,16 +590,20 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
         "event": payload.event.strip(),
         "change_type": payload.change_type.strip(),
         "appearance_after": payload.appearance_after.strip(),
+        "clothing_after": payload.clothing_after.strip(),
         "holder": payload.holder.strip(),
         "confirmed": payload.confirmed,
         "recorded_at": datetime.utcnow().isoformat(),
     })
+    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     data["evolution_history"] = history
+    latest = history[-1]
     data["current_state"] = {
-        "chapter_number": payload.chapter_number,
-        "appearance": payload.appearance_after.strip() or asset.appearance,
-        "holder": payload.holder.strip(),
-        "change_type": payload.change_type.strip(),
+        "chapter_number": latest["chapter_number"],
+        "appearance": latest.get("appearance_after") or asset.appearance,
+        "clothing": latest.get("clothing_after") or asset.clothing,
+        "holder": latest.get("holder", ""),
+        "change_type": latest.get("change_type", "状态变化"),
     }
     asset.data = data
     asset.updated_at = datetime.utcnow()
@@ -588,7 +611,26 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
     return {"success": True, "asset_id": asset_id, "history_count": len(history), "current_state": data["current_state"]}
 
 
-def build_asset_prompt(asset: VisualAsset, style: str = ""):
+@router.get("/assets/{asset_id}/evolution")
+def get_asset_evolution(asset_id: int, chapter_number: Optional[int] = None, db: Session = Depends(get_db)):
+    asset = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+    if not asset:
+        raise HTTPException(404, "素材不存在")
+    data = asset.data if isinstance(asset.data, dict) else {}
+    history = sorted(
+        [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)],
+        key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")),
+    )
+    return {
+        "asset_id": asset.id,
+        "asset_name": asset.name,
+        "history": history,
+        "effective_state": resolve_asset_state(asset, chapter_number),
+        "chapter_number": chapter_number,
+    }
+
+
+def build_asset_prompt(asset: VisualAsset, style: str = "", chapter_number: Optional[int] = None):
     category_labels = {
         "characters": "角色", "scenes": "场景", "props": "道具",
         "weapons": "武器", "costumes": "服装", "buildings": "建筑",
@@ -596,17 +638,26 @@ def build_asset_prompt(asset: VisualAsset, style: str = ""):
     }
     label = category_labels.get(asset.category, "视觉资产")
     data = asset.data if isinstance(asset.data, dict) else {}
-    history = data.get("evolution_history") or []
+    history = [
+        item for item in (data.get("evolution_history") or [])
+        if isinstance(item, dict)
+        and (chapter_number is None or int(item.get("chapter_number") or 0) <= chapter_number)
+    ]
+    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     history_text = "；".join(
-        f"第{item.get('chapter_number', '?')}章：{item.get('change_type', '变化')}，{item.get('event', '')}，变化后外观：{item.get('appearance_after', '')}"
-        for item in history[-12:] if isinstance(item, dict)
+        f"第{item.get('chapter_number', '?')}章：{item.get('change_type', '变化')}，{item.get('event', '')}，"
+        f"变化后外观：{item.get('appearance_after', '')}，变化后服装：{item.get('clothing_after', '')}"
+        for item in history[-12:]
     )
+    effective_state = resolve_asset_state(asset, chapter_number)
     style_name = style or asset.style or "3D动漫电影风格"
     positive = (
         f"为小说视觉资产“{asset.name}”制作专业{label}设定图。"
+        f"剧情时间点：{('第' + str(chapter_number) + '章') if chapter_number else '当前最新状态'}。"
         f"原文描述：{asset.description or '以已确认设定为准'}。"
-        f"外观结构：{asset.appearance or '严格依据原文和参考图，不擅自添加设定'}。"
-        f"服装/装备/表面细节：{asset.clothing or '按资产类别合理呈现'}。"
+        f"该剧情时间点外观结构：{effective_state['appearance'] or '严格依据原文和参考图，不擅自添加设定'}。"
+        f"该剧情时间点服装/装备/表面细节：{effective_state['clothing'] or '按资产类别合理呈现'}。"
+        f"当前持有人：{effective_state['holder'] or '原设定持有人或剧情明确安排'}。"
         f"气质/环境氛围：{asset.personality or '忠实原文'}。"
         f"固定一致性特征：{asset.consistency_prompt or asset.appearance}。"
         f"剧情变化记录：{history_text or '暂无已记录变化'}。"
@@ -630,15 +681,17 @@ def build_asset_prompt(asset: VisualAsset, style: str = ""):
             "source_analysis_item_id": data.get("source_analysis_item_id"),
         },
         "evolution_history": history,
+        "effective_state": effective_state,
+        "chapter_number": chapter_number,
     }
 
 
 @router.get("/assets/{asset_id}/prompt")
-def get_asset_prompt(asset_id: int, style: Optional[str] = None, db: Session = Depends(get_db)):
+def get_asset_prompt(asset_id: int, style: Optional[str] = None, chapter_number: Optional[int] = None, db: Session = Depends(get_db)):
     asset = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
     if not asset:
         raise HTTPException(404, "素材不存在")
-    return build_asset_prompt(asset, style or "")
+    return build_asset_prompt(asset, style or "", chapter_number)
 
 
 @router.post("/assets/{asset_id}/views")

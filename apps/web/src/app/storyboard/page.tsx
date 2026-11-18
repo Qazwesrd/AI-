@@ -16,6 +16,7 @@ type Shot = {
   character_actions: string; dialogue: string; sound_effects: string; image_prompt: string;
 };
 type VisualAsset = { id: number; category: string; name: string; description: string };
+type ShotAssetLink = { role: string; chapter_number?: number | null; state_snapshot?: { appearance?: string; clothing?: string; holder?: string; change_type?: string; event?: string }; asset: { id: number; name: string; category: string } };
 type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };
 
 const styles = [
@@ -30,6 +31,8 @@ export default function StoryboardPage() {
   const [shots, setShots] = useState<Shot[]>([]);
   const [videoTasks, setVideoTasks] = useState<VideoTask[]>([]);
   const [assets, setAssets] = useState<VisualAsset[]>([]);
+  const [shotAssetLinks, setShotAssetLinks] = useState<Record<number, ShotAssetLink[]>>({});
+  const [assetChapterNumber, setAssetChapterNumber] = useState("");
   const [novelId, setNovelId] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -100,6 +103,11 @@ export default function StoryboardPage() {
     const result = await request(`/api/story/episodes/${id}/shots`);
     setShots(result);
     setEpisodeId(id);
+    const linked = await Promise.all((result as Shot[]).map(async shot => {
+      try { return [shot.id, await request(`/api/story/shots/${shot.id}/assets`)] as const; }
+      catch { return [shot.id, []] as const; }
+    }));
+    setShotAssetLinks(Object.fromEntries(linked));
     await loadEpisodeVideoTasks(id);
   }
 
@@ -357,9 +365,11 @@ export default function StoryboardPage() {
       await request(`/api/story/shots/${shot.id}/assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset_id: assetId, role: "visual" }),
+        body: JSON.stringify({ asset_id: assetId, role: "visual", chapter_number: assetChapterNumber ? Number(assetChapterNumber) : null }),
       });
-      setMessage(`已将素材关联到镜头 #${shot.shot_number}`);
+      const linked = await request(`/api/story/shots/${shot.id}/assets`);
+      setShotAssetLinks(current => ({ ...current, [shot.id]: linked }));
+      setMessage(`已将素材关联到镜头 #${shot.shot_number}，并保存剧情章节状态。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "素材关联失败");
     }
@@ -548,12 +558,26 @@ export default function StoryboardPage() {
               <p className="mt-1 text-xs text-slate-400">场景：{shot.scene_name || "未指定"} · 时长：{shot.duration_seconds} 秒</p>
               {shot.dialogue && <p className="mt-2 text-sm text-purple-200">对白：{shot.dialogue}</p>}
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span className="text-xs text-slate-400">素材剧情时间点：</span>
+                <input className="w-24 rounded-lg border border-purple-300/20 bg-slate-950 px-2 py-1 text-xs" type="number" min="1" placeholder="章节号" value={assetChapterNumber} onChange={e => setAssetChapterNumber(e.target.value)} />
+                <span className="text-xs text-slate-500">留空则使用最新状态</span>
                 <span className="text-xs text-slate-400">关联视觉素材：</span>
                 <select className="max-w-xs rounded-lg border border-purple-300/20 bg-slate-950 px-2 py-1 text-xs" defaultValue="" onChange={e => e.target.value && linkAsset(shot, Number(e.target.value))}>
                   <option value="">选择人物/场景/道具</option>
                   {assets.map(a => <option key={a.id} value={a.id}>{a.name}（{a.category}）</option>)}
                 </select>
               </div>
+              {(shotAssetLinks[shot.id] || []).length > 0 && (
+                <div className="mt-3 space-y-2 rounded-lg border border-cyan-300/15 bg-cyan-950/20 p-3">
+                  <p className="text-xs font-semibold text-cyan-200">本镜头已锁定的素材版本</p>
+                  {(shotAssetLinks[shot.id] || []).map(link => (
+                    <div key={link.asset.id + ":" + link.role} className="text-xs text-slate-300">
+                      <strong>{link.asset.name}</strong> · {link.chapter_number ? `第${link.chapter_number}章` : "最新状态"}
+                      <p className="mt-1 text-slate-400">{link.state_snapshot?.change_type || "基础状态"}：{link.state_snapshot?.appearance || "未填写外观"}；服装/装备：{link.state_snapshot?.clothing || "基础设定"}{link.state_snapshot?.holder ? `；持有人：${link.state_snapshot.holder}` : ""}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
             </article>
           ))}
           {episodeId && shots.length === 0 && <p className="text-sm text-slate-400">当前分集还没有分镜镜头。</p>}
