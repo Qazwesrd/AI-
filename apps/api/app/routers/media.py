@@ -7,7 +7,7 @@ import re
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -776,7 +776,7 @@ class SpeechInput(BaseModel):
     text: str = Field(min_length=1, max_length=4096)
     voice: str = "alloy"
     instructions: Optional[str] = None
-    response_format: str = "mp3"
+    response_format: Literal["mp3", "opus", "aac", "flac", "wav", "pcm"] = "mp3"
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
     confirm_paid: bool = False
     force_regenerate: bool = False
