@@ -75,7 +75,7 @@ class PublishInput(BaseModel):
     title: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=10000)
     tags: list[str] = Field(default_factory=list)
-    cover_path: str = ""
+    cover_path: Optional[str] = None
     account_id: Optional[int] = None
     scheduled_at: Optional[datetime] = None
 
