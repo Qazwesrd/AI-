@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electron");
 const { spawn, execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -13,6 +13,9 @@ let apiProcess = null;
 let webProcess = null;
 let quitting = false;
 let startupFailed = false;
+let aiBrowserSession = null;
+const aiBrowserTasks = new Map();
+const aiBrowserWindows = new Map();
 
 const gotLock = app.requestSingleInstanceLock();
 
@@ -354,4 +357,99 @@ ipcMain.handle("external:open", async (_event, rawUrl) => {
 
   await shell.openExternal(parsed.toString());
   return true;
+});
+
+
+// Embedded AI browser: persistent login session and task-aware download collection.
+function getAiBrowserSession() {
+  if (aiBrowserSession) return aiBrowserSession;
+  aiBrowserSession = session.fromPartition("persist:ai-web-tools");
+  aiBrowserSession.on("will-download", (event, item, webContents) => {
+    const taskKey = aiBrowserTasks.get(webContents.id);
+    if (!taskKey) return;
+    const allowed = new Set([
+      ".png", ".jpg", ".jpeg", ".webp", ".gif",
+      ".mp4", ".mov", ".webm", ".mkv",
+      ".mp3", ".wav", ".m4a", ".aac",
+      ".txt", ".md", ".json", ".srt", ".vtt",
+      ".pdf", ".docx", ".csv"
+    ]);
+    const originalName = path.basename(item.getFilename() || "ai-result.bin").slice(0, 255);
+    const extension = path.extname(originalName).toLowerCase();
+    if (!allowed.has(extension)) {
+      event.preventDefault();
+      webContents.send("ai-browser:download-rejected", { taskId: taskKey, filename: originalName, reason: "该文件类型暂不支持自动归档。" });
+      return;
+    }
+    const resultDir = path.join(app.getPath("userData"), "storage", "web_ai_results");
+    fs.mkdirSync(resultDir, { recursive: true });
+    const storedName = require("crypto").randomUUID().replace(/-/g, "") + extension;
+    const targetPath = path.join(resultDir, storedName);
+    item.setSavePath(targetPath);
+    item.once("done", async (_downloadEvent, state) => {
+      if (state !== "completed") {
+        webContents.send("ai-browser:download-failed", { taskId: taskKey, filename: originalName, state });
+        return;
+      }
+      try {
+        const stat = fs.statSync(targetPath);
+        const response = await fetch("http://127.0.0.1:8000/api/web-ai/files/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            taskId: taskKey,
+            filename: originalName,
+            storedName,
+            contentType: item.getMimeType() || "application/octet-stream",
+            size: stat.size
+          })
+        });
+        if (!response.ok) throw new Error("本地 API 未能登记下载文件：" + response.status);
+        const registered = await response.json();
+        webContents.send("ai-browser:downloaded", registered);
+      } catch (error) {
+        webContents.send("ai-browser:download-failed", {
+          taskId: taskKey,
+          filename: originalName,
+          savedPath: targetPath,
+          reason: String(error.message || error)
+        });
+      }
+    });
+  });
+  return aiBrowserSession;
+}
+
+ipcMain.handle("ai-browser:open", async (_event, payload = {}) => {
+  const taskId = String(payload.taskId || "");
+  const rawUrl = String(payload.url || "");
+  if (!/^task-[a-zA-Z0-9-]{5,110}$/.test(taskId)) throw new Error("无效的任务编号");
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch { throw new Error("无效的网址"); }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("只允许打开 HTTP 或 HTTPS 网页地址");
+  }
+  const browserSession = getAiBrowserSession();
+  const browser = new BrowserWindow({
+    width: 1320,
+    height: 900,
+    minWidth: 900,
+    minHeight: 650,
+    autoHideMenuBar: true,
+    title: "AI 工具浏览器 - " + parsed.hostname,
+    webPreferences: {
+      partition: "persist:ai-web-tools",
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true
+    }
+  });
+  aiBrowserTasks.set(browser.webContents.id, taskId);
+  aiBrowserWindows.set(browser.webContents.id, browser);
+  browser.on("closed", () => {
+    aiBrowserTasks.delete(browser.webContents.id);
+    aiBrowserWindows.delete(browser.webContents.id);
+  });
+  await browser.loadURL(parsed.toString());
+  return { opened: true, taskId };
 });
