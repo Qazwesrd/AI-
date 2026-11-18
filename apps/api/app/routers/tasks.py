@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -9,6 +10,8 @@ from app.database import get_db
 from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
+from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog
+from app.services.task_runtime import runtime_snapshot
 from app.routers.visual import (
     pause_image_task,
     resume_image_task,
@@ -18,6 +21,10 @@ from app.routers.visual import (
 from app.routers.media import refresh_video_task
 
 router = APIRouter(prefix="/api/tasks", tags=["统一任务中心"])
+
+
+class ConcurrencyInput(BaseModel):
+    max_concurrency: int = Field(ge=1, le=8)
 
 
 def _iso(value):
@@ -52,6 +59,44 @@ def _group_counts(db: Session, model, status_column):
         result[group] += int(count)
         result["total"] += int(count)
     return result
+
+
+
+
+@router.get("/runtime")
+def get_task_runtime(db: Session = Depends(get_db)):
+    return runtime_snapshot(db)
+
+
+@router.put("/runtime/concurrency")
+def set_task_concurrency(payload: ConcurrencyInput, db: Session = Depends(get_db)):
+    control = db.query(TaskRuntimeControl).filter(TaskRuntimeControl.id == 1).first()
+    if not control:
+        control = TaskRuntimeControl(id=1, max_concurrency=payload.max_concurrency, active_count=0)
+        db.add(control)
+    else:
+        if payload.max_concurrency < control.active_count:
+            raise HTTPException(409, "新的并发上限不能低于当前正在执行的任务数")
+        control.max_concurrency = payload.max_concurrency
+        control.updated_at = datetime.utcnow()
+    db.commit()
+    return runtime_snapshot(db)
+
+
+@router.get("/runtime/logs")
+def get_task_execution_logs(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(TaskExecutionLog).order_by(
+        TaskExecutionLog.created_at.desc(), TaskExecutionLog.id.desc()
+    ).limit(limit).all()
+    return [{
+        "id": row.id, "source": row.source, "task_id": row.task_id,
+        "event": row.event, "message": row.message,
+        "duration_seconds": row.duration_seconds,
+        "created_at": _iso(row.created_at),
+    } for row in rows]
 
 
 @router.get("")
