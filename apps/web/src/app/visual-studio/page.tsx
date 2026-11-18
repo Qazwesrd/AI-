@@ -178,7 +178,7 @@ export default function VisualStudioPage() {
   }
 
   async function createTask() {
-    const effectivePrompt = prompt.trim() || buildPrompt();
+    const effectivePrompt = buildPrompt();
     if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
     setPrompt(effectivePrompt);
     setBusy(true);
