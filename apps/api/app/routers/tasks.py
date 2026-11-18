@@ -159,7 +159,7 @@ def manually_release_stale_lease(
         if task.status not in ("submission_unknown", "submitting"):
             raise HTTPException(409, "只有提交状态不确定的视频任务可以人工核实释放")
     else:
-        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、视频提交或小说解析任务租约")
+        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、3D 模型提交、视频提交或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
         TaskExecutionLease.source == source,
         TaskExecutionLease.task_id == task_id,
