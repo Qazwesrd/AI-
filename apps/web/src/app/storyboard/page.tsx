@@ -33,6 +33,7 @@ export default function StoryboardPage() {
   const [assets, setAssets] = useState<VisualAsset[]>([]);
   const [shotAssetLinks, setShotAssetLinks] = useState<Record<number, ShotAssetLink[]>>({});
   const [assetChapterNumber, setAssetChapterNumber] = useState("");
+  const [matchSuggestions, setMatchSuggestions] = useState<Record<number, any[]>>({});
   const [novelId, setNovelId] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -360,6 +361,31 @@ export default function StoryboardPage() {
     }
   }
 
+  async function suggestShotAssets(shot: Shot) {
+    try {
+      const names = [shot.scene_name, ...(shot.character_actions || "").split(/[，,、；;。]/)].map(x => x.trim()).filter(Boolean).slice(0, 20);
+      const result = await request("/api/ai-collaboration/storyboard/match-suggestions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shot_id: shot.id, chapter_number: assetChapterNumber ? Number(assetChapterNumber) : null, names }),
+      });
+      setMatchSuggestions(current => ({ ...current, [shot.id]: result.suggestions || [] }));
+      setMessage("已生成素材匹配建议。名称匹配只是候选，请核对后再确认。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "素材匹配失败"); }
+  }
+
+  async function confirmSuggestedAsset(shot: Shot, assetId: number, category: string) {
+    const role = category === "characters" ? "character" : category === "scenes" ? "scene" : category === "weapons" ? "weapon" : category === "costumes" ? "costume" : category === "buildings" ? "building" : category === "special_items" ? "special_item" : "prop";
+    try {
+      await request("/api/ai-collaboration/storyboard/confirm-match", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shot_id: shot.id, asset_id: assetId, role, chapter_number: assetChapterNumber ? Number(assetChapterNumber) : null }),
+      });
+      const linked = await request(`/api/story/shots/${shot.id}/assets`);
+      setShotAssetLinks(current => ({ ...current, [shot.id]: linked }));
+      setMessage("已确认素材匹配，并锁定该章节的素材状态快照。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "确认素材匹配失败"); }
+  }
+
   async function linkAsset(shot: Shot, assetId: number) {
     try {
       await request(`/api/story/shots/${shot.id}/assets`, {
@@ -561,12 +587,29 @@ export default function StoryboardPage() {
                 <span className="text-xs text-slate-400">素材剧情时间点：</span>
                 <input className="w-24 rounded-lg border border-purple-300/20 bg-slate-950 px-2 py-1 text-xs" type="number" min="1" placeholder="章节号" value={assetChapterNumber} onChange={e => setAssetChapterNumber(e.target.value)} />
                 <span className="text-xs text-slate-500">留空则使用最新状态</span>
+                <button className="rounded-lg border border-cyan-300/30 bg-cyan-900/40 px-3 py-1.5 text-xs" onClick={() => suggestShotAssets(shot)}>AI素材匹配建议</button>
                 <span className="text-xs text-slate-400">关联视觉素材：</span>
                 <select className="max-w-xs rounded-lg border border-purple-300/20 bg-slate-950 px-2 py-1 text-xs" defaultValue="" onChange={e => e.target.value && linkAsset(shot, Number(e.target.value))}>
                   <option value="">选择人物/场景/道具</option>
                   {assets.map(a => <option key={a.id} value={a.id}>{a.name}（{a.category}）</option>)}
                 </select>
               </div>
+              {(matchSuggestions[shot.id] || []).length > 0 && (
+                <div className="mt-3 space-y-2 rounded-lg border border-fuchsia-300/20 bg-fuchsia-950/20 p-3">
+                  <p className="text-xs font-semibold text-fuchsia-200">AI素材匹配候选（需人工确认）</p>
+                  {(matchSuggestions[shot.id] || []).map((group: any, index: number) => (
+                    <div key={group.requested_name + index} className="text-xs">
+                      <strong>{group.requested_name}</strong>
+                      {group.missing ? <span className="ml-2 text-amber-300">素材库未找到匹配项</span> : group.matches.map((match: any) => (
+                        <div key={match.asset_id} className="mt-1 flex flex-wrap items-center gap-2 text-slate-300">
+                          <span>{match.name} · {match.category} · 匹配度 {(match.confidence * 100).toFixed(0)}%</span>
+                          <button className="rounded border border-emerald-300/30 px-2 py-1 text-emerald-200" onClick={() => confirmSuggestedAsset(shot, match.asset_id, match.category)}>确认关联</button>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
               {(shotAssetLinks[shot.id] || []).length > 0 && (
                 <div className="mt-3 space-y-2 rounded-lg border border-cyan-300/15 bg-cyan-950/20 p-3">
                   <p className="text-xs font-semibold text-cyan-200">本镜头已锁定的素材版本</p>
