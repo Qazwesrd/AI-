@@ -41,3 +41,15 @@ class WebAITask(Base):
     scene_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WebAIResultFile(Base):
+    __tablename__ = "web_ai_result_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    task_key: Mapped[str] = mapped_column(String(120), index=True)
+    original_name: Mapped[str] = mapped_column(String(255))
+    stored_name: Mapped[str] = mapped_column(String(80), unique=True)
+    content_type: Mapped[str] = mapped_column(String(160), default="application/octet-stream")
+    file_size: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
