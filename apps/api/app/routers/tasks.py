@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
-from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog
+from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
 from app.services.task_runtime import runtime_snapshot, release_task_lease
 from app.routers.visual import (
     pause_image_task,
