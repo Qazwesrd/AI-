@@ -11,7 +11,7 @@ from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
-from app.services.task_runtime import runtime_snapshot, release_task_lease
+from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot
 from app.routers.visual import (
     pause_image_task,
     resume_image_task,
@@ -61,6 +61,11 @@ def _group_counts(db: Session, model, status_column):
     return result
 
 
+
+
+@router.get("/queue")
+def get_task_queue(db: Session = Depends(get_db)):
+    return queue_snapshot(db, 200)
 
 
 @router.get("/runtime")
