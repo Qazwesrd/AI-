@@ -87,8 +87,8 @@ def tripo_task_action(task):
     """Return a safe action for an existing 3D task; never resubmit uncertain work."""
     if task.status in ("submitting", "interrupted_unknown"):
         return "review"
-    if task.status in ("submitted", "running") and (task.result_url or "").startswith("tripo-task:"):
-        return "reuse"
+    if task.status in ("submitted", "running"):
+        return "reuse" if (task.result_url or "").startswith("tripo-task:") else "review"
     return "new"
 
 
