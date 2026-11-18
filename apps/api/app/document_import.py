@@ -1,4 +1,6 @@
 ﻿from pathlib import Path
+import posixpath
+from urllib.parse import unquote
 from io import BytesIO
 import zipfile
 import xml.etree.ElementTree as ET
@@ -27,8 +29,50 @@ def docx_text(raw):
 
 def epub_text(raw):
     with zipfile.ZipFile(BytesIO(raw)) as z:
-        names = [n for n in z.namelist()
-                 if n.lower().endswith((".xhtml", ".html", ".htm"))]
+        archive_names = set(z.namelist())
+        names = []
+
+        # EPUB reading order is defined by the OPF spine, not ZIP entry order.
+        # Follow container.xml -> package.opf -> manifest/spine when available.
+        try:
+            container = ET.fromstring(z.read("META-INF/container.xml"))
+            rootfile = container.find(
+                ".//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile"
+            )
+            if rootfile is not None:
+                package_path = rootfile.attrib.get("full-path", "")
+                package = ET.fromstring(z.read(package_path))
+                base_dir = posixpath.dirname(package_path)
+                manifest = {}
+                for item in package.findall(".//{*}manifest/{*}item"):
+                    item_id = item.attrib.get("id")
+                    href = item.attrib.get("href", "")
+                    media_type = item.attrib.get("media-type", "")
+                    if item_id and href and (
+                        media_type in {"application/xhtml+xml", "text/html"}
+                        or href.lower().split("?")[0].endswith((".xhtml", ".html", ".htm"))
+                    ):
+                        member = posixpath.normpath(
+                            posixpath.join(base_dir, unquote(href.split("#", 1)[0].split("?", 1)[0]))
+                        )
+                        manifest[item_id] = member
+                spine = package.find(".//{*}spine")
+                if spine is not None:
+                    for itemref in spine.findall("{*}itemref"):
+                        member = manifest.get(itemref.attrib.get("idref", ""))
+                        if member in archive_names and member not in names:
+                            names.append(member)
+        except (KeyError, ET.ParseError, OSError, ValueError):
+            # Some legacy EPUBs omit or contain malformed package metadata.
+            # Retain a best-effort fallback for those files.
+            names = []
+
+        if not names:
+            names = [
+                name for name in z.namelist()
+                if name.lower().endswith((".xhtml", ".html", ".htm"))
+            ]
+
         result = []
         for name in names:
             try:
