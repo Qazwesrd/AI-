@@ -45,6 +45,30 @@ class DocumentImportTests(unittest.TestCase):
             archive.writestr("OEBPS/chapter1.xhtml", "<html><body><p>EPUB正文</p></body></html>")
         self.assertIn("EPUB正文", epub_text(buffer.getvalue()))
 
+    def test_epub_uses_spine_reading_order_not_zip_order(self):
+        buffer = BytesIO()
+        container_xml = (
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="OPS/package.opf" '
+            'media-type="application/oebps-package+xml"/></rootfiles></container>'
+        )
+        package_xml = (
+            '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+            '<manifest>'
+            '<item id="chapter1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="chapter2" href="chapter2.xhtml" media-type="application/xhtml+xml"/>'
+            '</manifest><spine><itemref idref="chapter1"/><itemref idref="chapter2"/></spine>'
+            '</package>'
+        )
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("OPS/chapter2.xhtml", "<html><body>第二章</body></html>")
+            archive.writestr("META-INF/container.xml", container_xml)
+            archive.writestr("OPS/package.opf", package_xml)
+            archive.writestr("OPS/chapter1.xhtml", "<html><body>第一章</body></html>")
+
+        extracted = epub_text(buffer.getvalue())
+        self.assertLess(extracted.index("第一章"), extracted.index("第二章"))
+
     def test_txt_document_import(self):
         self.assertEqual(
             extract_document_text("novel.txt", "正文内容".encode("utf-8")),
