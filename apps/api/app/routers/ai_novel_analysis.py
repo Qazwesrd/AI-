@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.novel import Novel, AnalysisItem, NovelAnalysisJob
 from app.models.studio import AIProviderConfig, AIUsageLog
 from app.routers.studio import runtime, decrypt_key
+from app.services.task_runtime import acquire_task_lease, release_task_lease
 
 router = APIRouter(prefix="/api", tags=["AI小说深度分析"])
 
@@ -758,6 +759,7 @@ def analyze_novel_with_ai(
         db.commit()
 
     saved_results = dict(job.chunk_results or {})
+    acquire_task_lease(db, "analysis", job.id, priority=10)
     if job.total_chunks != len(chunks):
         job.total_chunks = len(chunks)
     job.status = "running"
@@ -805,6 +807,7 @@ def analyze_novel_with_ai(
                 detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1500]}",
             ))
             db.commit()
+            release_task_lease(db, "analysis", job.id, False, job.last_error)
 
             raise HTTPException(
                 502,
@@ -887,6 +890,7 @@ def analyze_novel_with_ai(
         job.last_error = ""
         job.updated_at = datetime.utcnow()
         db.commit()
+        release_task_lease(db, "analysis", job.id, True)
 
         for row in created:
             db.refresh(row)
