@@ -126,10 +126,12 @@ def _migrate_missing_columns():
                 )
 
             if not column.nullable and column.server_default is None:
-                raise RuntimeError(
-                    f"数据库迁移拒绝添加必填字段 {table.name}.{column.name}："
-                    "该字段没有安全的默认值。请先提供正式迁移脚本。"
-                )
+                python_default = column.default.arg if column.default is not None else None
+                if python_default is None or not isinstance(python_default, (str, int, float)):
+                    raise RuntimeError(
+                        f"数据库迁移拒绝添加必填字段 {table.name}.{column.name}："
+                        "该字段没有可安全转换为 SQLite 默认值的标量默认值。"
+                    )
 
             missing.append((table, column))
 
@@ -147,8 +149,14 @@ def _migrate_missing_columns():
                     f'ADD COLUMN "{column.name}" {column_type}'
                 )
 
-                if column.server_default is not None:
-                    clause += f" DEFAULT {column.server_default.arg}"
+                default_value = column.server_default.arg if column.server_default is not None else (
+                    column.default.arg if column.default is not None else None
+                )
+                if default_value is not None and isinstance(default_value, (str, int, float)):
+                    if isinstance(default_value, str):
+                        clause += " DEFAULT '" + default_value.replace("'", "''") + "'"
+                    else:
+                        clause += f" DEFAULT {default_value}"
 
                 connection.execute(text(clause))
     except Exception:
