@@ -277,11 +277,7 @@ def register_downloaded_file(payload: RegisterDownloadedFile, db: Session = Depe
         raise HTTPException(409, "下载文件大小校验失败")
     existing = db.query(WebAIResultFile).filter(WebAIResultFile.stored_name == payload.storedName).first()
     if existing is not None:
-        return {
-            "id": existing.id, "taskId": existing.task_key, "filename": existing.original_name,
-            "contentType": existing.content_type, "size": existing.file_size,
-            "downloadUrl": f"/api/web-ai/files/{existing.id}", "createdAt": iso(existing.created_at),
-        }
+        return result_file_dict(existing)
     original_name = Path(payload.filename).name[:255]
     classification, reason = infer_result_classification(original_name, payload.contentType, task.category)
     item = WebAIResultFile(
@@ -307,6 +303,7 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
     target = (STORAGE_DIR / "web_ai_results" / item.stored_name).resolve()
     root = (STORAGE_DIR / "web_ai_results").resolve()
     if target.parent != root or not target.is_file(): raise HTTPException(410, "结果文件已不存在")
+    if item.classification_status == "confirmed": raise HTTPException(409, "该文件已经确认归档，不能重复创建素材")
     asset_id = None
     if payload.classification in {"character", "scene", "prop"}:
         if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}: raise HTTPException(400, "人物、场景和道具素材必须是图片文件")
