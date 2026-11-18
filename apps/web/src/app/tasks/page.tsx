@@ -26,7 +26,8 @@ type TaskItem = {
   updated_at: string | null;
 };
 
-type RuntimeInfo = { max_concurrency: number; active_count: number; available_slots: number; leases: Array<{source:string;task_id:number;age_seconds:number;started_at:string|null}>; stale_leases: Array<{source:string;task_id:number;age_seconds:number}>; note?: string };
+type QueueItem = { id:number; source:string; task_id:number; priority:number; status:"waiting"|"ready_to_run"; queued_at:string|null; wait_seconds:number; reason:string };
+type RuntimeInfo = { max_concurrency: number; active_count: number; available_slots: number; leases: Array<{source:string;task_id:number;age_seconds:number;started_at:string|null}>; stale_leases: Array<{source:string;task_id:number;age_seconds:number}>; queue?: {items:QueueItem[];total:number;dispatch_mode:string;note:string}; note?: string };
 
 type TaskResponse = {
   items: TaskItem[];
@@ -194,7 +195,7 @@ export default function TasksPage() {
 
         <section className="mb-5 rounded-2xl border border-purple-300/15 bg-slate-950/50 p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="font-semibold">任务执行资源</h2><p className="mt-1 text-xs text-slate-400">持久化并发控制已接入视觉图片生成；其他任务类型仍由所属模块控制。</p></div>
+            <div><h2 className="font-semibold">任务执行资源</h2><p className="mt-1 text-xs text-slate-400">跨图片、视频和小说解析共享并发名额；排队任务按优先级排序，名额空出后等待你手动执行。</p></div>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-slate-300">全局并发上限</span>
               <select value={runtimeLimit} onChange={event => setRuntimeLimit(Number(event.target.value))} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2">
@@ -233,6 +234,24 @@ export default function TasksPage() {
                 } catch (error) { setMessage(error instanceof Error ? error.message : "释放失败"); }
               }} className="rounded-lg border border-amber-300/30 px-3 py-1.5 text-amber-200">核实后释放占用</button> : <span className="text-slate-500">暂不支持自动释放</span>}
             </div>)}
+          </div> : null}
+          {runtime?.queue?.total ? <div className="mt-4 border-t border-white/10 pt-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium">持久化等待队列（{runtime.queue.total}）</p>
+              <span className="text-xs text-slate-500">优先级高的任务排在前面</span>
+            </div>
+            <div className="space-y-2">
+              {runtime.queue.items.map((item, index) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-black/25 px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <p className="text-slate-200">#{index + 1} · {item.source === "analysis" ? "小说解析" : item.source === "image" ? "视觉图片" : "视频/媒体"}任务 #{item.task_id}
+                    <span className="ml-2 text-slate-500">优先级 {item.priority}</span>
+                  </p>
+                  <p className="mt-1 text-slate-500">{item.status === "ready_to_run" ? "并发名额已空出 · 等待手动执行" : "等待并发名额"} · 已等待 {Math.floor(item.wait_seconds / 60)} 分钟</p>
+                </div>
+                <Link href={item.source === "analysis" ? "/novels" : item.source === "image" ? "/visual-studio" : "/storyboard"} className="rounded-lg border border-purple-300/25 px-3 py-1.5 text-purple-200">打开模块</Link>
+              </div>)}
+            </div>
+            <p className="mt-2 text-xs text-amber-200/80">队列不会自动调用 AI。点击“打开模块”后，请检查任务设置和付费确认，再手动执行。</p>
           </div> : null}
           {runtimeLogs.length > 0 && <div className="mt-3 border-t border-white/10 pt-3">
             <p className="mb-2 text-xs text-slate-400">最近执行记录</p>
