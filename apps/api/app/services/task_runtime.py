@@ -106,3 +106,17 @@ def runtime_snapshot(db):
         "stale_leases": [item for item in items if item["age_seconds"] >= 1800],
         "note": "超过30分钟的租约仅标记为待核实，不自动释放，避免远程AI任务仍在运行时重复提交。",
     }
+
+
+
+def inspect_startup_leases():
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        snapshot = runtime_snapshot(db)
+        return {
+            "active_count": snapshot["active_count"],
+            "stale_count": len(snapshot.get("stale_leases") or []),
+        }
+    finally:
+        db.close()
