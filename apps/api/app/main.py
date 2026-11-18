@@ -20,8 +20,6 @@ ROUTER_MODULES = [
     "app.routers.media",
     "app.routers.video_editor",
     "app.routers.ai_novel_analysis",
-    "app.routers.publishing",
-    "app.routers.publishing_uploads",
     "app.routers.tasks",
     "app.routers.web_ai_tools",
     "app.routers.ai_collaboration",
