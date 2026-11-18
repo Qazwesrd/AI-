@@ -858,7 +858,7 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
         # Persist a local placeholder BEFORE any remote submission call. If
         # the desktop app exits or the DB connection drops, this record survives.
         task = ImageTask(
-            asset_id=asset.id, provider=payload.provider,
+            asset_id=asset.id, provider=payload.provider, model=payload.model,
             task_type="model3d_multiview", prompt=f"多视图生成 3D 模型：{asset.name}",
             size="GLB", status="submitting",
         )
