@@ -127,10 +127,21 @@ def _migrate_missing_columns():
 
             if not column.nullable and column.server_default is None:
                 python_default = column.default.arg if column.default is not None else None
-                if python_default is None or not isinstance(python_default, (str, int, float)):
+                is_datetime_default = (
+                    python_default is not None
+                    and callable(python_default)
+                    and column.type.python_type.__name__ in {"datetime", "date"}
+                )
+                if (
+                    python_default is None
+                    or (
+                        not isinstance(python_default, (str, int, float))
+                        and not is_datetime_default
+                    )
+                ):
                     raise RuntimeError(
                         f"数据库迁移拒绝添加必填字段 {table.name}.{column.name}："
-                        "该字段没有可安全转换为 SQLite 默认值的标量默认值。"
+                        "该字段没有可安全转换为 SQLite 默认值的默认值。"
                     )
 
             missing.append((table, column))
@@ -152,11 +163,13 @@ def _migrate_missing_columns():
                 default_value = column.server_default.arg if column.server_default is not None else (
                     column.default.arg if column.default is not None else None
                 )
-                if default_value is not None and isinstance(default_value, (str, int, float)):
+                if default_value is not None:
                     if isinstance(default_value, str):
                         clause += " DEFAULT '" + default_value.replace("'", "''") + "'"
-                    else:
+                    elif isinstance(default_value, (int, float)):
                         clause += f" DEFAULT {default_value}"
+                    elif callable(default_value) and column.type.python_type.__name__ in {"datetime", "date"}:
+                        clause += " DEFAULT CURRENT_TIMESTAMP"
 
                 connection.execute(text(clause))
     except Exception:
