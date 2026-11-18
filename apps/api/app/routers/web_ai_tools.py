@@ -106,9 +106,6 @@ def list_tasks(limit: int = 200, db: Session = Depends(get_db)):
 def create_task(payload: TaskInput, db: Session = Depends(get_db)):
     if db.query(WebAITask).filter(WebAITask.task_key == payload.id).first():
         raise HTTPException(409, "任务编号已存在")
-    tool = db.query(WebAITool).filter(WebAITool.tool_key == payload.toolId, WebAITool.enabled.is_(True)).first()
-    if tool is None:
-        raise HTTPException(400, "请先保存并启用对应的 AI 网页工具")
     item = WebAITask(
         task_key=payload.id, title=payload.title, category=payload.category,
         tool_key=payload.toolId, status=payload.status, prompt=payload.prompt,
