@@ -132,7 +132,9 @@ export default function TasksPage() {
     const confirmation = uncertainRetry
       ? task.source === "media"
         ? "请先核对语音服务商控制台和用量记录。只有确认没有对应远程任务或待结算请求后，才能解除重试保护。是否已核对并确认？"
-        : "请先登录图像服务商控制台核对该任务。只有确认服务商没有创建任务、没有产生费用时，才能重新排队。是否已核对并确认？"
+        : task.source === "analysis"
+          ? "请先核对文本模型服务商的用量记录。只有确认对应片段没有被受理、没有产生待结算费用后，才能解除保护并手动续作。是否已核对并确认？"
+          : "请先登录图像服务商控制台核对该任务。只有确认服务商没有创建任务、没有产生费用时，才能重新排队。是否已核对并确认？"
       : `确定要${actionNames[action]}此任务吗？${action === "retry" ? "重新排队不会自动调用 AI，也不会自动扣费。" : ""}`;
     if (["retry", "cancel"].includes(action) && !window.confirm(confirmation)) return;
     setBusyTask(task.id);
@@ -376,6 +378,10 @@ export default function TasksPage() {
                   {task.source === "media" && ["speech", "episode_speech"].includes(task.type) && ["submission_unknown", "interrupted_unknown"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "retry")}
                       className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-200 disabled:opacity-40">核实后重新生成</button>
+                  )}
+                  {task.source === "analysis" && task.status === "interrupted_unknown" && (
+                    <button disabled={busyTask === task.id} onClick={() => void runAction(task, "retry")}
+                      className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-200 disabled:opacity-40">核实后续作</button>
                   )}
                   <Link href={taskHref(task)} className="rounded-lg border border-purple-300/25 px-3 py-2 text-xs text-purple-200 hover:bg-purple-950/50">打开所属模块 ↗</Link>
                 </div>

@@ -39,6 +39,16 @@ def is_known_remote_3d_task(task) -> bool:
     )
 
 
+def _analysis_chunk_payload(job):
+    raw = dict(job.chunk_results or {})
+    states = raw.pop("__chunk_states__", {})
+    return raw, dict(states) if isinstance(states, dict) else {}
+
+
+def _merge_analysis_chunk_payload(results, states):
+    return {**dict(results or {}), "__chunk_states__": dict(states or {})}
+
+
 def _status_group(status: str) -> str:
     value = (status or "unknown").lower()
     if value in {"completed", "success", "succeeded", "finished", "done"}:
@@ -178,8 +188,17 @@ def manually_release_stale_lease(
     if age < 1800:
         raise HTTPException(409, "租约未超过30分钟保护期，暂不允许人工释放")
     if source == "analysis":
+        if task.status not in ("running", "interrupted_unknown"):
+            raise HTTPException(409, "只有运行中断或结果不确定的小说分析任务可以人工核实释放")
+        saved, states = _analysis_chunk_payload(task)
+        for key, state in list(states.items()):
+            if state in ("submitting", "submission_unknown", "interrupted_unknown"):
+                states[key] = "pending"
+        if not states and task.completed_chunks < task.total_chunks:
+            states[str(task.completed_chunks + 1)] = "pending"
+        task.chunk_results = _merge_analysis_chunk_payload(saved, states)
         task.status = "partial"
-        task.last_error = "用户核对服务商后人工释放遗留执行租约；再次分析前请确认没有仍在运行的远程任务。"
+        task.last_error = "用户已核对文本模型服务商记录并确认没有对应请求或待结算费用；可返回小说详情页手动续作。"
         db.commit()
     elif source == "media":
         if task.task_type in ("speech", "episode_speech"):
@@ -345,7 +364,12 @@ def reconcile_stale_tasks(
         MediaTask.status == "submitting",
         MediaTask.updated_at < cutoff,
     ).all()
+    analysis_jobs = db.query(NovelAnalysisJob).filter(
+        NovelAnalysisJob.status == "running",
+        NovelAnalysisJob.updated_at < cutoff,
+    ).all()
     image_marked = 0
+    analysis_marked = 0
     for task in image_tasks:
         # A 3D task with a persisted remote ID is known to have been accepted;
         # it must remain refreshable rather than being mislabeled as unknown.
@@ -364,11 +388,27 @@ def reconcile_stale_tasks(
             f"任务提交超过 {minutes} 分钟仍未确认。请先在服务商控制台核对，"
             "不得直接重复提交。"
         )
+    for job in analysis_jobs:
+        saved, states = _analysis_chunk_payload(job)
+        for key, state in list(states.items()):
+            if state == "submitting":
+                states[key] = "submission_unknown"
+        if not states and job.completed_chunks < job.total_chunks:
+            states[str(job.completed_chunks + 1)] = "submission_unknown"
+        job.chunk_results = _merge_analysis_chunk_payload(saved, states)
+        if any(state in ("submission_unknown", "interrupted_unknown") for state in states.values()):
+            job.status = "interrupted_unknown"
+            job.last_error = f"小说分析任务超过 {minutes} 分钟未更新；请核对文本模型服务商用量记录，不能自动重试。"
+        else:
+            job.status = "partial"
+            job.last_error = "小说分析任务在模型请求前中断，可安全续作。"
+        analysis_marked += 1
     db.commit()
     return {
         "success": True,
         "image_marked_for_review": image_marked,
         "media_marked_for_review": len(media_tasks),
+        "analysis_marked_for_review": analysis_marked,
         "message": "已标记需要人工核实的任务；没有自动重试、重新提交或产生新的 AI 调用。",
     }
 
@@ -452,10 +492,43 @@ def control_unified_task(
         }
 
     if source == "analysis":
-        raise HTTPException(
-            409,
-            "小说解析任务请在小说详情页继续或重试，以保留原有模型、服务商和付费确认设置",
-        )
+        if action != "retry":
+            raise HTTPException(409, "小说解析任务只支持人工核实后续作，不支持远程暂停或取消")
+        job = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == task_id).first()
+        if not job:
+            raise HTTPException(404, "小说解析任务不存在")
+        saved, states = _analysis_chunk_payload(job)
+        unknown = [
+            key for key, state in states.items()
+            if state in ("submitting", "submission_unknown", "interrupted_unknown")
+        ]
+        if job.status != "interrupted_unknown" and not unknown:
+            raise HTTPException(409, "该小说分析任务没有待核实的片段")
+        if not confirm_no_remote_job:
+            raise HTTPException(409, "请先核对文本模型服务商用量记录，确认没有对应请求或待结算费用后，再确认续作")
+        lease = db.query(TaskExecutionLease).filter(
+            TaskExecutionLease.source == "analysis",
+            TaskExecutionLease.task_id == task_id,
+            TaskExecutionLease.status == "active",
+        ).first()
+        if lease:
+            age = (datetime.utcnow() - (lease.heartbeat_at or lease.started_at)).total_seconds() if (lease.heartbeat_at or lease.started_at) else 0
+            if age < 1800:
+                raise HTTPException(409, "小说分析任务仍有活动执行租约；请等待任务结束或先扫描中断任务")
+        for key in unknown:
+            states[key] = "pending"
+        if not unknown and not states and job.completed_chunks < job.total_chunks:
+            states[str(job.completed_chunks + 1)] = "pending"
+        job.chunk_results = _merge_analysis_chunk_payload(saved, states)
+        job.status = "partial"
+        job.last_error = "用户已核对文本模型服务商用量记录并确认无对应请求或待结算费用；可返回小说详情页手动续作。"
+        db.commit()
+        if lease:
+            release_task_lease(db, "analysis", task_id, False, "用户核实后释放小说分析任务租约")
+        return {
+            "success": True, "task_id": task_id, "status": job.status,
+            "message": "已解除不确定片段的重试保护；没有自动调用 AI，请返回小说详情页手动继续分析。",
+        }
 
     raise HTTPException(404, "不支持的任务来源")
 
