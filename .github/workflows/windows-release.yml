@@ -67,7 +67,7 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: AI-manj-制作大师-Windows-Setup
+          name: AI-Comic-Studio-Windows-Setup
           path: apps/desktop/release/*Setup*.exe
           if-no-files-found: error
           retention-days: 14
