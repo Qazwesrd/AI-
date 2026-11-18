@@ -19,6 +19,7 @@ from app.models.media import MediaTask, MediaFile, SubtitleTrack
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink
 from app.models.visual import VisualAsset
 from app.models.studio import AIProviderConfig, AIRuntimeSetting
+from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
@@ -254,7 +255,7 @@ def generate_episode_shot_videos(
             # 因本地没有任务记录而再次点击，造成重复付费提交。
             task = MediaTask(
                 task_type="storyboard_video", provider=data.provider,
-                model=data.model, status="submitting", prompt=prompt,
+                model=data.model, status="pending", prompt=prompt,
                 request_data={
                     "base_url": base,
                     "status_path_template": data.status_path_template,
@@ -278,6 +279,9 @@ def generate_episode_shot_videos(
             db.refresh(task)
 
             try:
+                acquire_task_lease(db, "media", task.id, priority=5)
+                task.status = "submitting"
+                db.commit()
                 result = http_json(
                     base + "/" + data.create_path.lstrip("/"),
                     key, body=payload, timeout=300
@@ -290,6 +294,7 @@ def generate_episode_shot_videos(
                 task.status = "submitted"
                 task.error = None
                 db.commit()
+                release_task_lease(db, "media", task.id, True)
                 shot.status = "video_submitted"
                 created.append({"task_id": task.id, "shot_id": shot.id,
                                 "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
@@ -301,6 +306,7 @@ def generate_episode_shot_videos(
                     "确认不存在后再人工重新提交。原始错误：" + str(exc)
                 )[:2000]
                 db.commit()
+                release_task_lease(db, "media", task.id, False, task.error)
                 shot.status = "video_submission_unknown"
                 failures.append({"task_id": task.id, "shot_id": shot.id,
                                  "shot_number": shot.shot_number,
@@ -610,7 +616,7 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
         task_type="video",
         provider=data.provider,
         model=data.model,
-        status="submitting",
+        status="pending",
         prompt=data.prompt,
         request_data={
             "base_url": base,
@@ -625,6 +631,9 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(task)
     try:
+        acquire_task_lease(db, "media", task.id, priority=5)
+        task.status = "submitting"
+        db.commit()
         result = http_json(base + path, key, body=payload, timeout=300)
         remote_id = value_at(result, data.task_id_field)
         if not remote_id:
@@ -636,6 +645,7 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
         task.status = "submitted"
         task.error = None
         db.commit()
+        release_task_lease(db, "media", task.id, True)
         return {"task_id": task.id, "remote_task_id": remote_id,
                 "status": task.status, "provider_response": result}
     except Exception as exc:
@@ -645,6 +655,7 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
             "确认不存在后再人工重新提交。原始错误：" + str(exc)
         )[:2000]
         db.commit()
+        release_task_lease(db, "media", task.id, False, task.error)
         return {
             "success": False,
             "task_id": task.id,
