@@ -109,6 +109,33 @@ export default function AIToolsPage() {
     });
   }, []);
 
+
+  useEffect(() => {
+    const bridge = (window as Window & {
+      aiBrowserDesktop?: {
+        onDownloaded?: (callback: (payload: ResultFile & { taskId: string }) => void) => () => void;
+        onDownloadFailed?: (callback: (payload: { taskId: string; filename: string; reason?: string }) => void) => () => void;
+        onDownloadRejected?: (callback: (payload: { taskId: string; filename: string; reason: string }) => void) => () => void;
+      };
+    }).aiBrowserDesktop;
+    if (!bridge) return;
+    const removeDownloaded = bridge.onDownloaded?.((file) => {
+      setTaskFiles((current) => ({ ...current, [file.taskId]: [file, ...(current[file.taskId] || [])] }));
+      setNotice("已自动收集并归档网页下载文件：" + file.filename);
+    });
+    const removeFailed = bridge.onDownloadFailed?.((payload) => {
+      setNotice("网页文件已下载，但自动登记失败：" + payload.filename + "。可在任务中手动导入。");
+    });
+    const removeRejected = bridge.onDownloadRejected?.((payload) => {
+      setNotice(payload.reason || "该文件类型暂不支持自动归档。");
+    });
+    return () => {
+      removeDownloaded?.();
+      removeFailed?.();
+      removeRejected?.();
+    };
+  }, []);
+
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_TOOLS, JSON.stringify(tools));
@@ -211,15 +238,20 @@ export default function AIToolsPage() {
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
         throw new Error("只允许 HTTP 或 HTTPS 网站地址");
       }
+      const embedded = (window as Window & { aiBrowserDesktop?: { openTask?: (taskId: string, url: string) => Promise<{ opened: boolean }> } }).aiBrowserDesktop;
       const desktop = (window as Window & { desktopAPI?: { openExternal?: (url: string) => Promise<boolean> } }).desktopAPI;
-      // Start navigation during the user gesture so normal-browser popup blockers do not suppress it.
-      const opening = desktop?.openExternal
-        ? desktop.openExternal(parsed.toString())
-        : Promise.resolve(window.open(parsed.toString(), "_blank", "noopener,noreferrer"));
       await copyText(task.prompt);
-      await opening;
+      if (embedded?.openTask) {
+        await embedded.openTask(task.id, parsed.toString());
+        setNotice(`已在软件内打开 ${target.name}。请在网页中粘贴提示词并生成；支持的下载文件会自动归档到当前任务。`);
+      } else {
+        const opening = desktop?.openExternal
+          ? desktop.openExternal(parsed.toString())
+          : Promise.resolve(window.open(parsed.toString(), "_blank", "noopener,noreferrer"));
+        await opening;
+        setNotice(`已打开 ${target.name}。提示词已复制；当前运行环境不支持内嵌浏览器自动收集，请手动导入结果。`);
+      }
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "opened" } : item));
-      setNotice(`已打开 ${target.name}。提示词已复制，请在网页中粘贴并完成生成；本软件不会读取或绕过该网站的登录与验证码。`);
     } catch {
       setNotice("打开网页失败，请检查工具网址或默认浏览器设置。");
     }
