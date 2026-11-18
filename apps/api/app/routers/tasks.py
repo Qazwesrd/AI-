@@ -145,9 +145,9 @@ def manually_release_stale_lease(
             ImageTask.asset_id == task_id,
             ImageTask.task_type == "model3d_multiview",
         ).order_by(ImageTask.id.desc()).first()
-        if not task or task.status not in ("submitting", "interrupted_unknown"):
+        if task and task.status not in ("submitting", "interrupted_unknown"):
             raise HTTPException(409, "只有提交中断或结果不确定的 3D 任务可以人工核实释放")
-        if (task.result_url or "").startswith("tripo-task:"):
+        if task and (task.result_url or "").startswith("tripo-task:"):
             raise HTTPException(409, "该 3D 任务已有远程任务编号；请刷新远程状态，不能释放提交锁")
         asset_data = asset.data if isinstance(asset.data, dict) else {}
         model_task_data = asset_data.get("model3d_task") if isinstance(asset_data.get("model3d_task"), dict) else {}
@@ -186,12 +186,14 @@ def manually_release_stale_lease(
         task.error = "用户核对视频服务商后人工释放本地遗留租约；未自动重新提交，请先确认远程任务确实不存在。"
         db.commit()
     elif source == "image3d_asset":
-        task.status = "failed"
-        task.error = "用户已核对 Tripo 控制台并确认没有远程任务；提交锁已人工释放，可在素材卡片重新发起并再次确认费用。"
+        message = "用户已核对 Tripo 控制台并确认没有远程任务；提交锁已人工释放，可在素材卡片重新发起并再次确认费用。"
+        if task:
+            task.status = "failed"
+            task.error = message
         asset_data = dict(asset.data) if isinstance(asset.data, dict) else {}
         model_task_data = dict(asset_data.get("model3d_task") or {})
         model_task_data["status"] = "failed"
-        model_task_data["error"] = task.error
+        model_task_data["error"] = message
         model_task_data["manually_reconciled_at"] = datetime.utcnow().isoformat()
         asset_data["model3d_task"] = model_task_data
         asset.data = asset_data
