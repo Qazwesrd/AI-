@@ -250,7 +250,8 @@ def list_unified_tasks(
         title_map = {
             "storyboard_video": "分镜视频生成",
             "video": "独立视频生成",
-            "episode_speech": "分集配音",
+            "speech": "独立配音",
+            "episode_speech": "分镜对白配音",
         }
         items.append({
             "id": f"media:{task.id}", "source": "media", "source_id": task.id,
