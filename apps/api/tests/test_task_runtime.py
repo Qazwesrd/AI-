@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from app.database import Base
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLease, TaskExecutionLog, TaskQueueEntry
-from app.services.task_runtime import acquire_task_lease, release_task_lease, runtime_snapshot, enqueue_task, queue_snapshot
+from app.services.task_runtime import acquire_task_lease, release_task_lease, runtime_snapshot, enqueue_task, queue_snapshot, remove_queued_task
 
 
 class TaskRuntimeTests(unittest.TestCase):
@@ -34,6 +34,8 @@ class TaskRuntimeTests(unittest.TestCase):
         items = queue_snapshot(self.db)["items"]
         self.assertEqual([item["task_id"] for item in items], [202, 101])
         self.assertEqual(items[0]["priority"], 10)
+        self.assertEqual(items[0]["status"], "ready_to_run")
+        self.assertEqual(items[1]["status"], "waiting")
 
     def test_releasing_lease_promotes_highest_priority_queue_item(self):
         acquire_task_lease(self.db, "image", 1)
@@ -44,6 +46,18 @@ class TaskRuntimeTests(unittest.TestCase):
         self.assertEqual(items[0]["task_id"], 3)
         self.assertEqual(items[0]["status"], "ready_to_run")
         self.assertEqual(items[1]["status"], "waiting")
+
+
+    def test_removing_queued_task_promotes_next_item(self):
+        acquire_task_lease(self.db, "image", 8)
+        enqueue_task(self.db, "media", 9, priority=2)
+        enqueue_task(self.db, "analysis", 10, priority=9)
+        self.assertTrue(remove_queued_task(self.db, "analysis", 10))
+        release_task_lease(self.db, "image", 8, True)
+        items = queue_snapshot(self.db)["items"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["task_id"], 9)
+        self.assertEqual(items[0]["status"], "ready_to_run")
 
     def test_global_concurrency_limit_is_enforced(self):
         acquire_task_lease(self.db, "image", 1)
