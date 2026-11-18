@@ -38,3 +38,17 @@ class TaskExecutionLog(Base):
     message = Column(Text, default="")
     duration_seconds = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class TaskQueueEntry(Base):
+    __tablename__ = "task_queue_entries"
+    __table_args__ = (UniqueConstraint("source", "task_id", name="uq_task_queue_source_id"),)
+
+    id = Column(Integer, primary_key=True)
+    source = Column(String(30), nullable=False, index=True)
+    task_id = Column(Integer, nullable=False)
+    priority = Column(Integer, nullable=False, default=0)
+    status = Column(String(30), nullable=False, default="waiting", index=True)
+    queued_at = Column(DateTime, default=datetime.utcnow, index=True)
+    ready_at = Column(DateTime, nullable=True)
+    reason = Column(Text, default="")
