@@ -39,8 +39,10 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         handler.assert_called_once()
 
     def test_unified_image_retry_delegates_to_paid_safe_handler(self):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = None
         with patch("app.routers.tasks.retry_image_task", return_value={"status": "pending"}) as handler:
-            result = control_unified_task("image", 18, "retry", db=object())
+            result = control_unified_task("image", 18, "retry", db=db)
         self.assertEqual(result["status"], "pending")
         handler.assert_called_once()
 
