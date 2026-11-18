@@ -324,6 +324,7 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
     task.error = ""
     db.commit()
 
+    request_started = False
     try:
         api_key = decrypt_key(provider.encrypted_api_key)
         base_url = (provider.base_url or "").rstrip("/")
@@ -347,6 +348,7 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
             },
             method="POST",
         )
+        request_started = True
         with urllib.request.urlopen(request, timeout=300) as response:
             result = json.loads(response.read().decode("utf-8"))
 
@@ -414,8 +416,20 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
         release_task_lease(db, "image", task.id, False, task.error)
         raise HTTPException(502, task.error)
     except Exception as exc:
-        task.status = "failed"
-        task.error = str(exc)[:2000]
+        if request_started:
+            # A timeout, broken connection, malformed response, or local
+            # download/write failure after sending the request can mean the
+            # provider accepted and billed the image job. Never mark it as a
+            # safely retryable failure without checking the provider console.
+            task.status = "interrupted_unknown"
+            task.error = (
+                "图片请求已发出，但结果未能可靠确认。请先核对图像服务商控制台，"
+                "确认没有创建任务且不会重复扣费后，再从统一任务中心人工确认重排队。"
+                "原始错误：" + str(exc)
+            )[:2000]
+        else:
+            task.status = "failed"
+            task.error = str(exc)[:2000]
         db.commit()
         release_task_lease(db, "image", task.id, False, task.error)
         raise HTTPException(500, task.error)
