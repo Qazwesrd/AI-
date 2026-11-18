@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
+from app.models.studio import AIUsageLog
 from app.models.visual import ImageTask, VisualAsset
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
 from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task
@@ -300,6 +301,21 @@ def list_unified_tasks(
         })
 
     for job, novel_title in analysis_rows:
+        # The job row intentionally stores a concise safety state. The usage log
+        # retains the provider/network exception so the user can diagnose an
+        # uncertain submission without exposing credentials or retrying it.
+        usage_log = None
+        if job.status == "interrupted_unknown":
+            usage_log = db.query(AIUsageLog).filter(
+                AIUsageLog.task == "novel_deep_analysis",
+                AIUsageLog.detail.contains(f"任务：{job.id}；"),
+            ).order_by(AIUsageLog.created_at.desc(), AIUsageLog.id.desc()).first()
+        diagnostic_error = job.last_error or ""
+        if usage_log and usage_log.detail:
+            detail_marker = f"任务：{job.id}；"
+            provider_detail = usage_log.detail.split(detail_marker, 1)[-1].strip()
+            if provider_detail:
+                diagnostic_error = (diagnostic_error + "\\n服务商/网络错误详情：" + provider_detail)[:2400]
         items.append({
             "id": f"analysis:{job.id}", "source": "analysis", "source_id": job.id,
             "type": "novel_analysis", "title": "小说深度解析",
@@ -307,7 +323,7 @@ def list_unified_tasks(
             "provider": job.provider or "", "model": job.model or "",
             "summary": f"已完成 {job.completed_chunks}/{job.total_chunks} 个分析批次",
             "context": novel_title or f"小说 #{job.novel_id}",
-            "error": (job.last_error or "")[:1200], "failure_diagnostic": classify_task_error(job.last_error), "result_available": False,
+            "error": diagnostic_error[:2400], "failure_diagnostic": classify_task_error(diagnostic_error), "result_available": False,
             "progress": round(job.completed_chunks * 100 / job.total_chunks) if job.total_chunks else 0,
             "completed_chunks": job.completed_chunks, "total_chunks": job.total_chunks,
             "created_at": _iso(job.created_at), "updated_at": _iso(job.updated_at),
