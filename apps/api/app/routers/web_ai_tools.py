@@ -241,3 +241,47 @@ def download_task_result_file(file_id: int, db: Session = Depends(get_db)):
         filename=item.original_name,
         content_disposition_type="attachment",
     )
+
+
+class RegisterDownloadedFile(BaseModel):
+    taskId: str = Field(min_length=1, max_length=120)
+    filename: str = Field(min_length=1, max_length=255)
+    storedName: str = Field(pattern=r"^[a-f0-9]{32}\\.(png|jpg|jpeg|webp|gif|mp4|mov|webm|mkv|mp3|wav|m4a|aac|txt|md|json|srt|vtt|pdf|docx|csv)$")
+    contentType: str = Field(default="application/octet-stream", max_length=160)
+    size: int = Field(ge=0, le=2 * 1024 * 1024 * 1024)
+
+
+@router.post("/files/register")
+def register_downloaded_file(payload: RegisterDownloadedFile, db: Session = Depends(get_db)):
+    task = db.query(WebAITask).filter(WebAITask.task_key == payload.taskId).first()
+    if task is None:
+        raise HTTPException(404, "任务不存在")
+    result_dir = (STORAGE_DIR / "web_ai_results").resolve()
+    target = (result_dir / payload.storedName).resolve()
+    if target.parent != result_dir or not target.is_file():
+        raise HTTPException(400, "下载文件不存在或路径无效")
+    actual_size = target.stat().st_size
+    if actual_size != payload.size:
+        raise HTTPException(409, "下载文件大小校验失败")
+    existing = db.query(WebAIResultFile).filter(WebAIResultFile.stored_name == payload.storedName).first()
+    if existing is not None:
+        return {
+            "id": existing.id, "taskId": existing.task_key, "filename": existing.original_name,
+            "contentType": existing.content_type, "size": existing.file_size,
+            "downloadUrl": f"/api/web-ai/files/{existing.id}", "createdAt": iso(existing.created_at),
+        }
+    item = WebAIResultFile(
+        task_key=payload.taskId,
+        original_name=Path(payload.filename).name[:255],
+        stored_name=payload.storedName,
+        content_type=payload.contentType,
+        file_size=actual_size,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {
+        "id": item.id, "taskId": item.task_key, "filename": item.original_name,
+        "contentType": item.content_type, "size": item.file_size,
+        "downloadUrl": f"/api/web-ai/files/{item.id}", "createdAt": iso(item.created_at),
+    }
