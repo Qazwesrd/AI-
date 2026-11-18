@@ -42,6 +42,7 @@ const statusNames: Record<string, string> = {
   completed: "已完成", failed: "失败", cancelled: "已取消",
   canceled: "已取消", paused: "已暂停", partial: "部分完成",
   submission_unknown: "提交结果待核实", awaiting_video_url: "等待视频地址",
+  interrupted_unknown: "执行中断·待核实",
 };
 
 const groupStyles: Record<string, string> = {
@@ -109,11 +110,15 @@ export default function TasksPage() {
     const actionNames: Record<string, string> = {
       pause: "暂停", resume: "恢复", retry: "重新排队", cancel: "取消", refresh: "刷新远程状态",
     };
-    if (["retry", "cancel"].includes(action) &&
-        !window.confirm(`确定要${actionNames[action]}此任务吗？${action === "retry" ? "重新排队不会自动调用 AI，也不会自动扣费。" : ""}`)) return;
+    const uncertainRetry = action === "retry" && task.status === "interrupted_unknown";
+    const confirmation = uncertainRetry
+      ? "请先登录图像服务商控制台核对该任务。只有确认服务商没有创建任务、没有产生费用时，才能重新排队。是否已核对并确认？"
+      : `确定要${actionNames[action]}此任务吗？${action === "retry" ? "重新排队不会自动调用 AI，也不会自动扣费。" : ""}`;
+    if (["retry", "cancel"].includes(action) && !window.confirm(confirmation)) return;
     setBusyTask(task.id);
     try {
-      const response = await fetch(`${API}/api/tasks/${task.source}/${task.source_id}/${action}`, { method: "POST" });
+      const query = uncertainRetry ? "?confirm_no_remote_job=true" : "";
+      const response = await fetch(`${API}/api/tasks/${task.source}/${task.source_id}/${action}${query}`, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "任务操作失败");
       setMessage(data.message || `任务已执行：${actionNames[action]}`);
