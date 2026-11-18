@@ -43,6 +43,7 @@ MODEL_MODULES = [
     "app.models.story",
     "app.models.media",
     "app.models.editing",
+    "app.models.task_runtime",
 ]
 
 
