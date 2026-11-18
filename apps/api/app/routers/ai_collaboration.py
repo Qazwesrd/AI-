@@ -60,9 +60,21 @@ def proposal_dict(item):
     }
 
 
+def get_novel_chapter(db, novel_id, number):
+    return db.query(Chapter).filter(
+        Chapter.novel_id == novel_id,
+        Chapter.chapter_number == number,
+    ).first()
+
+
+def evidence_matches_chapter(chapter, evidence):
+    content = str(getattr(chapter, "content", "") or "")
+    quote = str(evidence or "").strip()
+    return bool(quote) and quote in content
+
+
 def chapter_exists(db, novel_id, number):
-    rows = db.query(Chapter).filter(Chapter.novel_id == novel_id).all()
-    return any(int(getattr(row, "chapter_number", 0) or 0) == number for row in rows)
+    return get_novel_chapter(db, novel_id, number) is not None
 
 
 @router.get("/prompt-schema")
@@ -84,10 +96,13 @@ def import_proposals(novel_id: int, payload: ImportPayload, db: Session = Depend
         raise HTTPException(404, "小说不存在")
     created, duplicates = [], 0
     for proposal in payload.proposals:
-        if not chapter_exists(db, novel_id, proposal.chapter_number):
+        chapter = get_novel_chapter(db, novel_id, proposal.chapter_number)
+        if chapter is None:
             raise HTTPException(422, f"第 {proposal.chapter_number} 章不存在")
-        if proposal.evidence.strip() not in payload.source_text:
-            raise HTTPException(422, f"证据未在提交的原文中找到：{proposal.asset_name}")
+        # Validate against the persisted chapter, never trust client-supplied source_text
+        # as proof: a client could otherwise submit fabricated text and matching quotes.
+        if not evidence_matches_chapter(chapter, proposal.evidence):
+            raise HTTPException(422, f"证据未在小说数据库第 {proposal.chapter_number} 章原文中找到：{proposal.asset_name}")
         duplicate = db.query(AIStoryProposal).filter(
             AIStoryProposal.novel_id == novel_id,
             AIStoryProposal.chapter_number == proposal.chapter_number,
@@ -140,7 +155,12 @@ def review_proposal(proposal_id: int, payload: ReviewPayload, db: Session = Depe
         VisualAsset.name == item.asset_name,
         VisualAsset.category == item.asset_category,
     ).all()
-    asset = next((x for x in candidates if isinstance(x.data, dict) and x.data.get("source_novel_id") in (None, item.novel_id)), None)
+    # Never attach an AI-proposed change to a same-named asset from another
+    # novel or to an unscoped manually-created asset.
+    asset = next((
+        x for x in candidates
+        if isinstance(x.data, dict) and x.data.get("source_novel_id") == item.novel_id
+    ), None)
     if asset is None:
         raise HTTPException(404, f"素材库中找不到该小说的{item.asset_name}（{item.asset_category}），请先建立或导入素材")
     data = dict(asset.data) if isinstance(asset.data, dict) else {}
