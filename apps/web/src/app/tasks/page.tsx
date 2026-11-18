@@ -218,7 +218,22 @@ export default function TasksPage() {
             <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-slate-400">可用并发位</p><p className="mt-1 text-xl">{runtime?.available_slots ?? runtimeLimit}</p></div>
             <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-slate-400">待核实租约</p><p className="mt-1 text-xl">{runtime?.stale_leases?.length ?? 0}</p></div>
           </div>
-          {runtime?.stale_leases?.length ? <p className="mt-3 text-xs text-amber-200">发现超过30分钟的执行租约：{runtime.stale_leases.map(item => item.source + " #" + item.task_id).join("、")}。系统不会自动释放，请先核对服务商执行状态。</p> : null}
+          {runtime?.stale_leases?.length ? <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-950/20 p-3">
+            <p className="mb-2 text-xs text-amber-200">发现超过30分钟的遗留执行租约。系统不会自动释放；只有核对服务商确认没有远程任务后，才可手动释放占用。</p>
+            {runtime.stale_leases.map(item => <div key={item.source + ":" + item.task_id} className="flex flex-wrap items-center justify-between gap-2 border-t border-white/5 py-2 text-xs">
+              <span>{item.source} #{item.task_id} · 已占用 {Math.floor(item.age_seconds / 60)} 分钟</span>
+              {item.source === "image" ? <button onClick={async () => {
+                if (!window.confirm("请先到图像服务商控制台核对。只有确认没有仍在运行的远程任务、不会发生重复扣费，才能释放本地并发占用。确认已核实？")) return;
+                try {
+                  const response = await fetch(API + "/api/tasks/runtime/leases/" + item.source + "/" + item.task_id + "/release?confirm_no_remote_job=true", {method:"POST"});
+                  const data = await response.json();
+                  if (!response.ok) throw new Error(data.detail || "释放失败");
+                  setMessage(data.message || "租约已释放");
+                  await loadTasks();
+                } catch (error) { setMessage(error instanceof Error ? error.message : "释放失败"); }
+              }} className="rounded-lg border border-amber-300/30 px-3 py-1.5 text-amber-200">核实后释放占用</button> : <span className="text-slate-500">暂不支持自动释放</span>}
+            </div>)}
+          </div> : null}
           {runtimeLogs.length > 0 && <div className="mt-3 border-t border-white/10 pt-3">
             <p className="mb-2 text-xs text-slate-400">最近执行记录</p>
             <div className="space-y-1">{runtimeLogs.slice(0,6).map(log => <p key={log.id} className="text-xs text-slate-400">
