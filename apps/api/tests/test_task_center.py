@@ -54,10 +54,14 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertEqual(result["status"], "pending")
         handler.assert_called_once()
 
-    def test_unified_analysis_control_keeps_existing_manual_resume_flow(self):
+    def test_unified_analysis_control_does_not_resume_normal_partial_job(self):
+        job = Mock(status="partial", chunk_results={"1": [{"name": "saved"}]})
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = job
         with self.assertRaises(HTTPException) as raised:
-            control_unified_task("analysis", 2, "retry", db=object())
+            control_unified_task("analysis", 2, "retry", db=db)
         self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
 
     def test_unified_media_does_not_allow_local_force_cancel(self):
         with self.assertRaises(HTTPException) as raised:
