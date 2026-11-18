@@ -52,4 +52,8 @@ class WebAIResultFile(Base):
     stored_name: Mapped[str] = mapped_column(String(80), unique=True)
     content_type: Mapped[str] = mapped_column(String(160), default="application/octet-stream")
     file_size: Mapped[int] = mapped_column(Integer, default=0)
+    classification: Mapped[str] = mapped_column(String(40), default="other", index=True)
+    classification_status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    classification_reason: Mapped[str] = mapped_column(Text, default="")
+    visual_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
