@@ -67,6 +67,7 @@ export default function VisualStudioPage() {
   const [consistency, setConsistency] = useState("");
   const [style, setStyle] = useState(styles[0]);
   const [prompt, setPrompt] = useState("");
+  const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [promptMode, setPromptMode] = useState("professional");
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
@@ -168,19 +169,33 @@ export default function VisualStudioPage() {
       ? "生成建筑正立面、侧立面和整体轴测参考图，保持建筑结构、层数、屋顶、门窗、材质和比例一致。"
       : "生成电影级环境概念设定图，建立明确空间布局、地形、建筑位置、光照方向、天气、时间和可供人物行动的区域；保持可复用的场景地理结构。";
     const subject = prompt.trim() ? `用户补充要求：${prompt.trim()}。` : (name.trim() ? `素材名称：${name.trim()}。` : `请根据${category === "characters" ? "人物" : category === "scenes" ? "场景" : "道具"}类别创作一个符合项目设定的视觉资产。`);
+    const continuity = category === "characters"
+      ? "角色一致性锁定：固定脸型、五官间距、年龄感、肤色、发型、发色、身高体型、四肢比例、服装层次和标志性配饰；不同视角必须是同一个角色，不得换脸、换装或改变年龄。"
+      : category === "scenes"
+      ? "场景一致性锁定：固定地形轮廓、建筑相对位置、道路与入口、地标、空间尺度、主光方向和环境色；后续镜头不得无故改变场景布局。"
+      : category === "costumes"
+      ? "服装一致性锁定：固定剪裁、版型、衣长、层数、领口、袖口、扣件、纹样、配色和穿戴方式；不得在视角之间增删部件。"
+      : category === "buildings"
+      ? "建筑一致性锁定：固定层数、平面轮廓、屋顶形式、门窗数量与位置、立柱、檐口、材质和结构比例；不同视角必须对应同一建筑。"
+      : category === "weapons"
+      ? "武器一致性锁定：固定总长度、刃形、刃宽、刀背、护手、握柄、刀鞘、装饰纹路和连接结构；不得改变武器型号或凭空增加零件。"
+      : category === "props" || category === "special_items"
+      ? "物品一致性锁定：固定外轮廓、长宽高比例、开合结构、材质、颜色、纹理、刻痕和标志；正侧背视图必须是同一件物品。"
+      : "视觉一致性锁定：固定主体轮廓、空间关系、材质、配色和标志性细节，确保后续镜头可复用。";
     const quality = promptMode === "concise"
       ? "画面主体明确，构图简洁，重点突出，避免无关元素。"
       : promptMode === "cinematic"
       ? "电影级视觉设计，强调戏剧性光影、镜头构图、色彩叙事和真实空间层次。"
       : "专业影视资产设定稿，细节完整，材质可信，结构准确，画面清晰，视觉统一。";
-    const full = `${base}${subject}。${viewGuide}视觉风格：${style}。${quality}保持角色/场景/道具在整个项目中的视觉一致性，不添加原设定中不存在的关键特征。`;
-    return full;
+    const positive = `${base}${subject}。${viewGuide}${continuity}视觉风格：${style}。${quality}保持项目内视觉一致性，不添加原设定中不存在的关键特征。`;
+    const negative = "负面约束：身份或外观漂移、视角间结构不一致、比例错误、额外肢体或零件、重复主体、错误服装、错误颜色、透视畸变、主体裁切、模糊、低清晰度、文字、字幕、水印、Logo、边框、无关装饰。";
+    return `正向提示词：${positive}\n\n${negative}`;
   }
 
   async function createTask() {
     const effectivePrompt = buildPrompt();
     if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
-    setPrompt(effectivePrompt);
+    setGeneratedPrompt(effectivePrompt);
     setBusy(true);
     try {
       const response = await fetch(`${API}/api/visual/tasks`, {
@@ -249,7 +264,7 @@ export default function VisualStudioPage() {
       const response = await fetch(API + "/api/visual/assets/" + assetId + "/prompt");
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "提示词生成失败");
-      setPrompt(result.positive_prompt + "\n\n负面提示词：" + result.negative_prompt);
+      setGeneratedPrompt("正向提示词：" + result.positive_prompt + "\n\n负面提示词：" + result.negative_prompt);
       setSelectedAsset(assetId);
       setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
     } catch (error) {
@@ -447,18 +462,23 @@ export default function VisualStudioPage() {
                 <option value="concise">简洁提示词</option>
               </select>
             </label>
-            <label className="block text-sm text-slate-300">提示词内容（可选编辑；留空时软件自动组合）
+            <label className="block text-sm text-slate-300">用户补充要求（可选）
               <textarea
                 className={field + " mt-2"}
-                rows={7}
-                placeholder="可填写额外要求；也可以留空，软件会根据素材类别、设定和画风自动生成完整提示词。"
+                rows={3}
+                placeholder="例如：角色表情更坚毅、场景增加薄雾、保留原著中的特殊纹样。留空时由软件根据素材设定自动生成。"
                 value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
+                onChange={(e) => { setPrompt(e.target.value); setGeneratedPrompt(""); }}
               />
             </label>
-            <button type="button" className="rounded-xl border border-sky-300/30 bg-sky-700/60 px-4 py-2 text-sm text-white hover:bg-sky-600" onClick={() => setPrompt(buildPrompt())}>
-              预览 / 更新提示词（可选）
-            </button>
+            <div className="rounded-xl border border-sky-300/20 bg-sky-950/20 p-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-sm text-sky-100">本次实际生成提示词预览</strong>
+                <button type="button" className="rounded-lg border border-sky-300/30 px-3 py-1.5 text-xs" onClick={() => setGeneratedPrompt(buildPrompt())}>生成 / 更新预览</button>
+              </div>
+              <textarea className={field} rows={8} readOnly value={generatedPrompt || "创建图片任务时会自动组合完整提示词；也可点击“生成 / 更新预览”提前查看。"} />
+              {generatedPrompt && <button type="button" className="mt-2 rounded-lg border border-purple-300/30 px-3 py-1.5 text-xs" onClick={() => navigator.clipboard?.writeText(generatedPrompt)}>复制实际提示词</button>}
+            </div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} />
               我已了解本次图片生成可能产生费用，并确认执行
@@ -515,6 +535,7 @@ export default function VisualStudioPage() {
                     setPersonality(item.personality || "");
                     setConsistency(item.consistency_prompt || "");
                     setPrompt("");
+                    setGeneratedPrompt("");
                   }}
                 >
                   使用此素材生成图片
