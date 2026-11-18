@@ -18,7 +18,7 @@ from app.database import get_db
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink
 from app.models.visual import VisualAsset
-from app.models.studio import AIProviderConfig, AIRuntimeSetting
+from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
 from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
@@ -976,6 +976,10 @@ def generate_episode_voice_track(
                 name=filename, category="audio", file_path=str(destination),
                 mime_type="audio/mpeg", file_size=destination.stat().st_size,
             ))
+            db.add(AIUsageLog(
+                provider=data.provider, model=data.model, task="episode_speech",
+                status="completed", detail=f"分集：{episode_id}；镜头：{shot.id}；本地任务：{task.id}",
+            ))
             db.commit()
             release_task_lease(db, "media", task.id, True)
             generated[shot.id] = destination
@@ -1001,6 +1005,11 @@ def generate_episode_voice_track(
                         "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。"
                         if request_started else str(exc.detail)
                     )[:2000]
+                    if request_started:
+                        db.add(AIUsageLog(
+                            provider=data.provider, model=data.model, task="episode_speech",
+                            status="submission_unknown", detail=f"分集：{episode_id}；镜头：{shot.id}；本地任务：{task.id}；{str(exc.detail)[:1000]}",
+                        ))
                     db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error if task else str(exc.detail))
@@ -1017,6 +1026,11 @@ def generate_episode_voice_track(
                     if request_started else "语音请求尚未发出："
                 ) + str(exc)[:1500]
                 task.error = task.error[:2000]
+                if request_started:
+                    db.add(AIUsageLog(
+                        provider=data.provider, model=data.model, task="episode_speech",
+                        status="submission_unknown", detail=f"分集：{episode_id}；镜头：{shot.id}；本地任务：{task.id}；{str(exc)[:1000]}",
+                    ))
                 db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error)
@@ -1185,6 +1199,10 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
             mime_type="audio/" + data.response_format,
             file_size=destination.stat().st_size
         ))
+        db.add(AIUsageLog(
+            provider=data.provider, model=data.model, task="speech",
+            status="completed", detail=f"独立配音；本地任务：{task.id}；格式：{data.response_format}",
+        ))
         db.commit()
         release_task_lease(db, "media", task.id, True)
         return {
@@ -1210,6 +1228,11 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
                 "语音请求已发出，但结果无法确认。请核对语音服务商记录后再人工确认重试。"
                 if request_started else str(exc.detail)
             )[:2000]
+            if request_started:
+                db.add(AIUsageLog(
+                    provider=data.provider, model=data.model, task="speech",
+                    status="submission_unknown", detail=f"本地任务：{task.id}；{str(exc.detail)[:1000]}",
+                ))
             db.commit()
         if lease_acquired and task:
             release_task_lease(db, "media", task.id, False, task.error)
@@ -1225,6 +1248,11 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
                 if request_started else "语音请求尚未发出："
             ) + str(exc)[:1500]
             task.error = task.error[:2000]
+            if request_started:
+                db.add(AIUsageLog(
+                    provider=data.provider, model=data.model, task="speech",
+                    status="submission_unknown", detail=f"本地任务：{task.id}；{str(exc)[:1000]}",
+                ))
             db.commit()
         if lease_acquired and task:
             release_task_lease(db, "media", task.id, False, task.error)
