@@ -247,6 +247,7 @@ export default function TasksPage() {
                     <span className="ml-2 text-slate-500">优先级 {item.priority}</span>
                   </p>
                   <p className="mt-1 text-slate-500">{item.status === "ready_to_run" ? "并发名额已空出 · 等待手动执行" : "等待并发名额"} · 已等待 {Math.floor(item.wait_seconds / 60)} 分钟</p>
+                  {item.source === "media" ? <p className="mt-1 text-amber-200/80">视频任务需先移出队列，再回分镜页重新提交该镜头；系统不会自动重复提交。</p> : null}
                 </div>
                 <div className="flex items-center gap-2">
                   <Link href={item.source === "analysis" ? "/novels" : item.source === "image" ? "/visual-studio" : "/storyboard"} className="rounded-lg border border-purple-300/25 px-3 py-1.5 text-purple-200">打开模块</Link>
