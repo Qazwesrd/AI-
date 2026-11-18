@@ -94,6 +94,20 @@ def release_task_lease(db, source: str, task_id: int, success: bool, error: str 
     db.commit()
 
 
+def heartbeat_task_lease(db, source: str, task_id: int):
+    now = datetime.utcnow()
+    lease = db.query(TaskExecutionLease).filter(
+        TaskExecutionLease.source == source,
+        TaskExecutionLease.task_id == task_id,
+        TaskExecutionLease.status == "active",
+    ).first()
+    if not lease:
+        return False
+    lease.heartbeat_at = now
+    db.commit()
+    return True
+
+
 def runtime_snapshot(db):
     control = db.query(TaskRuntimeControl).filter(TaskRuntimeControl.id == 1).first()
     if not control:
@@ -106,7 +120,7 @@ def runtime_snapshot(db):
         "source": row.source, "task_id": row.task_id, "priority": row.priority,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "heartbeat_at": row.heartbeat_at.isoformat() if row.heartbeat_at else None,
-        "age_seconds": max(0, int((now - row.started_at).total_seconds())) if row.started_at else 0,
+        "age_seconds": max(0, int((now - (row.heartbeat_at or row.started_at)).total_seconds())) if (row.heartbeat_at or row.started_at) else 0,
     } for row in leases]
     return {
         "max_concurrency": control.max_concurrency,
