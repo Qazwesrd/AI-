@@ -861,26 +861,36 @@ def analyze_novel_with_ai(
             db.rollback()
             job = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == job.id).first()
             current_results, current_states = split_chunk_state(job.chunk_results if job else {})
-            current_states[chunk_key] = "submission_unknown" if request_started else "pending"
+            result_already_saved = chunk_key in current_results
+            if result_already_saved:
+                # The response and chunk result were committed; only a later
+                # local heartbeat failed. Preserve the completed result.
+                current_states[chunk_key] = "completed"
+            else:
+                current_states[chunk_key] = "submission_unknown" if request_started else "pending"
             if job:
                 job.chunk_results = merge_chunk_state(current_results, current_states)
                 job.completed_chunks = len(current_results)
-                job.status = "interrupted_unknown" if request_started else "partial"
+                job.status = "partial" if result_already_saved or not request_started else "interrupted_unknown"
                 job.last_error = (
-                    f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。"
-                    if request_started else f"第{index}/{len(chunks)}段请求尚未发出：{str(exc)[:1600]}"
+                    f"第{index}/{len(chunks)}段结果已保存，但本地任务心跳更新失败；可安全继续。"
+                    if result_already_saved else (
+                        f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。"
+                        if request_started else f"第{index}/{len(chunks)}段请求尚未发出：{str(exc)[:1600]}"
+                    )
                 )
                 job.updated_at = datetime.utcnow()
-                db.add(AIUsageLog(
-                    provider=config.provider,
-                    model=config.model,
-                    task="novel_deep_analysis",
-                    status="submission_unknown" if request_started else "failed",
-                    detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1200]}",
-                ))
+                if not result_already_saved:
+                    db.add(AIUsageLog(
+                        provider=config.provider,
+                        model=config.model,
+                        task="novel_deep_analysis",
+                        status="submission_unknown" if request_started else "failed",
+                        detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1200]}",
+                    ))
                 db.commit()
             release_task_lease(db, "analysis", job_id, False, job.last_error if job else str(exc)[:2000])
-            if request_started:
+            if request_started and not result_already_saved:
                 raise HTTPException(
                     502,
                     f"第{index}/{len(chunks)}段分析结果不确定，已阻止自动重试。"
