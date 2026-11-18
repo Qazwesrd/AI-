@@ -303,7 +303,7 @@ export default function AIToolsPage() {
 
   function buildPrompt() {
     const quality = promptMode === "concise" ? "请使用简洁、明确、结构化的表达，避免重复。" : promptMode === "cinematic" ? "请采用电影级叙事与视觉表达，强调镜头感、情绪节奏、构图和光影。" : "请采用专业影视制作标准，细节完整、逻辑严谨、可直接进入后续制作流程。";
-    return `${taskExamples[category]}\\n\\n【任务名称】\\n${title.trim()}\\n\\n【项目资料 / 原文 / 设定】\\n${sourceText.trim() || "请在此处补充小说原文、人物设定、场景设定或分镜要求。"}\\n\\n【提示词风格】\\n${quality}\\n\\n【输出要求】\\n请输出可供 AI 漫剧制作大师整理归档的清晰内容；不要省略关键设定。若生成图片或视频，请按当前工具支持的方式提供可下载的原始文件。`;
+    return `${taskExamples[category]}\n\n【任务名称】\n${title.trim()}\n\n【项目资料 / 原文 / 设定】\n${sourceText.trim() || "请在此处补充小说原文、人物设定、场景设定或分镜要求。"}\n\n【提示词风格】\n${quality}\n\n【输出要求】\n请输出可供 AI 漫剧制作大师整理归档的清晰内容；不要省略关键设定。若生成图片或视频，请按当前工具支持的方式提供可下载的原始文件。`;
   }
 
   async function copyText(value: string) {
@@ -505,7 +505,8 @@ export default function AIToolsPage() {
                 <option value="cinematic">电影级叙事 / 视觉提示词</option>
                 <option value="concise">简洁提示词</option>
               </select>
-            </label>\n            <label className="mt-4 block text-sm text-purple-200">任务名称
+            </label>
+            <label className="mt-4 block text-sm text-purple-200">任务名称
               <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-3 text-white outline-none focus:border-purple-300/60" placeholder="例如：第一章改编为第1集剧本" />
             </label>
             <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-4">
