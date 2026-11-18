@@ -73,6 +73,8 @@ export default function AIToolsPage() {
   const [resultText, setResultText] = useState("");
   const [resultUrl, setResultUrl] = useState("");
   const [notice, setNotice] = useState("");
+  const [apiReady, setApiReady] = useState(false);
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
     const savedTools = safeRead<Tool[]>(STORAGE_TOOLS, presets);
@@ -82,6 +84,20 @@ export default function AIToolsPage() {
     if (savedTools.length && !savedTools.some((tool) => tool.id === "chatgpt")) {
       setToolId(savedTools[0].id);
     }
+    void Promise.all([
+      fetch(`${apiBase}/api/web-ai/tools`).then((response) => response.ok ? response.json() : null).catch(() => null),
+      fetch(`${apiBase}/api/web-ai/tasks`).then((response) => response.ok ? response.json() : null).catch(() => null),
+    ]).then(([toolData, taskData]) => {
+      if (Array.isArray(toolData?.items) && toolData.items.length) {
+        setTools((current) => {
+          const merged = new Map(current.map((item) => [item.id, item]));
+          for (const item of toolData.items) merged.set(item.id, { id: item.id, name: item.name, category: item.category, url: item.url, note: item.note || "", custom: Boolean(item.custom) });
+          return [...merged.values()];
+        });
+      }
+      if (Array.isArray(taskData?.items) && taskData.items.length) setTasks(taskData.items);
+      setApiReady(true);
+    });
   }, []);
 
   useEffect(() => {
@@ -99,6 +115,30 @@ export default function AIToolsPage() {
       setNotice("浏览器本地存储空间不足，任务记录可能无法保留。");
     }
   }, [tasks]);
+
+  useEffect(() => {
+    if (!apiReady) return;
+    for (const tool of tools) {
+      void fetch(`${apiBase}/api/web-ai/tools`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: tool.id, name: tool.name, category: tool.category, url: tool.url, note: tool.note, custom: Boolean(tool.custom), enabled: true }),
+      }).catch(() => setNotice("本地 API 暂不可用，工具配置暂时仅保存在本机浏览器。"));
+    }
+  }, [tools, apiReady]);
+
+  useEffect(() => {
+    if (!apiReady) return;
+    for (const task of tasks) {
+      const payload = { id: task.id, title: task.title, category: task.category, toolId: task.toolId, status: task.status, prompt: task.prompt, sourceText: "", resultText: task.resultText, resultUrl: task.resultUrl };
+      void fetch(`${apiBase}/api/web-ai/tasks`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+      }).then(async (response) => {
+        if (response.status === 409) await fetch(`${apiBase}/api/web-ai/tasks/${encodeURIComponent(task.id)}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+        });
+      }).catch(() => setNotice("本地 API 暂不可用，任务暂时仅保存在本机浏览器。"));
+    }
+  }, [tasks, apiReady]);
 
   const categoryTools = useMemo(
     () => tools.filter((tool) => tool.category === category),
