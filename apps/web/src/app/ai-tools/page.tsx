@@ -82,6 +82,7 @@ export default function AIToolsPage() {
   const [selectedNovelId, setSelectedNovelId] = useState("");
   const [chapters, setChapters] = useState<ChapterOption[]>([]);
   const [selectedChapterId, setSelectedChapterId] = useState("");
+  const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([]);
   const [loadingChapter, setLoadingChapter] = useState(false);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -149,6 +150,7 @@ export default function AIToolsPage() {
         const items = Array.isArray(data?.items) ? data.items as ChapterOption[] : [];
         setChapters(items);
         if (items.length) setSelectedChapterId(String(items[0].id));
+        setSelectedChapterIds([]);
       })
       .catch(() => { if (!cancelled) setNotice("读取章节目录失败，请检查本地 API。"); });
     return () => { cancelled = true; };
@@ -172,6 +174,50 @@ export default function AIToolsPage() {
       setNotice(`已载入章节：${data.title || chapter?.title || ""}。现在可以生成任务提示词。`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "读取章节内容失败");
+    } finally {
+      setLoadingChapter(false);
+    }
+  }
+
+
+  async function createBatchChapterTasks() {
+    const chosen = chapters.filter((chapter) => selectedChapterIds.includes(String(chapter.id)));
+    if (!chosen.length) { setNotice("请先勾选需要加入队列的章节。"); return; }
+    if (chosen.length > 5) { setNotice("单批最多选择 5 个章节，请分批加入。"); return; }
+    const plannedCount = chosen.length * 4;
+    if (!window.confirm(`将读取所选 ${chosen.length} 个章节，为每章准备深度分析、剧本改编、视觉素材提示词、分镜规划 4 项任务，共 ${plannedCount} 项。内容只会保存在本地任务中，不会自动发送到 AI 网页。继续吗？`)) return;
+    setLoadingChapter(true);
+    setNotice("正在读取章节并准备任务队列，请稍候…");
+    try {
+      const queued: Task[] = [];
+      const stages: { category: ToolCategory; label: string; instruction: string }[] = [
+        { category: "text", label: "剧情与人物深度分析", instruction: "深度分析本章，提取剧情事件、人物出场与行为动机、关系变化、时间线、地点、伏笔、关键道具和情绪转折。结构化输出，不得编造原文没有的事实。" },
+        { category: "text", label: "漫剧剧本改编", instruction: "将本章改编为适合漫剧的剧本，保留原著主线、人物性格和关键事件。按场次输出场景、时间、人物、动作、对白、旁白和转场，避免无意义扩写。" },
+        { category: "image", label: "人物场景道具视觉提示词", instruction: "提取主要人物、场景和道具，分别生成详细图片提示词。人物强调身份、年龄感、脸型、发型、服装、配色和三视图；场景强调空间结构、光线、气氛；道具强调形状、材质和识别特征。保持画风统一。" },
+        { category: "storyboard", label: "漫剧分镜规划", instruction: "规划连续分镜，输出镜头编号、场景、景别、机位、构图、画面内容、人物动作表情、对白/旁白、镜头运动、建议时长及人物/场景/道具关联。保持连续性。" },
+      ];
+      for (const chapter of chosen) {
+        const response = await fetch(`${apiBase}/api/chapters/${chapter.id}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || `读取章节失败：${chapter.title}`);
+        if (!data.content?.trim()) throw new Error(`章节正文为空：${chapter.title}`);
+        const novelName = novels.find((item) => item.id === chapter.novel_id)?.title || "小说";
+        const source = `【小说】${novelName}\n【章节】第 ${chapter.chapter_number} 章：${data.title || chapter.title}\n\n${data.content}`;
+        for (const stage of stages) {
+          const target = tools.find((item) => item.category === stage.category);
+          if (!target) throw new Error(`没有配置可用的${categoryLabels[stage.category]}工具`);
+          queued.push({
+            id: makeId(), title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`,
+            category: stage.category, toolId: target.id,
+            prompt: `${stage.instruction}\n\n【小说章节原文】\n${source}\n\n【统一要求】尊重原著；不确定处明确标记；输出结构清晰，便于 AI 漫剧制作大师整理归档。`,
+            status: "prepared", resultText: "", resultUrl: "", createdAt: new Date().toISOString(),
+          });
+        }
+      }
+      setTasks((current) => [...queued, ...current]);
+      setNotice(`任务队列已准备完成：${chosen.length} 个章节，共 ${queued.length} 项。逐项复制并打开对应 AI 网页，确认后再发送。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "批量准备任务失败");
     } finally {
       setLoadingChapter(false);
     }
@@ -483,6 +529,26 @@ export default function AIToolsPage() {
                   </select>
                 </label>
               </div>
+              {chapters.length > 0 && (
+                <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-cyan-100">批量选择章节（每批最多 5 章）</span>
+                    <button type="button" onClick={() => setSelectedChapterIds(chapters.slice(0, 5).map((item) => String(item.id)))} className="text-xs text-cyan-200 underline">选择前 5 章</button>
+                  </div>
+                  <div className="max-h-40 space-y-1 overflow-y-auto">
+                    {chapters.map((chapter) => (
+                      <label key={chapter.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-slate-300 hover:bg-white/5">
+                        <input type="checkbox" checked={selectedChapterIds.includes(String(chapter.id))} onChange={(event) => setSelectedChapterIds((current) => event.target.checked ? [...current, String(chapter.id)] : current.filter((id) => id !== String(chapter.id)))} />
+                        <span>第 {chapter.chapter_number} 章 · {chapter.title}（{chapter.word_count}字）</span>
+                      </label>
+                    ))}
+                  </div>
+                  <button type="button" onClick={() => void createBatchChapterTasks()} disabled={loadingChapter || selectedChapterIds.length === 0 || selectedChapterIds.length > 5} className="mt-3 rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">
+                    {loadingChapter ? "正在准备队列…" : `为所选 ${selectedChapterIds.length} 章生成全流程任务`}
+                  </button>
+                  {selectedChapterIds.length > 5 && <p className="mt-1 text-xs text-amber-300">每批最多 5 章，请取消部分选择。</p>}
+                </div>
+              )}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button type="button" onClick={() => void loadSelectedChapter(false)} disabled={!selectedChapterId || loadingChapter} className="rounded-lg bg-cyan-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">{loadingChapter ? "正在读取…" : "载入所选章节（替换）"}</button>
                 <button type="button" onClick={() => void loadSelectedChapter(true)} disabled={!selectedChapterId || loadingChapter} className="rounded-lg border border-cyan-200/30 px-4 py-2 text-xs text-cyan-100 disabled:opacity-40">追加所选章节</button>
