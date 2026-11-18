@@ -248,7 +248,19 @@ export default function TasksPage() {
                   </p>
                   <p className="mt-1 text-slate-500">{item.status === "ready_to_run" ? "并发名额已空出 · 等待手动执行" : "等待并发名额"} · 已等待 {Math.floor(item.wait_seconds / 60)} 分钟</p>
                 </div>
-                <Link href={item.source === "analysis" ? "/novels" : item.source === "image" ? "/visual-studio" : "/storyboard"} className="rounded-lg border border-purple-300/25 px-3 py-1.5 text-purple-200">打开模块</Link>
+                <div className="flex items-center gap-2">
+                  <Link href={item.source === "analysis" ? "/novels" : item.source === "image" ? "/visual-studio" : "/storyboard"} className="rounded-lg border border-purple-300/25 px-3 py-1.5 text-purple-200">打开模块</Link>
+                  <button onClick={async () => {
+                    if (!window.confirm("确定从等待队列移除此任务？不会调用 AI。")) return;
+                    try {
+                      const response = await fetch(API + "/api/tasks/queue/" + item.source + "/" + item.task_id, {method:"DELETE"});
+                      const data = await response.json();
+                      if (!response.ok) throw new Error(data.detail || "移除失败");
+                      setMessage(data.message || "已移除队列");
+                      await loadTasks();
+                    } catch (error) { setMessage(error instanceof Error ? error.message : "移除失败"); }
+                  }} className="rounded-lg border border-red-300/20 px-3 py-1.5 text-red-200">移出队列</button>
+                </div>
               </div>)}
             </div>
             <p className="mt-2 text-xs text-amber-200/80">队列不会自动调用 AI。点击“打开模块”后，请检查任务设置和付费确认，再手动执行。</p>
