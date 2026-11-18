@@ -251,9 +251,11 @@ export default function TasksPage() {
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "resume")}
                       className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">恢复</button>
                   )}
-                  {task.source === "image" && ["failed", "cancelled"].includes(task.status) && !task.type.startsWith("model3d_") && (
+                  {task.source === "image" && ["failed", "cancelled", "interrupted_unknown"].includes(task.status) && !task.type.startsWith("model3d_") && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "retry")}
-                      className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-200 disabled:opacity-40">重新排队</button>
+                      className="rounded-lg border border-amber-300/25 px-3 py-2 text-xs text-amber-200 disabled:opacity-40">
+                      {task.status === "interrupted_unknown" ? "核实后重新排队" : "重新排队"}
+                    </button>
                   )}
                   {task.source === "image" && ["pending", "paused", "failed"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "cancel")}
