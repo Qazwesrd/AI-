@@ -175,6 +175,8 @@ def create_jobs(data: list[PublishInput], db: Session = Depends(get_db)):
             raise HTTPException(404, "视频文件不存在") from exc
         except (OSError, ValueError) as exc:
             raise HTTPException(400, "视频必须位于应用素材存储目录内") from exc
+        if video.suffix.lower() not in {".mp4", ".mov", ".mkv", ".webm", ".avi"}:
+            raise HTTPException(400, "视频仅支持 MP4、MOV、MKV、WEBM、AVI 格式")
 
         cover = None
         if item.cover_path:
