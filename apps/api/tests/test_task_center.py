@@ -64,6 +64,36 @@ class UnifiedTaskStatusTests(unittest.TestCase):
             control_unified_task("media", 4, "cancel", db=object())
         self.assertEqual(raised.exception.status_code, 409)
 
+    def test_speech_retry_requires_explicit_provider_reconciliation(self):
+        task = Mock(task_type="episode_speech", status="submission_unknown", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 41, "retry", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+    def test_speech_retry_unblocks_only_after_explicit_confirmation(self):
+        task = Mock(task_type="episode_speech", status="submission_unknown", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        result = control_unified_task(
+            "media", 42, "retry", confirm_no_remote_job=True, db=db
+        )
+        self.assertEqual(task.status, "failed")
+        self.assertTrue(result["success"])
+        db.commit.assert_called_once()
+
+    def test_video_task_cannot_use_speech_retry_reconciliation(self):
+        task = Mock(task_type="video", status="submission_unknown", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task(
+                "media", 43, "retry", confirm_no_remote_job=True, db=db
+            )
+        self.assertEqual(raised.exception.status_code, 409)
+
     def test_interrupted_image_retry_requires_explicit_provider_verification(self):
         task = Mock(status="interrupted_unknown", task_type="character")
         db = Mock()
