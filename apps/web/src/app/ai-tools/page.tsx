@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 type ToolCategory = "text" | "image" | "storyboard" | "video";
+type NovelOption = { id: number; title: string; genre?: string; chapter_count?: number };
+type ChapterOption = { id: number; novel_id: number; chapter_number: number; title: string; word_count: number };
 type Tool = { id: string; name: string; category: ToolCategory; url: string; note: string; custom?: boolean };
 type ResultFile = { id: number; filename: string; size: number; downloadUrl: string; classification?: string; classificationStatus?: string; classificationReason?: string; visualAssetId?: number | null };
 type Task = {
@@ -76,6 +78,11 @@ export default function AIToolsPage() {
   const [notice, setNotice] = useState("");
   const [apiReady, setApiReady] = useState(false);
   const [taskFiles, setTaskFiles] = useState<Record<string, ResultFile[]>>({});
+  const [novels, setNovels] = useState<NovelOption[]>([]);
+  const [selectedNovelId, setSelectedNovelId] = useState("");
+  const [chapters, setChapters] = useState<ChapterOption[]>([]);
+  const [selectedChapterId, setSelectedChapterId] = useState("");
+  const [loadingChapter, setLoadingChapter] = useState(false);
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
@@ -109,6 +116,66 @@ export default function AIToolsPage() {
     });
   }, []);
 
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${apiBase}/api/novels`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("无法读取小说列表")))
+      .then((data) => {
+        if (cancelled) return;
+        const items = Array.isArray(data?.items) ? data.items as NovelOption[] : [];
+        setNovels(items);
+        if (items.length) setSelectedNovelId(String(items[0].id));
+      })
+      .catch(() => {
+        if (!cancelled) setNotice("暂时无法读取本地小说。请确认已导入小说且本地 API 正常运行。");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedNovelId) {
+      setChapters([]);
+      setSelectedChapterId("");
+      return;
+    }
+    let cancelled = false;
+    setChapters([]);
+    setSelectedChapterId("");
+    fetch(`${apiBase}/api/novels/${selectedNovelId}/chapters`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("读取章节目录失败")))
+      .then((data) => {
+        if (cancelled) return;
+        const items = Array.isArray(data?.items) ? data.items as ChapterOption[] : [];
+        setChapters(items);
+        if (items.length) setSelectedChapterId(String(items[0].id));
+      })
+      .catch(() => { if (!cancelled) setNotice("读取章节目录失败，请检查本地 API。"); });
+    return () => { cancelled = true; };
+  }, [selectedNovelId]);
+
+  async function loadSelectedChapter(append = false) {
+    if (!selectedChapterId) {
+      setNotice("请先选择一个章节。");
+      return;
+    }
+    setLoadingChapter(true);
+    try {
+      const response = await fetch(`${apiBase}/api/chapters/${selectedChapterId}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取章节内容失败");
+      const chapter = chapters.find((item) => item.id === Number(selectedChapterId));
+      const heading = `【${chapter?.chapter_number ?? ""} ${data.title || chapter?.title || "章节"}】\n`;
+      const content = heading + (data.content || "");
+      setSourceText((current) => append && current.trim() ? current.trimEnd() + "\n\n" + content : content);
+      setTitle((current) => current.trim() ? current : `${novels.find((item) => String(item.id) === selectedNovelId)?.title || "小说"} - ${data.title || "章节"}`);
+      setNotice(`已载入章节：${data.title || chapter?.title || ""}。现在可以生成任务提示词。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "读取章节内容失败");
+    } finally {
+      setLoadingChapter(false);
+    }
+  }
 
   useEffect(() => {
     const bridge = (window as Window & {
@@ -387,6 +454,41 @@ export default function AIToolsPage() {
             <label className="mt-4 block text-sm text-purple-200">任务名称
               <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-3 text-white outline-none focus:border-purple-300/60" placeholder="例如：第一章改编为第1集剧本" />
             </label>
+            <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-bold text-cyan-100">从本地小说直接选取章节</h3>
+                  <p className="mt-1 text-xs text-cyan-200/70">自动读取已导入的小说目录；正文只在你选择载入时读取，不会自动发送给 AI。</p>
+                </div>
+                <button type="button" onClick={() => {
+                  fetch(`${apiBase}/api/novels`).then((response) => response.ok ? response.json() : Promise.reject(new Error("刷新失败"))).then((data) => {
+                    const items = Array.isArray(data?.items) ? data.items as NovelOption[] : [];
+                    setNovels(items);
+                    setSelectedNovelId(items.length ? String(items[0].id) : "");
+                    setNotice(items.length ? "小说列表已刷新。" : "本地还没有导入的小说。");
+                  }).catch(() => setNotice("刷新小说列表失败，请检查本地 API。"));
+                }} className="rounded-lg border border-cyan-200/30 px-3 py-1.5 text-xs text-cyan-100">刷新小说</button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs text-cyan-100">小说项目
+                  <select value={selectedNovelId} onChange={(event) => setSelectedNovelId(event.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-sm text-white">
+                    <option value="">请选择小说</option>
+                    {novels.map((novel) => <option key={novel.id} value={String(novel.id)}>{novel.title}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs text-cyan-100">章节
+                  <select value={selectedChapterId} onChange={(event) => setSelectedChapterId(event.target.value)} disabled={!chapters.length} className="mt-1.5 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2.5 text-sm text-white disabled:opacity-50">
+                    <option value="">请选择章节</option>
+                    {chapters.map((chapter) => <option key={chapter.id} value={String(chapter.id)}>{chapter.chapter_number}. {chapter.title}（{chapter.word_count}字）</option>)}
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => void loadSelectedChapter(false)} disabled={!selectedChapterId || loadingChapter} className="rounded-lg bg-cyan-700 px-4 py-2 text-xs font-semibold text-white disabled:opacity-40">{loadingChapter ? "正在读取…" : "载入所选章节（替换）"}</button>
+                <button type="button" onClick={() => void loadSelectedChapter(true)} disabled={!selectedChapterId || loadingChapter} className="rounded-lg border border-cyan-200/30 px-4 py-2 text-xs text-cyan-100 disabled:opacity-40">追加所选章节</button>
+                <span className="self-center text-xs text-slate-400">{novels.length ? `已找到 ${novels.length} 部小说 · ${chapters.length} 个章节` : "尚未读取到小说项目"}</span>
+              </div>
+            </div>
             <label className="mt-4 block text-sm text-purple-200">小说原文 / 人物设定 / 分镜要求
               <textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} rows={8} className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-slate-900 px-3 py-3 text-sm leading-6 text-white outline-none focus:border-purple-300/60" placeholder="粘贴需要交给 AI 网页处理的内容。建议按章节或镜头分批提交。" />
             </label>
