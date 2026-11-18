@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
+import app.database as database_module
 from app.models.novel import Novel, Chapter, AnalysisItem
 from app.models.story import StoryProject
 from app.routers.novels import ChapterUpdate, update_chapter
@@ -86,6 +87,91 @@ class ChapterEditInvalidationTests(unittest.TestCase):
             project.settings["source_change_notice"]["status"],
             "pending_review",
         )
+
+
+    def test_get_novel_returns_chapter_metadata_without_full_bodies(self):
+        from app.routers.novels import get_novel
+
+        novel = Novel(
+            title="长篇测试",
+            source_text="完整原文不应随摘要返回",
+        )
+        self.db.add(novel)
+        self.db.flush()
+        self.db.add_all([
+            Chapter(
+                novel_id=novel.id,
+                chapter_number=1,
+                title="第一章",
+                content="第一章正文",
+                word_count=5,
+            ),
+            Chapter(
+                novel_id=novel.id,
+                chapter_number=2,
+                title="第二章",
+                content="第二章正文",
+                word_count=5,
+            ),
+        ])
+        self.db.commit()
+
+        result = get_novel(novel.id, db=self.db)
+
+        self.assertNotIn("source_text", result)
+        self.assertTrue(result["source_text_available"])
+        self.assertEqual(
+            result["chapters"],
+            [
+                {
+                    "id": result["chapters"][0]["id"],
+                    "novel_id": novel.id,
+                    "chapter_number": 1,
+                    "title": "第一章",
+                    "word_count": 5,
+                },
+                {
+                    "id": result["chapters"][1]["id"],
+                    "novel_id": novel.id,
+                    "chapter_number": 2,
+                    "title": "第二章",
+                    "word_count": 5,
+                },
+            ],
+        )
+
+    def test_additive_database_migration_adds_missing_column(self):
+        import tempfile
+        from pathlib import Path
+        from sqlalchemy import text
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "legacy.db"
+            legacy_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                future=True,
+            )
+            with legacy_engine.begin() as connection:
+                connection.execute(text(
+                    'CREATE TABLE novels (id INTEGER PRIMARY KEY, title VARCHAR(200))'
+                ))
+
+            old_engine = database_module.engine
+            old_path = database_module.DATABASE_PATH
+            database_module.engine = legacy_engine
+            database_module.DATABASE_PATH = db_path
+            try:
+                added = database_module._migrate_missing_columns()
+                self.assertTrue(any(item == "novels.description" for item in added))
+                columns = {
+                    row[1]
+                    for row in legacy_engine.connect().execute(text("PRAGMA table_info(novels)"))
+                }
+                self.assertIn("description", columns)
+            finally:
+                database_module.engine = old_engine
+                database_module.DATABASE_PATH = old_path
+                legacy_engine.dispose()
 
 
 if __name__ == "__main__":
