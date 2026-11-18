@@ -132,6 +132,25 @@ class ShotInput(BaseModel):
 class AssetLinkInput(BaseModel):
     asset_id: int
     role: str = "character"
+    chapter_number: Optional[int] = Field(default=None, ge=1)
+
+
+def snapshot_asset_state(asset: VisualAsset, chapter_number: Optional[int]):
+    data = asset.data if isinstance(asset.data, dict) else {}
+    history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
+    applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
+    latest = applicable[-1] if applicable else {}
+    return {
+        "chapter_number": latest.get("chapter_number"),
+        "event": latest.get("event", ""),
+        "change_type": latest.get("change_type", "基础状态"),
+        "appearance": latest.get("appearance_after") or asset.appearance or "",
+        "clothing": latest.get("clothing_after") or asset.clothing or "",
+        "holder": latest.get("holder", ""),
+        "confirmed": bool(latest.get("confirmed", False)),
+        "is_evolved": bool(latest),
+    }
 
 
 @router.get("/novels")
@@ -852,31 +871,48 @@ def link_asset(shot_id: int, payload: AssetLinkInput, db: Session = Depends(get_
     asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
     if not shot or not asset:
         raise HTTPException(404, "分镜或视觉素材不存在")
+    if asset.category not in {"characters", "scenes", "props", "weapons", "costumes", "buildings", "special_items"}:
+        raise HTTPException(400, "该素材类别不能关联到分镜")
+    snapshot = snapshot_asset_state(asset, payload.chapter_number)
     existing = db.query(StoryAssetLink).filter(
         StoryAssetLink.shot_id == shot_id,
         StoryAssetLink.asset_id == payload.asset_id,
         StoryAssetLink.role == payload.role,
     ).first()
     if existing:
-        return {"success": True, "link_id": existing.id, "existing": True}
+        existing.chapter_number = payload.chapter_number
+        existing.state_snapshot = snapshot
+        db.commit()
+        return {"success": True, "link_id": existing.id, "existing": True, "state_snapshot": snapshot}
     link = StoryAssetLink(
         project_id=shot.project_id,
         episode_id=shot.episode_id,
         shot_id=shot.id,
         asset_id=asset.id,
         role=payload.role,
+        chapter_number=payload.chapter_number,
+        state_snapshot=snapshot,
     )
     db.add(link)
     db.commit()
-    return {"success": True, "link_id": link.id}
+    db.refresh(link)
+    return {"success": True, "link_id": link.id, "state_snapshot": snapshot}
 
 
 @router.get("/shots/{shot_id}/assets")
 def get_shot_assets(shot_id: int, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if not shot:
+        raise HTTPException(404, "分镜不存在")
     links = db.query(StoryAssetLink).filter(StoryAssetLink.shot_id == shot_id).all()
     result = []
     for link in links:
         asset = db.query(VisualAsset).filter(VisualAsset.id == link.asset_id).first()
         if asset:
-            result.append({"role": link.role, "asset": serialize_model(asset)})
+            result.append({
+                "role": link.role,
+                "chapter_number": link.chapter_number,
+                "state_snapshot": link.state_snapshot or snapshot_asset_state(asset, link.chapter_number),
+                "asset": serialize_model(asset),
+            })
     return result
