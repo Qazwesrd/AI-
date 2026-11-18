@@ -59,6 +59,35 @@ class TaskRuntimeTests(unittest.TestCase):
         self.assertEqual(items[0]["task_id"], 9)
         self.assertEqual(items[0]["status"], "ready_to_run")
 
+    def test_queue_demotion_is_committed_when_no_slot_is_available(self):
+        self.db.query(TaskRuntimeControl).filter(
+            TaskRuntimeControl.id == 1
+        ).update({TaskRuntimeControl.max_concurrency: 2})
+        self.db.commit()
+        acquire_task_lease(self.db, "image", 11)
+        enqueue_task(self.db, "media", 12, priority=5)
+
+        control = self.db.query(TaskRuntimeControl).filter(
+            TaskRuntimeControl.id == 1
+        ).first()
+        control.max_concurrency = 1
+        self.db.commit()
+
+        snapshot = queue_snapshot(self.db)
+        self.assertEqual(snapshot["items"][0]["status"], "waiting")
+
+        # Verify the state was committed, not merely changed in this session.
+        independent = self.Session()
+        try:
+            persisted = independent.query(TaskQueueEntry).filter(
+                TaskQueueEntry.source == "media",
+                TaskQueueEntry.task_id == 12,
+            ).first()
+            self.assertEqual(persisted.status, "waiting")
+            self.assertIsNone(persisted.ready_at)
+        finally:
+            independent.close()
+
     def test_global_concurrency_limit_is_enforced(self):
         acquire_task_lease(self.db, "image", 1)
         with self.assertRaises(HTTPException) as raised:
