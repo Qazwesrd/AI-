@@ -1,0 +1,71 @@
+import unittest
+
+from app.models.visual import VisualAsset
+from app.routers.visual import build_asset_prompt, resolve_asset_state
+from app.routers.story import snapshot_asset_state
+
+
+class VisualAssetEvolutionTests(unittest.TestCase):
+    def setUp(self):
+        self.asset = VisualAsset(
+            id=7,
+            category="characters",
+            name="主角",
+            description="故事主角",
+            appearance="黑色短发，少年体型",
+            clothing="初始蓝色布衣",
+            data={
+                "evolution_history": [
+                    {
+                        "chapter_number": 12,
+                        "event": "决战中受伤",
+                        "change_type": "受伤",
+                        "appearance_after": "左脸有一道伤疤",
+                        "clothing_after": "蓝色布衣破损，左袖撕裂",
+                        "holder": "",
+                        "recorded_at": "2026-01-02T00:00:00",
+                    },
+                    {
+                        "chapter_number": 20,
+                        "event": "获得新装备",
+                        "change_type": "装备升级",
+                        "appearance_after": "左脸保留伤疤",
+                        "clothing_after": "换成黑色轻甲，肩部有银色护甲",
+                        "holder": "",
+                        "recorded_at": "2026-01-03T00:00:00",
+                    },
+                ]
+            },
+        )
+
+    def test_state_before_first_change_uses_base_design(self):
+        state = resolve_asset_state(self.asset, 5)
+        self.assertEqual(state["appearance"], "黑色短发，少年体型")
+        self.assertEqual(state["clothing"], "初始蓝色布衣")
+        self.assertFalse(state["is_evolved"])
+
+    def test_state_at_chapter_15_uses_only_first_evolution(self):
+        state = resolve_asset_state(self.asset, 15)
+        self.assertEqual(state["chapter_number"], 12)
+        self.assertEqual(state["appearance"], "左脸有一道伤疤")
+        self.assertEqual(state["clothing"], "蓝色布衣破损，左袖撕裂")
+
+    def test_state_at_chapter_25_uses_latest_evolution(self):
+        state = resolve_asset_state(self.asset, 25)
+        self.assertEqual(state["chapter_number"], 20)
+        self.assertEqual(state["clothing"], "换成黑色轻甲，肩部有银色护甲")
+
+    def test_chapter_prompt_excludes_future_changes(self):
+        prompt = build_asset_prompt(self.asset, chapter_number=15)
+        self.assertIn("蓝色布衣破损，左袖撕裂", prompt["positive_prompt"])
+        self.assertNotIn("黑色轻甲", prompt["positive_prompt"])
+        self.assertEqual(prompt["chapter_number"], 15)
+
+    def test_storyboard_link_snapshot_uses_requested_chapter(self):
+        snapshot = snapshot_asset_state(self.asset, 15)
+        self.assertEqual(snapshot["chapter_number"], 12)
+        self.assertEqual(snapshot["clothing"], "蓝色布衣破损，左袖撕裂")
+
+
+if __name__ == "__main__":
+    unittest.main()
