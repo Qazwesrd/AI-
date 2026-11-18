@@ -12,6 +12,7 @@ from app.database import STORAGE_DIR
 
 from app.database import get_db
 from app.models.web_ai_tool import WebAITool, WebAITask, WebAIResultFile
+from app.models.visual import VisualAsset
 
 router = APIRouter(prefix="/api/web-ai", tags=["AI网页工具协同中心"])
 
@@ -22,6 +23,25 @@ TaskStatus = Literal["prepared", "opened", "completed", "failed", "needs_review"
 def iso(value):
     return value.isoformat() if value else None
 
+
+def infer_result_classification(filename: str, content_type: str, task_category: str):
+    name = (filename or "").lower()
+    ext = Path(name).suffix.lower()
+    mime = (content_type or "").lower()
+    if ext in {".mp4", ".mov", ".webm", ".mkv"} or mime.startswith("video/"): return "video", "根据扩展名或 MIME 类型识别为视频"
+    if ext in {".mp3", ".wav", ".m4a", ".aac"} or mime.startswith("audio/"): return "audio", "根据扩展名或 MIME 类型识别为音频"
+    if ext in {".srt", ".vtt"}: return "subtitle", "根据字幕扩展名识别"
+    if ext in {".txt", ".md"}: return ("script" if task_category == "text" else "document"), "根据文本扩展名和任务类型推测"
+    if ext in {".json", ".csv", ".pdf", ".docx"}: return ("storyboard" if task_category == "storyboard" else "document"), "根据文档扩展名和任务类型推测"
+    if ext in {".png", ".jpg", ".jpeg", ".webp", ".gif"} or mime.startswith("image/"):
+        hints = [(("character", "人物", "角色"), "character"), (("scene", "场景", "环境"), "scene"), (("prop", "道具", "武器"), "prop"), (("storyboard", "分镜", "镜头"), "storyboard")]
+        for words, kind in hints:
+            if any(word in name for word in words): return kind, "仅根据文件名关键词给出候选，需人工确认"
+        return "image", "识别为图片；无法仅凭元数据判断画面内容"
+    return "other", "文件类型无法可靠判断"
+
+def result_file_dict(item):
+    return {"id": item.id, "taskId": item.task_key, "filename": item.original_name, "contentType": item.content_type, "size": item.file_size, "downloadUrl": "/api/web-ai/files/" + str(item.id), "createdAt": iso(item.created_at), "classification": item.classification or "other", "classificationStatus": item.classification_status or "pending", "classificationReason": item.classification_reason or "", "visualAssetId": item.visual_asset_id}
 
 def tool_dict(item):
     return {
@@ -196,21 +216,17 @@ async def upload_task_result_file(
         raise
     finally:
         await file.close()
+    content_type = file.content_type or "application/octet-stream"
+    classification, reason = infer_result_classification(original_name, content_type, task.category)
     item = WebAIResultFile(
-        task_key=task_key,
-        original_name=original_name,
-        stored_name=stored_name,
-        content_type=file.content_type or "application/octet-stream",
-        file_size=total,
+        task_key=task_key, original_name=original_name, stored_name=stored_name,
+        content_type=content_type, file_size=total, classification=classification,
+        classification_status="pending", classification_reason=reason,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
-    return {
-        "id": item.id, "taskId": item.task_key, "filename": item.original_name,
-        "contentType": item.content_type, "size": item.file_size,
-        "downloadUrl": f"/api/web-ai/files/{item.id}", "createdAt": iso(item.created_at),
-    }
+    return result_file_dict(item)
 
 
 @router.get("/tasks/{task_key}/files")
@@ -220,11 +236,7 @@ def list_task_result_files(task_key: str, db: Session = Depends(get_db)):
     items = db.query(WebAIResultFile).filter(
         WebAIResultFile.task_key == task_key
     ).order_by(WebAIResultFile.id.desc()).all()
-    return {"items": [{
-        "id": item.id, "taskId": item.task_key, "filename": item.original_name,
-        "contentType": item.content_type, "size": item.file_size,
-        "downloadUrl": f"/api/web-ai/files/{item.id}", "createdAt": iso(item.created_at),
-    } for item in items]}
+    return {"items": [result_file_dict(item) for item in items]}
 
 
 @router.get("/files/{file_id}")
@@ -270,18 +282,44 @@ def register_downloaded_file(payload: RegisterDownloadedFile, db: Session = Depe
             "contentType": existing.content_type, "size": existing.file_size,
             "downloadUrl": f"/api/web-ai/files/{existing.id}", "createdAt": iso(existing.created_at),
         }
+    original_name = Path(payload.filename).name[:255]
+    classification, reason = infer_result_classification(original_name, payload.contentType, task.category)
     item = WebAIResultFile(
-        task_key=payload.taskId,
-        original_name=Path(payload.filename).name[:255],
-        stored_name=payload.storedName,
-        content_type=payload.contentType,
-        file_size=actual_size,
+        task_key=payload.taskId, original_name=original_name, stored_name=payload.storedName,
+        content_type=payload.contentType, file_size=actual_size, classification=classification,
+        classification_status="pending", classification_reason=reason,
     )
     db.add(item)
     db.commit()
     db.refresh(item)
-    return {
-        "id": item.id, "taskId": item.task_key, "filename": item.original_name,
-        "contentType": item.content_type, "size": item.file_size,
-        "downloadUrl": f"/api/web-ai/files/{item.id}", "createdAt": iso(item.created_at),
-    }
+    return result_file_dict(item)
+
+
+class ConfirmResultClassification(BaseModel):
+    classification: Literal["character", "scene", "prop", "storyboard", "script", "subtitle", "video", "audio", "document", "image", "other"]
+    assetName: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=4000)
+
+@router.patch("/files/{file_id}/classification")
+def confirm_result_classification(file_id: int, payload: ConfirmResultClassification, db: Session = Depends(get_db)):
+    item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if item is None: raise HTTPException(404, "结果文件不存在")
+    target = (STORAGE_DIR / "web_ai_results" / item.stored_name).resolve()
+    root = (STORAGE_DIR / "web_ai_results").resolve()
+    if target.parent != root or not target.is_file(): raise HTTPException(410, "结果文件已不存在")
+    asset_id = None
+    if payload.classification in {"character", "scene", "prop"}:
+        if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}: raise HTTPException(400, "人物、场景和道具素材必须是图片文件")
+        if not payload.assetName.strip(): raise HTTPException(400, "请填写素材名称后再确认归档")
+        category_map = {"character": "characters", "scene": "scenes", "prop": "props"}
+        asset = VisualAsset(category=category_map[payload.classification], name=payload.assetName.strip(), description=payload.description.strip() or ("从 AI 网页任务 " + item.task_key + " 导入"), image_path=str(target), style="待确认", data={"source": "web_ai_result", "result_file_id": item.id, "task_key": item.task_key, "original_filename": item.original_name}, confirmed=True)
+        db.add(asset)
+        db.flush()
+        asset_id = asset.id
+    item.classification = payload.classification
+    item.classification_status = "confirmed"
+    item.classification_reason = "用户已确认分类"
+    item.visual_asset_id = asset_id
+    db.commit()
+    db.refresh(item)
+    return result_file_dict(item)
