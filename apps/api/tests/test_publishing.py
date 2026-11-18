@@ -1,6 +1,12 @@
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock
 
-from app.routers.publishing import PublishInput
+from fastapi import HTTPException
+
+from app.routers.publishing import PublishInput, create_jobs
+from app.services.media_service import STORAGE
 
 
 class PublishingInputTests(unittest.TestCase):
@@ -11,6 +17,45 @@ class PublishingInputTests(unittest.TestCase):
             cover_path=None,
         )
         self.assertIsNone(payload.cover_path)
+
+    def test_existing_video_outside_app_storage_is_rejected(self):
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as outside:
+            with self.assertRaises(HTTPException) as raised:
+                create_jobs(
+                    [PublishInput(platform="youtube", video_path=outside.name)],
+                    db=Mock(),
+                )
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("素材存储目录", raised.exception.detail)
+
+    def test_unsupported_video_extension_is_rejected_inside_storage(self):
+        with tempfile.TemporaryDirectory(dir=str(STORAGE)) as folder:
+            video = Path(folder) / "not-a-video.txt"
+            video.write_text("not a video", encoding="utf-8")
+            with self.assertRaises(HTTPException) as raised:
+                create_jobs(
+                    [PublishInput(platform="youtube", video_path=str(video))],
+                    db=Mock(),
+                )
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("视频仅支持", raised.exception.detail)
+
+    def test_cover_outside_app_storage_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir=str(STORAGE)) as folder:
+            video = Path(folder) / "video.mp4"
+            video.write_bytes(b"test video placeholder")
+            with tempfile.NamedTemporaryFile(suffix=".png") as outside_cover:
+                with self.assertRaises(HTTPException) as raised:
+                    create_jobs(
+                        [PublishInput(
+                            platform="youtube",
+                            video_path=str(video),
+                            cover_path=outside_cover.name,
+                        )],
+                        db=Mock(),
+                    )
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("封面必须位于", raised.exception.detail)
 
     def test_cover_defaults_to_none_when_omitted(self):
         payload = PublishInput(

@@ -88,6 +88,34 @@ class TaskRuntimeTests(unittest.TestCase):
         finally:
             independent.close()
 
+    def test_queue_ready_state_is_committed_when_available_slots_drop_to_zero(self):
+        enqueue_task(self.db, "media", 77, priority=5)
+        ready = self.db.query(TaskQueueEntry).filter(
+            TaskQueueEntry.source == "media",
+            TaskQueueEntry.task_id == 77,
+        ).first()
+        self.assertEqual(ready.status, "ready_to_run")
+
+        control = self.db.query(TaskRuntimeControl).filter(
+            TaskRuntimeControl.id == 1
+        ).first()
+        control.max_concurrency = 0
+        self.db.commit()
+
+        snapshot = queue_snapshot(self.db)
+        self.assertEqual(snapshot["items"][0]["status"], "waiting")
+
+        independent = self.Session()
+        try:
+            persisted = independent.query(TaskQueueEntry).filter(
+                TaskQueueEntry.source == "media",
+                TaskQueueEntry.task_id == 77,
+            ).first()
+            self.assertEqual(persisted.status, "waiting")
+            self.assertIsNone(persisted.ready_at)
+        finally:
+            independent.close()
+
     def test_global_concurrency_limit_is_enforced(self):
         acquire_task_lease(self.db, "image", 1)
         with self.assertRaises(HTTPException) as raised:
