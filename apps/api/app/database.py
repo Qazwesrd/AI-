@@ -75,6 +75,7 @@ MODEL_MODULES = [
     "app.models.media",
     "app.models.editing",
     "app.models.task_runtime",
+    "app.models.web_ai_tool",
 ]
 
 
