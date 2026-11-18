@@ -15,6 +15,14 @@ def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
         db.commit()
         db.refresh(control)
 
+    active_existing = db.query(TaskExecutionLease).filter(
+        TaskExecutionLease.source == source,
+        TaskExecutionLease.task_id == task_id,
+        TaskExecutionLease.status == "active",
+    ).first()
+    if active_existing:
+        raise HTTPException(409, "该任务已有执行租约，已阻止重复执行")
+
     updated = db.query(TaskRuntimeControl).filter(
         TaskRuntimeControl.id == 1,
         TaskRuntimeControl.active_count < TaskRuntimeControl.max_concurrency,
