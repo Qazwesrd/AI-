@@ -165,9 +165,9 @@ export default function AIToolsPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "读取章节内容失败");
       const chapter = chapters.find((item) => item.id === Number(selectedChapterId));
-      const heading = `【${chapter?.chapter_number ?? ""} ${data.title || chapter?.title || "章节"}】\\n`;
+      const heading = `【${chapter?.chapter_number ?? ""} ${data.title || chapter?.title || "章节"}】\n`;
       const content = heading + (data.content || "");
-      setSourceText((current) => append && current.trim() ? current.trimEnd() + "\\n\\n" + content : content);
+      setSourceText((current) => append && current.trim() ? current.trimEnd() + "\n\n" + content : content);
       setTitle((current) => current.trim() ? current : `${novels.find((item) => String(item.id) === selectedNovelId)?.title || "小说"} - ${data.title || "章节"}`);
       setNotice(`已载入章节：${data.title || chapter?.title || ""}。现在可以生成任务提示词。`);
     } catch (error) {
