@@ -299,7 +299,14 @@ def generate_episode_shot_videos(
                 created.append({"task_id": task.id, "shot_id": shot.id,
                                 "shot_number": shot.shot_number, "remote_task_id": str(remote_id)})
             except Exception as exc:
-                if task.status == "pending":
+                if task.status == "pending" and isinstance(exc, HTTPException) and exc.status_code == 429:
+                    task.status = "queued"
+                    task.error = str(exc.detail)[:2000]
+                    db.commit()
+                    failures.append({"task_id": task.id, "shot_id": shot.id,
+                                     "shot_number": shot.shot_number,
+                                     "status": "queued", "error": task.error})
+                elif task.status == "pending":
                     task.status = "failed"
                     task.error = ("任务尚未提交，未调用视频服务商，可在本集重新提交：" + str(exc))[:2000]
                     db.commit()
@@ -657,7 +664,11 @@ def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
         return {"task_id": task.id, "remote_task_id": remote_id,
                 "status": task.status, "provider_response": result}
     except Exception as exc:
-        if task.status == "pending":
+        if task.status == "pending" and isinstance(exc, HTTPException) and exc.status_code == 429:
+            task.status = "queued"
+            task.error = str(exc.detail)[:2000]
+            db.commit()
+        elif task.status == "pending":
             task.status = "failed"
             task.error = ("任务尚未提交，未调用视频服务商，可安全重新提交：" + str(exc))[:2000]
             db.commit()
