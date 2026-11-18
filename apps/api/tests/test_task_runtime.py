@@ -5,8 +5,8 @@ from sqlalchemy.pool import StaticPool
 from fastapi import HTTPException
 
 from app.database import Base
-from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLease, TaskExecutionLog
-from app.services.task_runtime import acquire_task_lease, release_task_lease, runtime_snapshot
+from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLease, TaskExecutionLog, TaskQueueEntry
+from app.services.task_runtime import acquire_task_lease, release_task_lease, runtime_snapshot, enqueue_task, queue_snapshot
 
 
 class TaskRuntimeTests(unittest.TestCase):
@@ -26,6 +26,24 @@ class TaskRuntimeTests(unittest.TestCase):
         self.db.close()
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
+
+
+    def test_queue_persists_and_orders_by_priority(self):
+        low = enqueue_task(self.db, "media", 101, priority=2)
+        high = enqueue_task(self.db, "analysis", 202, priority=10)
+        items = queue_snapshot(self.db)["items"]
+        self.assertEqual([item["task_id"] for item in items], [202, 101])
+        self.assertEqual(items[0]["priority"], 10)
+
+    def test_releasing_lease_promotes_highest_priority_queue_item(self):
+        acquire_task_lease(self.db, "image", 1)
+        enqueue_task(self.db, "media", 2, priority=3)
+        enqueue_task(self.db, "analysis", 3, priority=15)
+        release_task_lease(self.db, "image", 1, True)
+        items = queue_snapshot(self.db)["items"]
+        self.assertEqual(items[0]["task_id"], 3)
+        self.assertEqual(items[0]["status"], "ready_to_run")
+        self.assertEqual(items[1]["status"], "waiting")
 
     def test_global_concurrency_limit_is_enforced(self):
         acquire_task_lease(self.db, "image", 1)
