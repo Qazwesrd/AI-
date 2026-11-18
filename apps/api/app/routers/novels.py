@@ -114,8 +114,20 @@ def get_novel(novel_id: int, db: Session = Depends(get_db)):
     if not item:
         raise HTTPException(404, "小说不存在")
     result = novel_dict(item)
-    result["chapters"] = [chapter_dict(x) for x in item.chapters]
-    result["source_text"] = item.source_text
+    # Large novels can contain hundreds of chapters. Return only chapter
+    # metadata here; chapter bodies are fetched on demand through
+    # GET /api/chapters/{chapter_id}.
+    result["chapters"] = [
+        {
+            "id": x.id,
+            "novel_id": x.novel_id,
+            "chapter_number": x.chapter_number,
+            "title": x.title,
+            "word_count": x.word_count,
+        }
+        for x in sorted(item.chapters, key=lambda chapter: chapter.chapter_number)
+    ]
+    result["source_text_available"] = bool(item.source_text)
     return result
 
 @router.put("/novels/{novel_id}")
