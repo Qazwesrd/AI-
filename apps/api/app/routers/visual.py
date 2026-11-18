@@ -608,7 +608,6 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
     asset.data = data
     asset.updated_at = datetime.utcnow()
     db.commit()
-    db.commit()
     return {"success": True, "asset_id": asset_id, "history_count": len(history), "current_state": data["current_state"]}
 
 
