@@ -96,6 +96,9 @@ export default function MediaStudioPage() {
         <header>
           <h1 className="text-3xl font-bold">AI 视频与音频生产中心</h1>
           <p className="mt-2 text-white/60">视频生成、AI 配音、任务查询与媒体合成</p>
+          <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
+            查看统一任务中心（含配音任务）
+          </a>
         </header>
 
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
