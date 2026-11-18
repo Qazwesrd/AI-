@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type ToolCategory = "text" | "image" | "storyboard" | "video";
 type Tool = { id: string; name: string; category: ToolCategory; url: string; note: string; custom?: boolean };
-type ResultFile = { id: number; filename: string; size: number; downloadUrl: string };
+type ResultFile = { id: number; filename: string; size: number; downloadUrl: string; classification?: string; classificationStatus?: string; classificationReason?: string; visualAssetId?: number | null };
 type Task = {
   id: string;
   title: string;
@@ -325,6 +325,25 @@ export default function AIToolsPage() {
     }
   }
 
+
+  async function confirmResultFile(task: Task, file: ResultFile, classification: string) {
+    const needsName = ["character", "scene", "prop"].includes(classification);
+    const defaultName = file.filename.replace(/\\.[^.]+$/, "");
+    const assetName = needsName ? window.prompt("请输入素材名称（确认后将复制登记到人物/场景/道具素材库）", defaultName) : "";
+    if (needsName && !assetName?.trim()) return;
+    try {
+      const response = await fetch(apiBase + "/api/web-ai/files/" + file.id + "/classification", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ classification, assetName: assetName || "", description: "由任务“" + task.title + "”导入" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "确认归档失败");
+      setTaskFiles((current) => ({ ...current, [task.id]: (current[task.id] || []).map((item) => item.id === file.id ? data : item) }));
+      setNotice(needsName ? "已确认并登记到素材库：" + assetName : "已确认文件分类：" + file.filename);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "确认归档失败");
+    }
+  }
   function removeTask(taskId: string) {
     setTasks((current) => current.filter((task) => task.id !== taskId));
     if (activeTaskId === taskId) setActiveTaskId(null);
@@ -437,9 +456,17 @@ export default function AIToolsPage() {
                   {(taskFiles[task.id] || []).length > 0 && (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {(taskFiles[task.id] || []).map((file) => (
-                        <a key={file.id} href={apiBase + file.downloadUrl} className="rounded-lg border border-cyan-300/20 px-3 py-2 text-xs text-cyan-200 hover:bg-cyan-950/30" download>
-                          {file.filename} · {(file.size / 1024 / 1024).toFixed(1)} MB
-                        </a>
+                        <div key={file.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-cyan-300/20 px-3 py-2">
+                          <a href={apiBase + file.downloadUrl} className="text-xs text-cyan-200 hover:underline" download>{file.filename} · {(file.size / 1024 / 1024).toFixed(1)} MB</a>
+                          <span className="text-[11px] text-slate-400">{file.classification || "待识别"} · {file.classificationStatus === "confirmed" ? "已确认" : "待确认"}</span>
+                          {file.classificationStatus !== "confirmed" && <div className="flex flex-wrap gap-1">
+                            {(["character", "scene", "prop", "storyboard", "script", "video", "audio", "document", "image", "other"] as const).map((kind) => {
+                              const labels: Record<string, string> = { character: "人物", scene: "场景", prop: "道具", storyboard: "分镜", script: "剧本", video: "视频", audio: "音频", document: "文档", image: "图片", other: "其他" };
+                              return <button key={kind} onClick={() => void confirmResultFile(task, file, kind)} className="rounded border border-purple-300/20 px-2 py-1 text-[10px] text-purple-100 hover:bg-purple-900/40">确认为{labels[kind]}</button>;
+                            })}
+                          </div>}
+                          {file.visualAssetId && <span className="text-[10px] text-emerald-300">素材库 ID：{file.visualAssetId}</span>}
+                        </div>
                       ))}
                     </div>
                   )}
