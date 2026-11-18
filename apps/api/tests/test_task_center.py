@@ -3,10 +3,18 @@ from unittest.mock import patch, Mock
 
 from fastapi import HTTPException
 
-from app.routers.tasks import _status_group, control_unified_task
+from app.routers.tasks import _status_group, control_unified_task, is_known_remote_3d_task
 
 
 class UnifiedTaskStatusTests(unittest.TestCase):
+    def test_known_remote_3d_task_is_not_treated_as_lost_submission(self):
+        task = Mock(task_type="model3d_multiview", result_url="tripo-task:remote-123")
+        self.assertTrue(is_known_remote_3d_task(task))
+
+    def test_3d_task_without_remote_id_requires_reconciliation(self):
+        task = Mock(task_type="model3d_multiview", result_url="")
+        self.assertFalse(is_known_remote_3d_task(task))
+
     def test_active_provider_statuses_are_normalized(self):
         for value in ("pending", "queued", "submitted", "processing", "running"):
             with self.subTest(status=value):

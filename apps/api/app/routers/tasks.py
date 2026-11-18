@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
-from app.models.visual import ImageTask
+from app.models.visual import ImageTask, VisualAsset
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
 from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task
 from app.services.task_diagnostics import classify_task_error
@@ -30,6 +30,13 @@ class ConcurrencyInput(BaseModel):
 
 def _iso(value):
     return value.isoformat() if value else None
+
+
+def is_known_remote_3d_task(task) -> bool:
+    return (
+        str(getattr(task, "task_type", "")).startswith("model3d_")
+        and str(getattr(task, "result_url", "") or "").startswith("tripo-task:")
+    )
 
 
 def _status_group(status: str) -> str:
@@ -68,7 +75,7 @@ def _group_counts(db: Session, model, status_column):
 
 @router.delete("/queue/{source}/{task_id}")
 def cancel_queued_task(source: str, task_id: int, db: Session = Depends(get_db)):
-    if source not in {"image", "media", "analysis"}:
+    if source not in {"image", "image3d_asset", "media", "analysis"}:
         raise HTTPException(400, "不支持的任务来源")
     if not remove_queued_task(db, source, task_id):
         raise HTTPException(404, "等待队列中不存在该任务")
@@ -130,6 +137,22 @@ def manually_release_stale_lease(
             raise HTTPException(404, "图片任务不存在")
         if task.status == "running":
             raise HTTPException(409, "请先执行中断扫描，将任务标记为待核实；不能释放仍标记为运行中的租约")
+    elif source == "image3d_asset":
+        asset = db.query(VisualAsset).filter(VisualAsset.id == task_id).first()
+        if not asset:
+            raise HTTPException(404, "3D 素材不存在")
+        task = db.query(ImageTask).filter(
+            ImageTask.asset_id == task_id,
+            ImageTask.task_type == "model3d_multiview",
+        ).order_by(ImageTask.id.desc()).first()
+        if task and task.status not in ("submitting", "interrupted_unknown"):
+            raise HTTPException(409, "只有提交中断或结果不确定的 3D 任务可以人工核实释放")
+        if task and (task.result_url or "").startswith("tripo-task:"):
+            raise HTTPException(409, "该 3D 任务已有远程任务编号；请刷新远程状态，不能释放提交锁")
+        asset_data = asset.data if isinstance(asset.data, dict) else {}
+        model_task_data = asset_data.get("model3d_task") if isinstance(asset_data.get("model3d_task"), dict) else {}
+        if model_task_data.get("remote_task_id"):
+            raise HTTPException(409, "素材记录中已有远程 3D 任务编号；请刷新远程状态，不能释放提交锁")
     elif source == "analysis":
         task = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == task_id).first()
         if not task:
@@ -143,7 +166,7 @@ def manually_release_stale_lease(
         if task.status not in ("submission_unknown", "submitting"):
             raise HTTPException(409, "只有提交状态不确定的视频任务可以人工核实释放")
     else:
-        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、视频提交或小说解析任务租约")
+        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、3D 模型提交、视频提交或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
         TaskExecutionLease.source == source,
         TaskExecutionLease.task_id == task_id,
@@ -161,6 +184,20 @@ def manually_release_stale_lease(
     elif source == "media":
         task.status = "submission_unknown"
         task.error = "用户核对视频服务商后人工释放本地遗留租约；未自动重新提交，请先确认远程任务确实不存在。"
+        db.commit()
+    elif source == "image3d_asset":
+        message = "用户已核对 Tripo 控制台并确认没有远程任务；提交锁已人工释放，可在素材卡片重新发起并再次确认费用。"
+        if task:
+            task.status = "failed"
+            task.error = message
+        asset_data = dict(asset.data) if isinstance(asset.data, dict) else {}
+        model_task_data = dict(asset_data.get("model3d_task") or {})
+        model_task_data["status"] = "failed"
+        model_task_data["error"] = message
+        model_task_data["manually_reconciled_at"] = datetime.utcnow().isoformat()
+        asset_data["model3d_task"] = model_task_data
+        asset.data = asset_data
+        asset.updated_at = datetime.utcnow()
         db.commit()
     release_task_lease(db, source, task_id, False, "用户核对服务商后人工释放遗留租约")
     return {"success": True, "message": "遗留租约已释放；任务不会自动重试或调用 AI。请在所属模块确认后再手动执行。"}
@@ -296,20 +333,26 @@ def reconcile_stale_tasks(
     """仅将长时间无更新的执行中任务标记为待人工核实；绝不自动重试或再次调用 AI。"""
     cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     image_tasks = db.query(ImageTask).filter(
-        ImageTask.status == "running",
+        ImageTask.status.in_(("running", "submitting")),
         ImageTask.created_at < cutoff,
     ).all()
     media_tasks = db.query(MediaTask).filter(
         MediaTask.status == "submitting",
         MediaTask.updated_at < cutoff,
     ).all()
+    image_marked = 0
     for task in image_tasks:
+        # A 3D task with a persisted remote ID is known to have been accepted;
+        # it must remain refreshable rather than being mislabeled as unknown.
+        if is_known_remote_3d_task(task):
+            continue
         task.status = "interrupted_unknown"
         task.error = (
             f"任务已运行超过 {minutes} 分钟，可能在应用关闭或网络中断时失去执行结果。"
             "请先核对图像服务商记录；确认未创建任务后，才能手动重新排队。"
         )
         task.finished_at = datetime.utcnow()
+        image_marked += 1
     for task in media_tasks:
         task.status = "submission_unknown"
         task.error = (
@@ -319,7 +362,7 @@ def reconcile_stale_tasks(
     db.commit()
     return {
         "success": True,
-        "image_marked_for_review": len(image_tasks),
+        "image_marked_for_review": image_marked,
         "media_marked_for_review": len(media_tasks),
         "message": "已标记需要人工核实的任务；没有自动重试、重新提交或产生新的 AI 调用。",
     }
