@@ -193,7 +193,7 @@ export default function VisualStudioPage() {
   }
 
   async function createTask() {
-    const effectivePrompt = buildPrompt();
+    const effectivePrompt = generatedPrompt.trim() || buildPrompt();
     if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
     setGeneratedPrompt(effectivePrompt);
     setBusy(true);
@@ -264,7 +264,7 @@ export default function VisualStudioPage() {
       const response = await fetch(API + "/api/visual/assets/" + assetId + "/prompt");
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "提示词生成失败");
-      setGeneratedPrompt("正向提示词：" + result.positive_prompt + "\n\n负面提示词：" + result.negative_prompt);
+      setGeneratedPrompt("正向提示词：" + result.positive_prompt + (prompt.trim() ? "\n\n用户补充要求：" + prompt.trim() : "") + "\n\n负面提示词：" + result.negative_prompt);
       setSelectedAsset(assetId);
       setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
     } catch (error) {
@@ -405,7 +405,7 @@ export default function VisualStudioPage() {
         {categories.map((item) => (
           <button
             key={item.key}
-            onClick={() => setCategory(item.key)}
+            onClick={() => { setCategory(item.key); setGeneratedPrompt(""); }}
             className={`rounded-xl border p-4 text-left transition ${
               category === item.key
                 ? "border-purple-400 bg-purple-700/40"
@@ -436,7 +436,7 @@ export default function VisualStudioPage() {
             <textarea className={field} rows={2} placeholder="服装、装备或表面细节（场景和道具可填写对应特征）" value={clothing} onChange={(e) => setClothing(e.target.value)} />
             <textarea className={field} rows={2} placeholder="性格、气质或视觉氛围" value={personality} onChange={(e) => setPersonality(e.target.value)} />
             <textarea className={field} rows={3} placeholder="固定特征：发型、脸型、颜色、标志物等，供后续保持一致" value={consistency} onChange={(e) => setConsistency(e.target.value)} />
-            <select className={field} value={style} onChange={(e) => setStyle(e.target.value)}>
+            <select className={field} value={style} onChange={(e) => { setStyle(e.target.value); setGeneratedPrompt(""); }}>
               {styles.map((item) => <option key={item}>{item}</option>)}
             </select>
             <button className={button} disabled={busy} onClick={saveAsset}>保存素材设定</button>
@@ -450,13 +450,13 @@ export default function VisualStudioPage() {
             <select
               className={field}
               value={selectedAsset ?? ""}
-              onChange={(e) => setSelectedAsset(e.target.value ? Number(e.target.value) : null)}
+              onChange={(e) => { setSelectedAsset(e.target.value ? Number(e.target.value) : null); setGeneratedPrompt(""); }}
             >
               <option value="">不关联素材</option>
               {assets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
             <label className="block text-sm text-slate-300">提示词方案（自动生成并用于本次图片生成）
-              <select className={field + " mt-2"} value={promptMode} onChange={(e) => setPromptMode(e.target.value)}>
+              <select className={field + " mt-2"} value={promptMode} onChange={(e) => { setPromptMode(e.target.value); setGeneratedPrompt(""); }}>
                 <option value="professional">专业详细提示词（推荐）</option>
                 <option value="cinematic">电影镜头风格提示词</option>
                 <option value="concise">简洁提示词</option>
