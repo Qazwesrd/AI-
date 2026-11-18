@@ -4,7 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException
 
-from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLease, TaskExecutionLog
+from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLease, TaskExecutionLog, TaskQueueEntry
 
 
 def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
@@ -23,6 +23,17 @@ def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
     if active_existing:
         raise HTTPException(409, "该任务已有执行租约，已阻止重复执行")
 
+    queued = db.query(TaskQueueEntry).filter(
+        TaskQueueEntry.source == source, TaskQueueEntry.task_id == task_id
+    ).first()
+    _refresh_queue_ready(db)
+    ready_head = db.query(TaskQueueEntry).filter(
+        TaskQueueEntry.status == "ready_to_run"
+    ).order_by(TaskQueueEntry.priority.desc(), TaskQueueEntry.queued_at.asc(), TaskQueueEntry.id.asc()).first()
+    control = db.query(TaskRuntimeControl).filter(TaskRuntimeControl.id == 1).first()
+    if control.active_count >= control.max_concurrency or (ready_head and (not queued or ready_head.id != queued.id)):
+        queued_info = enqueue_task(db, source, task_id, priority, "等待全局并发名额；不会自动提交 AI 请求")
+        raise HTTPException(429, f"任务已进入持久化等待队列，第 {queued_info['position']} 位；名额空出后请回所属模块手动执行")
     updated = db.query(TaskRuntimeControl).filter(
         TaskRuntimeControl.id == 1,
         TaskRuntimeControl.active_count < TaskRuntimeControl.max_concurrency,
@@ -31,8 +42,8 @@ def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
         synchronize_session=False,
     )
     if not updated:
-        db.rollback()
-        raise HTTPException(429, "已达到全局任务并发上限，请等待其他任务完成后再执行")
+        queued_info = enqueue_task(db, source, task_id, priority, "等待全局并发名额")
+        raise HTTPException(429, f"任务已进入持久化等待队列，第 {queued_info['position']} 位")
 
     existing = db.query(TaskExecutionLease).filter(
         TaskExecutionLease.source == source, TaskExecutionLease.task_id == task_id
@@ -56,7 +67,7 @@ def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
             priority=max(-100, min(100, int(priority))), owner_token=token,
             started_at=now, heartbeat_at=now,
         ))
-    db.add(TaskExecutionLog(source=source, task_id=task_id, event="started", message="用户手动启动任务"))
+    if queued:\n        db.delete(queued)\n    db.add(TaskExecutionLog(source=source, task_id=task_id, event="started", message="用户手动启动任务"))
     try:
         db.commit()
     except IntegrityError:
@@ -127,7 +138,7 @@ def runtime_snapshot(db):
         "active_count": control.active_count,
         "available_slots": max(0, control.max_concurrency - control.active_count),
         "leases": items,
-        "stale_leases": [item for item in items if item["age_seconds"] >= 1800],
+        "stale_leases": [item for item in items if item["age_seconds"] >= 1800],\n        "queue": queue_snapshot(db, 100),
         "note": "超过30分钟的租约仅标记为待核实，不自动释放，避免远程AI任务仍在运行时重复提交。",
     }
 
