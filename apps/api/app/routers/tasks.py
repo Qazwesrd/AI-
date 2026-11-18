@@ -194,6 +194,8 @@ def manually_release_stale_lease(
         for key, state in list(states.items()):
             if state in ("submitting", "submission_unknown", "interrupted_unknown"):
                 states[key] = "pending"
+        if not states and task.completed_chunks < task.total_chunks:
+            states[str(task.completed_chunks + 1)] = "pending"
         task.chunk_results = _merge_analysis_chunk_payload(saved, states)
         task.status = "partial"
         task.last_error = "用户已核对文本模型服务商记录并确认没有对应请求或待结算费用；可返回小说详情页手动续作。"
@@ -515,6 +517,8 @@ def control_unified_task(
                 raise HTTPException(409, "小说分析任务仍有活动执行租约；请等待任务结束或先扫描中断任务")
         for key in unknown:
             states[key] = "pending"
+        if not unknown and not states and job.completed_chunks < job.total_chunks:
+            states[str(job.completed_chunks + 1)] = "pending"
         job.chunk_results = _merge_analysis_chunk_payload(saved, states)
         job.status = "partial"
         job.last_error = "用户已核对文本模型服务商用量记录并确认无对应请求或待结算费用；可返回小说详情页手动续作。"
