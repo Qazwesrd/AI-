@@ -17,18 +17,19 @@ def _refresh_queue_ready(db):
     control = db.query(TaskRuntimeControl).filter(TaskRuntimeControl.id == 1).first()
     if not control:
         return
-    available = max(0, int(control.max_concurrency or 0) - int(control.active_count or 0))
-    already_ready = db.query(TaskQueueEntry).filter(
+    # Recalculate readiness on every queue change so a newly arrived higher-priority
+    # task can move ahead of a lower-priority task that has not started yet.
+    db.query(TaskQueueEntry).filter(
         TaskQueueEntry.status == "ready_to_run"
-    ).count()
-    slots = max(0, available - already_ready)
+    ).update({TaskQueueEntry.status: "waiting", TaskQueueEntry.ready_at: None}, synchronize_session=False)
+    available = max(0, int(control.max_concurrency or 0) - int(control.active_count or 0))
     waiting = db.query(TaskQueueEntry).filter(
         TaskQueueEntry.status == "waiting"
     ).order_by(
         TaskQueueEntry.priority.desc(),
         TaskQueueEntry.queued_at.asc(),
         TaskQueueEntry.id.asc(),
-    ).limit(slots).all()
+    ).limit(available).all()
     now = datetime.utcnow()
     for entry in waiting:
         entry.status = "ready_to_run"
