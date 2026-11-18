@@ -246,7 +246,7 @@ def download_task_result_file(file_id: int, db: Session = Depends(get_db)):
 class RegisterDownloadedFile(BaseModel):
     taskId: str = Field(min_length=1, max_length=120)
     filename: str = Field(min_length=1, max_length=255)
-    storedName: str = Field(pattern=r"^[a-f0-9]{32}\\.(png|jpg|jpeg|webp|gif|mp4|mov|webm|mkv|mp3|wav|m4a|aac|txt|md|json|srt|vtt|pdf|docx|csv)$")
+    storedName: str = Field(pattern=r"^[a-f0-9]{32}\.(png|jpg|jpeg|webp|gif|mp4|mov|webm|mkv|mp3|wav|m4a|aac|txt|md|json|srt|vtt|pdf|docx|csv)$")
     contentType: str = Field(default="application/octet-stream", max_length=160)
     size: int = Field(ge=0, le=2 * 1024 * 1024 * 1024)
 
