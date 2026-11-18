@@ -222,7 +222,7 @@ export default function TasksPage() {
             <p className="mb-2 text-xs text-amber-200">发现超过30分钟的遗留执行租约。系统不会自动释放；只有核对服务商确认没有远程任务后，才可手动释放占用。</p>
             {runtime.stale_leases.map(item => <div key={item.source + ":" + item.task_id} className="flex flex-wrap items-center justify-between gap-2 border-t border-white/5 py-2 text-xs">
               <span>{item.source} #{item.task_id} · 已占用 {Math.floor(item.age_seconds / 60)} 分钟</span>
-              {item.source === "image" ? <button onClick={async () => {
+              {(item.source === "image" || item.source === "analysis") ? <button onClick={async () => {
                 if (!window.confirm("请先到图像服务商控制台核对。只有确认没有仍在运行的远程任务、不会发生重复扣费，才能释放本地并发占用。确认已核实？")) return;
                 try {
                   const response = await fetch(API + "/api/tasks/runtime/leases/" + item.source + "/" + item.task_id + "/release?confirm_no_remote_job=true", {method:"POST"});
