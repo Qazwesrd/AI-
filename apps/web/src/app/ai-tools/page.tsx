@@ -66,6 +66,7 @@ export default function AIToolsPage() {
   const [tools, setTools] = useState<Tool[]>(presets);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [category, setCategory] = useState<ToolCategory>("text");
+  const [promptMode, setPromptMode] = useState("professional");
   const [toolId, setToolId] = useState("chatgpt");
   const [title, setTitle] = useState("小说章节改编为漫剧剧本");
   const [sourceText, setSourceText] = useState("");
@@ -185,6 +186,7 @@ export default function AIToolsPage() {
     if (!chosen.length) { setNotice("请先勾选需要加入队列的章节。"); return; }
     if (chosen.length > 5) { setNotice("单批最多选择 5 个章节，请分批加入。"); return; }
     const plannedCount = chosen.length * 4;
+    const promptQuality = promptMode === "concise" ? "提示词风格：简洁、明确、结构化，避免重复。" : promptMode === "cinematic" ? "提示词风格：电影级叙事与视觉表达，强调镜头感、情绪节奏、构图和光影。" : "提示词风格：专业影视制作标准，细节完整、逻辑严谨、便于执行。";
     if (!window.confirm(`将读取所选 ${chosen.length} 个章节，为每章准备深度分析、剧本改编、视觉素材提示词、分镜规划 4 项任务，共 ${plannedCount} 项。内容只会保存在本地任务中，不会自动发送到 AI 网页。继续吗？`)) return;
     setLoadingChapter(true);
     setNotice("正在读取章节并准备任务队列，请稍候…");
@@ -209,7 +211,7 @@ export default function AIToolsPage() {
           queued.push({
             id: makeId(), title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`,
             category: stage.category, toolId: target.id,
-            prompt: `${stage.instruction}\n\n【小说章节原文】\n${source}\n\n【统一要求】尊重原著；不确定处明确标记；输出结构清晰，便于 AI 漫剧制作大师整理归档。`,
+            prompt: `${stage.instruction}\n\n【小说章节原文】\n${source}\n\n【统一要求】尊重原著；不确定处明确标记；输出结构清晰，便于 AI 漫剧制作大师整理归档。\n\n【提示词风格】\n${promptQuality}`,
             status: "prepared", resultText: "", resultUrl: "", createdAt: new Date().toISOString(),
           });
         }
@@ -301,7 +303,8 @@ export default function AIToolsPage() {
   }, [selectedTool, toolId]);
 
   function buildPrompt() {
-    return `${taskExamples[category]}\n\n【任务名称】\n${title.trim()}\n\n【项目资料 / 原文 / 设定】\n${sourceText.trim() || "请在此处补充小说原文、人物设定、场景设定或分镜要求。"}\n\n【输出要求】\n请输出可供 AI 漫剧制作大师整理归档的清晰内容；不要省略关键设定。若生成图片或视频，请按当前工具支持的方式提供可下载的原始文件。`;
+    const quality = promptMode === "concise" ? "请使用简洁、明确、结构化的表达，避免重复。" : promptMode === "cinematic" ? "请采用电影级叙事与视觉表达，强调镜头感、情绪节奏、构图和光影。" : "请采用专业影视制作标准，细节完整、逻辑严谨、可直接进入后续制作流程。";
+    return `${taskExamples[category]}\n\n【任务名称】\n${title.trim()}\n\n【项目资料 / 原文 / 设定】\n${sourceText.trim() || "请在此处补充小说原文、人物设定、场景设定或分镜要求。"}\n\n【提示词风格】\n${quality}\n\n【输出要求】\n请输出可供 AI 漫剧制作大师整理归档的清晰内容；不要省略关键设定。若生成图片或视频，请按当前工具支持的方式提供可下载的原始文件。`;
   }
 
   async function copyText(value: string) {
@@ -497,6 +500,13 @@ export default function AIToolsPage() {
               </label>
             </div>
             {selectedTool && <p className="mt-2 text-xs text-slate-400">{selectedTool.note} · {selectedTool.url}</p>}
+            <label className="mt-4 block text-sm text-purple-200">提示词方案（自动匹配任务并用于生成）
+              <select value={promptMode} onChange={(event) => setPromptMode(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-3 text-white">
+                <option value="professional">专业详细提示词（推荐）</option>
+                <option value="cinematic">电影级叙事 / 视觉提示词</option>
+                <option value="concise">简洁提示词</option>
+              </select>
+            </label>
             <label className="mt-4 block text-sm text-purple-200">任务名称
               <input value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-white/10 bg-slate-900 px-3 py-3 text-white outline-none focus:border-purple-300/60" placeholder="例如：第一章改编为第1集剧本" />
             </label>
@@ -559,7 +569,7 @@ export default function AIToolsPage() {
               <textarea value={sourceText} onChange={(event) => setSourceText(event.target.value)} rows={8} className="mt-2 w-full resize-y rounded-xl border border-white/10 bg-slate-900 px-3 py-3 text-sm leading-6 text-white outline-none focus:border-purple-300/60" placeholder="粘贴需要交给 AI 网页处理的内容。建议按章节或镜头分批提交。" />
             </label>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button onClick={createTask} className="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold shadow-lg shadow-purple-950/40 hover:brightness-110">生成任务提示词</button>
+              <button onClick={createTask} className="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-5 py-3 text-sm font-semibold shadow-lg shadow-purple-950/40 hover:brightness-110">直接创建任务（自动准备提示词）</button>
               <button onClick={() => void copyText(buildPrompt())} className="rounded-xl border border-purple-300/30 px-5 py-3 text-sm text-purple-100 hover:bg-purple-950/50">只复制提示词</button>
             </div>
           </div>
@@ -608,6 +618,11 @@ export default function AIToolsPage() {
                       <h3 className="font-semibold">{task.title}</h3>
                       <p className="mt-1 text-xs text-slate-400">{categoryLabels[task.category]} · {tool?.name ?? "工具已删除"} · {new Date(task.createdAt).toLocaleString()}</p>
                       <p className="mt-2 text-xs text-slate-400">状态：{task.status === "prepared" ? "已准备" : task.status === "opened" ? "已打开网页 / 等待生成" : "结果已登记"}</p>
+                      <details className="mt-3 rounded-lg border border-purple-300/15 bg-purple-950/20 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-purple-200">查看本任务实际使用的提示词（可复制）</summary>
+                        <textarea readOnly value={task.prompt} rows={7} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs leading-5 text-slate-200" />
+                        <button type="button" onClick={() => void copyText(task.prompt)} className="mt-2 rounded-lg border border-purple-300/30 px-3 py-1.5 text-xs text-purple-100">复制本任务提示词</button>
+                      </details>
                       {task.resultUrl && <a href={task.resultUrl} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs text-cyan-300 underline">结果链接：{task.resultUrl}</a>}
                       {task.resultText && <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-xs text-slate-300">{task.resultText}</p>}
                     </div>

@@ -67,6 +67,7 @@ export default function VisualStudioPage() {
   const [consistency, setConsistency] = useState("");
   const [style, setStyle] = useState(styles[0]);
   const [prompt, setPrompt] = useState("");
+  const [promptMode, setPromptMode] = useState("professional");
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [confirm3dPaid, setConfirm3dPaid] = useState(false);
@@ -166,15 +167,20 @@ export default function VisualStudioPage() {
       : category === "buildings"
       ? "生成建筑正立面、侧立面和整体轴测参考图，保持建筑结构、层数、屋顶、门窗、材质和比例一致。"
       : "生成电影级环境概念设定图，建立明确空间布局、地形、建筑位置、光照方向、天气、时间和可供人物行动的区域；保持可复用的场景地理结构。";
-    const full = `${base}${prompt}。${viewGuide}视觉风格：${style}。高质量电影级3D资产设定，清晰锐利，真实材质细节，统一比例，专业角色/道具设计稿。`;
-    setPrompt(full);
+    const subject = prompt.trim() ? `用户补充要求：${prompt.trim()}。` : (name.trim() ? `素材名称：${name.trim()}。` : `请根据${category === "characters" ? "人物" : category === "scenes" ? "场景" : "道具"}类别创作一个符合项目设定的视觉资产。`);
+    const quality = promptMode === "concise"
+      ? "画面主体明确，构图简洁，重点突出，避免无关元素。"
+      : promptMode === "cinematic"
+      ? "电影级视觉设计，强调戏剧性光影、镜头构图、色彩叙事和真实空间层次。"
+      : "专业影视资产设定稿，细节完整，材质可信，结构准确，画面清晰，视觉统一。";
+    const full = `${base}${subject}。${viewGuide}视觉风格：${style}。${quality}保持角色/场景/道具在整个项目中的视觉一致性，不添加原设定中不存在的关键特征。`;
+    return full;
   }
 
   async function createTask() {
-    if (!prompt.trim()) {
-      setMessage("请填写图片生成提示词");
-      return;
-    }
+    const effectivePrompt = buildPrompt();
+    if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
+    setPrompt(effectivePrompt);
     setBusy(true);
     try {
       const response = await fetch(`${API}/api/visual/tasks`, {
@@ -184,7 +190,7 @@ export default function VisualStudioPage() {
           asset_id: selectedAsset,
           provider: "doubao",
           task_type: category,
-          prompt,
+          prompt: effectivePrompt,
           size: "2K",
           confirm_paid: confirmPaid,
         }),
@@ -434,15 +440,24 @@ export default function VisualStudioPage() {
               <option value="">不关联素材</option>
               {assets.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
-            <textarea
-              className={field}
-              rows={7}
-              placeholder="填写图片生成要求，例如：角色正面、侧面、背面三视图，纯色背景，全身站立，三个人物视角保持同一比例……"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-            />
-            <button className="rounded-xl border border-sky-300/30 bg-sky-700/60 px-4 py-2 text-sm text-white hover:bg-sky-600" onClick={buildPrompt}>
-              根据素材设定组合提示词
+            <label className="block text-sm text-slate-300">提示词方案（自动生成并用于本次图片生成）
+              <select className={field + " mt-2"} value={promptMode} onChange={(e) => setPromptMode(e.target.value)}>
+                <option value="professional">专业详细提示词（推荐）</option>
+                <option value="cinematic">电影镜头风格提示词</option>
+                <option value="concise">简洁提示词</option>
+              </select>
+            </label>
+            <label className="block text-sm text-slate-300">提示词内容（可选编辑；留空时软件自动组合）
+              <textarea
+                className={field + " mt-2"}
+                rows={7}
+                placeholder="可填写额外要求；也可以留空，软件会根据素材类别、设定和画风自动生成完整提示词。"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+              />
+            </label>
+            <button type="button" className="rounded-xl border border-sky-300/30 bg-sky-700/60 px-4 py-2 text-sm text-white hover:bg-sky-600" onClick={() => setPrompt(buildPrompt())}>
+              预览 / 更新提示词（可选）
             </button>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} />

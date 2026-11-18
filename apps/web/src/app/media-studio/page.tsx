@@ -19,6 +19,7 @@ export default function MediaStudioPage() {
   const [provider, setProvider] = useState("openai");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [videoPromptMode, setVideoPromptMode] = useState("cinematic");
   const [duration, setDuration] = useState(10);
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [tasks, setTasks] = useState<MediaTask[]>([]);
@@ -38,13 +39,23 @@ export default function MediaStudioPage() {
   useEffect(() => { loadTasks(); }, []);
 
   async function createVideo() {
-    setMessage("正在提交真实视频生成请求……");
+    if (!prompt.trim()) {
+      setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
+      return;
+    }
+    const styleInstruction = videoPromptMode === "animation"
+      ? "采用高质量动画电影视觉表现，动作自然流畅，角色造型稳定，色彩统一。"
+      : videoPromptMode === "realistic"
+      ? "采用真人电影写实视觉，真实光影、自然运动、可信材质和摄影机语言。"
+      : "采用电影级镜头语言，强调构图、景深、光影、情绪节奏和连续性。";
+    const effectivePrompt = `视频内容与动作：${prompt.trim()}。\n\n生成要求：严格围绕上述内容，不擅自改变人物身份、服装、场景和关键动作；镜头运动平滑，动作前后连贯，避免画面闪烁、肢体畸形、主体漂移和无关文字水印。\n视觉方案：${styleInstruction}\n时长：${duration} 秒。请输出完整、可执行的视频生成结果。`;
+    setMessage("正在自动组合视频提示词并提交真实视频生成请求……");
     try {
       const response = await fetch(`${API}/api/media/video/tasks`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider, model, prompt, duration,
+          provider, model, prompt: effectivePrompt, duration,
           confirm_paid: confirmPaid
         })
       });
@@ -113,10 +124,17 @@ export default function MediaStudioPage() {
             <input value={model} onChange={e => setModel(e.target.value)}
               placeholder="填写服务商提供的视频模型 ID"
               className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">视频描述</label>
+            <label className="mb-2 block text-sm">视频内容描述</label>
             <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
               rows={5} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3"
-              placeholder="描述人物动作、场景、镜头运动和画面风格" />
+              placeholder="描述人物动作、场景、镜头内容；软件会自动将描述组合成完整视频提示词。" />
+            <label className="mb-2 block text-sm">提示词方案（自动应用）</label>
+            <select value={videoPromptMode} onChange={e => setVideoPromptMode(e.target.value)}
+              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3">
+              <option value="cinematic">电影级镜头语言（推荐）</option>
+              <option value="realistic">真人电影写实</option>
+              <option value="animation">动画电影风格</option>
+            </select>
             <label className="mb-2 block text-sm">视频时长（秒）</label>
             <input type="number" min={1} max={600} value={duration}
               onChange={e => setDuration(Number(e.target.value))}
