@@ -1,0 +1,21 @@
+# AI 网页工具协同中心：第二阶段
+
+## 新增能力
+
+- 工具配置和任务记录写入本地 SQLite（web_ai_tools、web_ai_tasks），不再只能依赖浏览器 localStorage。
+- 提供工具列表、创建/更新/删除接口。
+- 提供任务列表、创建/更新/删除接口。
+- 任务结构预留项目、小说、章节、人物、场景关联 ID。
+- 限制网址为 HTTP/HTTPS；不接收第三方密码、Cookie 或会话令牌。
+- 任务状态包括 prepared、opened、completed、failed、needs_review。
+
+## API
+
+- GET/PUT/DELETE /api/web-ai/tools
+- GET/POST/PATCH/DELETE /api/web-ai/tasks
+
+所有接口均为本地工作区数据管理，不会调用 AI 服务商，也不会自动产生费用。
+
+## 当前阶段边界
+
+结果文本和链接可持久化；二进制媒体文件仍通过现有素材库上传流程导入。本阶段不尝试读取第三方网页 DOM、会话 Cookie 或绕过验证码。文件与任务的自动绑定、素材上传接口联动和浏览器下载收集留待下一阶段。
