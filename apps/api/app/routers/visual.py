@@ -83,6 +83,15 @@ def mark_image_submission_unknown(task, error: str):
     )[:2000]
 
 
+def tripo_task_action(task):
+    """Return a safe action for an existing 3D task; never resubmit uncertain work."""
+    if task.status in ("submitting", "interrupted_unknown"):
+        return "review"
+    if task.status in ("submitted", "running") and (task.result_url or "").startswith("tripo-task:"):
+        return "reuse"
+    return "new"
+
+
 @router.get("/assets")
 def list_assets(category: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(VisualAsset)
@@ -760,13 +769,27 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
         raise HTTPException(404, "素材不存在")
     if not asset.confirmed:
         raise HTTPException(409, "请先确认人物/场景/道具设定，再生成三维模型")
+
     active = db.query(ImageTask).filter(
         ImageTask.asset_id == asset_id,
         ImageTask.task_type == "model3d_multiview",
-        ImageTask.status.in_(("submitted", "running")),
+        ImageTask.status.in_(("submitting", "submitted", "running", "interrupted_unknown")),
     ).order_by(ImageTask.id.desc()).first()
-    if active and (active.result_url or "").startswith("tripo-task:"):
-        return {"success": True, "task_id": active.id, "status": active.status, "message": "该素材已有正在处理的 3D 任务，已返回现有任务，避免重复扣费。"}
+    if active:
+        action = tripo_task_action(active)
+        if action == "review":
+            raise HTTPException(
+                409,
+                f"该素材已有 3D 任务（本地任务 #{active.id}）处于提交中断或结果待核实状态。"
+                "请先核对 Tripo 控制台；确认没有远程任务后，再从统一任务中心人工释放提交锁，"
+                "不得直接重复提交。",
+            )
+        if action == "reuse":
+            return {
+                "success": True, "task_id": active.id, "status": active.status,
+                "message": "该素材已有正在处理的 3D 任务，已返回现有任务，避免重复扣费。",
+            }
+
     provider, api_key, base = _tripo_provider(db, payload.provider, payload.confirm_paid)
     data = asset.data if isinstance(asset.data, dict) else {}
     views = data.get("generated_views") if isinstance(data.get("generated_views"), dict) else {}
@@ -782,7 +805,54 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
         raise HTTPException(409, "缺少正面参考图，请先生成并确认正面视图")
     if not side_path and not back_path:
         raise HTTPException(409, "至少还需要侧面或背面图片；请先生成完整三视图")
+
+    # A stable per-asset lease serializes simultaneous submissions even when
+    # two requests arrive before either one has inserted an ImageTask row.
+    # The lease also consumes the shared global concurrency budget.
+    acquire_task_lease(db, "image3d_asset", asset.id, priority=5)
+
+    task = None
+    request_started = False
     try:
+        # Re-check after acquiring the per-asset lease to close the race between
+        # the first lookup and the actual remote submission.
+        active = db.query(ImageTask).filter(
+            ImageTask.asset_id == asset_id,
+            ImageTask.task_type == "model3d_multiview",
+            ImageTask.status.in_(("submitting", "submitted", "running", "interrupted_unknown")),
+        ).order_by(ImageTask.id.desc()).first()
+        if active:
+            action = tripo_task_action(active)
+            release_task_lease(db, "image3d_asset", asset.id, True)
+            if action == "review":
+                raise HTTPException(409, "已有 3D 提交结果待人工核实；为避免重复扣费，已阻止再次提交。")
+            if action == "reuse":
+                return {
+                    "success": True, "task_id": active.id, "status": active.status,
+                    "message": "已返回现有 3D 任务，避免重复提交。",
+                }
+
+        # Persist a local placeholder BEFORE any remote submission call. If
+        # the desktop app exits or the DB connection drops, this record survives.
+        task = ImageTask(
+            asset_id=asset.id, provider=payload.provider,
+            task_type="model3d_multiview", prompt=f"多视图生成 3D 模型：{asset.name}",
+            size="GLB", status="submitting",
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+
+        asset_data = dict(asset.data) if isinstance(asset.data, dict) else {}
+        asset_data["model3d_task"] = {
+            "task_id": task.id, "provider": payload.provider, "model": payload.model,
+            "status": "submitting", "submitted_at": datetime.utcnow().isoformat(),
+            "format": "GLB",
+        }
+        asset.data = asset_data
+        asset.updated_at = datetime.utcnow()
+        db.commit()
+
         front_file = _safe_visual_view_path(front_path)
         tokens = {"front": _tripo_upload_image(front_file, api_key, base)}
         if side_path:
@@ -798,41 +868,74 @@ def create_tripo_3d_model(asset_id: int, payload: TripoModelInput, db: Session =
             "texture_quality": payload.texture_quality,
             "geometry_quality": payload.geometry_quality,
         }
+
+        # From this point on, an exception can mean the provider accepted and
+        # billed the generation even if the response was lost or malformed.
+        request_started = True
         result = _tripo_json(base + "/generation/multiview-to-model", api_key, body)
         remote_id = (result.get("data") or {}).get("task_id")
         if not remote_id:
-            raise RuntimeError("Tripo 未返回三维生成任务编号")
-        task = ImageTask(
-            asset_id=asset.id, provider=payload.provider,
-            task_type="model3d_multiview", prompt=f"多视图生成 3D 模型：{asset.name}",
-            size="GLB", status="submitted",
-            result_url="tripo-task:" + str(remote_id),
-        )
-        db.add(task)
+            raise RuntimeError("Tripo 已收到提交请求，但未返回可核实的远程任务编号")
+
+        task.status = "submitted"
+        task.result_url = "tripo-task:" + str(remote_id)
+        task.error = ""
         db.add(AIUsageLog(
             provider=payload.provider, model=payload.model, task="visual_multiview_to_3d",
-            status="submitted", detail=f"素材：{asset.name}；输入视角：{','.join(tokens.keys())}",
+            status="submitted", detail=f"素材：{asset.name}；本地任务：{task.id}；远程任务：{remote_id}；输入视角：{','.join(tokens.keys())}",
         ))
-        db.commit()
-        db.refresh(task)
-        data = dict(asset.data) if isinstance(asset.data, dict) else {}
-        data["model3d_task"] = {
+        asset_data = dict(asset.data) if isinstance(asset.data, dict) else {}
+        asset_data["model3d_task"] = {
             "task_id": task.id, "provider": payload.provider, "model": payload.model,
             "status": "submitted", "remote_task_id": str(remote_id),
             "submitted_at": datetime.utcnow().isoformat(),
             "input_views": list(tokens.keys()), "format": "GLB",
         }
-        asset.data = data
+        asset.data = asset_data
+        asset.updated_at = datetime.utcnow()
         db.commit()
-        return {"success": True, "task_id": task.id, "remote_task_id": str(remote_id), "status": "submitted", "input_views": list(tokens.keys()), "message": "已将三视图上传并提交真实 3D 模型生成任务；请稍后查询任务。"}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:1600]
-        db.add(AIUsageLog(provider=payload.provider, model=payload.model, task="visual_multiview_to_3d", status="failed", detail=f"HTTP {exc.code}: {detail}"))
-        db.commit()
-        raise HTTPException(502, f"Tripo API HTTP {exc.code}：{detail}") from exc
+        db.refresh(task)
+        release_task_lease(db, "image3d_asset", asset.id, True)
+        return {
+            "success": True, "task_id": task.id, "remote_task_id": str(remote_id),
+            "status": "submitted", "input_views": list(tokens.keys()),
+            "message": "已保存本地任务记录并提交真实 3D 模型生成任务；请稍后查询任务。",
+        }
+
+    except HTTPException:
+        db.rollback()
+        if task is not None:
+            task = db.query(ImageTask).filter(ImageTask.id == task.id).first()
+            if task:
+                task.status = "interrupted_unknown" if request_started else "failed"
+                task.error = (
+                    "3D 生成请求已发出，提交结果不确定。请先核对 Tripo 控制台；"
+                    "确认没有远程任务后才能人工释放提交锁并重新提交。"
+                    if request_started else "3D 任务在远程生成请求发出前失败。"
+                )
+                db.commit()
+        release_task_lease(db, "image3d_asset", asset.id, False, "3D 提交流程异常")
+        raise
     except Exception as exc:
-        db.add(AIUsageLog(provider=payload.provider, model=payload.model, task="visual_multiview_to_3d", status="failed", detail=str(exc)[:1600]))
-        db.commit()
+        db.rollback()
+        if task is not None:
+            task = db.query(ImageTask).filter(ImageTask.id == task.id).first()
+            if task:
+                task.status = "interrupted_unknown" if request_started else "failed"
+                task.error = (
+                    "3D 生成请求已发出，但结果未能可靠确认。请先核对 Tripo 控制台；"
+                    "确认没有远程任务后才能人工释放提交锁并重新提交。原始错误："
+                    if request_started else "3D 任务在远程生成请求发出前失败："
+                ) + str(exc)[:1500]
+                task.error = task.error[:2000]
+                db.add(AIUsageLog(
+                    provider=payload.provider, model=payload.model,
+                    task="visual_multiview_to_3d",
+                    status="interrupted_unknown" if request_started else "failed",
+                    detail=str(exc)[:1600],
+                ))
+                db.commit()
+        release_task_lease(db, "image3d_asset", asset.id, False, str(exc)[:2000])
         raise HTTPException(502, "提交 Tripo 3D 任务失败：" + str(exc)[:1600]) from exc
 
 
