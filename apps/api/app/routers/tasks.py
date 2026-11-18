@@ -331,13 +331,19 @@ def reconcile_stale_tasks(
         MediaTask.status == "submitting",
         MediaTask.updated_at < cutoff,
     ).all()
+    image_marked = 0
     for task in image_tasks:
+        # A 3D task with a persisted remote ID is known to have been accepted;
+        # it must remain refreshable rather than being mislabeled as unknown.
+        if task.task_type.startswith("model3d_") and (task.result_url or "").startswith("tripo-task:"):
+            continue
         task.status = "interrupted_unknown"
         task.error = (
             f"任务已运行超过 {minutes} 分钟，可能在应用关闭或网络中断时失去执行结果。"
             "请先核对图像服务商记录；确认未创建任务后，才能手动重新排队。"
         )
         task.finished_at = datetime.utcnow()
+        image_marked += 1
     for task in media_tasks:
         task.status = "submission_unknown"
         task.error = (
@@ -347,7 +353,7 @@ def reconcile_stale_tasks(
     db.commit()
     return {
         "success": True,
-        "image_marked_for_review": len(image_tasks),
+        "image_marked_for_review": image_marked,
         "media_marked_for_review": len(media_tasks),
         "message": "已标记需要人工核实的任务；没有自动重试、重新提交或产生新的 AI 调用。",
     }
