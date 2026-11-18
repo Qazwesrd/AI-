@@ -96,6 +96,19 @@ def queue_snapshot(db, limit: int = 100):
     }
 
 
+def remove_queued_task(db, source: str, task_id: int):
+    entry = db.query(TaskQueueEntry).filter(
+        TaskQueueEntry.source == source,
+        TaskQueueEntry.task_id == task_id,
+    ).first()
+    if not entry:
+        return False
+    db.delete(entry)
+    db.commit()
+    _refresh_queue_ready(db)
+    return True
+
+
 def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
     control = db.query(TaskRuntimeControl).filter(TaskRuntimeControl.id == 1).first()
     if not control:
