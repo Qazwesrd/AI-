@@ -202,3 +202,56 @@ def storyboard_match_suggestions(payload: MatchPayload, db: Session = Depends(ge
             "reason": "名称或别名匹配；请核对剧情时间点和素材版本",
         } for score, asset in ranked[:5]], "missing": not bool(ranked)})
     return {"shot_id": shot.id, "suggestions": suggestions, "requires_user_confirmation": True}
+
+
+class ConfirmMatchPayload(BaseModel):
+    shot_id: int
+    asset_id: int
+    role: Literal["character", "scene", "prop", "weapon", "costume", "building", "special_item"]
+    chapter_number: int | None = Field(default=None, ge=1)
+
+
+@router.post("/storyboard/confirm-match")
+def confirm_storyboard_match(payload: ConfirmMatchPayload, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == payload.shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
+    if asset is None or not asset.confirmed:
+        raise HTTPException(404, "素材不存在或尚未确认")
+    project = db.query(StoryProject).filter(StoryProject.id == shot.project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    if payload.chapter_number is not None and not chapter_exists(db, project.novel_id, payload.chapter_number):
+        raise HTTPException(422, "章节编号不属于当前小说")
+    data = asset.data if isinstance(asset.data, dict) else {}
+    history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
+    applicable = [x for x in history if payload.chapter_number is None or int(x.get("chapter_number") or 0) <= payload.chapter_number]
+    latest = applicable[-1] if applicable else {}
+    snapshot = {
+        "chapter_number": latest.get("chapter_number"),
+        "event": latest.get("event", ""),
+        "change_type": latest.get("change_type", "基础状态"),
+        "appearance": latest.get("appearance_after") or asset.appearance or "",
+        "clothing": latest.get("clothing_after") or asset.clothing or "",
+        "holder": latest.get("holder", ""),
+        "confirmed": bool(latest.get("confirmed", False)),
+        "is_evolved": bool(latest),
+    }
+    link = db.query(StoryAssetLink).filter(
+        StoryAssetLink.shot_id == shot.id,
+        StoryAssetLink.asset_id == asset.id,
+        StoryAssetLink.role == payload.role,
+    ).first()
+    if link is None:
+        link = StoryAssetLink(
+            project_id=shot.project_id, episode_id=shot.episode_id,
+            shot_id=shot.id, asset_id=asset.id, role=payload.role,
+        )
+        db.add(link)
+    link.chapter_number = payload.chapter_number
+    link.state_snapshot = snapshot
+    db.commit()
+    db.refresh(link)
+    return {"success": True, "link_id": link.id, "shot_id": shot.id, "asset_id": asset.id, "chapter_number": payload.chapter_number, "state_snapshot": snapshot}
