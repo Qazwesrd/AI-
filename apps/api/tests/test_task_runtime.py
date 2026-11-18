@@ -34,6 +34,16 @@ class TaskRuntimeTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 429)
         self.assertEqual(runtime_snapshot(self.db)["active_count"], 1)
 
+
+    def test_media_and_analysis_share_global_capacity(self):
+        acquire_task_lease(self.db, "media", 20, priority=5)
+        with self.assertRaises(HTTPException) as raised:
+            acquire_task_lease(self.db, "analysis", 30, priority=10)
+        self.assertEqual(raised.exception.status_code, 429)
+        snapshot = runtime_snapshot(self.db)
+        self.assertEqual(snapshot["active_count"], 1)
+        self.assertEqual(snapshot["leases"][0]["source"], "media")
+
     def test_duplicate_execution_is_rejected(self):
         acquire_task_lease(self.db, "image", 3)
         with self.assertRaises(HTTPException) as raised:
