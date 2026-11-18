@@ -60,7 +60,8 @@ const navigation = [
       ["✂️", "AI视频剪辑", "/video-editor"],
       ["📜", "剧本与分镜", "/storyboard"],
       ["🧊", "三维素材生成", "/visual-studio"],
-      ["🧭", "统一任务中心", "/tasks"]
+      ["🧭", "统一任务中心", "/tasks"],
+      ["🌐", "AI网页工具协同中心", "/ai-tools"]
     ]
   },
   {
