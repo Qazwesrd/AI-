@@ -159,12 +159,12 @@ def manually_release_stale_lease(
             raise HTTPException(404, "小说分析任务不存在")
     elif source == "media":
         task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-        if not task or task.task_type not in ("video", "storyboard_video"):
-            raise HTTPException(404, "视频任务不存在")
+        if not task or task.task_type not in ("video", "storyboard_video", "speech", "episode_speech"):
+            raise HTTPException(404, "媒体任务不存在")
         if task.remote_task_id:
-            raise HTTPException(409, "该视频已有服务商任务编号；这是远程任务，不允许释放提交租约，请使用刷新状态功能")
+            raise HTTPException(409, "该媒体任务已有服务商远程任务编号，不能释放提交租约")
         if task.status not in ("submission_unknown", "submitting"):
-            raise HTTPException(409, "只有提交状态不确定的视频任务可以人工核实释放")
+            raise HTTPException(409, "只有提交状态不确定的媒体任务可以人工核实释放")
     else:
         raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、3D 模型提交、视频提交或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
@@ -182,8 +182,12 @@ def manually_release_stale_lease(
         task.last_error = "用户核对服务商后人工释放遗留执行租约；再次分析前请确认没有仍在运行的远程任务。"
         db.commit()
     elif source == "media":
-        task.status = "submission_unknown"
-        task.error = "用户核对视频服务商后人工释放本地遗留租约；未自动重新提交，请先确认远程任务确实不存在。"
+        if task.task_type in ("speech", "episode_speech"):
+            task.status = "failed"
+            task.error = "用户已核对语音服务商记录并确认没有远程任务或待结算请求；本地提交锁已释放，可返回配音页面重新生成。"
+        else:
+            task.status = "submission_unknown"
+            task.error = "用户核对视频服务商后人工释放本地遗留租约；未自动重新提交，请先确认远程任务确实不存在。"
         db.commit()
     elif source == "image3d_asset":
         message = "用户已核对 Tripo 控制台并确认没有远程任务；提交锁已人工释放，可在素材卡片重新发起并再次确认费用。"
@@ -404,10 +408,38 @@ def control_unified_task(
         return handler(task_id, db)
 
     if source == "media":
+        if action == "retry":
+            task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+            if not task or task.task_type not in ("speech", "episode_speech"):
+                raise HTTPException(409, "只有独立配音或分镜对白配音任务支持人工核实后重新生成")
+            if task.status not in ("submission_unknown", "interrupted_unknown", "submitting"):
+                raise HTTPException(409, "只有提交结果不确定的配音任务需要人工核实")
+            if not confirm_no_remote_job:
+                raise HTTPException(409, "请先核对语音服务商控制台/用量记录，确认没有对应远程任务或待结算请求后，再确认重新生成")
+            if task.remote_task_id:
+                raise HTTPException(409, "该配音任务已有远程任务编号，不能作为未提交任务重新生成")
+            lease = db.query(TaskExecutionLease).filter(
+                TaskExecutionLease.source == "media",
+                TaskExecutionLease.task_id == task_id,
+                TaskExecutionLease.status == "active",
+            ).first()
+            if lease:
+                age = (datetime.utcnow() - (lease.heartbeat_at or lease.started_at)).total_seconds() if (lease.heartbeat_at or lease.started_at) else 0
+                if age < 1800:
+                    raise HTTPException(409, "配音任务仍有活动执行租约；请等待任务结束或先扫描中断任务")
+            task.status = "failed"
+            task.error = "用户已核对语音服务商记录并确认没有远程任务或待结算请求；可返回配音页面重新生成。"
+            db.commit()
+            if lease:
+                release_task_lease(db, "media", task_id, False, "用户核实后释放配音任务租约")
+            return {
+                "success": True, "task_id": task_id, "status": task.status,
+                "message": "已完成配音任务人工核实并解除重试保护；请返回配音页面重新发起，系统不会自动调用 AI。",
+            }
         if action != "refresh":
             raise HTTPException(
                 409,
-                "媒体任务暂不支持本地强制暂停、取消或自动重试；请使用所属模块的安全控制流程",
+                "媒体任务暂不支持本地强制暂停或取消；视频请刷新远程状态，配音任务请走人工核实流程",
             )
         result = refresh_video_task(task_id, db)
         return {
