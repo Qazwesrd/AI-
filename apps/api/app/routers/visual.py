@@ -73,6 +73,16 @@ def get_runtime(db):
     }
 
 
+def mark_image_submission_unknown(task, error: str):
+    """Persist an explicit manual-review state after a request may have reached the provider."""
+    task.status = "interrupted_unknown"
+    task.error = (
+        "图片请求已发出，但服务商返回错误，无法仅凭本地响应确认是否创建或计费。"
+        "请先核对图像服务商控制台；确认没有创建任务且不会重复扣费后，"
+        "再从统一任务中心人工确认重排队。原始错误：" + str(error)
+    )[:2000]
+
+
 @router.get("/assets")
 def list_assets(category: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(VisualAsset)
@@ -410,8 +420,15 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
 
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:2000]
-        task.status = "failed"
-        task.error = f"图片服务 HTTP {exc.code}: {detail}"
+        provider_error = f"图片服务 HTTP {exc.code}: {detail}"
+        # Even an HTTP error is not proof that the provider did not accept or
+        # bill a request. Once urlopen has been called, require manual
+        # reconciliation instead of making this task safely retryable.
+        if request_started:
+            mark_image_submission_unknown(task, provider_error)
+        else:
+            task.status = "failed"
+            task.error = provider_error
         db.commit()
         release_task_lease(db, "image", task.id, False, task.error)
         raise HTTPException(502, task.error)
