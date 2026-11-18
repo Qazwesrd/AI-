@@ -1,0 +1,41 @@
+import unittest
+from types import SimpleNamespace
+
+from pydantic import ValidationError
+
+from app.routers.media import SpeechInput, speech_fingerprint, speech_task_is_in_flight
+
+
+class SpeechSubmissionSafetyTests(unittest.TestCase):
+    def test_ambiguous_speech_states_are_not_safe_to_resubmit(self):
+        for status in ("queued", "submitting", "submission_unknown", "interrupted_unknown"):
+            with self.subTest(status=status):
+                task = SimpleNamespace(status=status)
+                self.assertTrue(speech_task_is_in_flight(task))
+
+    def test_pending_failed_and_completed_speech_states_are_not_in_flight(self):
+        for status in ("pending", "failed", "cancelled", "completed"):
+            with self.subTest(status=status):
+                task = SimpleNamespace(status=status)
+                self.assertFalse(speech_task_is_in_flight(task))
+
+    def test_speech_fingerprint_is_stable_for_identical_request(self):
+        first = speech_fingerprint("openai", "tts-1", "你好", "alloy", 1.0)
+        second = speech_fingerprint("openai", "tts-1", "你好", "alloy", 1.0)
+        self.assertEqual(first, second)
+
+    def test_speech_fingerprint_changes_when_voice_or_text_changes(self):
+        baseline = speech_fingerprint("openai", "tts-1", "你好", "alloy", 1.0)
+        self.assertNotEqual(baseline, speech_fingerprint("openai", "tts-1", "你好", "nova", 1.0))
+        self.assertNotEqual(baseline, speech_fingerprint("openai", "tts-1", "你好呀", "alloy", 1.0))
+
+    def test_output_format_cannot_inject_a_file_path(self):
+        with self.assertRaises(ValidationError):
+            SpeechInput(
+                provider="openai", model="tts-1", text="你好",
+                response_format="../outside.wav",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
