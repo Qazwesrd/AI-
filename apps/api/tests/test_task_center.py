@@ -64,6 +64,38 @@ class UnifiedTaskStatusTests(unittest.TestCase):
             control_unified_task("media", 4, "cancel", db=object())
         self.assertEqual(raised.exception.status_code, 409)
 
+    def test_analysis_retry_requires_explicit_provider_reconciliation(self):
+        job = Mock(
+            status="interrupted_unknown",
+            chunk_results={"1": [{"name": "saved"}], "__chunk_states__": {"2": "submission_unknown"}},
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = job
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("analysis", 51, "retry", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+    def test_analysis_retry_resets_only_unknown_chunk_after_confirmation(self):
+        job = Mock(
+            status="interrupted_unknown",
+            chunk_results={
+                "1": [{"name": "saved"}],
+                "__chunk_states__": {"1": "completed", "2": "submission_unknown"},
+            },
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [job, None]
+        result = control_unified_task(
+            "analysis", 52, "retry", confirm_no_remote_job=True, db=db
+        )
+        self.assertEqual(job.status, "partial")
+        self.assertEqual(job.chunk_results["__chunk_states__"]["1"], "completed")
+        self.assertEqual(job.chunk_results["__chunk_states__"]["2"], "pending")
+        self.assertEqual(job.chunk_results["1"], [{"name": "saved"}])
+        self.assertTrue(result["success"])
+        db.commit.assert_called_once()
+
     def test_speech_retry_requires_explicit_provider_reconciliation(self):
         task = Mock(task_type="episode_speech", status="submission_unknown", remote_task_id=None)
         db = Mock()
