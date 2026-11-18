@@ -103,6 +103,7 @@ def release_task_lease(db, source: str, task_id: int, success: bool, error: str 
         duration_seconds=duration,
     ))
     db.commit()
+    _refresh_queue_ready(db)
 
 
 def heartbeat_task_lease(db, source: str, task_id: int):
