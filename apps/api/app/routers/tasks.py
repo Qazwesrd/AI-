@@ -105,9 +105,6 @@ def manually_release_stale_lease(
         task = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == task_id).first()
         if not task:
             raise HTTPException(404, "小说分析任务不存在")
-        task.status = "partial"
-        task.last_error = "用户核对服务商后人工释放遗留执行租约；再次分析前请确认没有仍在运行的远程任务。"
-        db.commit()
     else:
         raise HTTPException(400, "当前仅支持人工核实后释放视觉图片或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
@@ -120,6 +117,10 @@ def manually_release_stale_lease(
     age = (datetime.utcnow() - lease.started_at).total_seconds() if lease.started_at else 0
     if age < 1800:
         raise HTTPException(409, "租约未超过30分钟保护期，暂不允许人工释放")
+    if source == "analysis":
+        task.status = "partial"
+        task.last_error = "用户核对服务商后人工释放遗留执行租约；再次分析前请确认没有仍在运行的远程任务。"
+        db.commit()
     release_task_lease(db, source, task_id, False, "用户核对服务商后人工释放遗留租约")
     return {"success": True, "message": "遗留租约已释放；任务不会自动重试或调用 AI。请在所属模块确认后再手动执行。"}
 
