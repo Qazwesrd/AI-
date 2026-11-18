@@ -20,7 +20,7 @@ def classify_task_error(error: str | None):
         (
             "timeout",
             ("timeout", "timed out", "deadline exceeded", "超时"),
-            "先检查服务商任务记录。若属于提交阶段且没有远程任务编号，必须核实是否已接单后再提交。",
+            "先检查服务商任务记录。若属于提交阶段且没有远程任务编号，必须核实是否已接单；核实前不要再次提交。",
         ),
         (
             "network",
