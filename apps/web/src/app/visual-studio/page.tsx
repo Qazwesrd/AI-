@@ -22,6 +22,8 @@ type Asset = {
     model3d_task?: { task_id?: number; status?: string };
     model3d?: { path?: string; format?: string };
     generated_views?: Record<string, { path?: string }>;
+    evolution_history?: Array<{ chapter_number: number; event: string; change_type: string; appearance_after?: string; clothing_after?: string; holder?: string }>;
+    current_state?: { chapter_number?: number; appearance?: string; clothing?: string; holder?: string; change_type?: string };
   };
 };
 
