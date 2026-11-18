@@ -168,7 +168,7 @@ function startProductionServices() {
 
   for (const file of [apiExe, webServer, webNodeModules, ffmpeg, ffprobe]) {
     if (!fs.existsSync(file)) {
-      throw new Error(`瀹夎鍖呯己灏戝繀瑕佹枃浠讹細${file}`);
+      throw new Error(`安装包缺少必要文件：${file}`);
     }
   }
 
