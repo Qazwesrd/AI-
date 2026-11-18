@@ -337,6 +337,13 @@ export default function TasksPage() {
                     <p className="mt-2 text-xs text-amber-200">该任务状态不确定。请先核对服务商任务记录，避免重复提交或重复扣费。</p>
                   )}
                   {task.error && <p className="mt-2 whitespace-pre-wrap break-words rounded-lg bg-red-950/30 p-2 text-xs text-red-200">{task.error}</p>}
+                  {task.failure_diagnostic?.category && task.failure_diagnostic.category !== "unknown" && <div className="mt-2 rounded-lg border border-amber-300/15 bg-amber-950/15 p-2 text-xs">
+                    <p className="text-amber-200">失败原因初步分类：{({
+                      quota_or_billing:"额度 / 计费", authentication:"授权 / 密钥", rate_limit:"请求频率限制",
+                      timeout:"请求超时", network:"网络连接", invalid_request:"请求参数",
+                    } as Record<string,string>)[task.failure_diagnostic.category] || task.failure_diagnostic.category} <span className="text-slate-500">（规则匹配，仅供排查）</span></p>
+                    <p className="mt-1 text-slate-300">{task.failure_diagnostic.guidance}</p>
+                  </div>}
                   <p className="mt-2 text-[11px] text-slate-500">最近更新：{formatTime(task.updated_at)}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
