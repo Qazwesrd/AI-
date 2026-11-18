@@ -133,8 +133,16 @@ def manually_release_stale_lease(
         task = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == task_id).first()
         if not task:
             raise HTTPException(404, "小说分析任务不存在")
+    elif source == "media":
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if not task or task.task_type not in ("video", "storyboard_video"):
+            raise HTTPException(404, "视频任务不存在")
+        if task.remote_task_id:
+            raise HTTPException(409, "该视频已有服务商任务编号；这是远程任务，不允许释放提交租约，请使用刷新状态功能")
+        if task.status not in ("submission_unknown", "submitting"):
+            raise HTTPException(409, "只有提交状态不确定的视频任务可以人工核实释放")
     else:
-        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片或小说解析任务租约")
+        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、视频提交或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
         TaskExecutionLease.source == source,
         TaskExecutionLease.task_id == task_id,
@@ -148,6 +156,10 @@ def manually_release_stale_lease(
     if source == "analysis":
         task.status = "partial"
         task.last_error = "用户核对服务商后人工释放遗留执行租约；再次分析前请确认没有仍在运行的远程任务。"
+        db.commit()
+    elif source == "media":
+        task.status = "submission_unknown"
+        task.error = "用户核对视频服务商后人工释放本地遗留租约；未自动重新提交，请先确认远程任务确实不存在。"
         db.commit()
     release_task_lease(db, source, task_id, False, "用户核对服务商后人工释放遗留租约")
     return {"success": True, "message": "遗留租约已释放；任务不会自动重试或调用 AI。请在所属模块确认后再手动执行。"}
