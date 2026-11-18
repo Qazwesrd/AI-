@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -224,7 +224,10 @@ def create_jobs(data: list[PublishInput], db: Session = Depends(get_db)):
             if not account:
                 raise HTTPException(400, f"{PLATFORMS[item.platform]}账号不存在或已停用")
 
-        if item.scheduled_at and item.scheduled_at <= datetime.utcnow():
+        scheduled_at = item.scheduled_at
+        if scheduled_at and scheduled_at.tzinfo is not None:
+            scheduled_at = scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
+        if scheduled_at and scheduled_at <= datetime.utcnow():
             raise HTTPException(400, "计划发布时间必须晚于当前时间")
 
         job = PublishJob(
@@ -235,8 +238,8 @@ def create_jobs(data: list[PublishInput], db: Session = Depends(get_db)):
             description=item.description.strip(),
             tags=[tag.strip() for tag in item.tags if tag.strip()][:50],
             cover_path=str(cover) if cover else "",
-            scheduled_at=item.scheduled_at,
-            status="scheduled" if item.scheduled_at else "pending",
+            scheduled_at=scheduled_at,
+            status="scheduled" if scheduled_at else "pending",
             idempotency_key=uuid.uuid4().hex,
         )
         db.add(job)
