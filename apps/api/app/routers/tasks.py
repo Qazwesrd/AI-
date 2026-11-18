@@ -95,13 +95,21 @@ def manually_release_stale_lease(
 ):
     if not confirm_no_remote_job:
         raise HTTPException(409, "必须先核对服务商控制台，并明确确认没有仍在运行的远程任务")
-    if source != "image":
-        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片任务租约")
-    task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
-    if not task:
-        raise HTTPException(404, "图片任务不存在")
-    if task.status == "running":
-        raise HTTPException(409, "请先执行中断扫描，将任务标记为待核实；不能释放仍标记为运行中的租约")
+    if source == "image":
+        task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+        if not task:
+            raise HTTPException(404, "图片任务不存在")
+        if task.status == "running":
+            raise HTTPException(409, "请先执行中断扫描，将任务标记为待核实；不能释放仍标记为运行中的租约")
+    elif source == "analysis":
+        task = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == task_id).first()
+        if not task:
+            raise HTTPException(404, "小说分析任务不存在")
+        task.status = "partial"
+        task.last_error = "用户核对服务商后人工释放遗留执行租约；再次分析前请确认没有仍在运行的远程任务。"
+        db.commit()
+    else:
+        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
         TaskExecutionLease.source == source,
         TaskExecutionLease.task_id == task_id,
