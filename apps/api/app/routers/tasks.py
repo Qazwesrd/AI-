@@ -201,7 +201,7 @@ def control_unified_task(
     source: str,
     task_id: int,
     action: str,
-    confirm_no_remote_job: bool = Query(default=False),
+    confirm_no_remote_job: bool = False,
     db: Session = Depends(get_db),
 ):
     """统一任务中心的显式人工操作入口；不自动执行 AI 生成。"""
