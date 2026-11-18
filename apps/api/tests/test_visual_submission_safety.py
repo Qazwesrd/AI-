@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from app.routers.visual import mark_image_submission_unknown
+from app.routers.visual import mark_image_submission_unknown, tripo_task_action
 
 
 class ImageSubmissionSafetyTests(unittest.TestCase):
@@ -21,6 +21,22 @@ class ImageSubmissionSafetyTests(unittest.TestCase):
         mark_image_submission_unknown(task, "x" * 5000)
 
         self.assertLessEqual(len(task.error), 2000)
+
+    def test_tripo_submission_in_progress_is_never_resubmitted(self):
+        task = SimpleNamespace(status="submitting", result_url="")
+        self.assertEqual(tripo_task_action(task), "review")
+
+    def test_tripo_ambiguous_submission_is_never_resubmitted(self):
+        task = SimpleNamespace(status="interrupted_unknown", result_url="")
+        self.assertEqual(tripo_task_action(task), "review")
+
+    def test_existing_remote_tripo_task_is_reused(self):
+        task = SimpleNamespace(status="submitted", result_url="tripo-task:remote-123")
+        self.assertEqual(tripo_task_action(task), "reuse")
+
+    def test_completed_tripo_task_can_be_replaced_by_a_new_explicit_submission(self):
+        task = SimpleNamespace(status="completed", result_url="https://example.invalid/model.glb")
+        self.assertEqual(tripo_task_action(task), "new")
 
 
 if __name__ == "__main__":
