@@ -186,6 +186,7 @@ export default function AIToolsPage() {
     if (!chosen.length) { setNotice("请先勾选需要加入队列的章节。"); return; }
     if (chosen.length > 5) { setNotice("单批最多选择 5 个章节，请分批加入。"); return; }
     const plannedCount = chosen.length * 4;
+    const promptQuality = promptMode === "concise" ? "提示词风格：简洁、明确、结构化，避免重复。" : promptMode === "cinematic" ? "提示词风格：电影级叙事与视觉表达，强调镜头感、情绪节奏、构图和光影。" : "提示词风格：专业影视制作标准，细节完整、逻辑严谨、便于执行。";
     if (!window.confirm(`将读取所选 ${chosen.length} 个章节，为每章准备深度分析、剧本改编、视觉素材提示词、分镜规划 4 项任务，共 ${plannedCount} 项。内容只会保存在本地任务中，不会自动发送到 AI 网页。继续吗？`)) return;
     setLoadingChapter(true);
     setNotice("正在读取章节并准备任务队列，请稍候…");
@@ -210,7 +211,7 @@ export default function AIToolsPage() {
           queued.push({
             id: makeId(), title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`,
             category: stage.category, toolId: target.id,
-            prompt: `${stage.instruction}\n\n【小说章节原文】\n${source}\n\n【统一要求】尊重原著；不确定处明确标记；输出结构清晰，便于 AI 漫剧制作大师整理归档。`,
+            prompt: `${stage.instruction}\n\n【小说章节原文】\n${source}\n\n【统一要求】尊重原著；不确定处明确标记；输出结构清晰，便于 AI 漫剧制作大师整理归档。\n\n【提示词风格】\n${promptQuality}`,
             status: "prepared", resultText: "", resultUrl: "", createdAt: new Date().toISOString(),
           });
         }
