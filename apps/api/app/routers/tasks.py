@@ -11,7 +11,7 @@ from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
 from app.models.visual import ImageTask
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
-from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot
+from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task
 from app.routers.visual import (
     pause_image_task,
     resume_image_task,
@@ -61,6 +61,29 @@ def _group_counts(db: Session, model, status_column):
     return result
 
 
+
+
+
+
+@router.delete("/queue/{source}/{task_id}")
+def cancel_queued_task(source: str, task_id: int, db: Session = Depends(get_db)):
+    if source not in {"image", "media", "analysis"}:
+        raise HTTPException(400, "不支持的任务来源")
+    if not remove_queued_task(db, source, task_id):
+        raise HTTPException(404, "等待队列中不存在该任务")
+    if source == "image":
+        task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+        if task and task.status == "pending":
+            task.status = "cancelled"
+            task.error = "用户从统一等待队列移除；未调用图像服务商"
+            db.commit()
+    elif source == "media":
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if task and task.status == "queued":
+            task.status = "cancelled"
+            task.error = "用户从统一等待队列移除；未调用视频服务商"
+            db.commit()
+    return {"success": True, "message": "已从等待队列移除；不会调用 AI。"}
 
 
 @router.get("/queue")
