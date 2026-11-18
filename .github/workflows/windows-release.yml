@@ -1,0 +1,73 @@
+name: Windows desktop installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "scripts/build-windows.ps1"
+      - ".github/workflows/windows-release.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Prepare Python environment
+        shell: pwsh
+        run: |
+          python -m venv apps/api/.venv
+          apps/api/.venv/Scripts/python.exe -m pip install --upgrade pip
+          apps/api/.venv/Scripts/python.exe -m pip install -r apps/api/requirements.txt pyinstaller
+
+      - name: Install frontend and desktop dependencies
+        shell: pwsh
+        run: |
+          npm ci --prefix apps/web
+          npm ci --prefix apps/desktop
+
+      - name: Download FFmpeg tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "ffmpeg-extract"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $bin = Get-ChildItem -Path $extract -Directory | Select-Object -First 1 | ForEach-Object { Join-Path $_.FullName "bin" }
+          if (!(Test-Path (Join-Path $bin "ffmpeg.exe")) -or !(Test-Path (Join-Path $bin "ffprobe.exe"))) { throw "FFmpeg archive did not contain required executables." }
+          $target = "apps/desktop/build-resources/ffmpeg"
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          Copy-Item (Join-Path $bin "ffmpeg.exe") $target -Force
+          Copy-Item (Join-Path $bin "ffprobe.exe") $target -Force
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          ./scripts/build-windows.ps1
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Windows-Setup
+          path: apps/desktop/release/*Setup*.exe
+          if-no-files-found: error
+          retention-days: 14

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 
-from app.database import get_db, ROOT_DIR
+from app.database import get_db, ROOT_DIR, STORAGE_DIR
 from app.models.visual import VisualAsset, ImageTask
 from app.models.novel import Novel, AnalysisItem
 from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
@@ -541,8 +541,10 @@ def cancel_image_task(task_id: int, db: Session = Depends(get_db)):
 @router.get("/files/{filename}")
 def get_visual_file(filename: str):
     from fastapi.responses import FileResponse
-    path = (ASSET_DIR / Path(filename).name).resolve()
-    if not path.exists() or ASSET_DIR.resolve() not in path.parents:
+    safe_name = Path(filename).name
+    allowed_roots = [ASSET_DIR.resolve(), (STORAGE_DIR / "web_ai_results").resolve()]
+    path = next((root / safe_name for root in allowed_roots if (root / safe_name).is_file()), None)
+    if path is None or path.resolve().parent not in allowed_roots:
         raise HTTPException(404, "图片文件不存在")
     return FileResponse(path)
 
