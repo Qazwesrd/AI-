@@ -150,10 +150,30 @@ export default function TasksPage() {
             <h1 className="mt-1 text-3xl font-bold">统一任务中心</h1>
             <p className="mt-2 text-sm text-slate-300">集中查看小说解析、视觉素材、视频与配音任务的执行状态。</p>
           </div>
-          <button onClick={() => void loadTasks()} disabled={loading}
-            className="rounded-xl border border-purple-300/30 bg-purple-950/50 px-4 py-2 text-sm hover:bg-purple-900/60 disabled:opacity-50">
-            {loading ? "刷新中…" : "↻ 刷新任务"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={async () => {
+              if (!window.confirm("将扫描运行超过 60 分钟的视觉任务和仍处于提交中的媒体任务，并标记为待核实。不会自动重试或调用 AI。继续吗？")) return;
+              setLoading(true);
+              try {
+                const response = await fetch(`${API}/api/tasks/reconcile-stale?minutes=60`, { method: "POST" });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || "扫描失败");
+                setMessage(data.message || "中断任务扫描完成");
+                await loadTasks();
+              } catch (error) {
+                setMessage(error instanceof Error ? error.message : "扫描失败");
+              } finally {
+                setLoading(false);
+              }
+            }} disabled={loading}
+              className="rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-2 text-sm text-amber-200 hover:bg-amber-900/40 disabled:opacity-50">
+              扫描中断任务
+            </button>
+            <button onClick={() => void loadTasks()} disabled={loading}
+              className="rounded-xl border border-purple-300/30 bg-purple-950/50 px-4 py-2 text-sm hover:bg-purple-900/60 disabled:opacity-50">
+              {loading ? "刷新中…" : "↻ 刷新任务"}
+            </button>
+          </div>
         </div>
 
         <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-5">
