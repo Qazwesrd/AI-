@@ -386,6 +386,9 @@ function getAiBrowserSession() {
     const storedName = require("crypto").randomUUID().replace(/-/g, "") + extension;
     const targetPath = path.join(resultDir, storedName);
     item.setSavePath(targetPath);
+    item.on("updated", () => {
+      if (item.getReceivedBytes() > 2 * 1024 * 1024 * 1024) item.cancel();
+    });
     item.once("done", async (_downloadEvent, state) => {
       if (state !== "completed") {
         webContents.send("ai-browser:download-failed", { taskId: taskKey, filename: originalName, state });
