@@ -890,7 +890,12 @@ def analyze_novel_with_ai(
                     ))
                 db.commit()
             release_task_lease(db, "analysis", job_id, False, job.last_error if job else str(exc)[:2000])
-            if request_started and not result_already_saved:
+            if result_already_saved:
+                raise HTTPException(
+                    502,
+                    f"第{index}/{len(chunks)}段分析结果已保存，但本地心跳更新失败；不会重复调用该片段，可再次点击继续。",
+                ) from exc
+            if request_started:
                 raise HTTPException(
                     502,
                     f"第{index}/{len(chunks)}段分析结果不确定，已阻止自动重试。"
