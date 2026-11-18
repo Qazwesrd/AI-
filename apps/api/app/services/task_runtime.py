@@ -54,7 +54,9 @@ def acquire_task_lease(db, source: str, task_id: int, priority: int = 0):
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "该任务已有执行租约，已阻止重复执行")
-    return lease
+    return db.query(TaskExecutionLease).filter(
+        TaskExecutionLease.source == source, TaskExecutionLease.task_id == task_id
+    ).first()
 
 
 def release_task_lease(db, source: str, task_id: int, success: bool, error: str = ""):
