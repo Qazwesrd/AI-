@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const { spawn, execFile } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -336,4 +336,22 @@ ipcMain.handle("dialog:openFile", async (_event, options = {}) => {
   }
 
   return result.filePaths[0];
+});
+
+
+// AI Web Tool Hub: open only explicitly requested HTTP(S) URLs in the system browser.
+ipcMain.handle("external:open", async (_event, rawUrl) => {
+  let parsed;
+  try {
+    parsed = new URL(String(rawUrl));
+  } catch {
+    throw new Error("无效的网址");
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("只允许打开 HTTP 或 HTTPS 网页地址");
+  }
+
+  await shell.openExternal(parsed.toString());
+  return true;
 });
