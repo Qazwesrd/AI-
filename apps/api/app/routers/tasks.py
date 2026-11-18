@@ -32,6 +32,13 @@ def _iso(value):
     return value.isoformat() if value else None
 
 
+def is_known_remote_3d_task(task) -> bool:
+    return (
+        str(getattr(task, "task_type", "")).startswith("model3d_")
+        and str(getattr(task, "result_url", "") or "").startswith("tripo-task:")
+    )
+
+
 def _status_group(status: str) -> str:
     value = (status or "unknown").lower()
     if value in {"completed", "success", "succeeded", "finished", "done"}:
@@ -335,7 +342,7 @@ def reconcile_stale_tasks(
     for task in image_tasks:
         # A 3D task with a persisted remote ID is known to have been accepted;
         # it must remain refreshable rather than being mislabeled as unknown.
-        if task.task_type.startswith("model3d_") and (task.result_url or "").startswith("tripo-task:"):
+        if is_known_remote_3d_task(task):
             continue
         task.status = "interrupted_unknown"
         task.error = (
