@@ -10,13 +10,14 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 Base = declarative_base()
 
 APP_ROOT = Path(__file__).resolve().parents[3]
-DATA_ROOT = Path(os.environ.get("APP_DATA_DIR", str(APP_ROOT)))
+DATA_ROOT = Path(os.environ.get("APP_DATA_DIR", str(APP_ROOT))).expanduser().resolve()
 ROOT_DIR = DATA_ROOT
 STORAGE_DIR = DATA_ROOT / "storage"
 STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
+
 def resolve_database_path():
-    """Keep existing user databases when the application database filename changes."""
+    """Resolve the database without abandoning databases created by older builds."""
     explicit = os.environ.get("AI_COMIC_DATABASE_PATH")
     if explicit:
         return Path(explicit).expanduser().resolve()
@@ -25,26 +26,36 @@ def resolve_database_path():
     if current.exists():
         return current
 
-    for legacy_name in ("novel_studio.db", "ai_novel_studio.db", "novel_studio_ai.db"):
-        legacy = STORAGE_DIR / legacy_name
+    legacy_candidates = [
+        APP_ROOT / "apps" / "api" / "novel_studio.db",
+        APP_ROOT / "apps" / "api" / "ai_novel_studio.db",
+        APP_ROOT / "apps" / "api" / "novel_studio_ai.db",
+        APP_ROOT / "novel_studio.db",
+        APP_ROOT / "ai_novel_studio.db",
+        APP_ROOT / "novel_studio_ai.db",
+    ]
+
+    for legacy in legacy_candidates:
         if legacy.exists():
             print(f"[数据库兼容] 使用现有旧数据库：{legacy}")
             return legacy
+
     return current
 
 
 DATABASE_PATH = resolve_database_path()
+DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 engine = create_engine(
     f"sqlite:///{DATABASE_PATH.as_posix()}",
-    connect_args={"check_same_thread": False},
-    future=True
+    connect_args={"check_same_thread": False, "timeout": 30},
+    future=True,
 )
 
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
-    bind=engine
+    bind=engine,
 )
 
 
@@ -70,54 +81,84 @@ MODEL_MODULES = [
 def _backup_database_before_migration():
     if not DATABASE_PATH.exists() or DATABASE_PATH.stat().st_size == 0:
         return None
+
     backup_dir = STORAGE_DIR / "backups" / "schema"
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
     target = backup_dir / f"{DATABASE_PATH.stem}-before-migration-{stamp}.db"
-    source = sqlite3.connect(str(DATABASE_PATH))
-    destination = sqlite3.connect(str(target))
+
+    source = sqlite3.connect(str(DATABASE_PATH), timeout=30)
+    destination = sqlite3.connect(str(target), timeout=30)
     try:
         source.backup(destination)
         destination.commit()
     finally:
         destination.close()
         source.close()
+
     return target
 
 
 def _migrate_missing_columns():
-    """Safely add columns introduced by newer ORM models to old SQLite DBs."""
+    """Safely add compatible ORM columns to existing SQLite databases."""
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
     missing = []
+
     for table in Base.metadata.sorted_tables:
         if table.name not in existing_tables:
             continue
-        existing_columns = {column["name"] for column in inspector.get_columns(table.name)}
+
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table.name)
+        }
+
         for column in table.columns:
             if column.name in existing_columns:
                 continue
+
             if column.primary_key or column.foreign_keys:
                 raise RuntimeError(
-                    f"无法安全自动迁移表 {table.name} 的结构列 {column.name}；请使用正式迁移脚本。"
+                    f"无法安全自动迁移表 {table.name} 的结构列 {column.name}；"
+                    "请使用正式迁移脚本。"
                 )
+
+            if not column.nullable and column.server_default is None:
+                raise RuntimeError(
+                    f"数据库迁移拒绝添加必填字段 {table.name}.{column.name}："
+                    "该字段没有安全的默认值。请先提供正式迁移脚本。"
+                )
+
             missing.append((table, column))
 
     if not missing:
         return []
 
     backup = _backup_database_before_migration()
-    with engine.begin() as connection:
-        for table, column in missing:
-            column_type = column.type.compile(dialect=engine.dialect)
-            clause = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column_type}'
-            if column.server_default is not None:
-                clause += f" DEFAULT {column.server_default.arg}"
-            connection.execute(text(clause))
 
-    print(f"[数据库迁移] 新增 {len(missing)} 个字段；迁移前备份：{backup}")
+    try:
+        with engine.begin() as connection:
+            for table, column in missing:
+                column_type = column.type.compile(dialect=engine.dialect)
+                clause = (
+                    f'ALTER TABLE "{table.name}" '
+                    f'ADD COLUMN "{column.name}" {column_type}'
+                )
+
+                if column.server_default is not None:
+                    clause += f" DEFAULT {column.server_default.arg}"
+
+                connection.execute(text(clause))
+    except Exception:
+        print(f"[数据库迁移失败] 已保留迁移前备份：{backup}")
+        raise
+
+    print(
+        f"[数据库迁移] 新增 {len(missing)} 个字段；"
+        f"迁移前备份：{backup}"
+    )
     return [f"{table.name}.{column.name}" for table, column in missing]
 
 
@@ -141,6 +182,6 @@ def init_database():
 
     return True
 
+
 # Publishing models registration
 import app.models.publishing
-
