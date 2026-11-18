@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -34,7 +34,7 @@ def _status_group(status: str) -> str:
         return "cancelled"
     if value in {"paused"}:
         return "paused"
-    if value in {"submission_unknown", "awaiting_video_url", "submitting"}:
+    if value in {"submission_unknown", "awaiting_video_url", "submitting", "interrupted_unknown"}:
         return "attention"
     if value in {"pending", "queued", "submitted", "processing", "running"}:
         return "active"
@@ -159,11 +159,49 @@ def list_unified_tasks(
         "note": "任务中心为跨模块只读汇总；各模块原有的暂停、恢复、重试、轮询和付费确认规则保持不变。",
     }
 
+
+@router.post("/reconcile-stale")
+def reconcile_stale_tasks(
+    minutes: int = Query(default=60, ge=15, le=1440),
+    db: Session = Depends(get_db),
+):
+    """仅将长时间无更新的执行中任务标记为待人工核实；绝不自动重试或再次调用 AI。"""
+    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+    image_tasks = db.query(ImageTask).filter(
+        ImageTask.status == "running",
+        ImageTask.created_at < cutoff,
+    ).all()
+    media_tasks = db.query(MediaTask).filter(
+        MediaTask.status == "submitting",
+        MediaTask.updated_at < cutoff,
+    ).all()
+    for task in image_tasks:
+        task.status = "interrupted_unknown"
+        task.error = (
+            f"任务已运行超过 {minutes} 分钟，可能在应用关闭或网络中断时失去执行结果。"
+            "请先核对图像服务商记录；确认未创建任务后，才能手动重新排队。"
+        )
+        task.finished_at = datetime.utcnow()
+    for task in media_tasks:
+        task.status = "submission_unknown"
+        task.error = (
+            f"任务提交超过 {minutes} 分钟仍未确认。请先在服务商控制台核对，"
+            "不得直接重复提交。"
+        )
+    db.commit()
+    return {
+        "success": True,
+        "image_marked_for_review": len(image_tasks),
+        "media_marked_for_review": len(media_tasks),
+        "message": "已标记需要人工核实的任务；没有自动重试、重新提交或产生新的 AI 调用。",
+    }
+
 @router.post("/{source}/{task_id}/{action}")
 def control_unified_task(
     source: str,
     task_id: int,
     action: str,
+    confirm_no_remote_job: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     """统一任务中心的显式人工操作入口；不自动执行 AI 生成。"""
@@ -177,6 +215,21 @@ def control_unified_task(
         handler = handlers.get(action)
         if not handler:
             raise HTTPException(400, "视觉任务仅支持暂停、恢复、重试或取消")
+        if action == "retry":
+            task = db.query(ImageTask).filter(ImageTask.id == task_id).first()
+            if task and task.status == "interrupted_unknown":
+                if task.task_type.startswith("model3d_"):
+                    raise HTTPException(409, "3D任务不能从不确定状态自动重试，请先核对服务商并回到素材卡片重新提交")
+                if not confirm_no_remote_job:
+                    raise HTTPException(409, "请先核对图像服务商记录；确认没有创建远程任务且不会重复扣费后，再明确确认重新排队")
+                task.status = "pending"
+                task.error = ""
+                task.result_path = ""
+                task.result_url = ""
+                task.finished_at = None
+                db.commit()
+                return {"success": True, "task_id": task.id, "status": task.status,
+                        "message": "已重新排队；不会自动调用 AI，请返回视觉素材模块手动执行。"}
         return handler(task_id, db)
 
     if source == "media":
