@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.publishing import PublishAccount, PublishJob
+from app.services.media_service import safe_storage_file
 
 router = APIRouter(prefix="/api/publishing", tags=["多平台视频发布"])
 
@@ -168,11 +169,23 @@ def create_jobs(data: list[PublishInput], db: Session = Depends(get_db)):
         if not item.video_path:
             raise HTTPException(400, "视频路径不能为空")
 
-        from pathlib import Path
-        video = Path(item.video_path).expanduser().resolve()
+        try:
+            video = safe_storage_file(item.video_path)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "视频文件不存在") from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(400, "视频必须位于应用素材存储目录内") from exc
 
-        if not video.is_file():
-            raise HTTPException(404, "视频文件不存在")
+        cover = None
+        if item.cover_path:
+            try:
+                cover = safe_storage_file(item.cover_path)
+            except FileNotFoundError as exc:
+                raise HTTPException(404, "封面文件不存在") from exc
+            except (OSError, ValueError) as exc:
+                raise HTTPException(400, "封面必须位于应用素材存储目录内") from exc
+            if cover.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+                raise HTTPException(400, "封面仅支持 PNG、JPG、JPEG、WEBP 格式")
 
         if item.account_id:
             account = db.query(PublishAccount).filter(
@@ -191,7 +204,7 @@ def create_jobs(data: list[PublishInput], db: Session = Depends(get_db)):
             title=item.title,
             description=item.description,
             tags=item.tags,
-            cover_path=item.cover_path,
+            cover_path=str(cover) if cover else "",
             scheduled_at=item.scheduled_at,
             status="scheduled" if item.scheduled_at else "pending",
             idempotency_key=uuid.uuid4().hex,
