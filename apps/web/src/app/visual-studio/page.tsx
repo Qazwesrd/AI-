@@ -167,7 +167,7 @@ export default function VisualStudioPage() {
       : category === "buildings"
       ? "生成建筑正立面、侧立面和整体轴测参考图，保持建筑结构、层数、屋顶、门窗、材质和比例一致。"
       : "生成电影级环境概念设定图，建立明确空间布局、地形、建筑位置、光照方向、天气、时间和可供人物行动的区域；保持可复用的场景地理结构。";
-    const subject = prompt.trim() || (name.trim() ? `素材名称：${name.trim()}。` : `请根据${category === "characters" ? "人物" : category === "scenes" ? "场景" : "道具"}类别创作一个符合项目设定的视觉资产" );
+    const subject = prompt.trim() ? `用户补充要求：${prompt.trim()}。` : (name.trim() ? `素材名称：${name.trim()}。` : `请根据${category === "characters" ? "人物" : category === "scenes" ? "场景" : "道具"}类别创作一个符合项目设定的视觉资产。`);
     const quality = promptMode === "concise"
       ? "画面主体明确，构图简洁，重点突出，避免无关元素。"
       : promptMode === "cinematic"
