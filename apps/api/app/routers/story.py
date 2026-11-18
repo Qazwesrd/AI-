@@ -60,7 +60,7 @@ def ensure_project_source_current(project):
         raise HTTPException(
             status_code=409,
             detail=(
-                "检测到小说原文已重新导入，当前剧本项目属于旧版本。为避免使用旧分集、剧本和分镜继续生成，"
+                "检测到小说原文或章节内容已发生变化，当前剧本项目属于旧版本。为避免使用旧分集、剧本和分镜继续生成，"
                 "本项目的 AI 分集规划、剧本和后续制作已暂停。请保留此旧项目作为历史版本，"
                 "并基于当前小说新建改编项目后重新规划；旧项目和已有成果不会被自动删除。"
             ),
@@ -470,6 +470,12 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
+    project = db.query(StoryProject).filter(
+        StoryProject.id == episode.project_id
+    ).first()
+    if not project:
+        raise HTTPException(404, "分集所属的剧本项目不存在")
+    ensure_project_source_current(project)
     if not (episode.source_text or "").strip():
         raise HTTPException(400, "本集原著内容为空")
     if db.query(StoryboardShot).filter(StoryboardShot.episode_id == episode_id).count():
