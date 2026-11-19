@@ -629,6 +629,7 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
     })
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     data["evolution_history"] = history
+    asset.data = data
     data["current_state"] = resolve_asset_state(asset)
     asset.data = data
     asset.updated_at = datetime.utcnow()
