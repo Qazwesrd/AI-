@@ -13,6 +13,8 @@ type Handoff = { id: number; prompt: string; manifest: any[]; notice: string };
 
 export default function VideoEditorPage() {
   const [files, setFiles] = useState<MediaFile[]>([]);
+  const [audioFiles, setAudioFiles] = useState<MediaFile[]>([]);
+  const [subtitleFiles, setSubtitleFiles] = useState<MediaFile[]>([]);
   const [jobs, setJobs] = useState<EditJob[]>([]);
   const [provider, setProvider] = useState("deepseek");
   const [model, setModel] = useState("");
@@ -28,11 +30,18 @@ export default function VideoEditorPage() {
 
   async function loadAll() {
     try {
-      const [fileResponse, jobResponse] = await Promise.all([
+      const [fileResponse, audioResponse, otherResponse, jobResponse] = await Promise.all([
         fetch(`${API}/api/media/files?category=video`),
+        fetch(`${API}/api/media/files?category=audio`),
+        fetch(`${API}/api/media/files?category=other`),
         fetch(`${API}/api/video-editor/jobs`)
       ]);
       if (fileResponse.ok) setFiles(await fileResponse.json());
+      if (audioResponse.ok) setAudioFiles(await audioResponse.json());
+      if (otherResponse.ok) {
+        const otherFiles: MediaFile[] = await otherResponse.json();
+        setSubtitleFiles(otherFiles.filter(file => /\.(srt|ass|ssa|vtt)$/i.test(file.name)));
+      }
       if (jobResponse.ok) setJobs(await jobResponse.json());
     } catch {
       setMessage("无法连接本地 API，请确认桌面软件服务已启动。");
@@ -59,6 +68,28 @@ export default function VideoEditorPage() {
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "上传失败");
     } finally { setBusy(false); }
+  }
+
+  async function uploadAuxiliaryFiles(list: FileList | null, category: "audio" | "other") {
+    if (!list?.length) return;
+    setBusy(true);
+    setMessage(category === "audio" ? "正在上传音轨文件……" : "正在上传字幕文件……");
+    try {
+      for (const file of Array.from(list)) {
+        const form = new FormData();
+        form.append("file", file);
+        form.append("category", category);
+        const response = await fetch(`${API}/api/media/files/upload`, { method: "POST", body: form });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "文件上传失败");
+      }
+      setMessage(category === "audio" ? "音轨文件已加入素材库。" : "字幕文件已加入素材库。");
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "文件上传失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createPlan() {
@@ -261,14 +292,38 @@ export default function VideoEditorPage() {
         )}
 
         <section className={panel}>
-          <h2 className="mb-4 text-xl font-semibold">第三步：可选字幕与音轨</h2>
-          <div className="grid gap-4 md:grid-cols-2">
-            <div><label className="mb-2 block text-sm">字幕文件路径（可选）</label>
-              <input value={subtitlePath} onChange={e => setSubtitlePath(e.target.value)} placeholder="storage/subtitles/xxx.srt 的完整路径" className="w-full rounded-lg border border-white/15 bg-black/30 p-3" /></div>
-            <div><label className="mb-2 block text-sm">替换音轨路径（可选）</label>
-              <input value={audioPath} onChange={e => setAudioPath(e.target.value)} placeholder="storage/audio/xxx.mp3 的完整路径" className="w-full rounded-lg border border-white/15 bg-black/30 p-3" /></div>
+          <h2 className="mb-4 text-xl font-semibold">第三步：选择字幕与音轨（可选）</h2>
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="space-y-3">
+              <label className="block text-sm font-medium">字幕文件</label>
+              <select value={subtitlePath} onChange={e => setSubtitlePath(e.target.value)}
+                className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
+                <option value="">不添加字幕</option>
+                {subtitleFiles.map(file => <option key={file.id} value={file.path}>{file.name}</option>)}
+              </select>
+              <label className="block cursor-pointer rounded-lg border border-dashed border-purple-300/30 p-3 text-center text-sm hover:bg-purple-500/10">
+                上传字幕（SRT / ASS / SSA / VTT）
+                <input type="file" accept=".srt,.ass,.ssa,.vtt" multiple className="hidden"
+                  onChange={e => void uploadAuxiliaryFiles(e.target.files, "other")} />
+              </label>
+              <p className="text-xs text-white/45">已上传 {subtitleFiles.length} 个字幕文件</p>
+            </div>
+            <div className="space-y-3">
+              <label className="block text-sm font-medium">替换音轨</label>
+              <select value={audioPath} onChange={e => setAudioPath(e.target.value)}
+                className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
+                <option value="">保留原视频音轨</option>
+                {audioFiles.map(file => <option key={file.id} value={file.path}>{file.name}</option>)}
+              </select>
+              <label className="block cursor-pointer rounded-lg border border-dashed border-purple-300/30 p-3 text-center text-sm hover:bg-purple-500/10">
+                上传音频（MP3 / WAV / AAC / M4A 等）
+                <input type="file" accept="audio/*" multiple className="hidden"
+                  onChange={e => void uploadAuxiliaryFiles(e.target.files, "audio")} />
+              </label>
+              <p className="text-xs text-white/45">已上传 {audioFiles.length} 个音频文件</p>
+            </div>
           </div>
-          <p className="mt-3 text-xs text-white/45">当前选择音轨会替换原视频音轨；不填写则保留视频原音轨。</p>
+          <p className="mt-3 text-xs text-white/45">选择的音轨会替换原视频音轨；不选择则保留原音轨。字幕和音轨会在最终导出时合成。</p>
         </section>
 
         <section className={panel}>
