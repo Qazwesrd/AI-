@@ -303,7 +303,7 @@ $InstallerHash = (Get-FileHash -LiteralPath $InstallerForBundle.FullName -Algori
 Copy-Item $InstallerHashFile $InstallFolder -Force
 Copy-Item $ManualPdf $GuideFolder -Force
 Copy-Item (Join-Path $ManualDir "manual.html") $GuideFolder -Force
-Copy-Item $ManualImageDir (Join-Path $GuideFolder "截图") -Recurse -Force
+Copy-Item $ManualImageDir (Join-Path $GuideFolder "images") -Recurse -Force
 $BundleReadme = @"
 AI漫剧制作大师 Windows 本地测试包 $($DesktopPackage.version)
 
@@ -312,7 +312,7 @@ AI漫剧制作大师 Windows 本地测试包 $($DesktopPackage.version)
 3. 安装完成后从桌面快捷方式打开软件。
 4. 首次使用请配置 AI 服务商；第三方 AI 费用、账号权限和额度由用户自行确认。
 5. 建议先用少量测试小说和素材验证流程，再导入重要项目。
-6. “使用说明书\截图”包含本次构建时从实际软件页面采集的界面截图。
+6. “使用说明书\images”包含本次构建时从实际软件页面采集的界面截图。
 7. 安装程序 SHA-256：$InstallerHash
 
 重要提醒：
