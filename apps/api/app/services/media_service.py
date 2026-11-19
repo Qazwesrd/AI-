@@ -236,6 +236,44 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
         "warnings": warnings,
     }
 
+def validate_rendered_audio(path):
+    """Validate a generated audio asset before it is registered or mixed."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise ValueError("配音文件不存在")
+    size = file_path.stat().st_size
+    if size < 128:
+        raise ValueError("配音文件过小，可能为空或下载不完整")
+    info = probe_media(file_path)
+    streams = info.get("streams") or []
+    audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not audio_stream:
+        raise ValueError("配音文件中没有有效的音频流")
+    raw_duration = (info.get("format") or {}).get("duration") or audio_stream.get("duration") or 0
+    try:
+        duration = float(raw_duration)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration <= 0:
+        raise ValueError("FFprobe 无法确认配音时长")
+    return {
+        "valid": True,
+        "size_bytes": size,
+        "duration_seconds": round(duration, 3),
+        "audio_codec": audio_stream.get("codec_name"),
+    }
+
+
+def finalize_rendered_audio(source, destination):
+    """Validate a staged audio file before atomically promoting it."""
+    source_path = Path(source)
+    destination_path = Path(destination)
+    report = validate_rendered_audio(source_path)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source_path, destination_path)
+    return report
+
+
 
 def finalize_rendered_video(source, destination, expected_duration=None, duration_tolerance=2.0, require_audio=False):
     """Validate a staged video before atomically promoting it to its final path."""
