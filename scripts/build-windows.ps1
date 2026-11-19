@@ -165,8 +165,12 @@ $OldFfprobePath = $env:FFPROBE_PATH
 $OldPort = $env:PORT
 $OldHostname = $env:HOSTNAME
 $OldApiBaseUrl = $env:NEXT_PUBLIC_API_BASE_URL
+$OldPythonIoEncoding = $env:PYTHONIOENCODING
+$OldPythonUtf8 = $env:PYTHONUTF8
 try {
     $env:APP_DATA_DIR = $ManualDataDir
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
     $env:FFMPEG_PATH = $FfmpegSource
     $env:FFPROBE_PATH = $FfprobeSource
     $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
@@ -230,6 +234,8 @@ try {
     if ($null -eq $OldPort) { Remove-Item Env:PORT -ErrorAction SilentlyContinue } else { $env:PORT = $OldPort }
     if ($null -eq $OldHostname) { Remove-Item Env:HOSTNAME -ErrorAction SilentlyContinue } else { $env:HOSTNAME = $OldHostname }
     if ($null -eq $OldApiBaseUrl) { Remove-Item Env:NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:NEXT_PUBLIC_API_BASE_URL = $OldApiBaseUrl }
+    if ($null -eq $OldPythonIoEncoding) { Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue } else { $env:PYTHONIOENCODING = $OldPythonIoEncoding }
+    if ($null -eq $OldPythonUtf8) { Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue } else { $env:PYTHONUTF8 = $OldPythonUtf8 }
     if ($ManualCaptureSuccess) {
         Remove-Item $ManualDataDir -Recurse -Force -ErrorAction SilentlyContinue
     } else {
