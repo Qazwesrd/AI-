@@ -2,7 +2,6 @@ from datetime import datetime
 from typing import Literal, Optional
 from pathlib import Path
 import hashlib
-import mimetypes
 import re
 import uuid
 
@@ -141,7 +140,7 @@ async def upload_result_attachment(
         raise HTTPException(404, "小说不存在")
     if chapter_number is not None and not chapter_exists(db, novel_id, chapter_number):
         raise HTTPException(404, "指定章节不存在")
-    original_name = (file.filename or "ai-result").replace("\\\\", "/").split("/")[-1][:300]
+    original_name = (file.filename or "ai-result").replace("\\", "/").split("/")[-1][:300]
     extension = Path(original_name).suffix.lower()
     file_type = RESULT_FILE_TYPES.get(extension)
     if not file_type:
@@ -388,7 +387,27 @@ def build_chapter_handoff_package(
             "props": {"type": "array", "items": {"type": "object", "required": ["name", "evidence"]}},
             "relationships": {"type": "array"},
             "timeline": {"type": "array"},
-            "proposals": {"type": "array", "items": {"type": "object", "required": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"]}},
+            "proposals": {"type": "array", "items": {
+                "type": "object",
+                "required": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"],
+                "properties": {
+                    "chapter_number": {"type": "integer"},
+                    "asset_name": {"type": "string"},
+                    "asset_category": {"type": "string"},
+                    "change_type": {"type": "string"},
+                    "event": {"type": "string"},
+                    "appearance_after": {"type": "string"},
+                    "clothing_after": {"type": "string"},
+                    "age_after": {"type": "string"},
+                    "hairstyle_after": {"type": "string"},
+                    "injury_after": {"type": "string"},
+                    "equipment_after": {"type": "string"},
+                    "condition_after": {"type": "string"},
+                    "holder": {"type": "string"},
+                    "evidence": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                }
+            }},
             "uncertainties": {"type": "array", "items": {"type": "string"}},
         },
     }
