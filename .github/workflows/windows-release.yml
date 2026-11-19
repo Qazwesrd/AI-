@@ -41,8 +41,8 @@ jobs:
       - name: Install frontend and desktop dependencies
         shell: pwsh
         run: |
-          npm ci --prefix apps/web
-          npm ci --prefix apps/desktop
+          npm ci --prefix apps/web --include=dev
+          npm ci --prefix apps/desktop --include=dev
 
       - name: Prepare FFmpeg tools (multiple download fallbacks)
         shell: pwsh
