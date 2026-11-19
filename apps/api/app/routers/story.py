@@ -138,6 +138,7 @@ class AssetLinkInput(BaseModel):
 def snapshot_asset_state(asset: VisualAsset, chapter_number: Optional[int]):
     data = asset.data if isinstance(asset.data, dict) else {}
     history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    history = [x for x in history if x.get("confirmed", True) is True]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
     latest = applicable[-1] if applicable else {}
