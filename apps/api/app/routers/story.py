@@ -87,9 +87,9 @@ class ProjectInput(BaseModel):
     novel_id: int
     name: str
     adaptation_style: str = "3D动漫电影风格"
-    target_duration: int = 120
-    min_duration: int = 90
-    max_duration: int = 150
+    target_duration: int = Field(default=120, ge=90, le=150)
+    min_duration: int = Field(default=90, ge=90, le=150)
+    max_duration: int = Field(default=150, ge=90, le=150)
     settings: dict = Field(default_factory=dict)
 
 
@@ -97,7 +97,7 @@ class EpisodeUpdate(BaseModel):
     title: Optional[str] = None
     synopsis: Optional[str] = None
     screenplay: Optional[str] = None
-    duration_seconds: Optional[int] = None
+    duration_seconds: Optional[int] = Field(default=None, ge=90, le=150)
     sort_order: Optional[int] = None
     status: Optional[str] = None
 
@@ -196,6 +196,8 @@ def create_project(payload: ProjectInput, db: Session = Depends(get_db)):
         raise HTTPException(404, "小说不存在")
     if payload.min_duration > payload.max_duration:
         raise HTTPException(400, "单集最短时长不能大于最长时长")
+    if not payload.min_duration <= payload.target_duration <= payload.max_duration:
+        raise HTTPException(400, "目标时长必须位于单集最短与最长时长之间（90–150秒）")
 
     project = StoryProject(**payload.model_dump())
     db.add(project)
@@ -308,6 +310,65 @@ PROMPT_STYLE_GUIDANCE = {
 
 def prompt_style_guidance(style: str) -> str:
     return PROMPT_STYLE_GUIDANCE.get(style, PROMPT_STYLE_GUIDANCE["professional"])
+
+
+def normalize_shot_durations(shots, target_seconds: int, min_seconds: int = 90, max_seconds: int = 150):
+    """Scale AI shot durations to the episode target without exceeding video API limits."""
+    if not isinstance(shots, list) or not shots:
+        raise ValueError("没有可用于时长分配的分镜")
+    if not min_seconds <= target_seconds <= max_seconds:
+        raise ValueError("单集目标时长必须在90–150秒之间")
+    if target_seconds < len(shots) or target_seconds > len(shots) * 60:
+        raise ValueError(
+            f"当前{len(shots)}个镜头无法分配{target_seconds}秒时长；"
+            "每个镜头必须在1–60秒之间，请调整镜头数量后重试"
+        )
+
+    weights = []
+    for shot in shots:
+        try:
+            value = float(shot.get("duration_seconds", 5) or 5) if isinstance(shot, dict) else 5.0
+        except (TypeError, ValueError):
+            value = 5.0
+        weights.append(max(0.01, value))
+
+    durations = [None] * len(shots)
+    active = set(range(len(shots)))
+    remaining = float(target_seconds)
+    while active:
+        weight_total = sum(weights[index] for index in active)
+        saturated = []
+        proposed_values = {
+            index: remaining * weights[index] / weight_total
+            for index in active
+        }
+        for index, proposed in proposed_values.items():
+            if proposed < 1.0:
+                durations[index] = 1.0
+                saturated.append(index)
+            elif proposed > 60.0:
+                durations[index] = 60.0
+                saturated.append(index)
+        if not saturated:
+            for index, proposed in proposed_values.items():
+                durations[index] = proposed
+            break
+        for index in saturated:
+            remaining -= durations[index]
+            active.remove(index)
+
+    rounded = [round(value, 2) for value in durations]
+    difference = round(float(target_seconds) - sum(rounded), 2)
+    if difference:
+        for index in range(len(rounded) - 1, -1, -1):
+            adjusted = round(rounded[index] + difference, 2)
+            if 1.0 <= adjusted <= 60.0:
+                rounded[index] = adjusted
+                difference = 0.0
+                break
+    if difference:
+        raise ValueError("无法将镜头时长精确分配到目标时长，请调整镜头数量")
+    return rounded
 
 
 @router.post("/projects/{project_id}/plan-ai")
@@ -606,6 +667,16 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         shots = generated.get("shots")
         if not isinstance(shots, list) or not shots:
             raise ValueError("AI未生成有效分镜镜头")
+        shots = [shot for shot in shots[:24] if isinstance(shot, dict)]
+        if len(shots) < 2:
+            raise ValueError("AI至少需要生成2个有效分镜，才能组成完整漫剧")
+        project_min = int(project.min_duration or 90)
+        project_max = int(project.max_duration or 150)
+        if not project_min <= int(target) <= project_max:
+            raise ValueError("项目目标时长配置无效，请检查单集90–150秒时长范围")
+        normalized_durations = normalize_shot_durations(
+            shots, int(target), project_min, project_max
+        )
         screenplay = str(generated.get("screenplay", "")).strip()
         if not screenplay:
             raise ValueError("AI未生成影视剧本正文")
@@ -622,13 +693,8 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
             if novel_id is not None and asset_data.get("source_novel_id") not in (None, novel_id):
                 continue
             asset_lookup.setdefault((asset.category, asset.name.strip().casefold()), asset)
-        for index, shot in enumerate(shots[:24], 1):
-            if not isinstance(shot, dict):
-                continue
-            try:
-                duration = float(shot.get("duration_seconds", 5) or 5)
-            except (TypeError, ValueError):
-                duration = 5.0
+        for index, shot in enumerate(shots, 1):
+            duration = normalized_durations[index - 1]
             scene_name = str(shot.get("scene_name", "")).strip()
             character_names = shot.get("character_names") if isinstance(shot.get("character_names"), list) else []
             prop_names = shot.get("prop_names") if isinstance(shot.get("prop_names"), list) else []
@@ -695,9 +761,14 @@ def update_episode(episode_id: int, payload: EpisodeUpdate, db: Session = Depend
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
-    for key, value in payload.model_dump(exclude_unset=True).items():
-        if key == "duration_seconds" and (value < 1 or value > 3600):
-            raise HTTPException(400, "单集时长必须在 1 到 3600 秒之间")
+    updates = payload.model_dump(exclude_unset=True)
+    if "duration_seconds" in updates:
+        project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+        minimum = int(project.min_duration or 90) if project else 90
+        maximum = int(project.max_duration or 150) if project else 150
+        if not minimum <= updates["duration_seconds"] <= maximum:
+            raise HTTPException(400, f"本集时长必须在当前项目设定的{minimum}–{maximum}秒范围内")
+    for key, value in updates.items():
         setattr(episode, key, value)
     episode.updated_at = datetime.utcnow()
     db.commit()
@@ -745,15 +816,26 @@ def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends
     if len(episodes) != len(set(payload.episode_ids)):
         raise HTTPException(400, "分集不存在或不属于该项目")
 
+    # Merging is a planning operation. Once any selected episode has shots,
+    # moving those shots into one episode could silently create a >150s render.
+    existing_shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id.in_(payload.episode_ids)
+    ).count()
+    if existing_shots:
+        raise HTTPException(
+            409,
+            "所选分集已有分镜。为避免合并后镜头时长超出单集限制，请在生成剧本与分镜前完成分集合并；"
+            "现有分镜和媒体任务均未修改。"
+        )
+
     first = episodes[0]
     first.title = payload.title.strip() or " + ".join(x.title for x in episodes)
     first.source_text = "\n\n".join(x.source_text or "" for x in episodes)
     first.source_chapter_ids = list(dict.fromkeys(
         chapter_id for x in episodes for chapter_id in (x.source_chapter_ids or [])
     ))
-    first.duration_seconds = min(
-        3600, sum(x.duration_seconds for x in episodes)
-    )
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    first.duration_seconds = int(project.target_duration or 120) if project else 120
     for item in episodes[1:]:
         db.query(StoryboardShot).filter(StoryboardShot.episode_id == item.id).update(
             {StoryboardShot.episode_id: first.id}
