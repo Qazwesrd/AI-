@@ -151,8 +151,11 @@ def pdf_text(raw):
         from pypdf import PdfReader
     except ImportError as exc:
         raise ValueError("PDF 解析依赖未安装") from exc
-    reader = PdfReader(BytesIO(raw))
-    text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
+    try:
+        reader = PdfReader(BytesIO(raw))
+        text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
+    except Exception as exc:
+        raise ValueError("PDF 文件损坏或无法读取") from exc
     if not text:
         raise ValueError("PDF 没有可提取文字，可能是扫描图片版，当前未配置 OCR")
     return text
