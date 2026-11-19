@@ -23,6 +23,8 @@ export default function VideoEditorPage() {
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [subtitlePath, setSubtitlePath] = useState("");
   const [audioPath, setAudioPath] = useState("");
+  const [audioMode, setAudioMode] = useState<"replace" | "mix">("replace");
+  const [subtitleLanguage, setSubtitleLanguage] = useState("zh");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
@@ -99,7 +101,11 @@ export default function VideoEditorPage() {
     try {
       const response = await fetch(`${API}/api/video-editor/jobs`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, model, instruction, source_paths: selected, confirm_paid: confirmPaid })
+        body: JSON.stringify({
+          provider, model,
+          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          source_paths: selected, confirm_paid: confirmPaid
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "AI 分析失败");
@@ -120,7 +126,8 @@ export default function VideoEditorPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: "网页版 AI 视频剪辑任务",
-          instruction, source_paths: selected, confirm_selected_videos: true
+          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          source_paths: selected, confirm_selected_videos: true
         })
       });
       const data = await response.json();
@@ -297,6 +304,16 @@ export default function VideoEditorPage() {
 
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">第三步：选择字幕与音轨（可选）</h2>
+          <div className="mb-4 max-w-md space-y-2">
+            <label className="block text-sm font-medium">字幕语言</label>
+            <select value={subtitleLanguage} onChange={e => setSubtitleLanguage(e.target.value)}
+              className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
+              <option value="zh">简体中文</option>
+              <option value="en">English（英语）</option>
+              <option value="zh-en">中英双语</option>
+            </select>
+            <p className="text-xs text-white/45">此设置会写入 AI 剪辑任务要求，供 AI 生成字幕文本时遵循；已上传的 SRT 等字幕文件不会被自动翻译。</p>
+          </div>
           <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-3">
               <label className="block text-sm font-medium">字幕文件</label>
