@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -31,7 +32,9 @@ class VideoEditorWebHandoffTests(unittest.TestCase):
             "height": 1080,
             "size_bytes": 123456,
         }]
-        with patch("app.routers.video_editor._web_file_manifest", return_value=manifest):
+        with patch("app.routers.video_editor.safe_storage_file", side_effect=lambda value: Path(value)), patch(
+            "app.routers.video_editor._web_file_manifest", return_value=manifest
+        ):
             details = _build_web_handoff_details(job)
         self.assertEqual(details["id"], 42)
         self.assertEqual(details["manifest"], manifest)
