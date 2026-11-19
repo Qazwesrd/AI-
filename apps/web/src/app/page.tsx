@@ -89,7 +89,8 @@ const navigation = [
       ["📊", "AI调用记录", "/ai-center#usage-logs"],
       ["🗄️", "素材库", "/assets"],
       ["🔧", "网络与付费权限", "/ai-center"],
-      ["💾", "项目数据备份与恢复", "/backup-center"]
+      ["💾", "项目数据备份与恢复", "/backup-center"],
+      ["🩺", "系统运行诊断", "/system-diagnostics"]
     ]
   }
 ];
