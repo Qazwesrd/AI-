@@ -120,7 +120,13 @@ Write-Host "[3/4] Building Next.js frontend..."
 
 Set-Location $Web
 
-npx tsc --noEmit
+if (!(Test-Path "$Web\node_modules\.bin\tsc.cmd")) {
+    Write-Host "Local TypeScript compiler is missing; restoring frontend development dependencies..."
+    npm ci --prefix $Web --include=dev
+    Check-ExitCode "Frontend dependency installation failed"
+}
+
+& "$Web\node_modules\.bin\tsc.cmd" --noEmit
 Check-ExitCode "TypeScript validation failed"
 
 npm run build
