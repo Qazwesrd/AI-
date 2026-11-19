@@ -133,7 +133,7 @@ export default function AICollaborationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-white">
+    <main className="cosmic min-h-screen px-4 py-8 text-white">
       <div className="mx-auto max-w-6xl space-y-6">
         <header>
           <p className="text-xs font-semibold tracking-[0.25em] text-cyan-300">DESKTOP · WEB AI COLLABORATION</p>
