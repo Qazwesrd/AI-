@@ -347,8 +347,6 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
     warnings = []
     if sync_report and sync_report["status"] == "warning":
         warnings.append(sync_report["note"])
-    if sync_report and sync_report["status"] == "unknown":
-        warnings.append(sync_report["note"])
     if black_segments:
         warnings.append(f"检测到 {len(black_segments)} 段持续黑屏，请检查是否为转场或意外空镜")
     if silence_segments:
