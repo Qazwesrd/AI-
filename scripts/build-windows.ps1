@@ -146,6 +146,10 @@ Write-Host "[4/4] Building Electron installer..."
 
 Set-Location $Desktop
 
+$Release = Join-Path $Desktop "release"
+New-Item -ItemType Directory -Path $Release -Force | Out-Null
+Get-ChildItem $Release -File -Filter "*Setup*.exe" -ErrorAction SilentlyContinue | Remove-Item -Force
+
 npm run build:desktop
 Check-ExitCode "Electron installer build failed"
 
