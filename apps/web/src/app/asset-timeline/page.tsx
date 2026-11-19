@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Asset = {
@@ -61,9 +61,9 @@ export default function AssetTimelinePage() {
   const loadAssets = useCallback(async (preferredId?: number | null) => {
     const result = await api<Asset[]>("/api/visual/assets");
     setAssets(result);
-    const next = preferredId ?? selectedId ?? result[0]?.id ?? null;
+    const next = preferredId ?? result[0]?.id ?? null;
     setSelectedId(result.some((item) => item.id === next) ? next : result[0]?.id ?? null);
-  }, [selectedId]);
+  }, []);
 
   const loadHistory = useCallback(async (id: number, chapterNumber = chapter) => {
     const suffix = chapterNumber ? `?chapter_number=${encodeURIComponent(chapterNumber)}` : "";
@@ -71,7 +71,7 @@ export default function AssetTimelinePage() {
     setHistory(result);
   }, [chapter]);
 
-  useEffect(() => { void loadAssets().catch((error) => setMessage(error.message)); }, []);
+  useEffect(() => { void loadAssets().catch((error) => setMessage(error.message)); }, [loadAssets]);
   useEffect(() => {
     if (!selectedId) { setHistory(null); setPrompt(""); return; }
     void loadHistory(selectedId).catch((error) => setMessage(error.message));
@@ -84,7 +84,7 @@ export default function AssetTimelinePage() {
     finally { setBusy(false); }
   }
 
-  async function saveEvolution(event: React.FormEvent<HTMLFormElement>) {
+  async function saveEvolution(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedId) return;
     if (!form.chapter_number || !form.event.trim()) { setMessage("请填写章节编号和剧情事件。"); return; }
