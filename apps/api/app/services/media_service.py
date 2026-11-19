@@ -262,7 +262,7 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "")[-2000:]
             raise RuntimeError("媒体质量扫描失败：" + detail)
-        return (result.stderr or "") + "\\n" + (result.stdout or "")
+        return (result.stderr or "") + "\n" + (result.stdout or "")
 
     black_log = run_filter([
         "-vf", f"blackdetect=d={float(black_min_duration)}:pix_th=0.10",
@@ -270,7 +270,7 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
     ])
     black_segments = []
     for match in re.finditer(
-        r"black_start:([0-9.]+)\\s+black_end:([0-9.]+)\\s+black_duration:([0-9.]+)",
+        r"black_start:([0-9.]+)\s+black_end:([0-9.]+)\s+black_duration:([0-9.]+)",
         black_log,
     ):
         black_segments.append({
@@ -286,7 +286,7 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
             "-f", "null", "-"
         ])
         for match in re.finditer(
-            r"silence_start:([0-9.]+).*?silence_end:([0-9.]+)\\s*\\|\\s*silence_duration:([0-9.]+)",
+            r"silence_start:([0-9.]+).*?silence_end:([0-9.]+)\s*\|\s*silence_duration:([0-9.]+)",
             silence_log,
             re.DOTALL,
         ):

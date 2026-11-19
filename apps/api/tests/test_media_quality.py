@@ -86,7 +86,7 @@ class AdvancedMediaQualityScanTests(unittest.TestCase):
             ]}
             run.side_effect = [
                 SimpleNamespace(returncode=0, stderr="black_start:1.000 black_end:2.250 black_duration:1.250", stdout=""),
-                SimpleNamespace(returncode=0, stderr="silence_start:3.000\\nsilence_end:5.500 | silence_duration:2.500", stdout=""),
+                SimpleNamespace(returncode=0, stderr="silence_start:3.000\nsilence_end:5.500 | silence_duration:2.500", stdout=""),
             ]
             report = scan_media_quality(path)
             self.assertTrue(report["scan_complete"])
