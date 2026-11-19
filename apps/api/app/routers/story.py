@@ -816,6 +816,18 @@ def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends
     if len(episodes) != len(set(payload.episode_ids)):
         raise HTTPException(400, "分集不存在或不属于该项目")
 
+    # Merging is a planning operation. Once any selected episode has shots,
+    # moving those shots into one episode could silently create a >150s render.
+    existing_shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id.in_(payload.episode_ids)
+    ).count()
+    if existing_shots:
+        raise HTTPException(
+            409,
+            "所选分集已有分镜。为避免合并后镜头时长超出单集限制，请在生成剧本与分镜前完成分集合并；"
+            "现有分镜和媒体任务均未修改。"
+        )
+
     first = episodes[0]
     first.title = payload.title.strip() or " + ".join(x.title for x in episodes)
     first.source_text = "\n\n".join(x.source_text or "" for x in episodes)
@@ -823,16 +835,7 @@ def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends
         chapter_id for x in episodes for chapter_id in (x.source_chapter_ids or [])
     ))
     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
-    minimum = int(project.min_duration or 90) if project else 90
-    maximum = int(project.max_duration or 150) if project else 150
-    merged_duration = sum(int(x.duration_seconds or 0) for x in episodes)
-    if not minimum <= merged_duration <= maximum:
-        raise HTTPException(
-            400,
-            f"合并后预计时长为{merged_duration}秒，超出当前项目单集{minimum}–{maximum}秒范围；"
-            "请调整分集或先拆分内容，避免生成无法合成的超长单集。"
-        )
-    first.duration_seconds = merged_duration
+    first.duration_seconds = int(project.target_duration or 120) if project else 120
     for item in episodes[1:]:
         db.query(StoryboardShot).filter(StoryboardShot.episode_id == item.id).update(
             {StoryboardShot.episode_id: first.id}
