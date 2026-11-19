@@ -29,6 +29,11 @@ class ProposalInput(BaseModel):
     event: str = Field(min_length=2, max_length=2000)
     appearance_after: str = Field(default="", max_length=4000)
     clothing_after: str = Field(default="", max_length=4000)
+    age_after: str = Field(default="", max_length=80)
+    hairstyle_after: str = Field(default="", max_length=300)
+    injury_after: str = Field(default="", max_length=1000)
+    equipment_after: str = Field(default="", max_length=2000)
+    condition_after: str = Field(default="", max_length=1000)
     holder: str = Field(default="", max_length=300)
     evidence: str = Field(min_length=4, max_length=2000)
     confidence: float = Field(default=0.5, ge=0, le=1)
@@ -136,7 +141,7 @@ async def upload_result_attachment(
         raise HTTPException(404, "小说不存在")
     if chapter_number is not None and not chapter_exists(db, novel_id, chapter_number):
         raise HTTPException(404, "指定章节不存在")
-    original_name = Path(file.filename or "ai-result").name[:300]
+    original_name = (file.filename or "ai-result").replace("\\\\", "/").split("/")[-1][:300]
     extension = Path(original_name).suffix.lower()
     file_type = RESULT_FILE_TYPES.get(extension)
     if not file_type:
@@ -259,8 +264,10 @@ def proposal_dict(item):
         "proposal_type": item.proposal_type, "asset_name": item.asset_name,
         "asset_category": item.asset_category, "change_type": item.change_type,
         "event": item.event, "appearance_after": item.appearance_after,
-        "clothing_after": item.clothing_after, "holder": item.holder,
-        "evidence": item.evidence, "confidence": item.confidence,
+        "clothing_after": item.clothing_after, "age_after": item.age_after,
+        "hairstyle_after": item.hairstyle_after, "injury_after": item.injury_after,
+        "equipment_after": item.equipment_after, "condition_after": item.condition_after,
+        "holder": item.holder, "evidence": item.evidence, "confidence": item.confidence,
         "status": item.status, "review_note": item.review_note,
         "applied_asset_id": item.applied_asset_id,
         "created_at": item.created_at.isoformat() if item.created_at else None,
@@ -450,7 +457,10 @@ def import_proposals(novel_id: int, payload: ImportPayload, db: Session = Depend
             asset_name=proposal.asset_name.strip(), asset_category=proposal.asset_category,
             change_type=proposal.change_type.strip(), event=proposal.event.strip(),
             appearance_after=proposal.appearance_after.strip(),
-            clothing_after=proposal.clothing_after.strip(), holder=proposal.holder.strip(),
+            clothing_after=proposal.clothing_after.strip(),
+            age_after=proposal.age_after.strip(), hairstyle_after=proposal.hairstyle_after.strip(),
+            injury_after=proposal.injury_after.strip(), equipment_after=proposal.equipment_after.strip(),
+            condition_after=proposal.condition_after.strip(), holder=proposal.holder.strip(),
             evidence=proposal.evidence.strip(), confidence=proposal.confidence,
             status="pending_review", source_task_key=payload.source_task_key,
         )
@@ -508,8 +518,10 @@ def review_proposal(proposal_id: int, payload: ReviewPayload, db: Session = Depe
         history.append({
             "chapter_number": item.chapter_number, "event": item.event,
             "change_type": item.change_type, "appearance_after": item.appearance_after,
-            "clothing_after": item.clothing_after, "holder": item.holder,
-            "evidence": item.evidence, "confirmed": True,
+            "clothing_after": item.clothing_after, "age_after": item.age_after,
+            "hairstyle_after": item.hairstyle_after, "injury_after": item.injury_after,
+            "equipment_after": item.equipment_after, "condition_after": item.condition_after,
+            "holder": item.holder, "evidence": item.evidence, "confirmed": True,
             "source": "ai_web_proposal", "proposal_id": item.id,
             "recorded_at": datetime.utcnow().isoformat(),
         })
