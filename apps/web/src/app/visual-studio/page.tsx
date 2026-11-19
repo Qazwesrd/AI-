@@ -119,6 +119,16 @@ export default function VisualStudioPage() {
   useEffect(() => { loadNovels(); }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedCategory = params.get("category");
+    const requestedNovelId = params.get("novelId");
+    if (requestedCategory && categories.some(item => item.key === requestedCategory)) {
+      setCategory(requestedCategory);
+    }
+    if (requestedNovelId) setSourceNovelId(requestedNovelId);
+  }, []);
+
+  useEffect(() => {
     loadTasks();
   }, []);
 
