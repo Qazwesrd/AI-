@@ -66,6 +66,17 @@ class EpisodeVisualConsistencyTests(unittest.TestCase):
         self.assertIn("newer_state_available", codes)
         self.assertEqual(report["warning_count"], 2)
 
+    def test_generic_visual_role_with_scene_category_satisfies_scene_link(self):
+        report = build_episode_asset_consistency_report([{
+            "id": 6, "shot_number": 7, "scene_name": "海皇神殿", "novel_id": 9,
+            "links": [{
+                "asset_id": 15, "role": "visual", "state_snapshot": {"appearance": "神殿"},
+                "newer_state_available": False,
+                "asset": {"name": "海皇神殿", "category": "scenes", "confirmed": True, "data": {}},
+            }],
+        }])
+        self.assertNotIn("missing_scene_asset", {issue["code"] for issue in report["issues"]})
+
     def test_shot_without_any_visual_asset_is_reported(self):
         report = build_episode_asset_consistency_report([{
             "id": 5, "shot_number": 6, "scene_name": "海界神殿", "novel_id": 9, "links": [],
