@@ -227,6 +227,7 @@ export default function VideoEditorPage() {
         <header>
           <h1 className="text-3xl font-bold">AI 视频剪辑中心</h1>
           <p className="mt-2 text-white/60">可使用已配置的 AI API，也可把任务交给网页版 AI 分析，再由本地 FFmpeg 执行剪辑。</p>
+          <a href="/subtitle-studio" className="mt-3 inline-flex rounded-lg border border-cyan-300/40 bg-cyan-900/30 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-800/40">打开 AI 字幕翻译与多语言配音工作室</a>
         </header>
 
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
