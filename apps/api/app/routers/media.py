@@ -585,7 +585,13 @@ def render_episode_from_shots(
     by_shot = {}
     for task in tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
-        if metadata.get("episode_id") == episode_id and metadata.get("shot_id"):
+        if (
+            metadata.get("episode_id") == episode_id
+            and metadata.get("shot_id")
+            and task.status == "completed"
+            and task.result_path
+            and Path(task.result_path).is_file()
+        ):
             by_shot.setdefault(metadata["shot_id"], task)
     clips = []
     missing = []
@@ -665,6 +671,8 @@ def render_episode_from_shots(
             font_candidates = [
                 Path("C:/Windows/Fonts/msyh.ttc"),
                 Path("C:/Windows/Fonts/arial.ttf"),
+                Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+                Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
                 Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
             ]
             font_path = next((item for item in font_candidates if item.is_file()), None)
