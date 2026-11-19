@@ -53,7 +53,7 @@ class VideoEditorAudioModeTests(unittest.TestCase):
 
     def test_replace_mode_uses_only_external_audio_track(self):
         args = self._run_plan("replace")
-        self.assertIn("[1:a:0]", args)
+        self.assertIn("1:a:0", args)
         self.assertNotIn("-filter_complex", args)
 
     def test_mix_mode_mixes_original_and_external_audio(self):
