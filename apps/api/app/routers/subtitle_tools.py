@@ -16,6 +16,7 @@ from app.models.studio import AIUsageLog
 from app.routers.media import get_provider
 from app.services.media_service import (
     AUDIO_DIR, SUBTITLE_DIR, VIDEO_DIR, probe_media, run_ffmpeg, safe_storage_file,
+    validate_rendered_video,
 )
 
 router = APIRouter(prefix="/api/subtitle-tools", tags=["字幕翻译与配音"])
@@ -330,11 +331,15 @@ def render_styled_subtitles(data: StyledRenderInput, db: Session = Depends(get_d
         run_ffmpeg(["-i", str(video), "-vf", vf, "-map", "0:v:0", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                     "-c:a", "aac", "-movflags", "+faststart", str(output)])
+        quality_report = validate_rendered_video(output, require_audio=False)
         db.add(MediaFile(name=output.name, category="video", file_path=str(output),
                          mime_type="video/mp4", file_size=output.stat().st_size,
-                         metadata_json={"subtitle_source": str(subtitle), "styled_render": True}))
+                         duration=quality_report["duration_seconds"],
+                         metadata_json={"subtitle_source": str(subtitle), "styled_render": True,
+                                        "quality_checked": True, "quality_report": quality_report}))
         db.commit()
         return {"success": True, "path": str(output), "size": output.stat().st_size,
+                "quality_report": quality_report,
                 "message": "字幕样式已烧录到视频，可在导出文件中查看。"}
     except HTTPException:
         raise

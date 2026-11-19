@@ -184,3 +184,52 @@ def _bundled_media_path(filename: str) -> str:
     raise FileNotFoundError(
         f"找不到 {command}。请检查软件媒体组件是否完整安装。"
     )
+
+
+def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0, require_audio=False):
+    """Validate a completed MP4 with FFprobe before it is registered as a deliverable."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise ValueError("导出文件不存在")
+    size = file_path.stat().st_size
+    if size < 1024:
+        raise ValueError("导出文件过小，可能是空文件或不完整文件")
+    info = probe_media(file_path)
+    streams = info.get("streams") or []
+    video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not video_stream:
+        raise ValueError("导出文件中没有有效的视频流")
+    raw_duration = (info.get("format") or {}).get("duration") or video_stream.get("duration") or 0
+    try:
+        duration = float(raw_duration)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration <= 0:
+        raise ValueError("FFprobe 无法确认导出视频时长")
+    if expected_duration is not None:
+        tolerance = max(float(duration_tolerance), float(expected_duration) * 0.01)
+        if abs(duration - float(expected_duration)) > tolerance:
+            raise ValueError(
+                f"导出视频时长异常：预期约 {float(expected_duration):.2f} 秒，实际 {duration:.2f} 秒"
+            )
+    if require_audio and not audio_stream:
+        raise ValueError("导出文件缺少音频流")
+    width = int(video_stream.get("width") or 0)
+    height = int(video_stream.get("height") or 0)
+    warnings = []
+    if not audio_stream:
+        warnings.append("文件没有音频流；如果这是静音视频则无需处理")
+    if width < 720 or height < 480:
+        warnings.append("视频分辨率较低，发布前建议检查画质")
+    return {
+        "valid": True,
+        "size_bytes": size,
+        "duration_seconds": round(duration, 3),
+        "width": width,
+        "height": height,
+        "video_codec": video_stream.get("codec_name"),
+        "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
+        "has_audio": bool(audio_stream),
+        "warnings": warnings,
+    }
