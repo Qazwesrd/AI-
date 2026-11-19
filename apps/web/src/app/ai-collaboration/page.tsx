@@ -265,6 +265,7 @@ export default function AICollaborationPage() {
                   <p className="break-all text-sm font-medium">{item.original_filename}</p>
                   <p className="mt-1 text-xs text-slate-400">{item.media_type} · {(item.file_size / 1024 / 1024).toFixed(1)} MB · {item.chapter_number ? `第 ${item.chapter_number} 章` : "未指定章节"}</p>
                   <p className="mt-1 break-all text-[10px] text-slate-500">SHA-256：{item.sha256}</p>
+                  <a href={`${API}/api/ai-collaboration/results/attachments/${item.id}/file`} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-300 underline">预览 / 打开文件</a>
                   {item.description && <p className="mt-1 text-xs text-slate-300">{item.description}</p>}
                   {item.media_file_id && <p className="mt-1 text-xs text-emerald-300">媒体素材 ID：{item.media_file_id}</p>}
                 </div>
