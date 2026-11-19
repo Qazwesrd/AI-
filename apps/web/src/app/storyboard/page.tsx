@@ -67,6 +67,7 @@ export default function StoryboardPage() {
   const [speechVoice, setSpeechVoice] = useState("alloy");
   const [speechPaidConfirmed, setSpeechPaidConfirmed] = useState(false);
   const [backgroundMusicPath, setBackgroundMusicPath] = useState("");
+  const [renderedEpisodeOutputs, setRenderedEpisodeOutputs] = useState<Record<number, string>>({});
 
   const [shotForm, setShotForm] = useState({
     scene_name: "", shot_type: "中景", camera_movement: "固定镜头",
@@ -277,6 +278,7 @@ export default function StoryboardPage() {
     try {
       const query = backgroundMusicPath.trim() ? "?music_path=" + encodeURIComponent(backgroundMusicPath.trim()) : "";
       const result = await request("/api/media/video/episodes/" + episode.id + "/render" + query, { method: "POST" });
+      setRenderedEpisodeOutputs(current => ({ ...current, [episode.id]: result.output }));
       setMessage("第" + episode.episode_number + "集初版视频已合成：" + result.output);
     } catch (error) { setMessage(error instanceof Error ? error.message : "视频合成失败"); }
     finally { setBusy(false); }
@@ -487,6 +489,7 @@ export default function StoryboardPage() {
                 <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
                 <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
+                {renderedEpisodeOutputs[ep.id] && <a className="rounded-lg border border-cyan-300/30 bg-cyan-900/40 px-3 py-1.5 text-xs text-cyan-100" href={`/publishing?videoPath=${encodeURIComponent(renderedEpisodeOutputs[ep.id])}&title=${encodeURIComponent(`第${ep.episode_number}集 ${ep.title}`)}`}>将本集成片送入发布中心</a>}
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, -1)}>上移</button>

@@ -98,6 +98,17 @@ export default function PublishingPage() {
   }
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sourceVideoPath = params.get("videoPath");
+    const sourceTitle = params.get("title");
+    if (sourceVideoPath) {
+      setVideoPath(sourceVideoPath);
+      if (sourceTitle) setTitle(sourceTitle);
+      setMessage("已接收分镜中心的本集成片。请确认视频文件、标题和发布平台后再创建发布任务。");
+    }
+  }, []);
+
+  useEffect(() => {
     void loadData();
     const timer = window.setInterval(() => void loadData(), 20000);
     return () => window.clearInterval(timer);
