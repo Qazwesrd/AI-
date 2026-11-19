@@ -10,6 +10,13 @@ on:
       - "scripts/build-windows.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
+  pull_request:
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "scripts/build-windows.ps1"
+      - "docs/manual/**"
+      - ".github/workflows/windows-release.yml"
 
 permissions:
   contents: write
