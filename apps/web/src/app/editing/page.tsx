@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+type MusicFile = { id: number; name: string; path: string };
 type Shot = { id: number; shot_number: number; duration_seconds: number; scene_name: string; visual_description: string; dialogue: string };
 type Transition = { after_shot_id: number; transition: "cut" | "fade" | "dissolve"; duration_seconds: number };
 type Timeline = {
@@ -14,6 +15,8 @@ const blank: Timeline = { shot_order: [], transitions: [], intro_title: "", outr
 export default function EpisodeEditingPage() {
   const [episodeId, setEpisodeId] = useState("");
   const [shots, setShots] = useState<Shot[]>([]);
+  const [musicFiles, setMusicFiles] = useState<MusicFile[]>([]);
+  const [musicPath, setMusicPath] = useState("");
   const [timeline, setTimeline] = useState<Timeline>(blank);
   const [version, setVersion] = useState(0);
   const [message, setMessage] = useState("");
@@ -29,6 +32,8 @@ export default function EpisodeEditingPage() {
       if (!response.ok) throw new Error(data.detail || "读取剪辑时间轴失败");
       setEpisodeId(id); setShots(data.shots || []); setVersion(data.version || 0);
       setTimeline({ ...blank, ...(data.timeline || {}) });
+      const musicResponse = await fetch(`${API}/api/media/files?category=audio`);
+      if (musicResponse.ok) setMusicFiles(await musicResponse.json());
       setMessage(`已载入：${data.episode_title || "当前分集"} · ${(data.shots || []).length} 个镜头`);
     } catch (e) { setMessage(e instanceof Error ? e.message : "读取失败"); }
     finally { setBusy(false); }
@@ -67,9 +72,16 @@ export default function EpisodeEditingPage() {
 
   async function renderEpisode() {
     if (!episodeId) return;
-    setBusy(true); setMessage("正在使用已保存的剪辑方案本地合成成片……");
+    setBusy(true); setMessage("正在保存剪辑方案并使用本地 FFmpeg 合成成片……");
     try {
-      const response = await fetch(`${API}/api/media/video/episodes/${episodeId}/render`, { method: "POST" });
+      const saveResponse = await fetch(`${API}/api/media/video/episodes/${episodeId}/timeline`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(timeline)
+      });
+      const saved = await saveResponse.json();
+      if (!saveResponse.ok) throw new Error(saved.detail || "保存剪辑方案失败");
+      setVersion(saved.version);
+      const musicQuery = musicPath ? `?music_path=${encodeURIComponent(musicPath)}` : "";
+      const response = await fetch(`${API}/api/media/video/episodes/${episodeId}/render${musicQuery}`, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "成片合成失败");
       setMessage(`成片已生成：${data.output} · ${data.duration_seconds || data.quality_report?.duration_seconds || "时长已检查"} 秒`);
@@ -142,6 +154,12 @@ export default function EpisodeEditingPage() {
           <label className="text-sm">片尾标题<input maxLength={120} value={timeline.outro_title} onChange={e => setTimeline({ ...timeline, outro_title: e.target.value })} className="mt-2 w-full rounded bg-black/30 p-3" placeholder="可留空" /></label>
           <label className="text-sm">背景音乐淡入（秒）<input type="number" min="0" max="30" step="0.5" value={timeline.music_fade_in_seconds} onChange={e => setTimeline({ ...timeline, music_fade_in_seconds: Math.max(0, Math.min(30, Number(e.target.value))) })} className="mt-2 w-full rounded bg-black/30 p-3" /></label>
           <label className="text-sm">背景音乐淡出（秒）<input type="number" min="0" max="30" step="0.5" value={timeline.music_fade_out_seconds} onChange={e => setTimeline({ ...timeline, music_fade_out_seconds: Math.max(0, Math.min(30, Number(e.target.value))) })} className="mt-2 w-full rounded bg-black/30 p-3" /></label>
+          <label className="text-sm md:col-span-2">背景音乐文件
+            <select value={musicPath} onChange={e => setMusicPath(e.target.value)} className="mt-2 w-full rounded bg-slate-800 p-3">
+              <option value="">不添加背景音乐</option>
+              {musicFiles.map(file => <option key={file.id} value={file.path}>{file.name}</option>)}
+            </select>
+          </label>
           <label className="text-sm md:col-span-2">背景音乐音量：{Math.round(timeline.music_volume * 100)}%
             <input type="range" min="0" max="1" step="0.01" value={timeline.music_volume} onChange={e => setTimeline({ ...timeline, music_volume: Number(e.target.value) })} className="mt-2 w-full" />
           </label>
