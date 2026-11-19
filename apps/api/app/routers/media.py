@@ -29,6 +29,45 @@ from app.services.media_service import (
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
 
 
+def build_episode_audio_filter(shot_ids, transitions):
+    """Build audio concat/acrossfade graph matching the video transition groups."""
+    transition_by_shot = {
+        item["after_shot_id"]: item
+        for item in transitions
+        if item.get("transition") in ("fade", "dissolve")
+    }
+    groups = []
+    boundaries = []
+    current = []
+    for index, shot_id in enumerate(shot_ids):
+        current.append(index)
+        transition = transition_by_shot.get(shot_id)
+        if transition and index < len(shot_ids) - 1:
+            groups.append(current)
+            boundaries.append(transition)
+            current = []
+    if current:
+        groups.append(current)
+
+    filters = []
+    for group_index, indexes in enumerate(groups):
+        labels = "".join(f"[a{index}]" for index in indexes)
+        label = f"ag{group_index}"
+        if len(indexes) == 1:
+            filters.append(f"{labels}anull[{label}]")
+        else:
+            filters.append(f"{labels}concat=n={len(indexes)}:v=0:a=1[{label}]")
+    current_label = "ag0"
+    for index, transition in enumerate(boundaries, 1):
+        duration = float(transition["duration_seconds"])
+        next_label = f"ax{index}"
+        filters.append(
+            f"[{current_label}][ag{index}]acrossfade=d={duration:.3f}:c1=tri:c2=tri[{next_label}]"
+        )
+        current_label = next_label
+    return filters, current_label
+
+
 def build_episode_video_filter(shot_ids, durations, transitions):
     """Build grouped concat + xfade filters while preserving hard cuts."""
     if not shot_ids or len(shot_ids) != len(durations):
@@ -611,7 +650,14 @@ def render_episode_from_shots(
                 f"本集镜头视频总时长为 {total_video_duration:.1f} 秒，必须控制在 90–150 秒；请调整镜头时长或视频生成设置后再合成。",
             )
         filters.extend(video_filters)
-        filters.append("".join(audio_labels) + f"concat=n={len(clips)}:v=0:a=1[aout]")
+        audio_filters, audio_label = build_episode_audio_filter(
+            [shot.id for shot in shots], transition_items
+        )
+        filters.extend(audio_filters)
+        filters.append(
+            f"[{audio_label}]atrim=duration={total_video_duration:.3f},"
+            "asetpts=PTS-STARTPTS[aout]"
+        )
         filters.append(f"[{video_label}]null[vout]")
         title_files = []
         title_texts = []
