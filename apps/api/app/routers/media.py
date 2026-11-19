@@ -584,6 +584,12 @@ def render_episode_from_shots(
             "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
             str(render_stage),
         ])
+        # Promote the first valid render before optional mixing. If mixing fails,
+        # the un-mixed episode remains available as a recoverable deliverable.
+        quality_report = finalize_rendered_video(
+            render_stage, output, expected_duration=total_video_duration,
+            duration_tolerance=2.0, require_audio=True,
+        )
         # Mix generated dialogue and optional background music with original shot sound.
         speech_tasks = db.query(MediaTask).filter(
             MediaTask.task_type == "episode_speech_track"
@@ -597,7 +603,7 @@ def render_episode_from_shots(
         music = safe_storage_file(music_path) if music_path else None
         if speech_path or music:
             mixed_output = output.with_name(output.stem + "_mixed.mp4")
-            mix_args = ["-i", str(render_stage)]
+            mix_args = ["-i", str(output)]
             mix_filters = ["[0:a]volume=0.35[original]"]
             mix_labels = ["[original]"]
             mix_index = 1
@@ -620,7 +626,6 @@ def render_episode_from_shots(
                 mixed_stage, output, expected_duration=total_video_duration,
                 duration_tolerance=2.0, require_audio=True,
             )
-            render_stage.unlink(missing_ok=True)
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
@@ -645,11 +650,6 @@ def render_episode_from_shots(
             os.replace(subtitle_stage, subtitle_file)
             subtitle_path = str(subtitle_file)
             db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
-        if not output.is_file():
-            quality_report = finalize_rendered_video(
-                render_stage, output, expected_duration=total_video_duration,
-                duration_tolerance=2.0, require_audio=True,
-            )
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
