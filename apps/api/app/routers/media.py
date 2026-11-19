@@ -1626,8 +1626,22 @@ def save_episode_edit_timeline(
         raise HTTPException(422, "同一镜头后不能重复设置转场")
     if any(shot_id not in valid_ids for shot_id in transition_ids):
         raise HTTPException(422, "转场引用了不属于本集的镜头")
-    if any(item.transition == "cut" and item.duration_seconds != 0 for item in data.transitions):
-        raise HTTPException(422, "直接切镜（cut）的转场时长必须为 0")
+    order_positions = {shot_id: index for index, shot_id in enumerate(data.shot_order)}
+    shot_by_id = {shot.id: shot for shot in shots}
+    for item in data.transitions:
+        position = order_positions[item.after_shot_id]
+        if position >= len(data.shot_order) - 1:
+            raise HTTPException(422, "最后一个镜头后不能设置转场")
+        if item.transition == "cut" and item.duration_seconds != 0:
+            raise HTTPException(422, "直接切镜（cut）的转场时长必须为 0")
+        if item.transition != "cut":
+            next_shot = shot_by_id[data.shot_order[position + 1]]
+            adjacent_limit = min(
+                float(shot_by_id[item.after_shot_id].duration_seconds or 0),
+                float(next_shot.duration_seconds or 0),
+            ) / 2
+            if item.duration_seconds <= 0 or item.duration_seconds >= adjacent_limit:
+                raise HTTPException(422, "转场时长必须大于 0，且小于相邻较短镜头时长的一半")
     payload = data.model_dump()
     record = db.query(EpisodeEditTimeline).filter(
         EpisodeEditTimeline.episode_id == episode_id
