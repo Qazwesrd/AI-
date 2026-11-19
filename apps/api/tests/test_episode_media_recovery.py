@@ -11,6 +11,8 @@ from app.routers.media import (
 from app.services.media_service import (
     download_validated_video,
     finalize_rendered_video,
+    validate_rendered_audio,
+    finalize_rendered_audio,
 )
 
 
@@ -67,6 +69,53 @@ class AtomicVideoArtifactTests(unittest.TestCase):
 
             self.assertTrue(source.exists())
             self.assertEqual(destination.read_bytes(), b"previous-good-output")
+
+
+
+class AudioArtifactValidationTests(unittest.TestCase):
+    @patch("app.services.media_service.probe_media")
+    def test_audio_file_requires_real_audio_stream_and_duration(self, probe):
+        with tempfile.TemporaryDirectory() as directory:
+            audio = Path(directory) / "voice.mp3"
+            audio.write_bytes(b"x" * 2048)
+            probe.return_value = {
+                "format": {"duration": "8.5"},
+                "streams": [{"codec_type": "audio", "codec_name": "mp3"}],
+            }
+            report = validate_rendered_audio(audio)
+            self.assertTrue(report["valid"])
+            self.assertEqual(report["duration_seconds"], 8.5)
+
+            probe.return_value = {
+                "format": {"duration": "8.5"},
+                "streams": [{"codec_type": "video", "codec_name": "h264"}],
+            }
+            with self.assertRaisesRegex(ValueError, "没有有效的音频流"):
+                validate_rendered_audio(audio)
+
+    @patch("app.services.media_service.probe_media")
+    def test_audio_with_unknown_duration_is_rejected(self, probe):
+        with tempfile.TemporaryDirectory() as directory:
+            audio = Path(directory) / "voice.mp3"
+            audio.write_bytes(b"x" * 2048)
+            probe.return_value = {
+                "format": {"duration": "0"},
+                "streams": [{"codec_type": "audio", "codec_name": "mp3"}],
+            }
+            with self.assertRaisesRegex(ValueError, "无法确认配音时长"):
+                validate_rendered_audio(audio)
+
+    @patch("app.services.media_service.validate_rendered_audio", side_effect=ValueError("音频损坏"))
+    def test_invalid_staged_audio_does_not_replace_existing_file(self, _validate):
+        with tempfile.TemporaryDirectory() as directory:
+            staged = Path(directory) / "staged.mp3"
+            final = Path(directory) / "voice.mp3"
+            staged.write_bytes(b"x" * 2048)
+            final.write_bytes(b"previous-valid-audio")
+            with self.assertRaisesRegex(ValueError, "音频损坏"):
+                finalize_rendered_audio(staged, final)
+            self.assertTrue(staged.exists())
+            self.assertEqual(final.read_bytes(), b"previous-valid-audio")
 
 
 class EpisodeShotArtifactSelectionTests(unittest.TestCase):
