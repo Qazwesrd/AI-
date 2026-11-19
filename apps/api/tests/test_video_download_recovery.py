@@ -55,7 +55,7 @@ class VideoDownloadRecoveryTests(unittest.TestCase):
         self, video_dir, validate, download, _http_json, _provider
     ):
         with tempfile.TemporaryDirectory() as folder:
-            video_dir.__truediv__ = lambda name: Path(folder) / name
+            video_dir.__truediv__ = lambda _self, name: Path(folder) / name
             def write_video(_url, destination):
                 Path(destination).write_bytes(b"valid-video" * 200)
             download.side_effect = write_video
