@@ -690,7 +690,7 @@ def render_episode_from_shots(
                 "output": str(output), "subtitle_path": subtitle_path,
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
-                "subtitle_count": subtitle_index - 1,
+                "subtitle_count": subtitle_index - 1 if subtitle_path else 0,
                 "quality_report": quality_report,
                 "warnings": render_warnings}
     except HTTPException:
@@ -817,8 +817,10 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
                 "already_downloaded": True,
             }
 
+    # Polling/downloading an already-submitted task does not create a new paid request.
     config, key, base = get_provider(
-        db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
+        db, task.provider, bool((task.request_data or {}).get("confirm_paid")),
+        check_paid=False,
     )
     settings = task.request_data or {}
     template = settings.get("status_path_template", "/videos/{task_id}")
