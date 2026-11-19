@@ -25,3 +25,25 @@ class AIStoryProposal(Base):
     source_task_key = Column(String(120), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
+
+
+class AIResultAttachment(Base):
+    __tablename__ = "ai_result_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    novel_id = Column(Integer, nullable=False, index=True)
+    chapter_number = Column(Integer, nullable=True, index=True)
+    original_filename = Column(String(300), nullable=False)
+    stored_filename = Column(String(300), nullable=False, unique=True)
+    media_type = Column(String(30), nullable=False, index=True)
+    mime_type = Column(String(160), nullable=False)
+    file_path = Column(Text, nullable=False)
+    file_size = Column(Integer, nullable=False, default=0)
+    sha256 = Column(String(64), nullable=False, index=True)
+    description = Column(Text, default="")
+    source_task_key = Column(String(120), default="")
+    status = Column(String(30), nullable=False, default="pending_review", index=True)
+    review_note = Column(Text, default="")
+    media_file_id = Column(Integer, nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    reviewed_at = Column(DateTime, nullable=True)
