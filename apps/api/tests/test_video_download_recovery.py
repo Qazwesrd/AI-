@@ -80,7 +80,7 @@ class VideoDownloadRecoveryTests(unittest.TestCase):
             db = Mock()
             db.query.return_value.filter.return_value.first.return_value = task
             # Stop after the existing-file integrity branch by making provider lookup fail.
-            with patch("app.routers.media.get_provider", side_effect=RuntimeError("provider unavailable")):
+            with patch("app.routers.media.get_provider", side_effect=HTTPException(503, "provider unavailable")):
                 from fastapi import HTTPException
                 with self.assertRaises(HTTPException):
                     refresh_video_task(81, db)
