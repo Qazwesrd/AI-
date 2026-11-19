@@ -77,6 +77,7 @@ export default function TasksPage() {
   const [source, setSource] = useState("all");
   const [status, setStatus] = useState("all");
   const [keyword, setKeyword] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -289,8 +290,14 @@ export default function TasksPage() {
         </div>
 
         <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/45 p-4 md:grid-cols-[1fr_180px_180px_auto]">
-          <input value={keyword} onChange={event => { setKeyword(event.target.value); setOffset(0); }}
-            onKeyDown={event => { if (event.key === "Enter") void loadTasks(); }}
+          <input value={searchInput} onChange={event => setSearchInput(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === "Enter") {
+                const nextKeyword = searchInput.trim();
+                if (nextKeyword === keyword && offset === 0) void loadTasks();
+                else { setKeyword(nextKeyword); setOffset(0); }
+              }
+            }}
             placeholder="搜索任务、模型、小说名称或错误信息"
             className="min-w-0 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-purple-300/50" />
           <select value={source} onChange={event => { setSource(event.target.value); setOffset(0); }}
@@ -310,7 +317,11 @@ export default function TasksPage() {
             <option value="attention">需要核实</option>
             <option value="partial">部分完成</option>
           </select>
-          <button onClick={() => void loadTasks()} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-950/40">查询</button>
+          <button onClick={() => {
+            const nextKeyword = searchInput.trim();
+            if (nextKeyword === keyword && offset === 0) void loadTasks();
+            else { setKeyword(nextKeyword); setOffset(0); }
+          }} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-200 hover:bg-cyan-950/40">查询</button>
         </div>
 
         {message && <p className="mb-4 rounded-xl border border-white/10 bg-slate-950/40 p-3 text-xs text-slate-300">{message}</p>}
