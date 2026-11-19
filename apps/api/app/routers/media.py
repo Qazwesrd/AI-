@@ -607,10 +607,12 @@ def render_episode_from_shots(
             speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
             if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
                 speech_path = safe_storage_file(speech_task.result_path)
+                validate_rendered_audio(speech_path)
                 break
         music = safe_storage_file(music_path) if music_path else None
+        if music:
+            validate_rendered_audio(music)
         if speech_path or music:
-            mixed_output = output.with_name(output.stem + "_mixed.mp4")
             mix_args = ["-i", str(output)]
             mix_filters = ["[0:a]volume=0.35[original]"]
             mix_labels = ["[original]"]
@@ -978,8 +980,8 @@ def generate_episode_voice_track(
         existing_audio = generated.get(shot.id)
         if existing_audio:
             try:
-                info = probe_media(existing_audio)
-                speech_duration = float((info.get("format") or {}).get("duration") or 0)
+                audio_report = validate_rendered_audio(existing_audio)
+                speech_duration = audio_report["duration_seconds"]
                 target_duration = clip_durations.get(
                     shot.id, max(1.0, float(shot.duration_seconds or 5))
                 )
@@ -1168,11 +1170,14 @@ def generate_episode_voice_track(
         input_index += 1
     filters.append("".join(labels) + f"concat=n={len(shots)}:v=0:a=1[aout]")
     track_path = AUDIO_DIR / f"episode_{episode_id}_voice_{uuid.uuid4().hex[:8]}.mp3"
+    track_stage = track_path.with_name("." + track_path.stem + ".rendering.mp3")
     try:
         run_ffmpeg(ffmpeg_args + [
             "-filter_complex", ";".join(filters), "-map", "[aout]",
-            "-c:a", "libmp3lame", "-q:a", "3", str(track_path),
+            "-c:a", "libmp3lame", "-q:a", "3", str(track_stage),
         ])
+        validate_rendered_audio(track_stage)
+        os.replace(track_stage, track_path)
         task = MediaTask(
             task_type="episode_speech_track", provider=data.provider, model=data.model,
             status="partial" if failures else "completed", prompt=f"第{episode.episode_number}集对白配音",
@@ -1187,8 +1192,8 @@ def generate_episode_voice_track(
         ))
         db.commit()
     except Exception as exc:
-        track_path.unlink(missing_ok=True)
-        raise HTTPException(500, "对白语音合成失败：" + str(exc))
+        track_stage.unlink(missing_ok=True)
+        raise HTTPException(500, "对白语音合成失败；已生成的逐镜头配音素材予以保留：" + str(exc))
     return {
         "success": not failures, "episode_id": episode_id,
         "voice_track": str(track_path), "generated_shots": len(generated),
