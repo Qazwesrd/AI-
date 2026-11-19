@@ -1,6 +1,6 @@
 {
     "name": "ai-comic-studio-desktop",
-    "version": "1.0.4",
+    "version": "1.0.5",
     "private": true,
     "description": "AI漫剧制作大师 Windows 桌面应用",
     "main": "main.cjs",
