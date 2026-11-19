@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 from app.document_import import (
     _verify_compressed_archive, decode_text, docx_text, epub_text, extract_document_text,
 )
-from app.routers.novels import _read_upload_limited, split_chapters\nfrom fastapi import HTTPException
+from app.routers.novels import _read_upload_limited, split_chapters
+from fastapi import HTTPException
 
 
 class DocumentImportTests(unittest.TestCase):
@@ -163,7 +164,8 @@ class DocumentImportTests(unittest.TestCase):
             asyncio.run(_read_upload_limited(FakeUpload(), max_bytes=10)),
             b"1234567890",
         )
-\n    def test_txt_document_import(self):
+
+    def test_txt_document_import(self):
         self.assertEqual(extract_document_text("novel.txt", "正文内容".encode("utf-8")), "正文内容")
 
     def test_reject_unsupported_format(self):
