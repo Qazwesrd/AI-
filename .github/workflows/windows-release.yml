@@ -163,6 +163,21 @@ jobs:
         run: |
           ./scripts/build-windows.ps1
 
+      - name: Verify installer and write SHA-256 checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Join-Path $PWD "apps/desktop/release"
+          $installers = @(Get-ChildItem $release -File -Filter "*Setup*.exe")
+          if ($installers.Count -ne 1) { throw "Expected exactly one fresh Windows installer; found $($installers.Count)." }
+          $installer = $installers[0]
+          if ($installer.Length -lt 1MB) { throw "Installer is unexpectedly small." }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
+          "$hash  $($installer.Name)" | Set-Content -LiteralPath (Join-Path $release "$($installer.Name).sha256") -Encoding ascii
+          Write-Host "Installer: $($installer.FullName)"
+          Write-Host "Size: $([math]::Round($installer.Length / 1MB, 2)) MB"
+          Write-Host "SHA256: $hash"
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -183,7 +198,7 @@ jobs:
             - 包含桌面启动器、本地 API 和 Web 前端。
             - 包含 FFmpeg / FFprobe 媒体处理组件。
             - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
-          files: apps/desktop/release/*Setup*.exe
+          files: |\n            apps/desktop/release/*Setup*.exe\n            apps/desktop/release/*.sha256
           fail_on_unmatched_files: true
           draft: false
           prerelease: false
