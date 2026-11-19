@@ -6,6 +6,7 @@ import urllib.error
 import ipaddress
 import socket
 import re
+import uuid
 from urllib.parse import urlparse
 from pathlib import Path
 from cryptography.fernet import Fernet
@@ -235,7 +236,126 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
         "warnings": warnings,
     }
 
+def validate_rendered_audio(path):
+    """Validate a generated audio asset before it is registered or mixed."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise ValueError("配音文件不存在")
+    size = file_path.stat().st_size
+    if size < 128:
+        raise ValueError("配音文件过小，可能为空或下载不完整")
+    info = probe_media(file_path)
+    streams = info.get("streams") or []
+    audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not audio_stream:
+        raise ValueError("配音文件中没有有效的音频流")
+    raw_duration = (info.get("format") or {}).get("duration") or audio_stream.get("duration") or 0
+    try:
+        duration = float(raw_duration)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration <= 0:
+        raise ValueError("FFprobe 无法确认配音时长")
+    return {
+        "valid": True,
+        "size_bytes": size,
+        "duration_seconds": round(duration, 3),
+        "audio_codec": audio_stream.get("codec_name"),
+    }
 
+
+def finalize_rendered_audio(source, destination):
+    """Validate a staged audio file before atomically promoting it."""
+    source_path = Path(source)
+    destination_path = Path(destination)
+    report = validate_rendered_audio(source_path)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source_path, destination_path)
+    return report
+
+
+
+def finalize_rendered_video(source, destination, expected_duration=None, duration_tolerance=2.0, require_audio=False):
+    """Validate a staged video before atomically promoting it to its final path."""
+    source_path = Path(source)
+    destination_path = Path(destination)
+    report = validate_rendered_video(
+        source_path,
+        expected_duration=expected_duration,
+        duration_tolerance=duration_tolerance,
+        require_audio=require_audio,
+    )
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source_path, destination_path)
+    return report
+
+
+def download_validated_video(url, destination, expected_duration=None, duration_tolerance=2.0, require_audio=False):
+    """Download to a private temporary file; expose it only after FFprobe validation."""
+    destination_path = Path(destination)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination_path.with_name(
+        f".{destination_path.stem}.{uuid.uuid4().hex}.download{destination_path.suffix}"
+    )
+    try:
+        http_download(url, temporary)
+        return finalize_rendered_video(
+            temporary,
+            destination_path,
+            expected_duration=expected_duration,
+            duration_tolerance=duration_tolerance,
+            require_audio=require_audio,
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+
+def media_stream_sync_report(streams, tolerance_seconds=0.5):
+    """Compare FFprobe stream start/duration metadata; this is a preflight hint, not lip-sync analysis."""
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not video:
+        return None
+
+    def number(value):
+        try:
+            result = float(value)
+            return result if result >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    video_duration = number(video.get("duration"))
+    audio_duration = number(audio.get("duration")) if audio else None
+    video_start = number(video.get("start_time")) or 0.0
+    audio_start = number(audio.get("start_time")) if audio else None
+    duration_difference = (
+        abs(video_duration - audio_duration)
+        if video_duration is not None and audio_duration is not None else None
+    )
+    start_offset = abs(video_start - audio_start) if audio_start is not None else None
+    measurable = duration_difference is not None and start_offset is not None
+    out_of_sync = measurable and (
+        duration_difference > tolerance_seconds or start_offset > tolerance_seconds
+    )
+    return {
+        "measurable": measurable,
+        "tolerance_seconds": float(tolerance_seconds),
+        "video_duration_seconds": round(video_duration, 3) if video_duration is not None else None,
+        "audio_duration_seconds": round(audio_duration, 3) if audio_duration is not None else None,
+        "duration_difference_seconds": round(duration_difference, 3) if duration_difference is not None else None,
+        "video_start_seconds": round(video_start, 3),
+        "audio_start_seconds": round(audio_start, 3) if audio_start is not None else None,
+        "start_offset_seconds": round(start_offset, 3) if start_offset is not None else None,
+        "status": "warning" if out_of_sync else ("ok" if measurable else "unknown"),
+        "note": (
+            "音视频轨起始位置或时长差超过阈值，请试听/试看复核"
+            if out_of_sync else (
+                "轨道元数据差异在阈值内；仍建议抽查对白口型"
+                if measurable else "文件缺少可比较的音频/视频轨时长元数据，无法判断轨道同步"
+            )
+        ),
+    }
 
 def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, silence_noise="-50dB"):
     """Detect sustained black frames and digital silence; findings are advisory, not automatic failures."""
@@ -296,7 +416,10 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
                 "duration_seconds": round(float(match.group(3)), 3),
             })
 
+    sync_report = media_stream_sync_report(streams)
     warnings = []
+    if sync_report and sync_report["status"] == "warning":
+        warnings.append(sync_report["note"])
     if black_segments:
         warnings.append(f"检测到 {len(black_segments)} 段持续黑屏，请检查是否为转场或意外空镜")
     if silence_segments:
@@ -309,6 +432,7 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         "silence_threshold_seconds": float(silence_min_duration),
         "silence_noise_threshold": silence_noise,
         "has_audio": bool(audio_stream),
+        "audio_video_sync": sync_report,
         "black_segments": black_segments,
         "silence_segments": silence_segments,
         "warnings": warnings,

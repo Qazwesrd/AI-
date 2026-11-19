@@ -322,6 +322,20 @@ export default function PublishingPage() {
             {qualityScan && <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm space-y-2">
               <div className="font-medium">质量扫描结果</div>
               <div className="text-white/70">持续黑屏：{qualityScan.black_segments?.length || 0} 段；持续静音：{qualityScan.silence_segments?.length || 0} 段</div>
+              {qualityScan.audio_video_sync && <div className="rounded-lg border border-white/10 bg-black/20 p-3 space-y-1">
+                <div className="font-medium">音视频轨同步检查（FFprobe 元数据）</div>
+                <div className={qualityScan.audio_video_sync.status === "warning" ? "text-yellow-200" : "text-white/70"}>
+                  {qualityScan.audio_video_sync.status === "warning" ? "发现轨道时间差，建议复核" :
+                    qualityScan.audio_video_sync.status === "ok" ? "轨道时长与起始位置在允许误差内" : "无法从文件元数据判断轨道同步"}
+                </div>
+                <div className="text-xs text-white/55">
+                  视频轨：{qualityScan.audio_video_sync.video_duration_seconds ?? "未知"} 秒；
+                  音频轨：{qualityScan.audio_video_sync.audio_duration_seconds ?? "未知"} 秒；
+                  时长差：{qualityScan.audio_video_sync.duration_difference_seconds ?? "未知"} 秒；
+                  起始差：{qualityScan.audio_video_sync.start_offset_seconds ?? "未知"} 秒
+                </div>
+                <p className="text-xs text-white/40">{qualityScan.audio_video_sync.note}</p>
+              </div>}
               {(qualityScan.black_segments || []).map((item: any, index: number) => <div key={`black-${index}`} className="text-yellow-200/80">
                 黑屏 {item.start_seconds}s – {item.end_seconds}s（{item.duration_seconds}s）
               </div>)}

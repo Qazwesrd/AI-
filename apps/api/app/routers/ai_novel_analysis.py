@@ -667,15 +667,48 @@ def deduplicate_character_items(items):
     return result
 
 
+def novel_source_signature(chapters):
+    source_payload = "\\n".join(
+        f"{chapter.chapter_number}|{chapter.title}|{chapter.content or ''}"
+        for chapter in sorted(chapters, key=lambda item: item.chapter_number)
+    )
+    return hashlib.sha256(source_payload.encode("utf-8")).hexdigest()
+
+
 @router.get("/novels/{novel_id}/analysis-progress")
 def get_novel_analysis_progress(novel_id: int, db: Session = Depends(get_db)):
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404, "小说不存在")
+
+    current_signature = novel_source_signature(novel.chapters)
     job = db.query(NovelAnalysisJob).filter(
-        NovelAnalysisJob.novel_id == novel_id
+        NovelAnalysisJob.novel_id == novel_id,
+        NovelAnalysisJob.source_signature == current_signature,
     ).order_by(NovelAnalysisJob.id.desc()).first()
+
     if not job:
-        return {"has_job": False, "status": "not_started"}
+        previous_job = db.query(NovelAnalysisJob).filter(
+            NovelAnalysisJob.novel_id == novel_id
+        ).order_by(NovelAnalysisJob.id.desc()).first()
+        if previous_job:
+            return {
+                "has_job": True,
+                "source_current": False,
+                "status": "stale_source",
+                "job_id": previous_job.id,
+                "previous_status": previous_job.status,
+                "completed_chunks": 0,
+                "total_chunks": 0,
+                "progress_percent": 0,
+                "last_error": "小说原文已变化，此进度属于旧版本，不可用于当前小说。",
+                "updated_at": previous_job.updated_at.isoformat() if previous_job.updated_at else None,
+            }
+        return {"has_job": False, "source_current": True, "status": "not_started"}
+
     return {
         "has_job": True,
+        "source_current": True,
         "job_id": job.id,
         "status": job.status,
         "completed_chunks": job.completed_chunks,

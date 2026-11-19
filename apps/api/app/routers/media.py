@@ -23,7 +23,9 @@ from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
-    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video
+    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video,
+    download_validated_video, finalize_rendered_video,
+    validate_rendered_audio, finalize_rendered_audio
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
@@ -95,6 +97,24 @@ def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3
         "speed": float(speed), "response_format": response_format,
         "instructions": instructions or "",
     }, ensure_ascii=False, sort_keys=True)
+
+
+def latest_completed_episode_shot_tasks(tasks, episode_id):
+    """Return the newest usable completed clip per shot, ignoring failed retries."""
+    selected = {}
+    for task in sorted(tasks, key=lambda item: item.id, reverse=True):
+        metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        shot_id = metadata.get("shot_id")
+        if (
+            metadata.get("episode_id") == episode_id
+            and shot_id
+            and shot_id not in selected
+            and task.status == "completed"
+            and task.result_path
+            and Path(task.result_path).is_file()
+        ):
+            selected[shot_id] = task
+    return selected
 
 
 class VideoTaskInput(BaseModel):
@@ -428,13 +448,24 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
             elif video_url:
                 filename = f"episode_{episode_id}_shot_{meta.get('shot_id')}_{uuid.uuid4().hex[:8]}.mp4"
                 destination = VIDEO_DIR / filename
-                http_download(str(video_url), destination)
-                if not destination.is_file() or destination.stat().st_size < 1024:
-                    destination.unlink(missing_ok=True)
-                    raise RuntimeError("视频服务返回的文件为空或无效")
+                try:
+                    download_validated_video(str(video_url), destination)
+                except Exception as exc:
+                    task.status = "download_failed"
+                    task.error = (
+                        f"服务商已生成视频，但本地下载或完整性检查失败：{str(exc)[:500]}。"
+                        "可刷新任务仅重试下载，不会重新提交视频生成请求。"
+                    )
+                    db.commit()
+                    outcomes.append({
+                        "task_id": task.id, "shot_number": meta.get("shot_number"),
+                        "status": task.status, "error": task.error,
+                        "retry_download_only": True,
+                    })
+                    continue
                 task.result_path = str(destination)
                 task.status = "completed"
-                task.error = ""
+                task.error = None
                 db.add(MediaFile(
                     name=filename, category="video", file_path=str(destination),
                     mime_type="video/mp4", file_size=destination.stat().st_size,
@@ -482,25 +513,34 @@ def render_episode_from_shots(
     tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "storyboard_video"
     ).all()
-    by_shot = {}
-    for task in tasks:
-        metadata = task.request_data if isinstance(task.request_data, dict) else {}
-        if metadata.get("episode_id") == episode_id and metadata.get("shot_id"):
-            by_shot[metadata["shot_id"]] = task
+    # A later failed retry must not shadow an earlier successful clip.
+    by_shot = latest_completed_episode_shot_tasks(tasks, episode_id)
     clips = []
     missing = []
+    invalid = []
     for shot in shots:
         task = by_shot.get(shot.id)
-        if not task or not task.result_path or not Path(task.result_path).is_file():
+        if not task:
             missing.append(shot.shot_number)
-        else:
-            clips.append(safe_storage_file(task.result_path))
+            continue
+        try:
+            clip = safe_storage_file(task.result_path)
+            validate_rendered_video(clip)
+            clips.append(clip)
+        except Exception as exc:
+            invalid.append(f"{shot.shot_number}（{str(exc)[:120]}）")
+    if invalid:
+        raise HTTPException(409, "以下镜头视频文件未通过完整性检查：" + "、".join(invalid) + "；原始素材已保留，请重新下载或替换。")
     if missing:
         raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
     output_name = re.sub(r"[^a-zA-Z0-9_-]", "_", output_name)
     if not output_name.lower().endswith(".mp4"):
         output_name += ".mp4"
     output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
+    render_stage = output.with_name("." + output.stem + ".rendering.mp4")
+    mixed_stage = output.with_name("." + output.stem + ".mixed.mp4")
+    subtitle_stage = None
+    render_warnings = []
     try:
         # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
         ffmpeg_args = []
@@ -551,8 +591,14 @@ def render_episode_from_shots(
             "-map", "[vout]", "-map", "[aout]",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
-            str(output),
+            str(render_stage),
         ])
+        # Promote the first valid render before optional mixing. If mixing fails,
+        # the un-mixed episode remains available as a recoverable deliverable.
+        quality_report = finalize_rendered_video(
+            render_stage, output, expected_duration=total_video_duration,
+            duration_tolerance=2.0, require_audio=True,
+        )
         # Mix generated dialogue and optional background music with original shot sound.
         speech_tasks = db.query(MediaTask).filter(
             MediaTask.task_type == "episode_speech_track"
@@ -561,32 +607,49 @@ def render_episode_from_shots(
         for speech_task in speech_tasks:
             speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
             if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
-                speech_path = safe_storage_file(speech_task.result_path)
-                break
-        music = safe_storage_file(music_path) if music_path else None
+                try:
+                    candidate = safe_storage_file(speech_task.result_path)
+                    validate_rendered_audio(candidate)
+                    speech_path = candidate
+                    break
+                except Exception as exc:
+                    render_warnings.append(f"已有配音轨无法使用：{str(exc)[:240]}；保留原始配音素材。")
+                    continue
+        music = None
+        if music_path:
+            try:
+                music = safe_storage_file(music_path)
+                validate_rendered_audio(music)
+            except Exception as exc:
+                render_warnings.append(f"背景音乐无法使用：{str(exc)[:240]}；本次跳过背景音乐。")
         if speech_path or music:
-            mixed_output = output.with_name(output.stem + "_mixed.mp4")
-            mix_args = ["-i", str(output)]
-            mix_filters = ["[0:a]volume=0.35[original]"]
-            mix_labels = ["[original]"]
-            mix_index = 1
-            if speech_path:
-                mix_args += ["-i", str(speech_path)]
-                mix_filters.append(f"[{mix_index}:a]volume=1.0[voice]")
-                mix_labels.append("[voice]")
-                mix_index += 1
-            if music:
-                mix_args += ["-stream_loop", "-1", "-i", str(music)]
-                mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
-                mix_labels.append("[music]")
-            mix_filters.append("".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2[mix]")
-            run_ffmpeg(mix_args + [
-                "-filter_complex", ";".join(mix_filters),
-                "-map", "0:v:0", "-map", "[mix]",
-                "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_output),
-            ])
-            output.unlink(missing_ok=True)
-            os.replace(mixed_output, output)
+            try:
+                mix_args = ["-i", str(output)]
+                mix_filters = ["[0:a]volume=0.35[original]"]
+                mix_labels = ["[original]"]
+                mix_index = 1
+                if speech_path:
+                    mix_args += ["-i", str(speech_path)]
+                    mix_filters.append(f"[{mix_index}:a]volume=1.0[voice]")
+                    mix_labels.append("[voice]")
+                    mix_index += 1
+                if music:
+                    mix_args += ["-stream_loop", "-1", "-i", str(music)]
+                    mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
+                    mix_labels.append("[music]")
+                mix_filters.append("".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2[mix]")
+                run_ffmpeg(mix_args + [
+                    "-filter_complex", ";".join(mix_filters),
+                    "-map", "0:v:0", "-map", "[mix]",
+                    "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_stage),
+                ])
+                quality_report = finalize_rendered_video(
+                    mixed_stage, output, expected_duration=total_video_duration,
+                    duration_tolerance=2.0, require_audio=True,
+                )
+            except Exception as exc:
+                mixed_stage.unlink(missing_ok=True)
+                render_warnings.append(f"音轨混合失败：{str(exc)[:300]}；已保留无额外配音/背景音乐的基础成片。")
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
@@ -604,13 +667,17 @@ def render_episode_from_shots(
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
-            subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
-            subtitle_path = str(subtitle_file)
-            db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
-        quality_report = validate_rendered_video(
-            output, expected_duration=total_video_duration,
-            duration_tolerance=2.0, require_audio=True,
-        )
+            subtitle_stage = subtitle_file.with_name("." + subtitle_file.name + ".tmp")
+            try:
+                subtitle_stage.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
+                if not subtitle_stage.is_file() or subtitle_stage.stat().st_size == 0:
+                    raise RuntimeError("字幕文件生成失败或内容为空")
+                os.replace(subtitle_stage, subtitle_file)
+                subtitle_path = str(subtitle_file)
+                db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+            except Exception as exc:
+                subtitle_stage.unlink(missing_ok=True)
+                render_warnings.append(f"字幕文件生成失败：{str(exc)[:240]}；视频成片已保留，可稍后重新生成字幕。")
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
@@ -623,14 +690,22 @@ def render_episode_from_shots(
                 "output": str(output), "subtitle_path": subtitle_path,
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
-                "subtitle_count": subtitle_index - 1,
-                "quality_report": quality_report}
+                "subtitle_count": subtitle_index - 1 if subtitle_path else 0,
+                "quality_report": quality_report,
+                "warnings": render_warnings}
     except HTTPException:
-        output.unlink(missing_ok=True)
+        render_stage.unlink(missing_ok=True)
+        mixed_stage.unlink(missing_ok=True)
+        if subtitle_stage:
+            subtitle_stage.unlink(missing_ok=True)
         raise
     except Exception as exc:
-        output.unlink(missing_ok=True)
-        raise HTTPException(500, "分集视频合成失败：" + str(exc))
+        render_stage.unlink(missing_ok=True)
+        mixed_stage.unlink(missing_ok=True)
+        if subtitle_stage:
+            subtitle_stage.unlink(missing_ok=True)
+        # Never delete a validated final output or the source shot/audio assets on failure.
+        raise HTTPException(500, "分集视频合成失败；已有镜头、配音和已验证成片均予以保留：" + str(exc))
 
 
 
@@ -720,18 +795,32 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
             "polling_skipped": True,
         }
     if task.result_path and Path(task.result_path).is_file():
-        task.status = "completed"
-        task.error = None
-        db.commit()
-        return {
-            "task_id": task.id,
-            "status": "completed",
-            "result_path": task.result_path,
-            "already_downloaded": True,
-        }
+        try:
+            validate_rendered_video(task.result_path)
+        except Exception as exc:
+            # Keep the previous file for diagnosis, but do not advertise it as a usable result.
+            settings = dict(task.request_data or {})
+            settings["invalid_result_path"] = task.result_path
+            task.request_data = settings
+            task.result_path = None
+            task.status = "download_failed"
+            task.error = f"上次下载文件未通过完整性检查：{str(exc)[:500]}；可刷新任务重新下载，不会重新提交生成请求。"
+            db.commit()
+        else:
+            task.status = "completed"
+            task.error = None
+            db.commit()
+            return {
+                "task_id": task.id,
+                "status": "completed",
+                "result_path": task.result_path,
+                "already_downloaded": True,
+            }
 
+    # Polling/downloading an already-submitted task does not create a new paid request.
     config, key, base = get_provider(
-        db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
+        db, task.provider, bool((task.request_data or {}).get("confirm_paid")),
+        check_paid=False,
     )
     settings = task.request_data or {}
     template = settings.get("status_path_template", "/videos/{task_id}")
@@ -743,10 +832,30 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
         task.status = status
 
         video_url = value_at(result, settings.get("video_url_field", "video_url"))
-        if video_url and not (task.result_path and Path(task.result_path).is_file()):
+        if video_url:
             filename = f"video_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
             destination = VIDEO_DIR / filename
-            http_download(str(video_url), destination)
+            temporary = VIDEO_DIR / f".download_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
+            try:
+                http_download(str(video_url), temporary)
+                # Never expose/register a partial or corrupt download as a completed video.
+                validate_rendered_video(temporary)
+                os.replace(temporary, destination)
+            except (ValueError, RuntimeError, OSError) as exc:
+                if temporary.exists():
+                    temporary.unlink()
+                task.status = "download_failed"
+                task.error = (
+                    f"视频已由服务商生成，但下载文件未通过完整性检查：{str(exc)[:500]}。"
+                    "可刷新任务重新下载；不会重新提交视频生成请求。"
+                )
+                db.commit()
+                return {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "error": task.error,
+                    "retry_download_only": True,
+                }
             media = MediaFile(
                 name=filename, category="video", file_path=str(destination),
                 mime_type="video/mp4", file_size=destination.stat().st_size
@@ -754,6 +863,7 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
             db.add(media)
             task.result_path = str(destination)
             task.status = "completed"
+            task.error = None
 
         db.commit()
         return {"task_id": task.id, "status": task.status,
@@ -891,8 +1001,8 @@ def generate_episode_voice_track(
         existing_audio = generated.get(shot.id)
         if existing_audio:
             try:
-                info = probe_media(existing_audio)
-                speech_duration = float((info.get("format") or {}).get("duration") or 0)
+                audio_report = validate_rendered_audio(existing_audio)
+                speech_duration = audio_report["duration_seconds"]
                 target_duration = clip_durations.get(
                     shot.id, max(1.0, float(shot.duration_seconds or 5))
                 )
@@ -919,6 +1029,7 @@ def generate_episode_voice_track(
             continue
         filename = f"episode_{episode_id}_shot_{shot.id}_{uuid.uuid4().hex[:8]}.mp3"
         destination = AUDIO_DIR / filename
+        temporary_audio = None
         payload = {
             "model": data.model, "input": text_value,
             "voice": data.voice, "response_format": "mp3",
@@ -953,20 +1064,21 @@ def generate_episode_voice_track(
             db.commit()
 
             request_started = True
+            temporary_audio = destination.with_name("." + destination.stem + ".partial" + destination.suffix)
             with urllib.request.urlopen(request, timeout=300) as response:
-                with destination.open("wb") as output:
+                with temporary_audio.open("wb") as output:
                     while True:
                         chunk = response.read(1024 * 1024)
                         if not chunk:
                             break
                         output.write(chunk)
-            if destination.stat().st_size < 128:
-                raise RuntimeError("语音服务返回的音频文件为空或无效")
-            audio_info = probe_media(destination)
-            speech_duration = float((audio_info.get("format") or {}).get("duration") or 0)
+            audio_report = finalize_rendered_audio(temporary_audio, destination)
+            speech_duration = audio_report["duration_seconds"]
             target_duration = clip_durations.get(
                 shot.id, max(1.0, float(shot.duration_seconds or 5))
             )
+            if speech_duration <= 0:
+                raise RuntimeError("FFprobe 无法确认配音时长")
             if speech_duration > target_duration * 1.5:
                 raise RuntimeError(
                     f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；"
@@ -1020,7 +1132,8 @@ def generate_episode_voice_track(
                     db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error if task else str(exc.detail))
-                destination.unlink(missing_ok=True)
+                if temporary_audio is not None:
+                    temporary_audio.unlink(missing_ok=True)
                 failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
                                  "status": task.status if task else "failed", "error": str(exc.detail)[:1000]})
         except Exception as exc:
@@ -1041,7 +1154,8 @@ def generate_episode_voice_track(
                 db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error)
-            destination.unlink(missing_ok=True)
+            if temporary_audio is not None:
+                temporary_audio.unlink(missing_ok=True)
             failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
                              "status": task.status if task else "failed", "error": str(exc)[:1000]})
 
@@ -1077,14 +1191,17 @@ def generate_episode_voice_track(
         input_index += 1
     filters.append("".join(labels) + f"concat=n={len(shots)}:v=0:a=1[aout]")
     track_path = AUDIO_DIR / f"episode_{episode_id}_voice_{uuid.uuid4().hex[:8]}.mp3"
+    track_stage = track_path.with_name("." + track_path.stem + ".rendering.mp3")
     try:
         run_ffmpeg(ffmpeg_args + [
             "-filter_complex", ";".join(filters), "-map", "[aout]",
-            "-c:a", "libmp3lame", "-q:a", "3", str(track_path),
+            "-c:a", "libmp3lame", "-q:a", "3", str(track_stage),
         ])
+        validate_rendered_audio(track_stage)
+        os.replace(track_stage, track_path)
         task = MediaTask(
             task_type="episode_speech_track", provider=data.provider, model=data.model,
-            status="completed", prompt=f"第{episode.episode_number}集对白配音",
+            status="partial" if failures else "completed", prompt=f"第{episode.episode_number}集对白配音",
             result_path=str(track_path),
             request_data={"episode_id": episode_id, "voice": data.voice,
                           "shot_count": len(generated), "aligned_to_storyboard": True},
@@ -1096,8 +1213,8 @@ def generate_episode_voice_track(
         ))
         db.commit()
     except Exception as exc:
-        track_path.unlink(missing_ok=True)
-        raise HTTPException(500, "对白语音合成失败：" + str(exc))
+        track_stage.unlink(missing_ok=True)
+        raise HTTPException(500, "对白语音合成失败；已生成的逐镜头配音素材予以保留：" + str(exc))
     return {
         "success": not failures, "episode_id": episode_id,
         "voice_track": str(track_path), "generated_shots": len(generated),
@@ -1135,6 +1252,15 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
         if meta.get("speech_fingerprint") != fingerprint:
             continue
         if prior.status == "completed" and prior.result_path and Path(prior.result_path).is_file() and not data.force_regenerate:
+            try:
+                if data.response_format == "pcm":
+                    if Path(prior.result_path).stat().st_size < 128:
+                        raise ValueError("PCM 配音文件过小")
+                else:
+                    validate_rendered_audio(prior.result_path)
+            except Exception:
+                # Keep the bad artifact for diagnosis; do not advertise it as reusable.
+                continue
             return {
                 "status": "completed", "task_id": prior.id,
                 "file": Path(prior.result_path).name, "path": prior.result_path,
@@ -1188,15 +1314,20 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
         db.commit()
 
         request_started = True
+        temporary_audio = destination.with_name("." + destination.stem + ".partial" + destination.suffix)
         with urllib.request.urlopen(request, timeout=300) as response:
-            with destination.open("wb") as output:
+            with temporary_audio.open("wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     output.write(chunk)
-        if not destination.is_file() or destination.stat().st_size < 128:
+        if not temporary_audio.is_file() or temporary_audio.stat().st_size < 128:
             raise RuntimeError("语音服务返回的音频文件为空或无效")
+        if data.response_format == "pcm":
+            os.replace(temporary_audio, destination)
+        else:
+            finalize_rendered_audio(temporary_audio, destination)
 
         task.status = "completed"
         task.result_path = str(destination)
@@ -1243,7 +1374,8 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
             db.commit()
         if lease_acquired and task:
             release_task_lease(db, "media", task.id, False, task.error)
-        destination.unlink(missing_ok=True)
+        if 'temporary_audio' in locals():
+            temporary_audio.unlink(missing_ok=True)
         raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc.detail}") from exc
     except Exception as exc:
         db.rollback()
@@ -1263,7 +1395,8 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
             db.commit()
         if lease_acquired and task:
             release_task_lease(db, "media", task.id, False, task.error)
-        destination.unlink(missing_ok=True)
+        if 'temporary_audio' in locals():
+            temporary_audio.unlink(missing_ok=True)
         raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc}") from exc
 
 

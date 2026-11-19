@@ -46,7 +46,7 @@ export default function NovelsPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisItem[]>([]);
-  const [analysisProgress, setAnalysisProgress] = useState<{ status: string; completed_chunks: number; total_chunks: number; progress_percent: number; last_error?: string } | null>(null);
+  const [analysisProgress, setAnalysisProgress] = useState<{ status: string; source_current?: boolean; previous_status?: string; completed_chunks: number; total_chunks: number; progress_percent: number; last_error?: string } | null>(null);
   const [title, setTitle] = useState("");
   const [genre, setGenre] = useState("奇幻");
   const [loading, setLoading] = useState(false);
@@ -310,21 +310,28 @@ export default function NovelsPage() {
         </header>
 
         {analysisProgress && (
-          <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>AI分析进度：{analysisProgress.completed_chunks}/{analysisProgress.total_chunks} 段</span>
-              <span>{analysisProgress.progress_percent}% · {analysisProgress.status}</span>
+          analysisProgress.source_current === false ? (
+            <div className="mb-4 rounded-xl border border-amber-300/30 bg-amber-950/30 p-3 text-sm text-amber-100">
+              <p className="font-semibold">检测到小说原文已更新</p>
+              <p className="mt-1">上次分析进度属于旧版本（{analysisProgress.previous_status || "状态未知"}），不会计入当前版本，也不会自动续跑。请重新发起当前版本的分析；旧分析记录仍保留供查看。</p>
             </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
-              <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${analysisProgress.progress_percent}%` }} />
+          ) : (
+            <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span>AI分析进度：{analysisProgress.completed_chunks}/{analysisProgress.total_chunks} 段</span>
+                <span>{analysisProgress.progress_percent}% · {analysisProgress.status}</span>
+              </div>
+              <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
+                <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${analysisProgress.progress_percent}%` }} />
+              </div>
+              {analysisProgress.last_error && <p className="mt-2 text-xs text-amber-200">{analysisProgress.last_error}</p>}
+              {analysisProgress.status === "interrupted_unknown" && (
+                <a href="/tasks" className="mt-2 inline-flex rounded-lg border border-amber-300/30 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-950/40">
+                  前往统一任务中心核对服务商记录 →
+                </a>
+              )}
             </div>
-            {analysisProgress.last_error && <p className="mt-2 text-xs text-amber-200">{analysisProgress.last_error}</p>}
-            {analysisProgress.status === "interrupted_unknown" && (
-              <a href="/tasks" className="mt-2 inline-flex rounded-lg border border-amber-300/30 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-950/40">
-                前往统一任务中心核对服务商记录 →
-              </a>
-            )}
-          </div>
+          )
         )}
         {message && (
           <div className="mb-5 rounded-xl border border-purple-400/30 bg-purple-950/70 p-3 text-sm text-purple-100">
