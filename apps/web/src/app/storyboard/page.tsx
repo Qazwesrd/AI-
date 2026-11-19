@@ -95,6 +95,13 @@ export default function StoryboardPage() {
       setNovels(n);
       setProjects(p);
       setAssets(a);
+      const params = new URLSearchParams(window.location.search);
+      const requestedNovelId = params.get("novelId");
+      const requestedProjectId = Number(params.get("projectId"));
+      if (requestedNovelId && n.some((novel: Novel) => String(novel.id) === requestedNovelId)) setNovelId(requestedNovelId);
+      if (Number.isFinite(requestedProjectId) && requestedProjectId > 0 && p.some((project: Project) => project.id === requestedProjectId)) {
+        await loadProject(requestedProjectId);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取数据失败");
     }
@@ -104,6 +111,10 @@ export default function StoryboardPage() {
     const result = await request(`/api/story/projects/${id}`);
     const scopedAssets = await request(`/api/story/assets?project_id=${id}`);
     setProjectId(id);
+    const url = new URL(window.location.href);
+    url.searchParams.set("projectId", String(id));
+    if (result.project?.novel_id) url.searchParams.set("novelId", String(result.project.novel_id));
+    window.history.replaceState({}, "", url.toString());
     setSelectedProject(result.project || null);
     setEpisodes(result.episodes);
     setAssets(scopedAssets);
