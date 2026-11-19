@@ -120,7 +120,7 @@ AI 只能提交“变化提议”，不能直接覆盖正式设定。每项提�
 已存在的后端基础：
 - `/api/web-ai/tools`、`/api/web-ai/tasks`：工具和任务记录 API。
 - `/api/web-ai/tasks/{task_key}/files`：结果文件上传与列表；当前根据扩展名/MIME/文件名初步分类。
-- `/api/ai-collaboration/prompt-schema`：剧情变化结构规范。
+- `/api/ai-collaboration/prompt-schema`：剧情变化结构规范。\n- `POST /api/ai-collaboration/novels/{novel_id}/chapters/{chapter_number}/handoff-package`：用户确认后，生成仅包含所选章节原文与已确认分析摘要的交接预览包，附结构化输出 Schema；不自动打开网页或发送第三方。
 - `/api/ai-collaboration/novels/{novel_id}/proposals/import`：接收变化提议，并用数据库章节原文核验证据。
 - `/api/ai-collaboration/novels/{novel_id}/proposals`、`/api/ai-collaboration/proposals/{proposal_id}/review`：提议列表和人工审核。
 - `/api/ai-collaboration/storyboard/match-suggestions`、`/api/ai-collaboration/storyboard/confirm-match`：素材候选匹配与人工确认。
@@ -128,7 +128,7 @@ AI 只能提交“变化提议”，不能直接覆盖正式设定。每项提�
 
 仍需开发/验收：
 - 前端统一任务工作台与上述剧情提议/素材匹配 API 的完整连接。
-- 从软件选择章节并生成“上下文包 + 提示词 + JSON Schema”的正式交接操作。
+- 将交接包预览接入前端页面，支持显示内容范围/字数、提示词与 JSON Schema，并提供用户复制/导出确认操作。
 - 网页 AI 结果粘贴/JSON 导入向导、Schema 校验、差异预览与批量审核。
 - 人物年龄/外貌/服装/伤势、道具归属/损坏/升级等状态时间线可视化。
 - 分镜素材版本候选的章节时间适用性校验和可视化。
@@ -156,3 +156,15 @@ AI 只能提交“变化提议”，不能直接覆盖正式设定。每项提�
 - 图片/视频仅凭文件名或 MIME 不得被标记为“AI 已理解内容”。
 - 任务从准备、打开、结果接收、待审核到完成的状态可查询；失败可重试且不会重复写入。
 - 原有视频发布中心、发布账号、发布 API 和上传路由全部保留，不在本功能范围内删除。
+
+
+### 本阶段新增 API：章节交接包预览
+
+`POST /api/ai-collaboration/novels/{novel_id}/chapters/{chapter_number}/handoff-package`
+
+- 必须显式传入 `confirm_selected_chapter: true`，否则拒绝生成。
+- 只返回指定章节正文，不会自动读取或上传整本小说。
+- 可选包含该小说已经人工确认的 `AnalysisItem` 摘要。
+- 返回任务指令、JSON Schema、章节 ID/编号、字数、是否截断和用户复核标记。
+- 默认最多 120,000 字符，可由调用方在 1,000–150,000 范围设置。
+- 明确返回 `third_party_transfer_started: false`：这只是本地软件可展示的交接预览，不会自动向外部网站发送数据。
