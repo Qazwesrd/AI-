@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -29,6 +29,8 @@ export default function SubtitleStudioPage() {
     if (subs.ok) setFiles((await subs.json()).filter((x: any) => /\.srt$/i.test(x.name)));
     if (vids.ok) setVideos(await vids.json());
   }
+
+  useEffect(() => { void loadFiles(); }, []);
 
   async function upload(file: File, category: "other" | "video") {
     const form = new FormData();
