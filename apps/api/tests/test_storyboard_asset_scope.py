@@ -35,6 +35,18 @@ class StoryboardAssetScopeTests(unittest.TestCase):
         self.assertEqual(state["clothing"], "破损蓝衣")
         self.assertEqual(state["chapter_number"], 4)
 
+    def test_unconfirmed_change_is_not_used_for_effective_state(self):
+        asset = SimpleNamespace(
+            data={"evolution_history": [
+                {"chapter_number": 2, "appearance_after": "伤疤", "clothing_after": "破衣", "confirmed": False}
+            ]},
+            appearance="原始外观", clothing="原始衣服",
+        )
+        state = resolve_asset_state(asset, 5)
+        self.assertEqual(state["appearance"], "原始外观")
+        self.assertEqual(state["clothing"], "原始衣服")
+        self.assertFalse(state["is_evolved"])
+
 
 if __name__ == "__main__":
     unittest.main()
