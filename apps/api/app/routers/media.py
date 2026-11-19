@@ -607,9 +607,15 @@ def render_episode_from_shots(
             subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
             subtitle_path = str(subtitle_file)
             db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+        quality_report = validate_rendered_video(
+            output, expected_duration=total_video_duration,
+            duration_tolerance=2.0, require_audio=True,
+        )
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
+            duration=quality_report["duration_seconds"],
+            metadata_json={"quality_checked": True, "quality_report": quality_report},
         ))
         episode.status = "rendered"
         db.commit()
@@ -617,7 +623,8 @@ def render_episode_from_shots(
                 "output": str(output), "subtitle_path": subtitle_path,
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
-                "subtitle_count": subtitle_index - 1}
+                "subtitle_count": subtitle_index - 1,
+                "quality_report": quality_report}
     except HTTPException:
         output.unlink(missing_ok=True)
         raise
@@ -1485,8 +1492,11 @@ def render_video(data: RenderInput):
             "-c:a", "aac", "-movflags", "+faststart", str(output)
         ]
         run_ffmpeg(args)
+        quality_report = validate_rendered_video(
+            output, require_audio=bool(audio or has_original_audio),
+        )
         return {"status": "completed", "output": str(output),
-                "size": output.stat().st_size}
+                "size": output.stat().st_size, "quality_report": quality_report}
     except Exception as exc:
         if output and output.exists():
             output.unlink()
@@ -1511,3 +1521,15 @@ def media_health():
         "ffprobe": shutil.which(os.environ.get("FFPROBE_PATH", "ffprobe")),
         "storage": str(STORAGE)
     }
+
+
+@router.get("/validate")
+def validate_media_output(path: str, expected_duration: Optional[float] = None):
+    try:
+        file_path = safe_storage_file(path)
+        return validate_rendered_video(
+            file_path, expected_duration=expected_duration,
+            duration_tolerance=2.0, require_audio=False,
+        )
+    except Exception as exc:
+        raise HTTPException(422, "视频质量检查未通过：" + str(exc)[:1200]) from exc
