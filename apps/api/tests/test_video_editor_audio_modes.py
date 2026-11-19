@@ -18,7 +18,9 @@ class VideoEditorAudioModeTests(unittest.TestCase):
 
             def fake_ffmpeg(args):
                 calls.append(list(args))
-                Path(args[-1]).write_bytes(b"rendered")
+                destination = Path(args[-1])
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(b"rendered")
 
             with (
                 patch.object(editing_service, "EDIT_DIR", root / "edit"),
