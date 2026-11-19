@@ -722,7 +722,7 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
     if task.result_path and Path(task.result_path).is_file():
         try:
             validate_rendered_video(task.result_path)
-        except (ValueError, RuntimeError, OSError) as exc:
+        except Exception as exc:
             # Keep the previous file for diagnosis, but do not advertise it as a usable result.
             settings = dict(task.request_data or {})
             settings["invalid_result_path"] = task.result_path
