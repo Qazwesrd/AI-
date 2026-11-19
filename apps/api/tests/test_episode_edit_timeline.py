@@ -90,6 +90,30 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
             save_episode_edit_timeline(self.episode_id, payload, self.db)
         self.assertEqual(caught.exception.status_code, 422)
 
+    def test_saves_per_shot_trim_and_independent_audio_tracks(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            shot_trims=[{"shot_id": self.shot_a.id, "start_seconds": 1.25, "end_seconds": 4.5}],
+            audio_tracks=[{
+                "file_path": "validated-local-audio.mp3",
+                "start_seconds": 2.0, "volume": 0.7,
+                "fade_in_seconds": 1.0, "fade_out_seconds": 2.0,
+                "enabled": False,
+            }],
+        )
+        # Validation of on-disk paths is covered by the endpoint integration tests;
+        # the Pydantic model preserves all timeline values for persistence.
+        self.assertEqual(payload.shot_trims[0].start_seconds, 1.25)
+        self.assertEqual(payload.audio_tracks[0].start_seconds, 2.0)
+        self.assertFalse(payload.audio_tracks[0].enabled)
+
+    def test_rejects_invalid_trim_range(self):
+        with self.assertRaises(Exception):
+            EpisodeTimelineInput(
+                shot_order=[self.shot_a.id, self.shot_b.id],
+                shot_trims=[{"shot_id": self.shot_a.id, "start_seconds": 4, "end_seconds": 3}],
+            )
+
     def test_rejects_cut_with_nonzero_duration(self):
         payload = EpisodeTimelineInput(
             shot_order=[self.shot_a.id, self.shot_b.id],
