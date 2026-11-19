@@ -1,8 +1,12 @@
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Optional
+from pathlib import Path
+import hashlib
 import re
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -10,7 +14,9 @@ from app.database import get_db
 from app.models.novel import Novel, Chapter, AnalysisItem
 from app.models.visual import VisualAsset
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
-from app.models.ai_story_collaboration import AIStoryProposal
+from app.models.ai_story_collaboration import AIStoryProposal, AIResultAttachment
+from app.models.media import MediaFile
+from app.services.media_service import STORAGE, safe_storage_file
 
 router = APIRouter(prefix="/api/ai-collaboration", tags=["网页版AI协同创作"])
 
@@ -23,6 +29,11 @@ class ProposalInput(BaseModel):
     event: str = Field(min_length=2, max_length=2000)
     appearance_after: str = Field(default="", max_length=4000)
     clothing_after: str = Field(default="", max_length=4000)
+    age_after: str = Field(default="", max_length=80)
+    hairstyle_after: str = Field(default="", max_length=300)
+    injury_after: str = Field(default="", max_length=1000)
+    equipment_after: str = Field(default="", max_length=2000)
+    condition_after: str = Field(default="", max_length=1000)
     holder: str = Field(default="", max_length=300)
     evidence: str = Field(min_length=4, max_length=2000)
     confidence: float = Field(default=0.5, ge=0, le=1)
@@ -46,14 +57,231 @@ class MatchPayload(BaseModel):
     names: list[str] = Field(default_factory=list, max_length=30)
 
 
+class AttachmentReviewPayload(BaseModel):
+    action: Literal["approve", "reject"]
+    note: str = Field(default="", max_length=2000)
+
+
+RESULT_FILE_TYPES = {
+    ".png": ("image", "image/png", 100 * 1024 * 1024),
+    ".jpg": ("image", "image/jpeg", 100 * 1024 * 1024),
+    ".jpeg": ("image", "image/jpeg", 100 * 1024 * 1024),
+    ".webp": ("image", "image/webp", 100 * 1024 * 1024),
+    ".gif": ("image", "image/gif", 100 * 1024 * 1024),
+    ".mp4": ("video", "video/mp4", 500 * 1024 * 1024),
+    ".mov": ("video", "video/quicktime", 500 * 1024 * 1024),
+    ".mkv": ("video", "video/x-matroska", 500 * 1024 * 1024),
+    ".webm": ("video", "video/webm", 500 * 1024 * 1024),
+    ".mp3": ("audio", "audio/mpeg", 200 * 1024 * 1024),
+    ".wav": ("audio", "audio/wav", 200 * 1024 * 1024),
+    ".m4a": ("audio", "audio/mp4", 200 * 1024 * 1024),
+    ".aac": ("audio", "audio/aac", 200 * 1024 * 1024),
+    ".ogg": ("audio", "audio/ogg", 200 * 1024 * 1024),
+    ".srt": ("subtitle", "application/x-subrip", 20 * 1024 * 1024),
+    ".vtt": ("subtitle", "text/vtt", 20 * 1024 * 1024),
+    ".txt": ("document", "text/plain", 20 * 1024 * 1024),
+    ".md": ("document", "text/markdown", 20 * 1024 * 1024),
+    ".json": ("document", "application/json", 20 * 1024 * 1024),
+    ".pdf": ("document", "application/pdf", 100 * 1024 * 1024),
+}
+
+
+def validate_result_file_signature(extension: str, prefix: bytes):
+    valid = {
+        ".png": prefix.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".jpg": prefix.startswith(b"\xff\xd8\xff"),
+        ".jpeg": prefix.startswith(b"\xff\xd8\xff"),
+        ".gif": prefix.startswith((b"GIF87a", b"GIF89a")),
+        ".webp": len(prefix) >= 12 and prefix[:4] == b"RIFF" and prefix[8:12] == b"WEBP",
+        ".mp4": len(prefix) >= 8 and prefix[4:8] == b"ftyp",
+        ".mov": len(prefix) >= 8 and prefix[4:8] == b"ftyp",
+        ".mkv": prefix.startswith(b"\x1a\x45\xdf\xa3"),
+        ".webm": prefix.startswith(b"\x1a\x45\xdf\xa3"),
+        ".wav": len(prefix) >= 12 and prefix[:4] == b"RIFF" and prefix[8:12] == b"WAVE",
+        ".ogg": prefix.startswith(b"OggS"),
+        ".mp3": prefix.startswith(b"ID3") or (len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xE0) == 0xE0),
+        ".aac": len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xF6) == 0xF0,
+        ".m4a": len(prefix) >= 8 and prefix[4:8] == b"ftyp",
+        ".srt": bool(prefix) and b"\x00" not in prefix,
+        ".vtt": prefix.lstrip(b"\xef\xbb\xbf").startswith(b"WEBVTT"),
+        ".txt": bool(prefix) and b"\x00" not in prefix,
+        ".md": bool(prefix) and b"\x00" not in prefix,
+        ".json": bool(prefix) and b"\x00" not in prefix,
+        ".pdf": prefix.startswith(b"%PDF-"),
+    }
+    if not valid.get(extension, False):
+        raise HTTPException(415, "文件内容与扩展名不匹配，已拒绝导入")
+
+def attachment_dict(item: AIResultAttachment):
+    return {
+        "id": item.id, "novel_id": item.novel_id, "chapter_number": item.chapter_number,
+        "original_filename": item.original_filename, "media_type": item.media_type,
+        "mime_type": item.mime_type, "file_size": item.file_size,
+        "sha256": item.sha256, "description": item.description,
+        "source_task_key": item.source_task_key, "status": item.status,
+        "review_note": item.review_note, "media_file_id": item.media_file_id,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
+@router.post("/results/attachments")
+async def upload_result_attachment(
+    novel_id: int = Form(...),
+    chapter_number: Optional[int] = Form(None),
+    confirm_import: bool = Form(False),
+    description: str = Form(""),
+    source_task_key: str = Form(""),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    if not confirm_import:
+        raise HTTPException(400, "请先确认导入这份网页版 AI 结果文件")
+    if db.query(Novel).filter(Novel.id == novel_id).first() is None:
+        raise HTTPException(404, "小说不存在")
+    if chapter_number is not None and not chapter_exists(db, novel_id, chapter_number):
+        raise HTTPException(404, "指定章节不存在")
+    original_name = (file.filename or "ai-result").replace("\\", "/").split("/")[-1][:300]
+    extension = Path(original_name).suffix.lower()
+    file_type = RESULT_FILE_TYPES.get(extension)
+    if not file_type:
+        raise HTTPException(415, "文件格式不支持。支持图片、视频、音频、字幕、TXT、MD、JSON 和 PDF")
+    media_type, mime_type, max_size = file_type
+    folder = STORAGE / "ai_results" / str(novel_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    stored_name = uuid.uuid4().hex + extension
+    destination = folder / stored_name
+    digest = hashlib.sha256()
+    total = 0
+    prefix = b""
+    try:
+        with destination.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                if len(prefix) < 64:
+                    prefix += chunk[:64 - len(prefix)]
+                total += len(chunk)
+                if total > max_size:
+                    raise HTTPException(413, f"文件超过该类型允许的大小上限（{max_size // (1024 * 1024)} MB）")
+                digest.update(chunk)
+                output.write(chunk)
+        if total <= 0:
+            raise HTTPException(400, "不能导入空文件")
+        validate_result_file_signature(extension, prefix)
+        checksum = digest.hexdigest()
+        duplicate = db.query(AIResultAttachment).filter(
+            AIResultAttachment.novel_id == novel_id,
+            AIResultAttachment.sha256 == checksum,
+        ).first()
+        if duplicate:
+            destination.unlink(missing_ok=True)
+            return {"success": True, "duplicate": True, "attachment": attachment_dict(duplicate),
+                    "message": "检测到相同文件，未重复保存。"}
+        item = AIResultAttachment(
+            novel_id=novel_id, chapter_number=chapter_number,
+            original_filename=original_name, stored_filename=stored_name,
+            media_type=media_type, mime_type=mime_type, file_path=str(destination),
+            file_size=total, sha256=checksum, description=description[:2000],
+            source_task_key=source_task_key[:120], status="pending_review",
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return {"success": True, "duplicate": False, "attachment": attachment_dict(item),
+                "message": "文件已安全保存到待审核区，尚未加入正式素材库。"}
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+
+@router.get("/results/attachments")
+def list_result_attachments(
+    novel_id: int,
+    status: str = "all",
+    db: Session = Depends(get_db),
+):
+    query = db.query(AIResultAttachment).filter(AIResultAttachment.novel_id == novel_id)
+    if status != "all":
+        query = query.filter(AIResultAttachment.status == status)
+    items = query.order_by(AIResultAttachment.id.desc()).limit(500).all()
+    return {"items": [attachment_dict(item) for item in items]}
+
+
+@router.get("/results/attachments/{attachment_id}/file")
+def get_result_attachment_file(attachment_id: int, db: Session = Depends(get_db)):
+    item = db.query(AIResultAttachment).filter(AIResultAttachment.id == attachment_id).first()
+    if item is None:
+        raise HTTPException(404, "AI 结果文件不存在")
+    try:
+        path = safe_storage_file(item.file_path)
+    except Exception as exc:
+        raise HTTPException(410, f"AI 结果文件不存在或路径无效：{exc}")
+    return FileResponse(
+        path, media_type=item.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{item.stored_filename}"'},
+    )
+
+
+@router.post("/results/attachments/{attachment_id}/review")
+def review_result_attachment(
+    attachment_id: int,
+    payload: AttachmentReviewPayload,
+    db: Session = Depends(get_db),
+):
+    item = db.query(AIResultAttachment).filter(AIResultAttachment.id == attachment_id).first()
+    if item is None:
+        raise HTTPException(404, "AI 结果文件不存在")
+    if item.status != "pending_review":
+        raise HTTPException(409, "该文件已经审核，不能重复处理")
+    if payload.action == "reject":
+        item.status = "rejected"
+        item.review_note = payload.note
+        item.reviewed_at = datetime.utcnow()
+        db.commit()
+        return {"success": True, "attachment": attachment_dict(item), "message": "已拒绝该文件，未加入正式素材库。"}
+    try:
+        path = safe_storage_file(item.file_path)
+    except Exception as exc:
+        raise HTTPException(410, f"待审核文件已不存在或路径无效：{exc}")
+    media = MediaFile(
+        name=item.original_filename,
+        category=item.media_type,
+        file_path=str(path),
+        mime_type=item.mime_type,
+        file_size=item.file_size,
+        metadata_json={
+            "source": "web_ai_result",
+            "novel_id": item.novel_id,
+            "chapter_number": item.chapter_number,
+            "attachment_id": item.id,
+            "sha256": item.sha256,
+            "description": item.description,
+            "source_task_key": item.source_task_key,
+        },
+    )
+    db.add(media)
+    db.flush()
+    item.status = "approved"
+    item.media_file_id = media.id
+    item.review_note = payload.note
+    item.reviewed_at = datetime.utcnow()
+    db.commit()
+    return {"success": True, "attachment": attachment_dict(item), "media_file_id": media.id,
+            "message": "已审核通过并加入素材媒体库。"}
+
 def proposal_dict(item):
     return {
         "id": item.id, "novel_id": item.novel_id, "chapter_number": item.chapter_number,
         "proposal_type": item.proposal_type, "asset_name": item.asset_name,
         "asset_category": item.asset_category, "change_type": item.change_type,
         "event": item.event, "appearance_after": item.appearance_after,
-        "clothing_after": item.clothing_after, "holder": item.holder,
-        "evidence": item.evidence, "confidence": item.confidence,
+        "clothing_after": item.clothing_after, "age_after": item.age_after,
+        "hairstyle_after": item.hairstyle_after, "injury_after": item.injury_after,
+        "equipment_after": item.equipment_after, "condition_after": item.condition_after,
+        "holder": item.holder, "evidence": item.evidence, "confidence": item.confidence,
         "status": item.status, "review_note": item.review_note,
         "applied_asset_id": item.applied_asset_id,
         "created_at": item.created_at.isoformat() if item.created_at else None,
@@ -95,17 +323,31 @@ def resolve_asset_state(asset, chapter_number=None):
     history = [x for x in history if x.get("confirmed", True) is True]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
-    latest = applicable[-1] if applicable else {}
-    return {
-        "chapter_number": latest.get("chapter_number"),
-        "event": latest.get("event", ""),
-        "change_type": latest.get("change_type", "基础状态"),
-        "appearance": latest.get("appearance_after") or asset.appearance or "",
-        "clothing": latest.get("clothing_after") or asset.clothing or "",
-        "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", True)),
-        "is_evolved": bool(latest),
+    state = {
+        "chapter_number": None, "event": "", "change_type": "基础状态",
+        "appearance": asset.appearance or "", "clothing": asset.clothing or "",
+        "age": "", "hairstyle": "", "injury": "", "equipment": "",
+        "condition": "", "holder": "", "confirmed": True, "is_evolved": False,
     }
+    fields = {
+        "appearance_after": "appearance", "clothing_after": "clothing",
+        "age_after": "age", "hairstyle_after": "hairstyle",
+        "injury_after": "injury", "equipment_after": "equipment",
+        "condition_after": "condition", "holder": "holder",
+    }
+    for item in applicable:
+        for source, target in fields.items():
+            value = item.get(source)
+            if isinstance(value, str) and value.strip():
+                state[target] = value.strip()
+        state.update({
+            "chapter_number": item.get("chapter_number"),
+            "event": item.get("event", ""),
+            "change_type": item.get("change_type", "状态变化"),
+            "confirmed": bool(item.get("confirmed", True)),
+            "is_evolved": True,
+        })
+    return state
 
 
 class HandoffPackageRequest(BaseModel):
@@ -160,7 +402,27 @@ def build_chapter_handoff_package(
             "props": {"type": "array", "items": {"type": "object", "required": ["name", "evidence"]}},
             "relationships": {"type": "array"},
             "timeline": {"type": "array"},
-            "proposals": {"type": "array", "items": {"type": "object", "required": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"]}},
+            "proposals": {"type": "array", "items": {
+                "type": "object",
+                "required": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"],
+                "properties": {
+                    "chapter_number": {"type": "integer"},
+                    "asset_name": {"type": "string"},
+                    "asset_category": {"type": "string"},
+                    "change_type": {"type": "string"},
+                    "event": {"type": "string"},
+                    "appearance_after": {"type": "string"},
+                    "clothing_after": {"type": "string"},
+                    "age_after": {"type": "string"},
+                    "hairstyle_after": {"type": "string"},
+                    "injury_after": {"type": "string"},
+                    "equipment_after": {"type": "string"},
+                    "condition_after": {"type": "string"},
+                    "holder": {"type": "string"},
+                    "evidence": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+                }
+            }},
             "uncertainties": {"type": "array", "items": {"type": "string"}},
         },
     }
@@ -208,8 +470,9 @@ def prompt_schema():
         "version": "1.0",
         "required_fields": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"],
         "asset_categories": ["characters", "scenes", "props", "weapons", "costumes", "buildings", "special_items"],
-        "rules": ["只输出JSON对象，proposals为数组", "evidence必须逐字引用输入原文", "没有明确变化时不要推测", "confidence为0到1之间数字"],
-        "example": {"proposals": [{"chapter_number": 3, "asset_name": "主角", "asset_category": "characters", "change_type": "服装变化", "event": "战斗后更换衣服", "appearance_after": "", "clothing_after": "黑色破损长袍", "holder": "", "evidence": "原文中逐字引用的证据", "confidence": 0.92}]},
+        "optional_state_fields": ["age_after", "hairstyle_after", "injury_after", "equipment_after", "condition_after"],
+        "rules": ["只输出JSON对象，proposals为数组", "evidence必须逐字引用输入原文", "没有明确变化时不要推测", "confidence为0到1之间数字", "人物年龄/发型/伤势和道具装备状态应分别填写对应字段，未知字段留空"],
+        "example": {"proposals": [{"chapter_number": 3, "asset_name": "主角", "asset_category": "characters", "change_type": "装备变化", "event": "战斗后获得护腕", "appearance_after": "", "clothing_after": "", "age_after": "", "hairstyle_after": "", "injury_after": "", "equipment_after": "银色护腕", "condition_after": "", "holder": "主角", "evidence": "原文中逐字引用的证据", "confidence": 0.92}]},
     }
 
 
@@ -243,7 +506,10 @@ def import_proposals(novel_id: int, payload: ImportPayload, db: Session = Depend
             asset_name=proposal.asset_name.strip(), asset_category=proposal.asset_category,
             change_type=proposal.change_type.strip(), event=proposal.event.strip(),
             appearance_after=proposal.appearance_after.strip(),
-            clothing_after=proposal.clothing_after.strip(), holder=proposal.holder.strip(),
+            clothing_after=proposal.clothing_after.strip(),
+            age_after=proposal.age_after.strip(), hairstyle_after=proposal.hairstyle_after.strip(),
+            injury_after=proposal.injury_after.strip(), equipment_after=proposal.equipment_after.strip(),
+            condition_after=proposal.condition_after.strip(), holder=proposal.holder.strip(),
             evidence=proposal.evidence.strip(), confidence=proposal.confidence,
             status="pending_review", source_task_key=payload.source_task_key,
         )
@@ -301,13 +567,17 @@ def review_proposal(proposal_id: int, payload: ReviewPayload, db: Session = Depe
         history.append({
             "chapter_number": item.chapter_number, "event": item.event,
             "change_type": item.change_type, "appearance_after": item.appearance_after,
-            "clothing_after": item.clothing_after, "holder": item.holder,
-            "evidence": item.evidence, "confirmed": True,
+            "clothing_after": item.clothing_after, "age_after": item.age_after,
+            "hairstyle_after": item.hairstyle_after, "injury_after": item.injury_after,
+            "equipment_after": item.equipment_after, "condition_after": item.condition_after,
+            "holder": item.holder, "evidence": item.evidence, "confirmed": True,
             "source": "ai_web_proposal", "proposal_id": item.id,
             "recorded_at": datetime.utcnow().isoformat(),
         })
         history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
         data["evolution_history"] = history
+        asset.data = data
+        data["current_state"] = resolve_asset_state(asset)
         asset.data = data
         asset.updated_at = datetime.utcnow()
     item.status, item.review_note, item.reviewed_at = "approved", payload.note, datetime.utcnow()

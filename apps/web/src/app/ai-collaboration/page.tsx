@@ -12,7 +12,15 @@ type Handoff = {
 type Proposal = {
   id: number; chapter_number: number; asset_name: string; asset_category: string;
   change_type: string; event: string; appearance_after: string; clothing_after: string;
+  age_after?: string; hairstyle_after?: string; injury_after?: string;
+  equipment_after?: string; condition_after?: string;
   holder: string; evidence: string; confidence: number; status: string; review_note?: string;
+};
+type ResultAttachment = {
+  id: number; novel_id: number; chapter_number?: number | null; original_filename: string;
+  media_type: string; mime_type: string; file_size: number; sha256: string;
+  description: string; status: string; review_note?: string; media_file_id?: number | null;
+  created_at?: string;
 };
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -34,6 +42,10 @@ export default function AICollaborationPage() {
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [resultJson, setResultJson] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [attachments, setAttachments] = useState<ResultAttachment[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [attachmentDescription, setAttachmentDescription] = useState("");
+  const [attachmentChapter, setAttachmentChapter] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("pending_review");
@@ -56,6 +68,7 @@ export default function AICollaborationPage() {
       .then((data) => { setChapters(data.items || []); setChapterNumber(data.items?.length ? String(data.items[0].chapter_number) : ""); })
       .catch((error) => setMessage(error.message));
     void loadProposals(novelId, filter);
+    void loadAttachments(novelId);
   }, [novelId]);
 
   async function loadProposals(id = novelId, status = filter) {
@@ -64,6 +77,51 @@ export default function AICollaborationPage() {
       const data = await request<{ items: Proposal[] }>(`/api/ai-collaboration/novels/${id}/proposals?status=${encodeURIComponent(status)}`);
       setProposals(data.items || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : "读取待审核提议失败"); }
+  }
+
+  async function loadAttachments(id = novelId) {
+    if (!id) return;
+    try {
+      const data = await request<{ items: ResultAttachment[] }>(`/api/ai-collaboration/results/attachments?novel_id=${id}&status=all`);
+      setAttachments(data.items || []);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "读取 AI 结果文件失败"); }
+  }
+
+  async function uploadAttachment() {
+    if (!novelId || !selectedFile) { setMessage("请先选择小说和 AI 返回的文件。"); return; }
+    if (!window.confirm("确认把这个文件导入本地待审核区？文件不会发送到第三方，审核通过后才加入正式媒体素材库。")) return;
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append("novel_id", novelId);
+      if (attachmentChapter) form.append("chapter_number", attachmentChapter);
+      form.append("confirm_import", "true");
+      form.append("description", attachmentDescription);
+      form.append("source_task_key", `web-ai-${novelId}-${attachmentChapter || "general"}`);
+      form.append("file", selectedFile);
+      const response = await fetch(API + "/api/ai-collaboration/results/attachments", { method: "POST", body: form });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || "文件导入失败");
+      setMessage(data.message || "文件已进入待审核区。");
+      setSelectedFile(null);
+      setAttachmentDescription("");
+      await loadAttachments();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "文件导入失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function reviewAttachment(id: number, action: "approve" | "reject") {
+    const note = window.prompt(action === "approve" ? "确认将该文件加入正式媒体素材库？可填写备注：" : "拒绝原因（可留空）：", "") ?? null;
+    if (note === null) return;
+    setBusy(true);
+    try {
+      const data = await request<{ message: string }>(`/api/ai-collaboration/results/attachments/${id}/review`, {
+        method: "POST", body: JSON.stringify({ action, note }),
+      });
+      setMessage(data.message);
+      await loadAttachments();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "文件审核失败"); }
+    finally { setBusy(false); }
   }
 
   async function prepareHandoff() {
@@ -181,8 +239,50 @@ export default function AICollaborationPage() {
         </section>
 
         <section className="rounded-2xl border border-purple-300/20 bg-slate-900/80 p-5">
+          <h2 className="text-lg font-semibold">③ 接收图片、视频、音频和文档文件</h2>
+          <p className="mt-2 text-xs leading-5 text-slate-400">可导入网页版 AI 生成的图片、视频、音频、字幕、TXT、MD、JSON 和 PDF。文件先进入待审核区，审核通过后才加入正式媒体素材库。</p>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <label className="text-sm text-slate-300">关联章节（可选）
+              <select value={attachmentChapter} onChange={event => setAttachmentChapter(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
+                <option value="">不指定章节</option>
+                {chapters.map(item => <option key={item.id} value={item.chapter_number}>第 {item.chapter_number} 章 · {item.title}</option>)}
+              </select>
+            </label>
+            <label className="text-sm text-slate-300">选择 AI 返回文件
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,video/mp4,video/quicktime,video/x-matroska,video/webm,audio/mpeg,audio/wav,audio/mp4,audio/aac,audio/ogg,.srt,.vtt,.txt,.md,.json,.pdf" onChange={event => setSelectedFile(event.target.files?.[0] || null)} className="mt-2 block w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs text-white" />
+            </label>
+          </div>
+          <input value={attachmentDescription} onChange={event => setAttachmentDescription(event.target.value)} placeholder="文件说明（可选，例如：主角第三版正面设定图）" className="mt-3 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-sm text-white" />
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            {selectedFile && <span className="text-xs text-cyan-200">{selectedFile.name} · {(selectedFile.size / 1024 / 1024).toFixed(1)} MB</span>}
+            <button disabled={busy || !selectedFile || !novelId} onClick={() => void uploadAttachment()} className="rounded-lg bg-cyan-700 px-5 py-3 text-sm font-semibold disabled:opacity-40">确认导入待审核区</button>
+            <button onClick={() => void loadAttachments()} className="rounded-lg border border-white/15 px-4 py-3 text-sm">刷新文件</button>
+          </div>
+          <div className="mt-5 space-y-2">
+            {attachments.map(item => <article key={item.id} className="rounded-xl border border-white/10 bg-slate-950/70 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="break-all text-sm font-medium">{item.original_filename}</p>
+                  <p className="mt-1 text-xs text-slate-400">{item.media_type} · {(item.file_size / 1024 / 1024).toFixed(1)} MB · {item.chapter_number ? `第 ${item.chapter_number} 章` : "未指定章节"}</p>
+                  <p className="mt-1 break-all text-[10px] text-slate-500">SHA-256：{item.sha256}</p>
+                  <a href={`${API}/api/ai-collaboration/results/attachments/${item.id}/file`} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-300 underline">预览 / 打开文件</a>
+                  {item.description && <p className="mt-1 text-xs text-slate-300">{item.description}</p>}
+                  {item.media_file_id && <p className="mt-1 text-xs text-emerald-300">媒体素材 ID：{item.media_file_id}</p>}
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[10px] ${item.status === "approved" ? "bg-emerald-900/50 text-emerald-200" : item.status === "rejected" ? "bg-red-900/50 text-red-200" : "bg-amber-900/50 text-amber-200"}`}>{item.status === "approved" ? "已入库" : item.status === "rejected" ? "已拒绝" : "待审核"}</span>
+              </div>
+              {item.status === "pending_review" && <div className="mt-3 flex gap-2">
+                <button disabled={busy} onClick={() => void reviewAttachment(item.id, "approve")} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs disabled:opacity-40">审核通过并入库</button>
+                <button disabled={busy} onClick={() => void reviewAttachment(item.id, "reject")} className="rounded-lg border border-red-300/30 px-3 py-2 text-xs text-red-200 disabled:opacity-40">拒绝</button>
+              </div>}
+            </article>)}
+            {!attachments.length && <p className="rounded-xl border border-dashed border-white/15 p-5 text-center text-xs text-slate-400">还没有导入 AI 结果文件。</p>}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-purple-300/20 bg-slate-900/80 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">③ 剧情变化审核与素材状态记录</h2>
+            <h2 className="text-lg font-semibold">④ 剧情变化审核与素材状态记录</h2>
             <div className="flex gap-2">
               <select value={filter} onChange={(event) => { setFilter(event.target.value); void loadProposals(novelId, event.target.value); }} className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs">
                 <option value="pending_review">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="all">全部</option>
@@ -199,6 +299,11 @@ export default function AICollaborationPage() {
               <p className="mt-2 text-sm text-slate-200">{item.event}</p>
               {item.appearance_after && <p className="mt-1 text-xs text-slate-300">外貌变化：{item.appearance_after}</p>}
               {item.clothing_after && <p className="mt-1 text-xs text-slate-300">服装变化：{item.clothing_after}</p>}
+              {item.age_after && <p className="mt-1 text-xs text-slate-300">年龄变化：{item.age_after}</p>}
+              {item.hairstyle_after && <p className="mt-1 text-xs text-slate-300">发型变化：{item.hairstyle_after}</p>}
+              {item.injury_after && <p className="mt-1 text-xs text-slate-300">伤势变化：{item.injury_after}</p>}
+              {item.equipment_after && <p className="mt-1 text-xs text-slate-300">装备变化：{item.equipment_after}</p>}
+              {item.condition_after && <p className="mt-1 text-xs text-slate-300">道具/场景状态：{item.condition_after}</p>}
               {item.holder && <p className="mt-1 text-xs text-slate-300">持有者：{item.holder}</p>}
               <blockquote className="mt-3 border-l-2 border-cyan-400/50 pl-3 text-xs leading-5 text-cyan-100">原文证据：{item.evidence}</blockquote>
               {item.review_note && <p className="mt-2 text-xs text-slate-500">审核备注：{item.review_note}</p>}
@@ -206,7 +311,7 @@ export default function AICollaborationPage() {
             {!proposals.length && <p className="rounded-xl border border-dashed border-white/15 p-8 text-center text-sm text-slate-400">当前筛选条件下没有剧情变化提议。</p>}
           </div>
         </section>
-        <p className="text-xs leading-5 text-slate-500">说明：本页面实现章节交接、JSON 结果接收和剧情变化审核。尚未实现第三方网页自动读取/自动提交，也尚未把所有人物状态和分镜素材匹配功能接入此页面。视频发布功能不在本模块修改范围内。</p>
+        <p className="text-xs leading-5 text-slate-500">说明：本页面实现章节交接、JSON 结果接收、图片/视频/音频/文档文件导入与审核，以及剧情变化审核。第三方网页的登录、上传和提交仍由用户主动完成；视频发布功能保持独立。</p>
       </div>
     </main>
   );
