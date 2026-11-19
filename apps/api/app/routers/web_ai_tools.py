@@ -293,7 +293,7 @@ def register_downloaded_file(payload: RegisterDownloadedFile, db: Session = Depe
 
 
 class ConfirmResultClassification(BaseModel):
-    classification: Literal["character", "scene", "prop", "storyboard", "script", "subtitle", "video", "audio", "document", "image", "other"]
+    classification: Literal["character", "scene", "prop", "weapon", "costume", "building", "special_item", "storyboard", "script", "subtitle", "video", "audio", "document", "image", "other"]
     assetName: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=4000)
     novelId: int | None = Field(default=None, ge=1)
@@ -309,10 +309,10 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
     asset_id = None
     if payload.novelId is not None and db.query(Novel).filter(Novel.id == payload.novelId).first() is None:
         raise HTTPException(404, "指定的小说不存在")
-    if payload.classification in {"character", "scene", "prop"}:
+    if payload.classification in {"character", "scene", "prop", "weapon", "costume", "building", "special_item"}:
         if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}: raise HTTPException(400, "人物、场景和道具素材必须是图片文件")
         if not payload.assetName.strip(): raise HTTPException(400, "请填写素材名称后再确认归档")
-        category_map = {"character": "characters", "scene": "scenes", "prop": "props"}
+        category_map = {"character": "characters", "scene": "scenes", "prop": "props", "weapon": "weapons", "costume": "costumes", "building": "buildings", "special_item": "special_items"}
         asset_data = {"source": "web_ai_result", "result_file_id": item.id, "task_key": item.task_key, "original_filename": item.original_name}
         if payload.novelId is not None:
             asset_data["source_novel_id"] = payload.novelId
