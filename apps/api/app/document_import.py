@@ -3,28 +3,59 @@ import posixpath
 from urllib.parse import unquote
 from io import BytesIO
 import zipfile
+import zlib
 import xml.etree.ElementTree as ET
 
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 MAX_ARCHIVE_EXPANDED_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 50000
+ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024
+
+
+def _verify_compressed_archive(archive):
+    """Enforce ZIP limits using actual streamed output, not only central-directory metadata."""
+    entries = archive.infolist()
+    if len(entries) > MAX_ARCHIVE_ENTRIES:
+        raise ValueError("文档压缩包内文件数量过多，已拒绝解析")
+
+    declared_total = 0
+    for entry in entries:
+        if entry.file_size < 0 or entry.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+            raise ValueError("文档压缩包包含超出单文件解压限制的内容")
+        declared_total += entry.file_size
+        if declared_total > MAX_ARCHIVE_EXPANDED_BYTES:
+            raise ValueError("文档解压后超过 512 MB 安全限制，已拒绝解析")
+
+    actual_total = 0
+    try:
+        for entry in entries:
+            if entry.is_dir():
+                continue
+            actual_member = 0
+            with archive.open(entry, "r") as source:
+                while True:
+                    chunk = source.read(ARCHIVE_READ_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    actual_member += len(chunk)
+                    actual_total += len(chunk)
+                    if actual_member > MAX_ARCHIVE_MEMBER_BYTES:
+                        raise ValueError("文档压缩包单个文件实际解压后超过 256 MB 安全限制")
+                    if actual_total > MAX_ARCHIVE_EXPANDED_BYTES:
+                        raise ValueError("文档压缩包实际解压总量超过 512 MB 安全限制")
+            if actual_member != entry.file_size:
+                raise ValueError("文档压缩包成员实际解压大小与声明不一致")
+    except (zipfile.BadZipFile, RuntimeError, EOFError, OSError, zlib.error, NotImplementedError) as exc:
+        raise ValueError("DOCX/EPUB 压缩包损坏或无法安全解压") from exc
+    return actual_total
 
 
 def validate_compressed_document(raw):
-    """Reject ZIP-based documents whose declared expansion exceeds safe limits."""
+    """Reject ZIP-based documents whose declared and actual expansion exceeds safe limits."""
     try:
         with zipfile.ZipFile(BytesIO(raw)) as archive:
-            entries = archive.infolist()
-            if len(entries) > MAX_ARCHIVE_ENTRIES:
-                raise ValueError("文档压缩包内文件数量过多，已拒绝解析")
-            expanded_total = 0
-            for entry in entries:
-                if entry.file_size < 0 or entry.file_size > MAX_ARCHIVE_MEMBER_BYTES:
-                    raise ValueError("文档压缩包包含超出单文件解压限制的内容")
-                expanded_total += entry.file_size
-                if expanded_total > MAX_ARCHIVE_EXPANDED_BYTES:
-                    raise ValueError("文档解压后超过 512 MB 安全限制，已拒绝解析")
+            _verify_compressed_archive(archive)
     except zipfile.BadZipFile as exc:
         raise ValueError("DOCX/EPUB 文件不是有效的 ZIP 文档") from exc
 
