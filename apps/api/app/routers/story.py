@@ -950,13 +950,17 @@ def build_episode_asset_consistency_report(shot_rows):
         shot_number = shot["shot_number"]
         links = shot.get("links") or []
         roles = {link.get("role") for link in links}
+        categories = {
+            (link.get("asset") or {}).get("category")
+            for link in links if isinstance(link.get("asset"), dict)
+        }
         if not links:
             issues.append({
                 "shot_id": shot_id, "shot_number": shot_number,
                 "code": "no_visual_assets", "severity": "warning",
                 "message": "该镜头尚未关联任何视觉素材。",
             })
-        if (shot.get("scene_name") or "").strip() and "scene" not in roles:
+        if (shot.get("scene_name") or "").strip() and "scene" not in roles and "scenes" not in categories:
             issues.append({
                 "shot_id": shot_id, "shot_number": shot_number,
                 "code": "missing_scene_asset", "severity": "warning",
