@@ -649,22 +649,7 @@ def confirm_storyboard_match(payload: ConfirmMatchPayload, db: Session = Depends
         raise HTTPException(403, "该素材属于其他小说，不能关联到当前漫剧项目")
     if payload.chapter_number is not None and not chapter_exists(db, project.novel_id, payload.chapter_number):
         raise HTTPException(422, "章节编号不属于当前小说")
-    data = asset.data if isinstance(asset.data, dict) else {}
-    history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
-    history = [x for x in history if x.get("confirmed", True) is True]
-    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
-    applicable = [x for x in history if payload.chapter_number is None or int(x.get("chapter_number") or 0) <= payload.chapter_number]
-    latest = applicable[-1] if applicable else {}
-    snapshot = {
-        "chapter_number": latest.get("chapter_number"),
-        "event": latest.get("event", ""),
-        "change_type": latest.get("change_type", "基础状态"),
-        "appearance": latest.get("appearance_after") or asset.appearance or "",
-        "clothing": latest.get("clothing_after") or asset.clothing or "",
-        "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", False)),
-        "is_evolved": bool(latest),
-    }
+    snapshot = resolve_asset_state(asset, payload.chapter_number)
     link = db.query(StoryAssetLink).filter(
         StoryAssetLink.shot_id == shot.id,
         StoryAssetLink.asset_id == asset.id,
