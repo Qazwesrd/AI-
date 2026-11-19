@@ -215,6 +215,15 @@ jobs:
           "version=$($package.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Release version: $($package.version)"
 
+      - name: Read desktop version
+        id: desktop-version
+        shell: pwsh
+        run: |
+          $package = Get-Content "apps/desktop/package.json" -Raw | ConvertFrom-Json
+          if (!$package.version -or $package.version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid desktop version in package.json." }
+          "version=$($package.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Release version: $($package.version)"
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
@@ -229,8 +238,8 @@ jobs:
         if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: desktop-v1.0.3
-          name: AI漫剧制作大师 Windows 1.0.3
+          tag_name: desktop-v${{ steps.desktop-version.outputs.version }}
+          name: AI漫剧制作大师 Windows ${{ steps.desktop-version.outputs.version }}
           body: |
             Windows 桌面安装包。
 
