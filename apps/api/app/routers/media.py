@@ -98,6 +98,24 @@ def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3
     }, ensure_ascii=False, sort_keys=True)
 
 
+def latest_completed_episode_shot_tasks(tasks, episode_id):
+    """Return the newest usable completed clip per shot, ignoring failed retries."""
+    selected = {}
+    for task in sorted(tasks, key=lambda item: item.id, reverse=True):
+        metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        shot_id = metadata.get("shot_id")
+        if (
+            metadata.get("episode_id") == episode_id
+            and shot_id
+            and shot_id not in selected
+            and task.status == "completed"
+            and task.result_path
+            and Path(task.result_path).is_file()
+        ):
+            selected[shot_id] = task
+    return selected
+
+
 class VideoTaskInput(BaseModel):
     provider: str
     model: str
@@ -495,18 +513,7 @@ def render_episode_from_shots(
         MediaTask.task_type == "storyboard_video"
     ).all()
     # A later failed retry must not shadow an earlier successful clip.
-    by_shot = {}
-    for task in sorted(tasks, key=lambda item: item.id, reverse=True):
-        metadata = task.request_data if isinstance(task.request_data, dict) else {}
-        if (
-            metadata.get("episode_id") == episode_id
-            and metadata.get("shot_id")
-            and metadata["shot_id"] not in by_shot
-            and task.status == "completed"
-            and task.result_path
-            and Path(task.result_path).is_file()
-        ):
-            by_shot[metadata["shot_id"]] = task
+    by_shot = latest_completed_episode_shot_tasks(tasks, episode_id)
     clips = []
     missing = []
     invalid = []
