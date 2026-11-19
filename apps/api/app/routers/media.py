@@ -23,7 +23,7 @@ from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
-    safe_storage_file, run_ffmpeg, probe_media
+    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])

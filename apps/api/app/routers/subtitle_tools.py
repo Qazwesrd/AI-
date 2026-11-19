@@ -16,6 +16,7 @@ from app.models.studio import AIUsageLog
 from app.routers.media import get_provider
 from app.services.media_service import (
     AUDIO_DIR, SUBTITLE_DIR, VIDEO_DIR, probe_media, run_ffmpeg, safe_storage_file,
+    validate_rendered_video,
 )
 
 router = APIRouter(prefix="/api/subtitle-tools", tags=["字幕翻译与配音"])
