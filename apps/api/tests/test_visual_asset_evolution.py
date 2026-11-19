@@ -66,6 +66,21 @@ class VisualAssetEvolutionTests(unittest.TestCase):
         self.assertEqual(snapshot["chapter_number"], 12)
         self.assertEqual(snapshot["clothing"], "蓝色布衣破损，左袖撕裂")
 
+    def test_unconfirmed_evolution_is_not_used_for_effective_state(self):
+        asset = VisualAsset(
+            id=8, category="characters", name="测试角色",
+            appearance="基础外观", clothing="基础服装",
+            data={"evolution_history": [{
+                "chapter_number": 3, "event": "AI推断受伤",
+                "appearance_after": "新增伤疤", "clothing_after": "衣服破损",
+                "confirmed": False,
+            }]},
+        )
+        state = resolve_asset_state(asset, 5)
+        self.assertEqual(state["appearance"], "基础外观")
+        self.assertEqual(state["clothing"], "基础服装")
+        self.assertFalse(state["is_evolved"])
+
 
 if __name__ == "__main__":
     unittest.main()
