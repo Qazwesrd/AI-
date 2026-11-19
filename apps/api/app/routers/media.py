@@ -24,7 +24,8 @@ from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
     safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video,
-    download_validated_video, finalize_rendered_video
+    download_validated_video, finalize_rendered_video,
+    validate_rendered_audio, finalize_rendered_audio
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
@@ -1039,20 +1040,21 @@ def generate_episode_voice_track(
             db.commit()
 
             request_started = True
+            temporary_audio = destination.with_name("." + destination.stem + ".partial" + destination.suffix)
             with urllib.request.urlopen(request, timeout=300) as response:
-                with destination.open("wb") as output:
+                with temporary_audio.open("wb") as output:
                     while True:
                         chunk = response.read(1024 * 1024)
                         if not chunk:
                             break
                         output.write(chunk)
-            if destination.stat().st_size < 128:
-                raise RuntimeError("语音服务返回的音频文件为空或无效")
-            audio_info = probe_media(destination)
-            speech_duration = float((audio_info.get("format") or {}).get("duration") or 0)
+            audio_report = finalize_rendered_audio(temporary_audio, destination)
+            speech_duration = audio_report["duration_seconds"]
             target_duration = clip_durations.get(
                 shot.id, max(1.0, float(shot.duration_seconds or 5))
             )
+            if speech_duration <= 0:
+                raise RuntimeError("FFprobe 无法确认配音时长")
             if speech_duration > target_duration * 1.5:
                 raise RuntimeError(
                     f"对白音频约 {speech_duration:.1f} 秒，超过镜头时长 {target_duration:.1f} 秒的 1.5 倍；"
@@ -1106,7 +1108,8 @@ def generate_episode_voice_track(
                     db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error if task else str(exc.detail))
-                destination.unlink(missing_ok=True)
+                if 'temporary_audio' in locals():
+                    temporary_audio.unlink(missing_ok=True)
                 failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
                                  "status": task.status if task else "failed", "error": str(exc.detail)[:1000]})
         except Exception as exc:
@@ -1127,7 +1130,8 @@ def generate_episode_voice_track(
                 db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error)
-            destination.unlink(missing_ok=True)
+            if 'temporary_audio' in locals():
+                temporary_audio.unlink(missing_ok=True)
             failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
                              "status": task.status if task else "failed", "error": str(exc)[:1000]})
 
@@ -1170,7 +1174,7 @@ def generate_episode_voice_track(
         ])
         task = MediaTask(
             task_type="episode_speech_track", provider=data.provider, model=data.model,
-            status="completed", prompt=f"第{episode.episode_number}集对白配音",
+            status="partial" if failures else "completed", prompt=f"第{episode.episode_number}集对白配音",
             result_path=str(track_path),
             request_data={"episode_id": episode_id, "voice": data.voice,
                           "shot_count": len(generated), "aligned_to_storyboard": True},
@@ -1221,6 +1225,15 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
         if meta.get("speech_fingerprint") != fingerprint:
             continue
         if prior.status == "completed" and prior.result_path and Path(prior.result_path).is_file() and not data.force_regenerate:
+            try:
+                if data.response_format == "pcm":
+                    if Path(prior.result_path).stat().st_size < 128:
+                        raise ValueError("PCM 配音文件过小")
+                else:
+                    validate_rendered_audio(prior.result_path)
+            except Exception:
+                # Keep the bad artifact for diagnosis; do not advertise it as reusable.
+                continue
             return {
                 "status": "completed", "task_id": prior.id,
                 "file": Path(prior.result_path).name, "path": prior.result_path,
@@ -1274,15 +1287,20 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
         db.commit()
 
         request_started = True
+        temporary_audio = destination.with_name("." + destination.stem + ".partial" + destination.suffix)
         with urllib.request.urlopen(request, timeout=300) as response:
-            with destination.open("wb") as output:
+            with temporary_audio.open("wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
                     output.write(chunk)
-        if not destination.is_file() or destination.stat().st_size < 128:
+        if not temporary_audio.is_file() or temporary_audio.stat().st_size < 128:
             raise RuntimeError("语音服务返回的音频文件为空或无效")
+        if data.response_format == "pcm":
+            os.replace(temporary_audio, destination)
+        else:
+            finalize_rendered_audio(temporary_audio, destination)
 
         task.status = "completed"
         task.result_path = str(destination)
@@ -1329,7 +1347,8 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
             db.commit()
         if lease_acquired and task:
             release_task_lease(db, "media", task.id, False, task.error)
-        destination.unlink(missing_ok=True)
+        if 'temporary_audio' in locals():
+            temporary_audio.unlink(missing_ok=True)
         raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc.detail}") from exc
     except Exception as exc:
         db.rollback()
@@ -1349,7 +1368,8 @@ def generate_speech(data: SpeechInput, db: Session = Depends(get_db)):
             db.commit()
         if lease_acquired and task:
             release_task_lease(db, "media", task.id, False, task.error)
-        destination.unlink(missing_ok=True)
+        if 'temporary_audio' in locals():
+            temporary_audio.unlink(missing_ok=True)
         raise HTTPException(502, f"语音生成失败（任务 #{task.id if task else '未知'}）：{exc}") from exc
 
 
