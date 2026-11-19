@@ -35,6 +35,36 @@ class StoryboardAssetScopeTests(unittest.TestCase):
         self.assertEqual(state["clothing"], "破损蓝衣")
         self.assertEqual(state["chapter_number"], 4)
 
+    def test_effective_state_carries_forward_all_character_and_prop_fields(self):
+        asset = SimpleNamespace(
+            data={"evolution_history": [
+                {"chapter_number": 2, "age_after": "少年", "hairstyle_after": "短发", "equipment_after": "木剑", "holder": "主角"},
+                {"chapter_number": 5, "injury_after": "左臂受伤", "condition_after": "木剑折断"},
+            ]},
+            appearance="黑发", clothing="布衣",
+        )
+        state = resolve_asset_state(asset, 6)
+        self.assertEqual(state["age"], "少年")
+        self.assertEqual(state["hairstyle"], "短发")
+        self.assertEqual(state["equipment"], "木剑")
+        self.assertEqual(state["holder"], "主角")
+        self.assertEqual(state["injury"], "左臂受伤")
+        self.assertEqual(state["condition"], "木剑折断")
+        self.assertEqual(state["chapter_number"], 5)
+
+    def test_state_snapshot_at_earlier_chapter_excludes_future_changes(self):
+        asset = SimpleNamespace(
+            data={"evolution_history": [
+                {"chapter_number": 3, "clothing_after": "青色长袍"},
+                {"chapter_number": 8, "clothing_after": "银色铠甲", "equipment_after": "长枪"},
+            ]},
+            appearance="黑发", clothing="布衣",
+        )
+        state = resolve_asset_state(asset, 5)
+        self.assertEqual(state["clothing"], "青色长袍")
+        self.assertEqual(state["equipment"], "")
+        self.assertEqual(state["chapter_number"], 3)
+
     def test_unconfirmed_change_is_not_used_for_effective_state(self):
         asset = SimpleNamespace(
             data={"evolution_history": [
