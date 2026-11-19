@@ -171,7 +171,14 @@ try {
     $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
 
     $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
-    $WebServer = Join-Path $Web ".next\standalone\server.js"
+    $StandaloneRoot = Join-Path $Web ".next\standalone"
+    $StandaloneStatic = Join-Path $StandaloneRoot ".next\static"
+    New-Item -ItemType Directory -Path $StandaloneStatic -Force | Out-Null
+    Copy-Item (Join-Path $Web ".next\static\*") $StandaloneStatic -Recurse -Force
+    if (Test-Path (Join-Path $Web "public")) {
+        Copy-Item (Join-Path $Web "public") (Join-Path $StandaloneRoot "public") -Recurse -Force
+    }
+    $WebServer = Join-Path $StandaloneRoot "server.js"
     $env:PORT = "3000"
     $env:HOSTNAME = "127.0.0.1"
     $env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:8000"
