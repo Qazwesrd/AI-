@@ -101,7 +101,31 @@ def _backup_database_before_migration():
     return target
 
 
-def _migrate_missing_columns():
+def _pending_schema_changes():
+    """Return missing model tables and columns before any schema mutation."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    missing_tables = []
+    missing_columns = []
+
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            missing_tables.append(table.name)
+            continue
+
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table.name)
+        }
+        for column in table.columns:
+            if column.name not in existing_columns:
+                missing_columns.append(f"{table.name}.{column.name}")
+
+    return missing_tables, missing_columns
+
+
+def _migrate_missing_columns(backup_path=None):
     """Safely add compatible ORM columns to existing SQLite databases."""
     from sqlalchemy import inspect, text
 
@@ -151,7 +175,7 @@ def _migrate_missing_columns():
     if not missing:
         return []
 
-    backup = _backup_database_before_migration()
+    backup = backup_path or _backup_database_before_migration()
 
     try:
         with engine.begin() as connection:
@@ -199,8 +223,21 @@ def init_database():
                 print(f"[模型依赖错误] {module_name}: {exc}")
                 raise
 
+    # Snapshot an existing database before create_all can add any tables.
+    # The old order backed up only after create_all, which meant the backup
+    # was not a faithful pre-migration copy when a release introduced tables.
+    missing_tables, missing_columns = _pending_schema_changes()
+    backup = None
+    if missing_tables or missing_columns:
+        backup = _backup_database_before_migration()
+        if backup:
+            print(
+                f"[数据库迁移] 已在结构变更前创建完整备份：{backup} "
+                f"(新增表 {len(missing_tables)}，新增字段 {len(missing_columns)})"
+            )
+
     Base.metadata.create_all(bind=engine)
-    _migrate_missing_columns()
+    _migrate_missing_columns(backup_path=backup)
     print(f"[数据库初始化完成] {DATABASE_PATH}")
 
     return True
