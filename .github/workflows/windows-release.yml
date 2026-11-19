@@ -211,6 +211,7 @@ jobs:
 
             - 包含桌面启动器、本地 API 和 Web 前端。
             - 包含 FFmpeg / FFprobe 媒体处理组件。
+            - 同时提供包含安装程序、中文 PDF 使用说明书和实际界面截图的本地测试 ZIP。
             - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
           files: |
             apps/desktop/release/*Setup*.exe
