@@ -612,9 +612,15 @@ export default function StoryboardPage() {
                     <div key={group.requested_name + index} className="text-xs">
                       <strong>{group.requested_name}</strong>
                       {group.missing ? <span className="ml-2 text-amber-300">素材库未找到匹配项</span> : group.matches.map((match: any) => (
-                        <div key={match.asset_id} className="mt-1 flex flex-wrap items-center gap-2 text-slate-300">
-                          <span>{match.name} · {match.category} · 匹配度 {(match.confidence * 100).toFixed(0)}%</span>
-                          <button className="rounded border border-emerald-300/30 px-2 py-1 text-emerald-200" onClick={() => confirmSuggestedAsset(shot, match.asset_id, match.category)}>确认关联</button>
+                        <div key={match.asset_id} className="mt-2 rounded-lg border border-white/10 bg-slate-950/60 p-2 text-slate-300">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span>{match.name} · {match.category} · 匹配度 {(match.confidence * 100).toFixed(0)}%</span>
+                            <button className="rounded border border-emerald-300/30 px-2 py-1 text-emerald-200" onClick={() => confirmSuggestedAsset(shot, match.asset_id, match.category)}>确认关联</button>
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-400">外观：{match.effective_state?.appearance || "未记录"} · 服装：{match.effective_state?.clothing || "未记录"} · 年龄：{match.effective_state?.age || "未记录"}</p>
+                          <p className="mt-1 text-[11px] text-slate-400">发型：{match.effective_state?.hairstyle || "未记录"} · 伤势：{match.effective_state?.injury || "未记录"} · 装备：{match.effective_state?.equipment || "未记录"}</p>
+                          <p className="mt-1 text-[11px] text-slate-400">道具状态：{match.effective_state?.condition || "未记录"} · 持有人：{match.effective_state?.holder || "未记录"}</p>
+                          <p className="mt-1 text-[10px] text-slate-500">{match.reason}</p>
                         </div>
                       ))}
                     </div>
