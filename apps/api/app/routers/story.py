@@ -149,7 +149,7 @@ def snapshot_asset_state(asset: VisualAsset, chapter_number: Optional[int]):
         "appearance": latest.get("appearance_after") or asset.appearance or "",
         "clothing": latest.get("clothing_after") or asset.clothing or "",
         "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", False)),
+        "confirmed": bool(latest.get("confirmed", True)),
         "is_evolved": bool(latest),
     }
 
