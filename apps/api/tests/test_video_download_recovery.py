@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from fastapi import HTTPException
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -27,7 +28,7 @@ class VideoDownloadRecoveryTests(unittest.TestCase):
         self, video_dir, validate, download, _http_json, _provider
     ):
         with tempfile.TemporaryDirectory() as folder:
-            video_dir.__truediv__ = lambda name: Path(folder) / name
+            video_dir.__truediv__ = lambda _self, name: Path(folder) / name
             def write_partial(_url, destination):
                 Path(destination).write_bytes(b"partial")
             download.side_effect = write_partial
@@ -81,7 +82,6 @@ class VideoDownloadRecoveryTests(unittest.TestCase):
             db.query.return_value.filter.return_value.first.return_value = task
             # Stop after the existing-file integrity branch by making provider lookup fail.
             with patch("app.routers.media.get_provider", side_effect=HTTPException(503, "provider unavailable")):
-                from fastapi import HTTPException
                 with self.assertRaises(HTTPException):
                     refresh_video_task(81, db)
             self.assertEqual(task.status, "download_failed")
