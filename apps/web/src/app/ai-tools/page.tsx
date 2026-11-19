@@ -524,7 +524,7 @@ export default function AIToolsPage() {
 
 
   async function confirmResultFile(task: Task, file: ResultFile, classification: string) {
-    const needsName = ["character", "scene", "prop"].includes(classification);
+    const needsName = ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(classification);
     const defaultName = file.filename.replace(/\\.[^.]+$/, "");
     const assetName = needsName ? window.prompt("请输入素材名称（确认后将登记到人物/场景/道具素材库）", defaultName) : "";
     if (needsName && !assetName?.trim()) return;
@@ -735,8 +735,8 @@ export default function AIToolsPage() {
                           <a href={apiBase + file.downloadUrl} className="text-xs text-cyan-200 hover:underline" download>{file.filename} · {(file.size / 1024 / 1024).toFixed(1)} MB</a>
                           <span className="text-[11px] text-slate-400">{file.classification || "待识别"} · {file.classificationStatus === "confirmed" ? "已确认" : "待确认"}</span>
                           {file.classificationStatus !== "confirmed" && <div className="flex flex-wrap gap-1">
-                            {(["character", "scene", "prop", "storyboard", "script", "video", "audio", "document", "image", "other"] as const).map((kind) => {
-                              const labels: Record<string, string> = { character: "人物", scene: "场景", prop: "道具", storyboard: "分镜", script: "剧本", video: "视频", audio: "音频", document: "文档", image: "图片", other: "其他" };
+                            {(["character", "scene", "prop", "weapon", "costume", "building", "special_item", "storyboard", "script", "video", "audio", "document", "image", "other"] as const).map((kind) => {
+                              const labels: Record<string, string> = { character: "人物", scene: "场景", prop: "道具", weapon: "武器", costume: "服装", building: "建筑", special_item: "特殊物品", storyboard: "分镜", script: "剧本", video: "视频", audio: "音频", document: "文档", image: "图片", other: "其他" };
                               return <button key={kind} onClick={() => void confirmResultFile(task, file, kind)} className="rounded border border-purple-300/20 px-2 py-1 text-[10px] text-purple-100 hover:bg-purple-900/40">确认为{labels[kind]}</button>;
                             })}
                           </div>}
