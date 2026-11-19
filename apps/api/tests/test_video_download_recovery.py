@@ -45,6 +45,9 @@ class VideoDownloadRecoveryTests(unittest.TestCase):
             self.assertFalse(any(Path(folder).iterdir()))
             db.add.assert_not_called()
             self.assertIn("不会重新提交视频生成请求", task.error)
+            _provider.assert_called_once_with(
+                db, "provider-x", False, check_paid=False
+            )
 
     @patch("app.routers.media.get_provider", return_value=(SimpleNamespace(), "key", "https://provider.invalid"))
     @patch("app.routers.media.http_json", return_value={"status": "completed", "video_url": "https://cdn.invalid/video.mp4"})
