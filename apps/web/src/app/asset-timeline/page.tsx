@@ -10,12 +10,14 @@ type Asset = {
 };
 type Evolution = {
   chapter_number: number; event: string; change_type: string; appearance_after?: string;
-  clothing_after?: string; holder?: string; evidence?: string; source?: string;
+  clothing_after?: string; age_after?: string; hairstyle_after?: string; injury_after?: string;
+  equipment_after?: string; condition_after?: string; holder?: string; evidence?: string; source?: string;
   confidence?: number; confirmed?: boolean; recorded_at?: string;
 };
 type EffectiveState = {
   chapter_number?: number; event?: string; change_type?: string; appearance: string;
-  clothing: string; holder: string; confirmed: boolean; is_evolved: boolean;
+  clothing: string; age: string; hairstyle: string; injury: string; equipment: string;
+  condition: string; holder: string; confirmed: boolean; is_evolved: boolean;
 };
 type HistoryResponse = { history: Evolution[]; effective_state: EffectiveState };
 
@@ -48,7 +50,8 @@ export default function AssetTimelinePage() {
   const [message, setMessage] = useState("");
   const [form, setForm] = useState({
     chapter_number: "", change_type: "状态变化", event: "", appearance_after: "",
-    clothing_after: "", holder: "", evidence: "", confirmed: false,
+    clothing_after: "", age_after: "", hairstyle_after: "", injury_after: "",
+    equipment_after: "", condition_after: "", holder: "", evidence: "", confirmed: false,
   });
 
   const selected = useMemo(() => assets.find((item) => item.id === selectedId) || null, [assets, selectedId]);
@@ -95,11 +98,14 @@ export default function AssetTimelinePage() {
         body: JSON.stringify({
           chapter_number: Number(form.chapter_number), change_type: form.change_type,
           event: form.event, appearance_after: form.appearance_after,
-          clothing_after: form.clothing_after, holder: form.holder,
-          evidence: form.evidence, confirmed: form.confirmed, source: "manual", confidence: 1,
+          clothing_after: form.clothing_after, age_after: form.age_after,
+          hairstyle_after: form.hairstyle_after, injury_after: form.injury_after,
+          equipment_after: form.equipment_after, condition_after: form.condition_after,
+          holder: form.holder, evidence: form.evidence, confirmed: form.confirmed,
+          source: "manual", confidence: 1,
         }),
       });
-      setForm({ chapter_number: "", change_type: "状态变化", event: "", appearance_after: "", clothing_after: "", holder: "", evidence: "", confirmed: false });
+      setForm({ chapter_number: "", change_type: "状态变化", event: "", appearance_after: "", clothing_after: "", age_after: "", hairstyle_after: "", injury_after: "", equipment_after: "", condition_after: "", holder: "", evidence: "", confirmed: false });
       await loadAssets(selectedId);
       await loadHistory(selectedId);
       setMessage("剧情变化已写入历史。未勾选确认的记录会标记为待确认，不会伪装成已核实事实。");
@@ -181,7 +187,12 @@ export default function AssetTimelinePage() {
                 <div className="text-xs font-semibold text-cyan-200">该章节生效状态 {history.effective_state.chapter_number ? "· 最近一次变化：第 " + history.effective_state.chapter_number + " 章" : "· 基础设定"}</div>
                 <div className="mt-2 grid gap-3 text-sm md:grid-cols-3">
                   <div><span className="text-slate-400">外观：</span>{history.effective_state.appearance || "无记录"}</div>
-                  <div><span className="text-slate-400">服装/装备：</span>{history.effective_state.clothing || "无记录"}</div>
+                  <div><span className="text-slate-400">年龄：</span>{history.effective_state.age || "未明确"}</div>
+                  <div><span className="text-slate-400">发型：</span>{history.effective_state.hairstyle || "未明确"}</div>
+                  <div><span className="text-slate-400">伤势：</span>{history.effective_state.injury || "无已确认变化"}</div>
+                  <div><span className="text-slate-400">服装：</span>{history.effective_state.clothing || "无记录"}</div>
+                  <div><span className="text-slate-400">装备：</span>{history.effective_state.equipment || "无记录"}</div>
+                  <div><span className="text-slate-400">道具/场景状态：</span>{history.effective_state.condition || "无已确认变化"}</div>
                   <div><span className="text-slate-400">持有人：</span>{history.effective_state.holder || "无记录"}</div>
                 </div>
               </div>}
@@ -198,8 +209,13 @@ export default function AssetTimelinePage() {
                     <p className="mt-2 text-sm">{item.event}</p>
                     <div className="mt-2 grid gap-2 text-xs text-slate-300 md:grid-cols-3">
                       {item.appearance_after && <p>外观：{item.appearance_after}</p>}
-                      {item.clothing_after && <p>服装/装备：{item.clothing_after}</p>}
-                      {item.holder && <p>持有人：{item.holder}</p>}
+                      {item.age_after && <p>年龄：{item.age_after}</p>}
+                      {item.hairstyle_after && <p>发型：{item.hairstyle_after}</p>}
+                      {item.injury_after && <p>伤势：{item.injury_after}</p>}
+                      {item.clothing_after && <p>服装：{item.clothing_after}</p>}
+                      {item.equipment_after && <p>装备：{item.equipment_after}</p>}
+                      {item.condition_after && <p>道具/场景状态：{item.condition_after}</p>}
+                      {item.holder && <p>持有人/归属：{item.holder}</p>}
                     </div>
                     {item.evidence && <blockquote className="mt-3 border-l-2 border-cyan-400/50 pl-3 text-xs text-cyan-100">原文证据：{item.evidence}</blockquote>}
                     <p className="mt-2 text-[10px] text-slate-500">来源：{item.source || "历史记录"} · 置信度：{Math.round((item.confidence ?? 1) * 100)}% · {item.recorded_at || ""}</p>
@@ -216,8 +232,13 @@ export default function AssetTimelinePage() {
                 <label className="text-xs text-slate-300">发生章节<input required min="1" type="number" value={form.chapter_number} onChange={(e) => setForm({ ...form, chapter_number: e.target.value })} className={styles + " mt-1"} /></label>
                 <label className="text-xs text-slate-300">变化类型<select value={form.change_type} onChange={(e) => setForm({ ...form, change_type: e.target.value })} className={styles + " mt-1"}>{["状态变化","年龄变化","外貌变化","发型变化","受伤","服装变化","装备变化","道具损坏","道具升级","持有人变化","场景变化","其他"].map((x) => <option key={x}>{x}</option>)}</select></label>
                 <label className="md:col-span-2 text-xs text-slate-300">剧情事件<input required minLength={2} value={form.event} onChange={(e) => setForm({ ...form, event: e.target.value })} placeholder="例如：主角在第25章战斗中左臂受伤" className={styles + " mt-1"} /></label>
-                <label className="text-xs text-slate-300">变化后的外观 / 年龄 / 伤势<textarea rows={3} value={form.appearance_after} onChange={(e) => setForm({ ...form, appearance_after: e.target.value })} className={styles + " mt-1"} /></label>
-                <label className="text-xs text-slate-300">变化后的服装 / 装备 / 道具状态<textarea rows={3} value={form.clothing_after} onChange={(e) => setForm({ ...form, clothing_after: e.target.value })} className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">变化后的外观<textarea rows={2} value={form.appearance_after} onChange={(e) => setForm({ ...form, appearance_after: e.target.value })} className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">年龄（人物）<input value={form.age_after} onChange={(e) => setForm({ ...form, age_after: e.target.value })} placeholder="例如：从少年成长为青年" className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">发型（人物）<input value={form.hairstyle_after} onChange={(e) => setForm({ ...form, hairstyle_after: e.target.value })} placeholder="例如：长发束起" className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">伤势 / 疤痕<textarea rows={2} value={form.injury_after} onChange={(e) => setForm({ ...form, injury_after: e.target.value })} className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">服装变化<textarea rows={2} value={form.clothing_after} onChange={(e) => setForm({ ...form, clothing_after: e.target.value })} className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">装备变化<textarea rows={2} value={form.equipment_after} onChange={(e) => setForm({ ...form, equipment_after: e.target.value })} className={styles + " mt-1"} /></label>
+                <label className="text-xs text-slate-300">道具/场景当前状态<textarea rows={2} value={form.condition_after} onChange={(e) => setForm({ ...form, condition_after: e.target.value })} placeholder="例如：破损、修复、升级、位置变化" className={styles + " mt-1"} /></label>
                 <label className="text-xs text-slate-300">当前持有人 / 归属<input value={form.holder} onChange={(e) => setForm({ ...form, holder: e.target.value })} className={styles + " mt-1"} /></label>
                 <label className="text-xs text-slate-300">原文证据（建议逐字引用）<textarea rows={2} value={form.evidence} onChange={(e) => setForm({ ...form, evidence: e.target.value })} className={styles + " mt-1"} /></label>
                 <label className="md:col-span-2 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={form.confirmed} onChange={(e) => setForm({ ...form, confirmed: e.target.checked })} />我已核对原文并确认这条变化真实发生</label>
