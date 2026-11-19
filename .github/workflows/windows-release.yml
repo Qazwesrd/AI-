@@ -172,6 +172,7 @@ jobs:
           retention-days: 14
 
       - name: Publish Windows installer to GitHub Releases
+        if: github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-v1.0.3
