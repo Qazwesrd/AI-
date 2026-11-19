@@ -283,7 +283,7 @@ export default function AIToolsPage() {
             id: makeId(), title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`,
             category: stage.category, toolId: target.id,
             prompt: buildProductionPrompt({ category: stage.category, title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`, source, mode: promptMode, toolName: target.name, instruction: stage.instruction }),
-            status: "prepared", resultText: "", resultUrl: "", createdAt: new Date().toISOString(),
+            status: "prepared", resultText: "", resultUrl: "", novelId: chapter.novel_id, chapterId: chapter.id, createdAt: new Date().toISOString(),
           });
         }
       }
@@ -351,7 +351,7 @@ export default function AIToolsPage() {
   useEffect(() => {
     if (!apiReady) return;
     for (const task of tasks) {
-      const payload = { id: task.id, title: task.title, category: task.category, toolId: task.toolId, status: task.status, prompt: task.prompt, sourceText: "", resultText: task.resultText, resultUrl: task.resultUrl };
+      const payload = { id: task.id, title: task.title, category: task.category, toolId: task.toolId, status: task.status, prompt: task.prompt, sourceText: "", resultText: task.resultText, resultUrl: task.resultUrl, novelId: task.novelId ?? null, chapterId: task.chapterId ?? null };
       void fetch(`${apiBase}/api/web-ai/tasks`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       }).then(async (response) => {
@@ -522,12 +522,23 @@ export default function AIToolsPage() {
   async function confirmResultFile(task: Task, file: ResultFile, classification: string) {
     const needsName = ["character", "scene", "prop"].includes(classification);
     const defaultName = file.filename.replace(/\\.[^.]+$/, "");
-    const assetName = needsName ? window.prompt("请输入素材名称（确认后将复制登记到人物/场景/道具素材库）", defaultName) : "";
+    const assetName = needsName ? window.prompt("请输入素材名称（确认后将登记到人物/场景/道具素材库）", defaultName) : "";
     if (needsName && !assetName?.trim()) return;
+    let novelId = task.novelId;
+    if (needsName && !novelId && novels.length) {
+      const choices = novels.map((item) => `${item.id}: ${item.title}`).join("\\n");
+      const selected = window.prompt("请选择素材所属小说，输入小说编号；不绑定小说请留空：\\n" + choices, "");
+      if (selected === null) return;
+      novelId = selected.trim() ? Number(selected.trim()) : undefined;
+      if (selected.trim() && (!Number.isInteger(novelId) || !novels.some((item) => item.id === novelId))) {
+        setNotice("小说编号无效，请重新确认归档。");
+        return;
+      }
+    }
     try {
       const response = await fetch(apiBase + "/api/web-ai/files/" + file.id + "/classification", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classification, assetName: assetName || "", description: "由任务“" + task.title + "”导入" }),
+        body: JSON.stringify({ classification, assetName: assetName || "", description: "由任务“" + task.title + "”导入", novelId: novelId ?? null }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "确认归档失败");
