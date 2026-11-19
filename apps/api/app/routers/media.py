@@ -23,7 +23,8 @@ from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
-    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video
+    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video,
+    download_validated_video, finalize_rendered_video
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
@@ -428,13 +429,24 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
             elif video_url:
                 filename = f"episode_{episode_id}_shot_{meta.get('shot_id')}_{uuid.uuid4().hex[:8]}.mp4"
                 destination = VIDEO_DIR / filename
-                http_download(str(video_url), destination)
-                if not destination.is_file() or destination.stat().st_size < 1024:
-                    destination.unlink(missing_ok=True)
-                    raise RuntimeError("视频服务返回的文件为空或无效")
+                try:
+                    download_validated_video(str(video_url), destination)
+                except Exception as exc:
+                    task.status = "download_failed"
+                    task.error = (
+                        f"服务商已生成视频，但本地下载或完整性检查失败：{str(exc)[:500]}。"
+                        "可刷新任务仅重试下载，不会重新提交视频生成请求。"
+                    )
+                    db.commit()
+                    outcomes.append({
+                        "task_id": task.id, "shot_number": meta.get("shot_number"),
+                        "status": task.status, "error": task.error,
+                        "retry_download_only": True,
+                    })
+                    continue
                 task.result_path = str(destination)
                 task.status = "completed"
-                task.error = ""
+                task.error = None
                 db.add(MediaFile(
                     name=filename, category="video", file_path=str(destination),
                     mime_type="video/mp4", file_size=destination.stat().st_size,
@@ -482,25 +494,44 @@ def render_episode_from_shots(
     tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "storyboard_video"
     ).all()
+    # A later failed retry must not shadow an earlier successful clip.
     by_shot = {}
-    for task in tasks:
+    for task in sorted(tasks, key=lambda item: item.id, reverse=True):
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
-        if metadata.get("episode_id") == episode_id and metadata.get("shot_id"):
+        if (
+            metadata.get("episode_id") == episode_id
+            and metadata.get("shot_id")
+            and metadata["shot_id"] not in by_shot
+            and task.status == "completed"
+            and task.result_path
+            and Path(task.result_path).is_file()
+        ):
             by_shot[metadata["shot_id"]] = task
     clips = []
     missing = []
+    invalid = []
     for shot in shots:
         task = by_shot.get(shot.id)
-        if not task or not task.result_path or not Path(task.result_path).is_file():
+        if not task:
             missing.append(shot.shot_number)
-        else:
-            clips.append(safe_storage_file(task.result_path))
+            continue
+        try:
+            clip = safe_storage_file(task.result_path)
+            validate_rendered_video(clip)
+            clips.append(clip)
+        except Exception as exc:
+            invalid.append(f"{shot.shot_number}（{str(exc)[:120]}）")
+    if invalid:
+        raise HTTPException(409, "以下镜头视频文件未通过完整性检查：" + "、".join(invalid) + "；原始素材已保留，请重新下载或替换。")
     if missing:
         raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
     output_name = re.sub(r"[^a-zA-Z0-9_-]", "_", output_name)
     if not output_name.lower().endswith(".mp4"):
         output_name += ".mp4"
     output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
+    render_stage = output.with_name("." + output.stem + ".rendering.mp4")
+    mixed_stage = output.with_name("." + output.stem + ".mixed.mp4")
+    subtitle_stage = None
     try:
         # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
         ffmpeg_args = []
@@ -551,7 +582,7 @@ def render_episode_from_shots(
             "-map", "[vout]", "-map", "[aout]",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
-            str(output),
+            str(render_stage),
         ])
         # Mix generated dialogue and optional background music with original shot sound.
         speech_tasks = db.query(MediaTask).filter(
@@ -566,7 +597,7 @@ def render_episode_from_shots(
         music = safe_storage_file(music_path) if music_path else None
         if speech_path or music:
             mixed_output = output.with_name(output.stem + "_mixed.mp4")
-            mix_args = ["-i", str(output)]
+            mix_args = ["-i", str(render_stage)]
             mix_filters = ["[0:a]volume=0.35[original]"]
             mix_labels = ["[original]"]
             mix_index = 1
@@ -583,10 +614,13 @@ def render_episode_from_shots(
             run_ffmpeg(mix_args + [
                 "-filter_complex", ";".join(mix_filters),
                 "-map", "0:v:0", "-map", "[mix]",
-                "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_output),
+                "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_stage),
             ])
-            output.unlink(missing_ok=True)
-            os.replace(mixed_output, output)
+            quality_report = finalize_rendered_video(
+                mixed_stage, output, expected_duration=total_video_duration,
+                duration_tolerance=2.0, require_audio=True,
+            )
+            render_stage.unlink(missing_ok=True)
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
@@ -604,13 +638,18 @@ def render_episode_from_shots(
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
-            subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
+            subtitle_stage = subtitle_file.with_name("." + subtitle_file.name + ".tmp")
+            subtitle_stage.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
+            if not subtitle_stage.is_file() or subtitle_stage.stat().st_size == 0:
+                raise RuntimeError("字幕文件生成失败或内容为空")
+            os.replace(subtitle_stage, subtitle_file)
             subtitle_path = str(subtitle_file)
             db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
-        quality_report = validate_rendered_video(
-            output, expected_duration=total_video_duration,
-            duration_tolerance=2.0, require_audio=True,
-        )
+        if not output.is_file():
+            quality_report = finalize_rendered_video(
+                render_stage, output, expected_duration=total_video_duration,
+                duration_tolerance=2.0, require_audio=True,
+            )
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
@@ -626,11 +665,18 @@ def render_episode_from_shots(
                 "subtitle_count": subtitle_index - 1,
                 "quality_report": quality_report}
     except HTTPException:
-        output.unlink(missing_ok=True)
+        render_stage.unlink(missing_ok=True)
+        mixed_stage.unlink(missing_ok=True)
+        if subtitle_stage:
+            subtitle_stage.unlink(missing_ok=True)
         raise
     except Exception as exc:
-        output.unlink(missing_ok=True)
-        raise HTTPException(500, "分集视频合成失败：" + str(exc))
+        render_stage.unlink(missing_ok=True)
+        mixed_stage.unlink(missing_ok=True)
+        if subtitle_stage:
+            subtitle_stage.unlink(missing_ok=True)
+        # Never delete a validated final output or the source shot/audio assets on failure.
+        raise HTTPException(500, "分集视频合成失败；已有镜头、配音和已验证成片均予以保留：" + str(exc))
 
 
 
