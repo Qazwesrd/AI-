@@ -306,7 +306,7 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
 
 
 @router.post("/render")
-def render_styled_subtitles(data: StyledRenderInput):
+def render_styled_subtitles(data: StyledRenderInput, db: Session = Depends(get_db)):
     output = None
     try:
         video = safe_storage_file(data.video_path)
@@ -330,6 +330,10 @@ def render_styled_subtitles(data: StyledRenderInput):
         run_ffmpeg(["-i", str(video), "-vf", vf, "-map", "0:v:0", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "medium", "-crf", "20",
                     "-c:a", "aac", "-movflags", "+faststart", str(output)])
+        db.add(MediaFile(name=output.name, category="video", file_path=str(output),
+                         mime_type="video/mp4", file_size=output.stat().st_size,
+                         metadata_json={"subtitle_source": str(subtitle), "styled_render": True}))
+        db.commit()
         return {"success": True, "path": str(output), "size": output.stat().st_size,
                 "message": "字幕样式已烧录到视频，可在导出文件中查看。"}
     except HTTPException:
