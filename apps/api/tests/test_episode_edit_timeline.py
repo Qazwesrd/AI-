@@ -108,11 +108,25 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         self.assertFalse(payload.audio_tracks[0].enabled)
 
     def test_rejects_invalid_trim_range(self):
-        with self.assertRaises(Exception):
-            EpisodeTimelineInput(
-                shot_order=[self.shot_a.id, self.shot_b.id],
-                shot_trims=[{"shot_id": self.shot_a.id, "start_seconds": 4, "end_seconds": 3}],
-            )
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            shot_trims=[{"shot_id": self.shot_a.id, "start_seconds": 4, "end_seconds": 3}],
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_rejects_duplicate_trim_entries(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            shot_trims=[
+                {"shot_id": self.shot_a.id, "start_seconds": 0, "end_seconds": 2},
+                {"shot_id": self.shot_a.id, "start_seconds": 1, "end_seconds": 3},
+            ],
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
 
     def test_rejects_cut_with_nonzero_duration(self):
         payload = EpisodeTimelineInput(
