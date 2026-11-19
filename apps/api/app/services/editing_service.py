@@ -283,7 +283,7 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
             args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
         elif audio and audio_mode == "mix":
             # Mix selected audio with the original clip audio when available.
-            streams = probe_media(concat_file).get("streams", [])
+            streams = probe_media(clips[0]).get("streams", [])
             has_original_audio = any(x.get("codec_type") == "audio" for x in streams)
             if has_original_audio:
                 args += [
