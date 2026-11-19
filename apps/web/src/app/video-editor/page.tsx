@@ -7,7 +7,7 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type MediaFile = { id: number; name: string; category: string; path: string; size: number };
 type EditJob = {
   id: number; title: string; provider: string; model: string; instruction: string;
-  status: string; edit_plan: any; output_path: string; error: string;
+  source_files?: string[]; status: string; edit_plan: any; output_path: string; error: string;
 };
 type Handoff = { id: number; prompt: string; manifest: any[]; notice: string };
 
@@ -100,6 +100,23 @@ export default function VideoEditorPage() {
       await loadAll();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "交接包生成失败");
+    } finally { setBusy(false); }
+  }
+
+  async function resumeWebHandoff(job: EditJob) {
+    setBusy(true);
+    try {
+      const response = await fetch(`${API}/api/video-editor/jobs/${job.id}/web-handoff`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "恢复交接任务失败");
+      setHandoff(data);
+      setWebResult("");
+      setInstruction(job.instruction || "");
+      setSelected(job.source_files || []);
+      setMessage(`已恢复网页版 AI 剪辑任务 #${job.id}。你可以继续复制提示词、提交视频并导入结果。`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "恢复交接任务失败");
     } finally { setBusy(false); }
   }
 
@@ -265,7 +282,10 @@ export default function VideoEditorPage() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div><h3 className="font-semibold">{job.title} · #{job.id}</h3>
                     <p className="mt-1 text-sm text-white/50">{job.provider} / {job.model} · {job.status}</p></div>
-                  {job.status === "planned" && <button disabled={busy} onClick={() => void executeJob(job.id)} className="rounded-lg bg-indigo-600 px-5 py-2 disabled:opacity-40">执行剪辑并导出</button>}
+                  <div className="flex flex-wrap gap-2">
+                    {job.status === "awaiting_web_ai" && <button disabled={busy} onClick={() => void resumeWebHandoff(job)} className="rounded-lg border border-cyan-300/40 bg-cyan-900/40 px-4 py-2 text-cyan-100 disabled:opacity-40">恢复网页版 AI 交接</button>}
+                    {job.status === "planned" && <button disabled={busy} onClick={() => void executeJob(job.id)} className="rounded-lg bg-indigo-600 px-5 py-2 disabled:opacity-40">执行剪辑并导出</button>}
+                  </div>
                 </div>
                 {job.edit_plan && <div className="mt-4 space-y-2 text-sm">
                   <p className="text-white/70">{job.edit_plan.summary}</p><p>片段数量：{job.edit_plan.segments?.length || 0}</p>
