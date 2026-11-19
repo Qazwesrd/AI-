@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect
@@ -74,6 +75,82 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                         ).fetchone(),
                         ("keep-this-row",),
                     )
+            finally:
+                test_engine.dispose()
+                database.engine = previous_engine
+                database.DATABASE_PATH = previous_path
+                database.STORAGE_DIR = previous_storage
+
+    def test_failed_migration_restores_original_database_snapshot(self):
+        with tempfile.TemporaryDirectory(prefix="comic-db-rollback-test-") as temp:
+            root = Path(temp)
+            db_path = root / "existing.db"
+            storage_path = root / "storage"
+            with sqlite3.connect(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO legacy_marker (value) VALUES (?)",
+                    ("must-survive-failed-migration",),
+                )
+
+            previous_engine = database.engine
+            previous_path = database.DATABASE_PATH
+            previous_storage = database.STORAGE_DIR
+            test_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+                future=True,
+            )
+            try:
+                database.engine = test_engine
+                database.DATABASE_PATH = db_path
+                database.STORAGE_DIR = storage_path
+                with patch.object(database, "_migrate_missing_columns", side_effect=RuntimeError("simulated migration failure")):
+                    with self.assertRaisesRegex(RuntimeError, "已自动恢复迁移前数据库备份"):
+                        database.init_database()
+
+                with sqlite3.connect(db_path) as restored:
+                    tables = {
+                        row[0] for row in restored.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    }
+                    self.assertEqual(tables, {"legacy_marker"})
+                    self.assertEqual(
+                        restored.execute("SELECT value FROM legacy_marker WHERE id=1").fetchone(),
+                        ("must-survive-failed-migration",),
+                    )
+                    self.assertEqual(restored.execute("PRAGMA integrity_check").fetchone(), ("ok",))
+                backups = list((storage_path / "backups" / "schema").glob("*.db"))
+                self.assertEqual(len(backups), 1)
+            finally:
+                test_engine.dispose()
+                database.engine = previous_engine
+                database.DATABASE_PATH = previous_path
+                database.STORAGE_DIR = previous_storage
+
+    def test_failed_first_initialization_removes_partial_database(self):
+        with tempfile.TemporaryDirectory(prefix="comic-db-first-run-") as temp:
+            root = Path(temp)
+            db_path = root / "new.db"
+            previous_engine = database.engine
+            previous_path = database.DATABASE_PATH
+            previous_storage = database.STORAGE_DIR
+            test_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+                future=True,
+            )
+            try:
+                database.engine = test_engine
+                database.DATABASE_PATH = db_path
+                database.STORAGE_DIR = root / "storage"
+                with patch.object(database, "_migrate_missing_columns", side_effect=RuntimeError("simulated first-run failure")):
+                    with self.assertRaisesRegex(RuntimeError, "新建的空数据库已清理"):
+                        database.init_database()
+                self.assertFalse(db_path.exists())
             finally:
                 test_engine.dispose()
                 database.engine = previous_engine

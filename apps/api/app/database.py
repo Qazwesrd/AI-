@@ -1,5 +1,6 @@
 ﻿import os
 import sqlite3
+import shutil
 from datetime import datetime
 from pathlib import Path
 from importlib import import_module
@@ -99,6 +100,27 @@ def _backup_database_before_migration():
         source.close()
 
     return target
+
+
+
+def _restore_database_backup(backup_path: Path):
+    """Restore a pre-migration SQLite snapshot after a failed schema upgrade."""
+    if not backup_path or not Path(backup_path).is_file():
+        raise RuntimeError("找不到迁移前数据库备份，无法自动回滚")
+    engine.dispose()
+    DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = DATABASE_PATH.with_name(
+        DATABASE_PATH.name + f".rollback-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}.tmp"
+    )
+    try:
+        shutil.copy2(backup_path, temporary)
+        # Remove stale WAL sidecars before atomically replacing the main database.
+        for suffix in ("-wal", "-shm"):
+            Path(str(DATABASE_PATH) + suffix).unlink(missing_ok=True)
+        os.replace(temporary, DATABASE_PATH)
+    finally:
+        temporary.unlink(missing_ok=True)
+        engine.dispose()
 
 
 def _pending_schema_changes():
@@ -236,10 +258,29 @@ def init_database():
                 f"(新增表 {len(missing_tables)}，新增字段 {len(missing_columns)})"
             )
 
-    Base.metadata.create_all(bind=engine)
-    _migrate_missing_columns(backup_path=backup)
-    print(f"[数据库初始化完成] {DATABASE_PATH}")
+    database_existed_before = DATABASE_PATH.exists() and DATABASE_PATH.stat().st_size > 0
+    try:
+        Base.metadata.create_all(bind=engine)
+        _migrate_missing_columns(backup_path=backup)
+    except Exception as migration_error:
+        rollback_message = ""
+        try:
+            if backup and Path(backup).is_file():
+                _restore_database_backup(backup)
+                rollback_message = f"；已自动恢复迁移前数据库备份：{backup}"
+            elif not database_existed_before:
+                engine.dispose()
+                DATABASE_PATH.unlink(missing_ok=True)
+                for suffix in ("-wal", "-shm"):
+                    Path(str(DATABASE_PATH) + suffix).unlink(missing_ok=True)
+                rollback_message = "；本次新建的空数据库已清理"
+        except Exception as rollback_error:
+            rollback_message = f"；自动回滚也失败，请保留备份 {backup} 并联系维护：{rollback_error}"
+        raise RuntimeError(
+            f"数据库结构升级失败：{migration_error}{rollback_message}"
+        ) from migration_error
 
+    print(f"[数据库初始化完成] {DATABASE_PATH}")
     return True
 
 
