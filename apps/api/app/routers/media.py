@@ -579,7 +579,11 @@ def render_episode_from_shots(
                 mix_args += ["-stream_loop", "-1", "-i", str(music)]
                 mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
                 mix_labels.append("[music]")
-            mix_filters.append("".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2[mix]")
+            mix_filters.append(
+                "".join(mix_labels)
+                + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2,"
+                "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95[mix]"
+            )
             run_ffmpeg(mix_args + [
                 "-filter_complex", ";".join(mix_filters),
                 "-map", "0:v:0", "-map", "[mix]",
