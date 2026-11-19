@@ -95,6 +95,10 @@ export default function StoryboardPage() {
       setNovels(n);
       setProjects(p);
       setAssets(a);
+      const requestedNovelId = new URLSearchParams(window.location.search).get("novelId");
+      if (requestedNovelId && n.some((novel: Novel) => String(novel.id) === requestedNovelId)) {
+        setNovelId(requestedNovelId);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取数据失败");
     }
