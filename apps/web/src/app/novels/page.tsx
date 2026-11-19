@@ -417,6 +417,17 @@ export default function NovelsPage() {
                       ✨ AI深度分析小说
                     </button>
                   </div>
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-purple-300/10 pt-4">
+                    <a href={`/ai-analysis?novelId=${selected.id}`} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-950/40">
+                      下一步：剧情与世界观分析
+                    </a>
+                    <a href={`/visual-studio?novelId=${selected.id}&category=characters`} className="rounded-lg border border-purple-300/30 px-4 py-2 text-sm text-purple-100 hover:bg-purple-950/40">
+                      管理人物视觉素材
+                    </a>
+                    <a href={`/storyboard?novelId=${selected.id}`} className="rounded-lg border border-fuchsia-300/30 px-4 py-2 text-sm text-fuchsia-100 hover:bg-fuchsia-950/40">
+                      进入剧本与分镜
+                    </a>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-5 2xl:grid-cols-2">
