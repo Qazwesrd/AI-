@@ -1,5 +1,4 @@
 import json
-import os
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -170,7 +169,6 @@ def import_web_result(job_id: int, data: WebPlanImportInput, db: Session = Depen
     if job.status != "awaiting_web_ai":
         raise HTTPException(400, "该任务当前不在等待网页版 AI 结果的状态")
     sources = [str(safe_storage_file(x)) for x in (job.source_files or [])]
-    key_to_path = {f"video_{index}": path for index, path in enumerate(sources, 1)}
     plan = data.plan
     try:
         normalized = _map_web_plan(plan, sources)
