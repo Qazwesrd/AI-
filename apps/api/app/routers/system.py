@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.database import DATABASE_PATH, STORAGE_DIR, get_db
+from app.database import DATABASE_PATH, STORAGE_DIR, get_db, get_schema_version
 from app.models.studio import AIRuntimeSetting
 from app.models.task_runtime import TaskExecutionLease, TaskQueueEntry
 from app.services.media_service import _bundled_media_path
@@ -31,6 +31,7 @@ def _check_database():
                     "message": "SQLite 完整性检查未通过"}
         return {"status": "ok", "exists": True, "tables": tables,
                 "size_bytes": DATABASE_PATH.stat().st_size,
+                "schema_version": get_schema_version(),
                 "message": "数据库可读取，完整性检查通过"}
     except Exception as exc:
         return {"status": "error", "exists": True, "message": str(exc)[:500]}

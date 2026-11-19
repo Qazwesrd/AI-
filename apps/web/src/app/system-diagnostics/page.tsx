@@ -8,7 +8,7 @@ type Diagnostic = {
   status: string;
   platform: string;
   python: string;
-  database: { status: string; path: string; size_bytes?: number; tables?: number; message: string };
+  database: { status: string; path: string; size_bytes?: number; tables?: number; schema_version?: number; message: string };
   storage: { path: string; disk: { status: string; free_bytes: number; total_bytes: number; message: string } };
   media_tools: { ffmpeg: { status: string; path?: string | null; message: string }; ffprobe: { status: string; path?: string | null; message: string } };
   ai_permissions: { network_enabled: boolean; paid_api_allowed: boolean; note: string };
@@ -82,7 +82,7 @@ export default function SystemDiagnosticsPage() {
               <div className="flex items-center justify-between"><h2 className="font-semibold">数据库</h2><Status value={data.database.status} /></div>
               <p className="mt-3 text-sm">{data.database.message}</p>
               <p className="mt-2 break-all text-xs text-white/45">{data.database.path}</p>
-              <p className="mt-2 text-xs text-white/55">数据表：{data.database.tables ?? "—"} · 文件大小：{size(data.database.size_bytes)}</p>
+              <p className="mt-2 text-xs text-white/55">数据表：{data.database.tables ?? "—"} · 结构版本：{data.database.schema_version ?? "—"} · 文件大小：{size(data.database.size_bytes)}</p>
               <a href="/backup-center" className="mt-4 inline-flex text-sm text-cyan-200 underline">打开备份与恢复中心</a>
             </div>
             <div className={panel}>

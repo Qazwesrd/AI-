@@ -157,6 +157,36 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 database.DATABASE_PATH = previous_path
                 database.STORAGE_DIR = previous_storage
 
+    def test_schema_migration_ledger_is_recorded_once(self):
+        with tempfile.TemporaryDirectory(prefix="comic-schema-version-") as temp:
+            root = Path(temp)
+            db_path = root / "versioned.db"
+            previous_engine = database.engine
+            previous_path = database.DATABASE_PATH
+            previous_storage = database.STORAGE_DIR
+            test_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+                future=True,
+            )
+            try:
+                database.engine = test_engine
+                database.DATABASE_PATH = db_path
+                database.STORAGE_DIR = root / "storage"
+                database.init_database()
+                database.init_database()
+                self.assertEqual(database.get_schema_version(), 1)
+                with sqlite3.connect(db_path) as connection:
+                    rows = connection.execute(
+                        "SELECT version, name FROM schema_migrations ORDER BY version"
+                    ).fetchall()
+                self.assertEqual(rows, [(1, "baseline_schema")])
+            finally:
+                test_engine.dispose()
+                database.engine = previous_engine
+                database.DATABASE_PATH = previous_path
+                database.STORAGE_DIR = previous_storage
+
 
 if __name__ == "__main__":
     unittest.main()
