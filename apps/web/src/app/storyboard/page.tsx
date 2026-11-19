@@ -93,9 +93,11 @@ export default function StoryboardPage() {
 
   async function loadProject(id: number) {
     const result = await request(`/api/story/projects/${id}`);
+    const scopedAssets = await request(`/api/story/assets?project_id=${id}`);
     setProjectId(id);
     setSelectedProject(result.project || null);
     setEpisodes(result.episodes);
+    setAssets(scopedAssets);
     setEpisodeId(null);
     setShots([]);
   }
