@@ -68,6 +68,8 @@ export default function PublishingPage() {
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [qualityScan, setQualityScan] = useState<any>(null);
+  const [scanningQuality, setScanningQuality] = useState(false);
   const videoInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
 
@@ -164,6 +166,24 @@ export default function PublishingPage() {
     } finally {
       setUploading(false);
       event.target.value = "";
+    }
+  }
+
+  async function scanQuality() {
+    if (!videoPath) return setMessage("请先上传视频，再进行质量扫描");
+    setScanningQuality(true);
+    setQualityScan(null);
+    setMessage("正在检测视频黑屏和静音片段，长视频可能需要一些时间...");
+    try {
+      const report = await api<any>(`/api/media/quality-scan?path=${encodeURIComponent(videoPath)}`);
+      setQualityScan(report);
+      setMessage(report.warnings?.length
+        ? `扫描完成：发现 ${report.warnings.length} 项需要人工复核的提示`
+        : "扫描完成：没有发现达到检测阈值的持续黑屏或静音片段");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "视频质量扫描失败");
+    } finally {
+      setScanningQuality(false);
     }
   }
 
@@ -294,6 +314,23 @@ export default function PublishingPage() {
             className="hidden" onChange={e => void selectAndUpload(e, "video")} />
           {videoPath && <p className="text-xs text-green-300 break-all">视频上传完成</p>}
           {videoUrl && <video src={videoUrl} controls className="w-full max-h-[440px] rounded-xl bg-black" />}
+          {videoPath && <div className="space-y-3">
+            <button type="button" onClick={() => void scanQuality()} disabled={scanningQuality || uploading}
+              className="rounded-xl border border-cyan-300/40 px-5 py-2 text-sm text-cyan-100 hover:bg-cyan-400/10 disabled:opacity-50">
+              {scanningQuality ? "正在扫描视频..." : "扫描黑屏与静音"}
+            </button>
+            {qualityScan && <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm space-y-2">
+              <div className="font-medium">质量扫描结果</div>
+              <div className="text-white/70">持续黑屏：{qualityScan.black_segments?.length || 0} 段；持续静音：{qualityScan.silence_segments?.length || 0} 段</div>
+              {(qualityScan.black_segments || []).map((item: any, index: number) => <div key={`black-${index}`} className="text-yellow-200/80">
+                黑屏 {item.start_seconds}s – {item.end_seconds}s（{item.duration_seconds}s）
+              </div>)}
+              {(qualityScan.silence_segments || []).map((item: any, index: number) => <div key={`silence-${index}`} className="text-yellow-200/80">
+                静音 {item.start_seconds}s – {item.end_seconds}s（{item.duration_seconds}s）
+              </div>)}
+              <p className="text-xs text-white/40">{qualityScan.note}</p>
+            </div>}
+          </div>}
         </div>
         <div className="border-t border-white/10 pt-5 space-y-3">
           <div className="font-medium">视频封面</div>

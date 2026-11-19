@@ -67,5 +67,68 @@ class RenderedVideoValidationTests(unittest.TestCase):
                 validate_rendered_video(path)
 
 
+
+
+class AdvancedMediaQualityScanTests(unittest.TestCase):
+    @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
+    @patch("app.services.media_service.subprocess.run")
+    @patch("app.services.media_service.probe_media")
+    def test_detects_black_frames_and_silence_as_advisories(self, probe, run, _ffmpeg):
+        from types import SimpleNamespace
+        from app.services.media_service import scan_media_quality
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "episode.mp4"
+            path.write_bytes(b"x" * 2048)
+            probe.return_value = {"streams": [
+                {"codec_type": "video", "codec_name": "h264"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ]}
+            run.side_effect = [
+                SimpleNamespace(returncode=0, stderr="black_start:1.000 black_end:2.250 black_duration:1.250", stdout=""),
+                SimpleNamespace(returncode=0, stderr="silence_start:3.000\nsilence_end:5.500 | silence_duration:2.500", stdout=""),
+            ]
+            report = scan_media_quality(path)
+            self.assertTrue(report["scan_complete"])
+            self.assertEqual(len(report["black_segments"]), 1)
+            self.assertEqual(report["black_segments"][0]["duration_seconds"], 1.25)
+            self.assertEqual(len(report["silence_segments"]), 1)
+            self.assertEqual(report["silence_segments"][0]["duration_seconds"], 2.5)
+            self.assertEqual(len(report["warnings"]), 2)
+
+    @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
+    @patch("app.services.media_service.subprocess.run")
+    @patch("app.services.media_service.probe_media")
+    def test_skips_silence_detection_when_video_has_no_audio(self, probe, run, _ffmpeg):
+        from types import SimpleNamespace
+        from app.services.media_service import scan_media_quality
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "silent.mp4"
+            path.write_bytes(b"x" * 2048)
+            probe.return_value = {"streams": [
+                {"codec_type": "video", "codec_name": "h264"}
+            ]}
+            run.return_value = SimpleNamespace(returncode=0, stderr="", stdout="")
+            report = scan_media_quality(path)
+            self.assertFalse(report["has_audio"])
+            self.assertEqual(report["silence_segments"], [])
+            self.assertEqual(run.call_count, 1)
+            self.assertTrue(any("没有音轨" in item for item in report["warnings"]))
+
+    @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
+    @patch("app.services.media_service.subprocess.run")
+    @patch("app.services.media_service.probe_media")
+    def test_rejects_media_without_video_stream(self, probe, _run, _ffmpeg):
+        from app.services.media_service import scan_media_quality
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "audio.mp4"
+            path.write_bytes(b"x" * 2048)
+            probe.return_value = {"streams": [{"codec_type": "audio"}]}
+            with self.assertRaisesRegex(ValueError, "没有可检测的视频流"):
+                scan_media_quality(path)
+
+
 if __name__ == "__main__":
     unittest.main()
