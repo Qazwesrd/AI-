@@ -1,3 +1,5 @@
+import CreationWorkflowGuide from "../components/creation-workflow-guide";
+
 const features = [
   {
     number: "01",
@@ -238,6 +240,8 @@ export default function Home() {
               </article>
             ))}
           </section>
+
+          <CreationWorkflowGuide />
 
           {/* 下方区域 */}
           <section className="grid grid-cols-1 xl:grid-cols-3 gap-5">
