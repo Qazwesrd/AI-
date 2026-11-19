@@ -194,7 +194,7 @@ export default function AssetTimelinePage() {
               <div className="mt-4 space-y-3">
                 {[...(history?.history || [])].sort((a, b) => a.chapter_number - b.chapter_number).map((item, index) => (
                   <article key={item.recorded_at || index} className="rounded-xl border border-white/10 bg-slate-900/60 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">第 {item.chapter_number} 章 · {item.change_type}</h3><span className={`rounded-full px-2 py-1 text-[10px] ${item.confirmed ? "bg-emerald-900/50 text-emerald-200" : "bg-amber-900/50 text-amber-200"}`}>{item.confirmed ? "已确认" : "待确认"}</span></div>
+                    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">第 {item.chapter_number} 章 · {item.change_type}</h3><span className={`rounded-full px-2 py-1 text-[10px] ${item.confirmed !== false ? "bg-emerald-900/50 text-emerald-200" : "bg-amber-900/50 text-amber-200"}`}>{item.confirmed !== false ? "已确认" : "待确认"}</span></div>
                     <p className="mt-2 text-sm">{item.event}</p>
                     <div className="mt-2 grid gap-2 text-xs text-slate-300 md:grid-cols-3">
                       {item.appearance_after && <p>外观：{item.appearance_after}</p>}
