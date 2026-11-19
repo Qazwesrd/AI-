@@ -833,7 +833,7 @@ def merge_episodes(project_id: int, payload: EpisodeMerge, db: Session = Depends
             "请调整分集或先拆分内容，避免生成无法合成的超长单集。"
         )
     first.duration_seconds = merged_duration
-    for item in episodes[1:])
+    for item in episodes[1:]:
         db.query(StoryboardShot).filter(StoryboardShot.episode_id == item.id).update(
             {StoryboardShot.episode_id: first.id}
         )
