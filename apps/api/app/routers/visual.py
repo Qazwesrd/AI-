@@ -556,6 +556,11 @@ class PropEvolutionInput(BaseModel):
     change_type: str = Field(default="状态变化", max_length=80)
     appearance_after: str = Field(default="", max_length=4000)
     clothing_after: str = Field(default="", max_length=4000)
+    age_after: str = Field(default="", max_length=80)
+    hairstyle_after: str = Field(default="", max_length=300)
+    injury_after: str = Field(default="", max_length=1000)
+    equipment_after: str = Field(default="", max_length=2000)
+    condition_after: str = Field(default="", max_length=1000)
     holder: str = Field(default="", max_length=300)
     confirmed: bool = False
     evidence: str = Field(default="", max_length=2000)
@@ -570,17 +575,31 @@ def resolve_asset_state(asset: VisualAsset, chapter_number: Optional[int] = None
     history = [x for x in history if x.get("confirmed", True) is True]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
-    latest = applicable[-1] if applicable else {}
-    return {
-        "chapter_number": latest.get("chapter_number"),
-        "event": latest.get("event", ""),
-        "change_type": latest.get("change_type", "基础状态"),
-        "appearance": latest.get("appearance_after") or asset.appearance or "",
-        "clothing": latest.get("clothing_after") or asset.clothing or "",
-        "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", True)),
-        "is_evolved": bool(latest),
+    state = {
+        "chapter_number": None, "event": "", "change_type": "基础状态",
+        "appearance": asset.appearance or "", "clothing": asset.clothing or "",
+        "age": "", "hairstyle": "", "injury": "", "equipment": "",
+        "condition": "", "holder": "", "confirmed": True, "is_evolved": False,
     }
+    field_map = {
+        "appearance_after": "appearance", "clothing_after": "clothing",
+        "age_after": "age", "hairstyle_after": "hairstyle",
+        "injury_after": "injury", "equipment_after": "equipment",
+        "condition_after": "condition", "holder": "holder",
+    }
+    for item in applicable:
+        for source_key, target_key in field_map.items():
+            value = item.get(source_key)
+            if isinstance(value, str) and value.strip():
+                state[target_key] = value.strip()
+        state.update({
+            "chapter_number": item.get("chapter_number"),
+            "event": item.get("event", ""),
+            "change_type": item.get("change_type", "状态变化"),
+            "confirmed": bool(item.get("confirmed", True)),
+            "is_evolved": True,
+        })
+    return state
 
 
 @router.post("/assets/{asset_id}/evolution")
@@ -596,6 +615,11 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
         "change_type": payload.change_type.strip(),
         "appearance_after": payload.appearance_after.strip(),
         "clothing_after": payload.clothing_after.strip(),
+        "age_after": payload.age_after.strip(),
+        "hairstyle_after": payload.hairstyle_after.strip(),
+        "injury_after": payload.injury_after.strip(),
+        "equipment_after": payload.equipment_after.strip(),
+        "condition_after": payload.condition_after.strip(),
         "holder": payload.holder.strip(),
         "evidence": payload.evidence.strip(),
         "source": payload.source.strip() or "manual",
@@ -605,15 +629,8 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
     })
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     data["evolution_history"] = history
-    confirmed_history = [item for item in history if item.get("confirmed", True) is True]
-    latest = confirmed_history[-1] if confirmed_history else {}
-    data["current_state"] = {
-        "chapter_number": latest.get("chapter_number"),
-        "appearance": latest.get("appearance_after") or asset.appearance,
-        "clothing": latest.get("clothing_after") or asset.clothing,
-        "holder": latest.get("holder", ""),
-        "change_type": latest.get("change_type", "基础状态"),
-    }
+    asset.data = data
+    data["current_state"] = resolve_asset_state(asset)
     asset.data = data
     asset.updated_at = datetime.utcnow()
     db.commit()
@@ -666,6 +683,9 @@ def build_asset_prompt(asset: VisualAsset, style: str = "", chapter_number: Opti
         f"剧情时间点：{('第' + str(chapter_number) + '章') if chapter_number else '当前最新状态'}。"
         f"原文描述：{asset.description or '以已确认设定为准'}。"
         f"该剧情时间点外观结构：{effective_state['appearance'] or '严格依据原文和参考图，不擅自添加设定'}。"
+        f"年龄：{effective_state['age'] or '未明确，不擅自改变'}；发型：{effective_state['hairstyle'] or '按已确认基础设定'}。"
+        f"伤势：{effective_state['injury'] or '无已确认新增伤势'}；装备：{effective_state['equipment'] or '按已确认设定'}。"
+        f"道具/场景当前状态：{effective_state['condition'] or '无已确认变化'}。"
         f"该剧情时间点服装/装备/表面细节：{effective_state['clothing'] or '按资产类别合理呈现'}。"
         f"当前持有人：{effective_state['holder'] or '原设定持有人或剧情明确安排'}。"
         f"气质/环境氛围：{asset.personality or '忠实原文'}。"

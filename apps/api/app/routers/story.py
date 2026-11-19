@@ -141,17 +141,31 @@ def snapshot_asset_state(asset: VisualAsset, chapter_number: Optional[int]):
     history = [x for x in history if x.get("confirmed", True) is True]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
-    latest = applicable[-1] if applicable else {}
-    return {
-        "chapter_number": latest.get("chapter_number"),
-        "event": latest.get("event", ""),
-        "change_type": latest.get("change_type", "基础状态"),
-        "appearance": latest.get("appearance_after") or asset.appearance or "",
-        "clothing": latest.get("clothing_after") or asset.clothing or "",
-        "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", True)),
-        "is_evolved": bool(latest),
+    state = {
+        "chapter_number": None, "event": "", "change_type": "基础状态",
+        "appearance": asset.appearance or "", "clothing": asset.clothing or "",
+        "age": "", "hairstyle": "", "injury": "", "equipment": "",
+        "condition": "", "holder": "", "confirmed": True, "is_evolved": False,
     }
+    field_map = {
+        "appearance_after": "appearance", "clothing_after": "clothing",
+        "age_after": "age", "hairstyle_after": "hairstyle",
+        "injury_after": "injury", "equipment_after": "equipment",
+        "condition_after": "condition", "holder": "holder",
+    }
+    for item in applicable:
+        for source_key, target_key in field_map.items():
+            value = item.get(source_key)
+            if isinstance(value, str) and value.strip():
+                state[target_key] = value.strip()
+        state.update({
+            "chapter_number": item.get("chapter_number"),
+            "event": item.get("event", ""),
+            "change_type": item.get("change_type", "状态变化"),
+            "confirmed": bool(item.get("confirmed", True)),
+            "is_evolved": True,
+        })
+    return state
 
 
 @router.get("/novels")
