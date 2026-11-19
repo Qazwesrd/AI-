@@ -113,6 +113,13 @@ export default function VisualStudioPage() {
   }
 
   useEffect(() => {
+    const requestedCategory = new URLSearchParams(window.location.search).get("category");
+    if (requestedCategory && categories.some((item) => item.key === requestedCategory)) {
+      setCategory(requestedCategory);
+    }
+  }, []);
+
+  useEffect(() => {
     loadAssets();
   }, [category]);
 
