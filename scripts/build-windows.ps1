@@ -31,9 +31,19 @@ if (!(Test-Path "$Web\node_modules")) {
 }
 
 # Validate source code before producing an installer.
-Write-Host "[0/4] Running source validation..."
-& $Python -m compileall -q "$Api\app"
-Check-ExitCode "Python source compilation failed"
+Write-Host "[0/4] Running backend regression tests and source validation..."
+$TestDataRoot = Join-Path $env:TEMP ("ai-comic-build-test-" + [guid]::NewGuid().ToString("N"))
+$env:APP_DATA_DIR = $TestDataRoot
+Push-Location $Api
+try {
+    & $Python -m unittest discover -s tests -v
+    Check-ExitCode "Backend regression tests failed"
+    & $Python -m compileall -q "$Api\app"
+    Check-ExitCode "Python source compilation failed"
+} finally {
+    Pop-Location
+    Remove-Item Env:APP_DATA_DIR -ErrorAction SilentlyContinue
+}
 
 $FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
 $FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
@@ -110,7 +120,13 @@ Write-Host "[3/4] Building Next.js frontend..."
 
 Set-Location $Web
 
-npx tsc --noEmit
+if (!(Test-Path "$Web\node_modules\.bin\tsc.cmd")) {
+    Write-Host "Local TypeScript compiler is missing; restoring frontend development dependencies..."
+    npm ci --prefix $Web --include=dev
+    Check-ExitCode "Frontend dependency installation failed"
+}
+
+& "$Web\node_modules\.bin\tsc.cmd" --noEmit
 Check-ExitCode "TypeScript validation failed"
 
 npm run build
@@ -129,6 +145,10 @@ Write-Host "Frontend standalone build created."
 Write-Host "[4/4] Building Electron installer..."
 
 Set-Location $Desktop
+
+$Release = Join-Path $Desktop "release"
+New-Item -ItemType Directory -Path $Release -Force | Out-Null
+Get-ChildItem $Release -File -Filter "*Setup*.exe" -ErrorAction SilentlyContinue | Remove-Item -Force
 
 npm run build:desktop
 Check-ExitCode "Electron installer build failed"

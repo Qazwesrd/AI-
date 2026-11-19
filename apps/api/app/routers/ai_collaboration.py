@@ -77,6 +77,37 @@ def chapter_exists(db, novel_id, number):
     return get_novel_chapter(db, novel_id, number) is not None
 
 
+
+def asset_belongs_to_novel(asset, novel_id):
+    data = asset.data if isinstance(asset.data, dict) else {}
+    owner = data.get("source_novel_id")
+    if owner in (None, ""):
+        return True
+    try:
+        return int(owner) == int(novel_id)
+    except (TypeError, ValueError):
+        return False
+
+
+def resolve_asset_state(asset, chapter_number=None):
+    data = asset.data if isinstance(asset.data, dict) else {}
+    history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    history = [x for x in history if x.get("confirmed", True) is True]
+    history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
+    applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
+    latest = applicable[-1] if applicable else {}
+    return {
+        "chapter_number": latest.get("chapter_number"),
+        "event": latest.get("event", ""),
+        "change_type": latest.get("change_type", "基础状态"),
+        "appearance": latest.get("appearance_after") or asset.appearance or "",
+        "clothing": latest.get("clothing_after") or asset.clothing or "",
+        "holder": latest.get("holder", ""),
+        "confirmed": bool(latest.get("confirmed", True)),
+        "is_evolved": bool(latest),
+    }
+
+
 class HandoffPackageRequest(BaseModel):
     # Explicit acknowledgement: this endpoint returns selected novel text to the
     # caller so the user can review it before copying it to a third-party AI site.
@@ -293,7 +324,13 @@ def storyboard_match_suggestions(payload: MatchPayload, db: Session = Depends(ge
     names = [x.strip() for x in payload.names if x and x.strip()]
     if not names:
         names = [x for x in [shot.scene_name] if x]
-    assets = db.query(VisualAsset).filter(VisualAsset.confirmed.is_(True)).all()
+    project = db.query(StoryProject).filter(StoryProject.id == shot.project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    # Assets from another novel must never leak into this project's suggestions.
+    # Unscoped manually-created assets remain selectable for backward compatibility.
+    all_assets = db.query(VisualAsset).filter(VisualAsset.confirmed.is_(True)).all()
+    assets = [asset for asset in all_assets if asset_belongs_to_novel(asset, project.novel_id)]
     suggestions = []
     for name in names:
         key = re.sub(r"\s+", "", name).lower()
@@ -304,17 +341,19 @@ def storyboard_match_suggestions(payload: MatchPayload, db: Session = Depends(ge
                 continue
             score = 1.0 if key == asset_name else (0.82 if key in asset_name or asset_name in key else 0.0)
             data = asset.data if isinstance(asset.data, dict) else {}
-            aliases = [str(x).lower() for x in data.get("aliases", [])] if isinstance(data.get("aliases"), list) else []
+            aliases = [re.sub(r"\s+", "", str(x)).lower() for x in data.get("aliases", [])] if isinstance(data.get("aliases"), list) else []
             if key in aliases:
                 score = max(score, 0.95)
             if score:
-                ranked.append((score, asset))
+                state = resolve_asset_state(asset, payload.chapter_number)
+                ranked.append((score, asset, state))
         ranked.sort(key=lambda x: (-x[0], x[1].id))
         suggestions.append({"requested_name": name, "matches": [{
             "asset_id": asset.id, "name": asset.name, "category": asset.category,
             "confidence": score, "chapter_number": payload.chapter_number,
-            "reason": "名称或别名匹配；请核对剧情时间点和素材版本",
-        } for score, asset in ranked[:5]], "missing": not bool(ranked)})
+            "effective_state": state,
+            "reason": "同一小说或未绑定小说的素材名称/别名匹配；状态已按目标章节计算，请人工确认",
+        } for score, asset, state in ranked[:5]], "missing": not bool(ranked)})
     return {"shot_id": shot.id, "suggestions": suggestions, "requires_user_confirmation": True}
 
 
@@ -330,16 +369,19 @@ def confirm_storyboard_match(payload: ConfirmMatchPayload, db: Session = Depends
     shot = db.query(StoryboardShot).filter(StoryboardShot.id == payload.shot_id).first()
     if shot is None:
         raise HTTPException(404, "分镜镜头不存在")
-    asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
-    if asset is None or not asset.confirmed:
-        raise HTTPException(404, "素材不存在或尚未确认")
     project = db.query(StoryProject).filter(StoryProject.id == shot.project_id).first()
     if project is None:
         raise HTTPException(404, "漫剧项目不存在")
+    asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
+    if asset is None or not asset.confirmed:
+        raise HTTPException(404, "素材不存在或尚未确认")
+    if not asset_belongs_to_novel(asset, project.novel_id):
+        raise HTTPException(403, "该素材属于其他小说，不能关联到当前漫剧项目")
     if payload.chapter_number is not None and not chapter_exists(db, project.novel_id, payload.chapter_number):
         raise HTTPException(422, "章节编号不属于当前小说")
     data = asset.data if isinstance(asset.data, dict) else {}
     history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    history = [x for x in history if x.get("confirmed", True) is True]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     applicable = [x for x in history if payload.chapter_number is None or int(x.get("chapter_number") or 0) <= payload.chapter_number]
     latest = applicable[-1] if applicable else {}

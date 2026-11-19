@@ -94,7 +94,7 @@ async def lifespan(application: FastAPI):
 app = FastAPI(
     title="AI漫剧制作大师 API",
     description="小说分析、AI创作、视觉素材、分镜、视频制作与发布",
-    version="1.0.2",
+    version="1.0.3",
     lifespan=lifespan,
 )
 

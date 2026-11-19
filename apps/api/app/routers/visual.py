@@ -558,11 +558,16 @@ class PropEvolutionInput(BaseModel):
     clothing_after: str = Field(default="", max_length=4000)
     holder: str = Field(default="", max_length=300)
     confirmed: bool = False
+    evidence: str = Field(default="", max_length=2000)
+    source: str = Field(default="manual", max_length=40)
+    confidence: float = Field(default=1.0, ge=0, le=1)
 
 
 def resolve_asset_state(asset: VisualAsset, chapter_number: Optional[int] = None):
     data = asset.data if isinstance(asset.data, dict) else {}
     history = [x for x in (data.get("evolution_history") or []) if isinstance(x, dict)]
+    # Legacy records without a confirmed flag are treated as previously accepted.
+    history = [x for x in history if x.get("confirmed", True) is True]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     applicable = [x for x in history if chapter_number is None or int(x.get("chapter_number") or 0) <= chapter_number]
     latest = applicable[-1] if applicable else {}
@@ -573,7 +578,7 @@ def resolve_asset_state(asset: VisualAsset, chapter_number: Optional[int] = None
         "appearance": latest.get("appearance_after") or asset.appearance or "",
         "clothing": latest.get("clothing_after") or asset.clothing or "",
         "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", False)),
+        "confirmed": bool(latest.get("confirmed", True)),
         "is_evolved": bool(latest),
     }
 
@@ -592,18 +597,22 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
         "appearance_after": payload.appearance_after.strip(),
         "clothing_after": payload.clothing_after.strip(),
         "holder": payload.holder.strip(),
+        "evidence": payload.evidence.strip(),
+        "source": payload.source.strip() or "manual",
+        "confidence": payload.confidence,
         "confirmed": payload.confirmed,
         "recorded_at": datetime.utcnow().isoformat(),
     })
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
     data["evolution_history"] = history
-    latest = history[-1]
+    confirmed_history = [item for item in history if item.get("confirmed", True) is True]
+    latest = confirmed_history[-1] if confirmed_history else {}
     data["current_state"] = {
-        "chapter_number": latest["chapter_number"],
+        "chapter_number": latest.get("chapter_number"),
         "appearance": latest.get("appearance_after") or asset.appearance,
         "clothing": latest.get("clothing_after") or asset.clothing,
         "holder": latest.get("holder", ""),
-        "change_type": latest.get("change_type", "状态变化"),
+        "change_type": latest.get("change_type", "基础状态"),
     }
     asset.data = data
     asset.updated_at = datetime.utcnow()
@@ -644,6 +653,7 @@ def build_asset_prompt(asset: VisualAsset, style: str = "", chapter_number: Opti
         and (chapter_number is None or int(item.get("chapter_number") or 0) <= chapter_number)
     ]
     history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
+    history = [item for item in history if item.get("confirmed", True) is True]
     history_text = "；".join(
         f"第{item.get('chapter_number', '?')}章：{item.get('change_type', '变化')}，{item.get('event', '')}，"
         f"变化后外观：{item.get('appearance_after', '')}，变化后服装：{item.get('clothing_after', '')}"

@@ -38,6 +38,14 @@ const features = [
     description: "管理国内外平台账号，批量准备视频、封面和发布文案，跟踪发布任务。",
     action: "进入发布中心",
     href: "/publishing"
+  },
+  {
+    number: "06",
+    icon: "🧬",
+    title: "人物与素材状态追踪",
+    description: "按章节追踪人物外貌、服装、伤势、装备与道具归属，保留证据和历史版本。",
+    action: "查看剧情状态",
+    href: "/asset-timeline"
   }
 ];
 
@@ -48,6 +56,7 @@ const navigation = [
       ["✍️", "小说创作", "/novels"],
       ["📁", "项目管理", "/novels"],
       ["👤", "人物角色", "/visual-studio"],
+      ["🧬", "人物与素材状态追踪", "/asset-timeline"],
       ["🏞️", "场景设定", "/visual-studio"],
       ["💎", "道具素材", "/visual-studio"],
       ["🌌", "世界观设定", "/novels"]
