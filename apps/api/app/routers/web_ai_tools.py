@@ -13,6 +13,7 @@ from app.database import STORAGE_DIR
 from app.database import get_db
 from app.models.web_ai_tool import WebAITool, WebAITask, WebAIResultFile
 from app.models.visual import VisualAsset
+from app.models.novel import Novel
 
 router = APIRouter(prefix="/api/web-ai", tags=["AI网页工具协同中心"])
 
@@ -295,6 +296,7 @@ class ConfirmResultClassification(BaseModel):
     classification: Literal["character", "scene", "prop", "storyboard", "script", "subtitle", "video", "audio", "document", "image", "other"]
     assetName: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=4000)
+    novelId: int | None = Field(default=None, ge=1)
 
 @router.patch("/files/{file_id}/classification")
 def confirm_result_classification(file_id: int, payload: ConfirmResultClassification, db: Session = Depends(get_db)):
@@ -305,11 +307,16 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
     if target.parent != root or not target.is_file(): raise HTTPException(410, "结果文件已不存在")
     if item.classification_status == "confirmed": raise HTTPException(409, "该文件已经确认归档，不能重复创建素材")
     asset_id = None
+    if payload.novelId is not None and db.query(Novel).filter(Novel.id == payload.novelId).first() is None:
+        raise HTTPException(404, "指定的小说不存在")
     if payload.classification in {"character", "scene", "prop"}:
         if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}: raise HTTPException(400, "人物、场景和道具素材必须是图片文件")
         if not payload.assetName.strip(): raise HTTPException(400, "请填写素材名称后再确认归档")
         category_map = {"character": "characters", "scene": "scenes", "prop": "props"}
-        asset = VisualAsset(category=category_map[payload.classification], name=payload.assetName.strip(), description=payload.description.strip() or ("从 AI 网页任务 " + item.task_key + " 导入"), image_path=str(target), style="待确认", data={"source": "web_ai_result", "result_file_id": item.id, "task_key": item.task_key, "original_filename": item.original_name}, confirmed=True)
+        asset_data = {"source": "web_ai_result", "result_file_id": item.id, "task_key": item.task_key, "original_filename": item.original_name}
+        if payload.novelId is not None:
+            asset_data["source_novel_id"] = payload.novelId
+        asset = VisualAsset(category=category_map[payload.classification], name=payload.assetName.strip(), description=payload.description.strip() or ("从 AI 网页任务 " + item.task_key + " 导入"), image_path=str(target), style="待确认", data=asset_data, confirmed=True)
         db.add(asset)
         db.flush()
         asset_id = asset.id
