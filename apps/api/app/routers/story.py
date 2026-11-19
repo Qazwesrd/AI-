@@ -853,8 +853,19 @@ def delete_shot(shot_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/assets")
-def list_visual_assets(db: Session = Depends(get_db)):
+def list_visual_assets(project_id: Optional[int] = None, db: Session = Depends(get_db)):
     items = db.query(VisualAsset).all()
+    if project_id is not None:
+        project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+        if project is None:
+            raise HTTPException(404, "漫剧项目不存在")
+        scoped = []
+        for asset in items:
+            data = asset.data if isinstance(asset.data, dict) else {}
+            owner = data.get("source_novel_id")
+            if owner in (None, "") or str(owner) == str(project.novel_id):
+                scoped.append(asset)
+        items = scoped
     return [{
         "id": x.id,
         "category": x.category,
@@ -872,6 +883,13 @@ def link_asset(shot_id: int, payload: AssetLinkInput, db: Session = Depends(get_
     asset = db.query(VisualAsset).filter(VisualAsset.id == payload.asset_id).first()
     if not shot or not asset:
         raise HTTPException(404, "分镜或视觉素材不存在")
+    project = db.query(StoryProject).filter(StoryProject.id == shot.project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    asset_data = asset.data if isinstance(asset.data, dict) else {}
+    owner = asset_data.get("source_novel_id")
+    if owner not in (None, "") and str(owner) != str(project.novel_id):
+        raise HTTPException(403, "该素材属于其他小说，不能关联到当前漫剧项目")
     if asset.category not in {"characters", "scenes", "props", "weapons", "costumes", "buildings", "special_items"}:
         raise HTTPException(400, "该素材类别不能关联到分镜")
     snapshot = snapshot_asset_state(asset, payload.chapter_number)
