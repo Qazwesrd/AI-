@@ -225,7 +225,7 @@ def validate_plan(plan, allowed_files):
     }
 
 
-def execute_edit_plan(plan, subtitle_path=None, audio_path=None):
+def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="replace"):
     work = EDIT_DIR / uuid.uuid4().hex
     work.mkdir(parents=True, exist_ok=True)
     output = None
@@ -270,14 +270,31 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None):
         audio = safe_storage_file(audio_path) if audio_path else None
         subtitle = safe_storage_file(subtitle_path) if subtitle_path else None
         if audio:
+            if audio_mode not in ("replace", "mix"):
+                raise ValueError("音轨模式必须是 replace 或 mix")
             args += ["-i", str(audio)]
 
         if subtitle:
             escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
             args += ["-vf", f"subtitles='{escaped}'"]
 
-        if audio:
+        if audio and audio_mode == "replace":
+            # Replace mode intentionally uses only the selected external track.
             args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        elif audio and audio_mode == "mix":
+            # Mix selected audio with the original clip audio when available.
+            streams = probe_media(concat_file).get("streams", [])
+            has_original_audio = any(x.get("codec_type") == "audio" for x in streams)
+            if has_original_audio:
+                args += [
+                    "-filter_complex",
+                    "[0:a:0]volume=1.0[original];"
+                    "[1:a:0]volume=0.25[music];"
+                    "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]",
+                    "-map", "0:v:0", "-map", "[mix]", "-shortest"
+                ]
+            else:
+                args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
         else:
             args += ["-map", "0:v:0", "-map", "0:a?"]
 
