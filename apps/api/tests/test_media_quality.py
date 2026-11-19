@@ -96,6 +96,36 @@ class AdvancedMediaQualityScanTests(unittest.TestCase):
             self.assertEqual(report["silence_segments"][0]["duration_seconds"], 2.5)
             self.assertEqual(len(report["warnings"]), 2)
 
+    def test_reports_audio_video_duration_and_start_drift(self):
+        from app.services.media_service import media_stream_sync_report
+
+        report = media_stream_sync_report([
+            {"codec_type": "video", "duration": "120.0", "start_time": "0.0"},
+            {"codec_type": "audio", "duration": "118.8", "start_time": "0.8"},
+        ])
+        self.assertEqual(report["status"], "warning")
+        self.assertEqual(report["duration_difference_seconds"], 1.2)
+        self.assertEqual(report["start_offset_seconds"], 0.8)
+
+    def test_reports_streams_within_sync_tolerance(self):
+        from app.services.media_service import media_stream_sync_report
+
+        report = media_stream_sync_report([
+            {"codec_type": "video", "duration": "120.0", "start_time": "0.0"},
+            {"codec_type": "audio", "duration": "119.9", "start_time": "0.1"},
+        ])
+        self.assertEqual(report["status"], "ok")
+
+    def test_marks_sync_unknown_when_stream_duration_is_missing(self):
+        from app.services.media_service import media_stream_sync_report
+
+        report = media_stream_sync_report([
+            {"codec_type": "video", "start_time": "0.0"},
+            {"codec_type": "audio", "start_time": "0.0"},
+        ])
+        self.assertEqual(report["status"], "unknown")
+        self.assertFalse(report["measurable"])
+
     @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
     @patch("app.services.media_service.subprocess.run")
     @patch("app.services.media_service.probe_media")
