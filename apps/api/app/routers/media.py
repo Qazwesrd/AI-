@@ -705,6 +705,11 @@ def render_episode_from_shots(
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
+        transition_by_shot = {
+            item["after_shot_id"]: item
+            for item in transition_items
+            if item.get("transition") in ("fade", "dissolve")
+        }
         for shot, duration in zip(shots, actual_durations):
             dialogue = (shot.dialogue or "").strip()
             if dialogue:
@@ -715,7 +720,8 @@ def render_episode_from_shots(
                     "",
                 ])
                 subtitle_index += 1
-            elapsed += duration
+            overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
+            elapsed += duration - overlap
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
@@ -754,6 +760,87 @@ def render_episode_from_shots(
         for title_file in locals().get("title_files", []):
             title_file.unlink(missing_ok=True)
         raise HTTPException(500, "分集视频合成失败：" + str(exc))
+
+
+
+@router.post("/video/episodes/{episode_id}/shots/{shot_id}/replace")
+async def replace_episode_shot_video(
+    episode_id: int,
+    shot_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Replace one shot with a user-supplied local clip; never submits an AI task."""
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    shot = db.query(StoryboardShot).filter(
+        StoryboardShot.id == shot_id,
+        StoryboardShot.episode_id == episode_id,
+    ).first()
+    if not episode or not shot:
+        raise HTTPException(404, "分集或镜头不存在")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".mp4", ".mov", ".mkv", ".webm"}:
+        raise HTTPException(415, "仅支持 MP4、MOV、MKV 或 WebM 视频文件")
+    destination = VIDEO_DIR / f"local_replace_ep{episode_id}_shot{shot_id}_{uuid.uuid4().hex[:8]}{suffix}"
+    temporary = destination.with_suffix(destination.suffix + ".uploading")
+    size = 0
+    try:
+        with temporary.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > 1024 * 1024 * 1024:
+                    raise HTTPException(413, "单个替换镜头视频不能超过 1GB")
+                output.write(chunk)
+        if size < 1024:
+            raise HTTPException(400, "视频文件为空或过小")
+        os.replace(temporary, destination)
+        info = probe_media(destination)
+        streams = info.get("streams") or []
+        video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if not video_stream or duration <= 0 or duration > 600:
+            raise HTTPException(422, "替换文件不是有效视频，或时长超过 10 分钟")
+        task = MediaTask(
+            task_type="storyboard_video",
+            provider="local",
+            model="local-import",
+            status="completed",
+            prompt="用户手动替换镜头素材",
+            request_data={
+                "episode_id": episode_id, "shot_id": shot_id,
+                "shot_number": shot.shot_number, "local_replacement": True,
+                "source_filename": Path(file.filename or "replacement").name,
+            },
+            result_path=str(destination),
+        )
+        db.add(task)
+        db.add(MediaFile(
+            name=destination.name, category="video", file_path=str(destination),
+            mime_type=file.content_type or "video/mp4", file_size=size,
+            duration=duration,
+            metadata_json={"episode_id": episode_id, "shot_id": shot_id, "local_replacement": True},
+        ))
+        db.commit()
+        db.refresh(task)
+        return {
+            "success": True, "episode_id": episode_id, "shot_id": shot_id,
+            "task_id": task.id, "duration_seconds": round(duration, 3),
+            "message": "镜头替换素材已保存。原视频和历史任务均保留；重新合成时将优先使用本次替换素材。",
+        }
+    except HTTPException:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise HTTPException(422, "镜头替换失败：" + str(exc)[:1000]) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+        await file.close()
 
 
 
