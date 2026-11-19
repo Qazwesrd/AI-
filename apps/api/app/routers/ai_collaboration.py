@@ -103,7 +103,7 @@ def resolve_asset_state(asset, chapter_number=None):
         "appearance": latest.get("appearance_after") or asset.appearance or "",
         "clothing": latest.get("clothing_after") or asset.clothing or "",
         "holder": latest.get("holder", ""),
-        "confirmed": bool(latest.get("confirmed", False)),
+        "confirmed": bool(latest.get("confirmed", True)),
         "is_evolved": bool(latest),
     }
 
