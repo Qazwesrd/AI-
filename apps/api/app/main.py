@@ -22,6 +22,7 @@ ROUTER_MODULES = [
     "app.routers.subtitle_tools",
     "app.routers.backups",
     "app.routers.system",
+    "app.routers.workspace_backups",
     "app.routers.ai_novel_analysis",
     "app.routers.publishing",
     "app.routers.publishing_uploads",
