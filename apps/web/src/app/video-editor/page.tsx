@@ -188,7 +188,11 @@ export default function VideoEditorPage() {
     try {
       const response = await fetch(`${API}/api/video-editor/jobs/${id}/execute`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subtitle_path: subtitlePath || null, audio_path: audioPath || null })
+        body: JSON.stringify({
+          subtitle_path: subtitlePath || null,
+          audio_path: audioPath || null,
+          audio_mode: audioMode
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "剪辑执行失败");
@@ -309,11 +313,18 @@ export default function VideoEditorPage() {
               <p className="text-xs text-white/45">已上传 {subtitleFiles.length} 个字幕文件</p>
             </div>
             <div className="space-y-3">
-              <label className="block text-sm font-medium">替换音轨</label>
+              <label className="block text-sm font-medium">音轨文件</label>
               <select value={audioPath} onChange={e => setAudioPath(e.target.value)}
                 className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
                 <option value="">保留原视频音轨</option>
                 {audioFiles.map(file => <option key={file.id} value={file.path}>{file.name}</option>)}
+              </select>
+              <label className="block text-sm font-medium">音轨处理方式</label>
+              <select value={audioMode} onChange={e => setAudioMode(e.target.value as "replace" | "mix")}
+                disabled={!audioPath}
+                className="w-full rounded-lg border border-white/15 bg-black/30 p-3 disabled:opacity-50">
+                <option value="replace">替换原视频声音（仅保留新音轨）</option>
+                <option value="mix">与原视频声音混合（背景音乐）</option>
               </select>
               <label className="block cursor-pointer rounded-lg border border-dashed border-purple-300/30 p-3 text-center text-sm hover:bg-purple-500/10">
                 上传音频（MP3 / WAV / AAC / M4A 等）
@@ -323,7 +334,7 @@ export default function VideoEditorPage() {
               <p className="text-xs text-white/45">已上传 {audioFiles.length} 个音频文件</p>
             </div>
           </div>
-          <p className="mt-3 text-xs text-white/45">选择的音轨会替换原视频音轨；不选择则保留原音轨。字幕和音轨会在最终导出时合成。</p>
+          <p className="mt-3 text-xs text-white/45">可选择替换原声或与原声混合；不选择音轨则保留原视频声音。混合模式下新音轨默认使用较低音量。字幕会在最终导出时合成。</p>
         </section>
 
         <section className={panel}>
