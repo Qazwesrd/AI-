@@ -176,7 +176,9 @@ try {
     New-Item -ItemType Directory -Path $StandaloneStatic -Force | Out-Null
     Copy-Item (Join-Path $Web ".next\static\*") $StandaloneStatic -Recurse -Force
     if (Test-Path (Join-Path $Web "public")) {
-        Copy-Item (Join-Path $Web "public") (Join-Path $StandaloneRoot "public") -Recurse -Force
+        $StandalonePublic = Join-Path $StandaloneRoot "public"
+        New-Item -ItemType Directory -Path $StandalonePublic -Force | Out-Null
+        Copy-Item (Join-Path $Web "public\*") $StandalonePublic -Recurse -Force
     }
     $WebServer = Join-Path $StandaloneRoot "server.js"
     $env:PORT = "3000"
