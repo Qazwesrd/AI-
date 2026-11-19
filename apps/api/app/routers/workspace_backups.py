@@ -1,7 +1,6 @@
 import json
 import os
 import shutil
-import sqlite3
 import stat
 import uuid
 import zipfile
@@ -202,6 +201,8 @@ def restore_workspace_backup(
     new_storage_installed = False
     old_storage_moved = False
     safety_archive = None
+    temporary_database = None
+    includes_local_key = False
     total = 0
     try:
         active = db.query(TaskExecutionLease).filter(TaskExecutionLease.status == "active").count()
@@ -217,6 +218,9 @@ def restore_workspace_backup(
                     raise HTTPException(413, "工作空间归档超过 100 GB 上传限制")
                 output.write(chunk)
         _validate_workspace_archive(uploaded)
+        with zipfile.ZipFile(uploaded, "r") as archive:
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            includes_local_key = bool(manifest.get("includes_local_encryption_key"))
         staging_root.mkdir(parents=True, exist_ok=True)
         staged_storage, staged_database = _extract_workspace_archive(uploaded, staging_root)
         safety_archive, _ = _create_workspace_archive("before-restore")
@@ -242,7 +246,12 @@ def restore_workspace_backup(
             "success": True,
             "restored_bytes": total,
             "safety_archive": safety_archive.name if safety_archive else None,
-            "message": "完整工作空间恢复成功。小说、数据库记录、素材文件和本地 AI 密钥文件已恢复；建议重新启动软件。",
+            "includes_local_encryption_key": includes_local_key,
+            "message": (
+                "完整工作空间恢复成功。数据库和素材文件已恢复。"
+                + ("本地 AI 密钥加密文件也已包含。" if includes_local_key else "该归档未包含本地 AI 密钥加密文件，AI 服务商密钥需要重新保存。")
+                + "建议重新启动软件。"
+            ),
         }
     except HTTPException:
         raise
@@ -263,6 +272,8 @@ def restore_workspace_backup(
         raise HTTPException(500, "工作空间恢复失败：" + str(exc)[:1000] + suffix) from exc
     finally:
         uploaded.unlink(missing_ok=True)
+        if temporary_database:
+            temporary_database.unlink(missing_ok=True)
         shutil.rmtree(staging_root, ignore_errors=True)
         try:
             archive_file.file.close()
