@@ -280,7 +280,20 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         })
 
     silence_segments = []
+    audio_levels = None
     if audio_stream:
+        levels_log = run_filter(["-vn", "-af", "volumedetect", "-f", "null", "-"])
+        mean_match = re.search(r"mean_volume:\s*(-?inf|-?[0-9.]+)\s*dB", levels_log, re.IGNORECASE)
+        max_match = re.search(r"max_volume:\s*(-?inf|-?[0-9.]+)\s*dB", levels_log, re.IGNORECASE)
+        def parse_db(match):
+            if not match:
+                return None
+            value = match.group(1).lower()
+            return None if value == "-inf" else round(float(value), 2)
+        audio_levels = {
+            "mean_volume_db": parse_db(mean_match),
+            "max_volume_db": parse_db(max_match),
+        }
         silence_log = run_filter([
             "-vn", "-af", f"silencedetect=noise={silence_noise}:d={float(silence_min_duration)}",
             "-f", "null", "-"
@@ -303,12 +316,22 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         warnings.append(f"检测到 {len(silence_segments)} 段持续静音，请确认是否符合剧情需要")
     if not audio_stream:
         warnings.append("文件没有音轨，已跳过静音检测")
+    elif audio_levels:
+        mean_level = audio_levels.get("mean_volume_db")
+        peak_level = audio_levels.get("max_volume_db")
+        if mean_level is None:
+            warnings.append("音频平均音量接近数字静音，请检查配音或音轨")
+        elif mean_level < -35:
+            warnings.append(f"音频平均音量偏低（{mean_level} dB），请检查对白和背景音乐响度")
+        if peak_level is not None and peak_level > -0.5:
+            warnings.append(f"音频峰值接近或达到削波风险（{peak_level} dB），建议降低混音增益")
     return {
         "scan_complete": True,
         "black_frame_threshold_seconds": float(black_min_duration),
         "silence_threshold_seconds": float(silence_min_duration),
         "silence_noise_threshold": silence_noise,
         "has_audio": bool(audio_stream),
+        "audio_levels": audio_levels,
         "black_segments": black_segments,
         "silence_segments": silence_segments,
         "warnings": warnings,
