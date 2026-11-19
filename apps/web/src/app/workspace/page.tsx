@@ -141,19 +141,23 @@ export default function WorkspacePage() {
         const detail = await api<{ project?: StoryProject; episodes: Episode[] }>(`/api/story/projects/${activeProject.id}`);
         const episodeList = detail.episodes || [];
         setEpisodes(episodeList);
-        const [assetList, shotLists, videoLists] = await Promise.all([
+        const [assetList, shotLists, videoLists, taskResult] = await Promise.all([
           api<Asset[]>(`/api/story/assets?project_id=${activeProject.id}`),
           Promise.all(episodeList.map((episode) => api<Shot[]>(`/api/story/episodes/${episode.id}/shots`).catch(() => []))),
           Promise.all(episodeList.map((episode) => api<VideoTask[]>(`/api/media/video/episodes/${episode.id}/tasks`).catch(() => []))),
+          api<{ items: Task[] }>(`/api/tasks?limit=100&offset=0&project_id=${activeProject.id}`),
         ]);
         setAssets(Array.isArray(assetList) ? assetList : []);
         setShots(shotLists.flat());
         setVideoTasks(videoLists.flat());
+        setTasks(taskResult.items || []);
       } else {
         setEpisodes([]);
         setShots([]);
         setAssets([]);
         setVideoTasks([]);
+        const taskResult = await api<{ items: Task[] }>("/api/tasks?limit=100&offset=0");
+        setTasks(taskResult.items || []);
       }
       const url = new URL(window.location.href);
       url.searchParams.set("novelId", String(novelId));
@@ -284,7 +288,7 @@ export default function WorkspacePage() {
               <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-slate-400">失败</p><p className="mt-1 text-xl font-bold text-rose-200">{failedTasks}</p></div>
             </div>
             <div className="mt-4 space-y-2">{tasks.slice(0, 5).map((task) => <div key={task.id} className="flex items-center justify-between gap-3 rounded-lg bg-black/20 px-3 py-2 text-xs"><span className="min-w-0 truncate">{task.title || task.summary || `${task.source} #${task.source_id}`}</span><span className="shrink-0 text-purple-200">{statusText(task.status)}</span></div>)}{tasks.length === 0 && <p className="text-sm text-slate-400">暂无任务记录</p>}</div>
-            <a href="/tasks" className="mt-4 inline-flex text-sm text-purple-200 hover:text-white">打开任务中心 →</a>
+            <a href={selectedProject ? `/tasks?projectId=${selectedProject.id}` : "/tasks"} className="mt-4 inline-flex text-sm text-purple-200 hover:text-white">打开当前项目任务 →</a>
           </div>
           <div className="rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-5">
             <h2 className="text-lg font-bold">制作与发布概况</h2><p className="mt-1 text-xs text-slate-400">不会自动创建发布任务或上传视频</p>
