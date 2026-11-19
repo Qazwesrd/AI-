@@ -1,7 +1,7 @@
 import json
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -41,6 +41,7 @@ class WebPlanImportInput(BaseModel):
 class ExecuteEditInput(BaseModel):
     subtitle_path: Optional[str] = None
     audio_path: Optional[str] = None
+    audio_mode: Literal["replace", "mix"] = "replace"
 
 
 def _get_job(db: Session, job_id: int):
@@ -275,7 +276,10 @@ def execute_job(job_id: int, data: ExecuteEditInput, db: Session = Depends(get_d
         job.status = "rendering"
         db.commit()
         output, size = execute_edit_plan(
-            job.edit_plan, subtitle_path=data.subtitle_path, audio_path=data.audio_path
+            job.edit_plan,
+            subtitle_path=data.subtitle_path,
+            audio_path=data.audio_path,
+            audio_mode=data.audio_mode,
         )
         job.output_path = output
         job.status = "completed"

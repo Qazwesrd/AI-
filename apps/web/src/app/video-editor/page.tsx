@@ -23,6 +23,8 @@ export default function VideoEditorPage() {
   const [confirmPaid, setConfirmPaid] = useState(false);
   const [subtitlePath, setSubtitlePath] = useState("");
   const [audioPath, setAudioPath] = useState("");
+  const [audioMode, setAudioMode] = useState<"replace" | "mix">("replace");
+  const [subtitleLanguage, setSubtitleLanguage] = useState("zh");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
@@ -99,7 +101,11 @@ export default function VideoEditorPage() {
     try {
       const response = await fetch(`${API}/api/video-editor/jobs`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, model, instruction, source_paths: selected, confirm_paid: confirmPaid })
+        body: JSON.stringify({
+          provider, model,
+          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          source_paths: selected, confirm_paid: confirmPaid
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "AI 分析失败");
@@ -120,7 +126,8 @@ export default function VideoEditorPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: "网页版 AI 视频剪辑任务",
-          instruction, source_paths: selected, confirm_selected_videos: true
+          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          source_paths: selected, confirm_selected_videos: true
         })
       });
       const data = await response.json();
@@ -188,7 +195,11 @@ export default function VideoEditorPage() {
     try {
       const response = await fetch(`${API}/api/video-editor/jobs/${id}/execute`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subtitle_path: subtitlePath || null, audio_path: audioPath || null })
+        body: JSON.stringify({
+          subtitle_path: subtitlePath || null,
+          audio_path: audioPath || null,
+          audio_mode: audioMode
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "剪辑执行失败");
@@ -293,6 +304,16 @@ export default function VideoEditorPage() {
 
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">第三步：选择字幕与音轨（可选）</h2>
+          <div className="mb-4 max-w-md space-y-2">
+            <label className="block text-sm font-medium">字幕语言</label>
+            <select value={subtitleLanguage} onChange={e => setSubtitleLanguage(e.target.value)}
+              className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
+              <option value="zh">简体中文</option>
+              <option value="en">English（英语）</option>
+              <option value="zh-en">中英双语</option>
+            </select>
+            <p className="text-xs text-white/45">此设置会写入 AI 剪辑任务要求，供 AI 生成字幕文本时遵循；已上传的 SRT 等字幕文件不会被自动翻译。</p>
+          </div>
           <div className="grid gap-5 md:grid-cols-2">
             <div className="space-y-3">
               <label className="block text-sm font-medium">字幕文件</label>
@@ -309,11 +330,18 @@ export default function VideoEditorPage() {
               <p className="text-xs text-white/45">已上传 {subtitleFiles.length} 个字幕文件</p>
             </div>
             <div className="space-y-3">
-              <label className="block text-sm font-medium">替换音轨</label>
+              <label className="block text-sm font-medium">音轨文件</label>
               <select value={audioPath} onChange={e => setAudioPath(e.target.value)}
                 className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
                 <option value="">保留原视频音轨</option>
                 {audioFiles.map(file => <option key={file.id} value={file.path}>{file.name}</option>)}
+              </select>
+              <label className="block text-sm font-medium">音轨处理方式</label>
+              <select value={audioMode} onChange={e => setAudioMode(e.target.value as "replace" | "mix")}
+                disabled={!audioPath}
+                className="w-full rounded-lg border border-white/15 bg-black/30 p-3 disabled:opacity-50">
+                <option value="replace">替换原视频声音（仅保留新音轨）</option>
+                <option value="mix">与原视频声音混合（背景音乐）</option>
               </select>
               <label className="block cursor-pointer rounded-lg border border-dashed border-purple-300/30 p-3 text-center text-sm hover:bg-purple-500/10">
                 上传音频（MP3 / WAV / AAC / M4A 等）
@@ -323,7 +351,7 @@ export default function VideoEditorPage() {
               <p className="text-xs text-white/45">已上传 {audioFiles.length} 个音频文件</p>
             </div>
           </div>
-          <p className="mt-3 text-xs text-white/45">选择的音轨会替换原视频音轨；不选择则保留原音轨。字幕和音轨会在最终导出时合成。</p>
+          <p className="mt-3 text-xs text-white/45">可选择替换原声或与原声混合；不选择音轨则保留原视频声音。混合模式下新音轨默认使用较低音量。字幕会在最终导出时合成。</p>
         </section>
 
         <section className={panel}>
