@@ -470,8 +470,9 @@ def prompt_schema():
         "version": "1.0",
         "required_fields": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"],
         "asset_categories": ["characters", "scenes", "props", "weapons", "costumes", "buildings", "special_items"],
-        "rules": ["只输出JSON对象，proposals为数组", "evidence必须逐字引用输入原文", "没有明确变化时不要推测", "confidence为0到1之间数字"],
-        "example": {"proposals": [{"chapter_number": 3, "asset_name": "主角", "asset_category": "characters", "change_type": "服装变化", "event": "战斗后更换衣服", "appearance_after": "", "clothing_after": "黑色破损长袍", "holder": "", "evidence": "原文中逐字引用的证据", "confidence": 0.92}]},
+        "optional_state_fields": ["age_after", "hairstyle_after", "injury_after", "equipment_after", "condition_after"],
+        "rules": ["只输出JSON对象，proposals为数组", "evidence必须逐字引用输入原文", "没有明确变化时不要推测", "confidence为0到1之间数字", "人物年龄/发型/伤势和道具装备状态应分别填写对应字段，未知字段留空"],
+        "example": {"proposals": [{"chapter_number": 3, "asset_name": "主角", "asset_category": "characters", "change_type": "装备变化", "event": "战斗后获得护腕", "appearance_after": "", "clothing_after": "", "age_after": "", "hairstyle_after": "", "injury_after": "", "equipment_after": "银色护腕", "condition_after": "", "holder": "主角", "evidence": "原文中逐字引用的证据", "confidence": 0.92}]},
     }
 
 
@@ -575,6 +576,8 @@ def review_proposal(proposal_id: int, payload: ReviewPayload, db: Session = Depe
         })
         history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
         data["evolution_history"] = history
+        asset.data = data
+        data["current_state"] = resolve_asset_state(asset)
         asset.data = data
         asset.updated_at = datetime.utcnow()
     item.status, item.review_note, item.reviewed_at = "approved", payload.note, datetime.utcnow()
