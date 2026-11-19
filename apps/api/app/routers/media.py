@@ -614,7 +614,7 @@ def render_episode_from_shots(
                     break
                 except Exception as exc:
                     render_warnings.append(f"已有配音轨无法使用：{str(exc)[:240]}；保留原始配音素材。")
-                    break
+                    continue
         music = None
         if music_path:
             try:
