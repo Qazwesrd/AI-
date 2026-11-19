@@ -251,7 +251,8 @@ def list_edit_jobs(db: Session = Depends(get_db)):
     rows = db.query(VideoEditJob).order_by(VideoEditJob.id.desc()).limit(200).all()
     return [{
         "id": x.id, "title": x.title, "provider": x.provider, "model": x.model,
-        "instruction": x.instruction, "status": x.status, "edit_plan": x.edit_plan,
+        "instruction": x.instruction, "source_files": x.source_files or [],
+        "status": x.status, "edit_plan": x.edit_plan,
         "output_path": x.output_path, "error": x.error, "created_at": x.created_at
     } for x in rows]
 
