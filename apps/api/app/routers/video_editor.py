@@ -90,13 +90,66 @@ def _web_file_manifest(paths: list[str]):
     return manifest
 
 
+def _build_web_handoff_details(job: VideoEditJob):
+    sources = [str(safe_storage_file(raw)) for raw in (job.source_files or [])]
+    manifest = _web_file_manifest(sources)
+    schema = {
+        "type": "object",
+        "required": ["title", "summary", "segments", "width", "height"],
+        "properties": {
+            "title": {"type": "string"},
+            "summary": {"type": "string"},
+            "segments": {"type": "array", "items": {
+                "type": "object",
+                "required": ["file_key", "start", "end", "description"],
+                "properties": {
+                    "file_key": {"type": "string", "enum": [x["file_key"] for x in manifest]},
+                    "start": {"type": "number", "minimum": 0},
+                    "end": {"type": "number", "exclusiveMinimum": 0},
+                    "description": {"type": "string"},
+                },
+            }},
+            "width": {"type": "integer"},
+            "height": {"type": "integer"},
+            "subtitle_text": {"type": "string"},
+            "notes": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    prompt = (
+        "你是专业影视剪辑师。请根据用户的剪辑要求和视频素材信息，生成可执行的剪辑方案。"
+        "注意：你目前只收到文件元数据，没有看到视频画面；除非用户另外在网页端上传并让你查看视频，"
+        "否则不得编造人物、场景、动作或镜头内容。无法判断的画面内容必须写入 notes，"
+        "并提示用户补充视频画面/字幕/转写文本。"
+        "片段只能引用 manifest 中的 file_key，时间必须在对应视频时长范围内。"
+        "按用户要求排序片段；只返回符合 schema 的 JSON，不要 Markdown。\n\n"
+        + "用户剪辑要求：\n" + (job.instruction or "")
+        + "\n\n视频素材元数据：\n"
+        + json.dumps(manifest, ensure_ascii=False, indent=2)
+        + "\n\n输出 JSON Schema：\n"
+        + json.dumps(schema, ensure_ascii=False, indent=2)
+    )
+    return {
+        "id": job.id,
+        "status": job.status,
+        "title": job.title,
+        "manifest": manifest,
+        "prompt": prompt,
+        "output_schema": schema,
+        "user_review_required": True,
+        "video_bytes_transferred": False,
+        "third_party_transfer_started": False,
+        "notice": "本交接包仅包含文件名、时长、分辨率和剪辑要求，不会上传视频。若要让网页版 AI 理解画面，请由你自行在该网页上传视频；完成后将 JSON 结果粘贴回来。",
+    }
+
+
 @router.post("/web-handoff")
 def create_web_handoff(data: WebHandoffInput, db: Session = Depends(get_db)):
     if not data.confirm_selected_videos:
         raise HTTPException(400, "请先确认本次交给网页版 AI 分析的视频文件")
     try:
         sources = [str(safe_storage_file(raw)) for raw in data.source_paths]
-        manifest = _web_file_manifest(sources)
+        # Probe selected files before creating a persistent task.
+        _web_file_manifest(sources)
         job = VideoEditJob(
             title=data.title,
             provider="web_ai",
@@ -108,59 +161,23 @@ def create_web_handoff(data: WebHandoffInput, db: Session = Depends(get_db)):
         db.add(job)
         db.commit()
         db.refresh(job)
-
-        schema = {
-            "type": "object",
-            "required": ["title", "summary", "segments", "width", "height"],
-            "properties": {
-                "title": {"type": "string"},
-                "summary": {"type": "string"},
-                "segments": {"type": "array", "items": {
-                    "type": "object",
-                    "required": ["file_key", "start", "end", "description"],
-                    "properties": {
-                        "file_key": {"type": "string", "enum": [x["file_key"] for x in manifest]},
-                        "start": {"type": "number", "minimum": 0},
-                        "end": {"type": "number", "exclusiveMinimum": 0},
-                        "description": {"type": "string"},
-                    },
-                }},
-                "width": {"type": "integer"},
-                "height": {"type": "integer"},
-                "subtitle_text": {"type": "string"},
-                "notes": {"type": "array", "items": {"type": "string"}},
-            },
-        }
-        prompt = (
-            "你是专业影视剪辑师。请根据用户的剪辑要求和视频素材信息，生成可执行的剪辑方案。"
-            "注意：你目前只收到文件元数据，没有看到视频画面；除非用户另外在网页端上传并让你查看视频，"
-            "否则不得编造人物、场景、动作或镜头内容。无法判断的画面内容必须写入 notes，"
-            "并提示用户补充视频画面/字幕/转写文本。"
-            "片段只能引用 manifest 中的 file_key，时间必须在对应视频时长范围内。"
-            "按用户要求排序片段；只返回符合 schema 的 JSON，不要 Markdown。\n\n"
-            + "用户剪辑要求：\n" + data.instruction
-            + "\n\n视频素材元数据：\n"
-            + json.dumps(manifest, ensure_ascii=False, indent=2)
-            + "\n\n输出 JSON Schema：\n"
-            + json.dumps(schema, ensure_ascii=False, indent=2)
-        )
-        return {
-            "id": job.id,
-            "status": job.status,
-            "title": job.title,
-            "manifest": manifest,
-            "prompt": prompt,
-            "output_schema": schema,
-            "user_review_required": True,
-            "video_bytes_transferred": False,
-            "third_party_transfer_started": False,
-            "notice": "本交接包仅包含文件名、时长、分辨率和剪辑要求，不会上传视频。若要让网页版 AI 理解画面，请由你自行在该网页上传视频；完成后将 JSON 结果粘贴回来。",
-        }
+        return _build_web_handoff_details(job)
     except HTTPException:
         raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(422, f"无法准备网页版 AI 交接包：{exc}")
+
+
+@router.get("/jobs/{job_id}/web-handoff")
+def resume_web_handoff(job_id: int, db: Session = Depends(get_db)):
+    job = _get_job(db, job_id)
+    if job.provider != "web_ai" or job.status != "awaiting_web_ai":
+        raise HTTPException(409, "该任务不在等待网页版 AI 结果的状态，无法恢复交接包")
+    try:
+        return _build_web_handoff_details(job)
+    except Exception as exc:
+        raise HTTPException(422, f"无法恢复网页版 AI 交接包：{exc}")
 
 
 @router.post("/jobs/{job_id}/web-result")
