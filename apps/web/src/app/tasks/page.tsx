@@ -46,6 +46,7 @@ const statusNames: Record<string, string> = {
   completed: "已完成", failed: "失败", cancelled: "已取消",
   canceled: "已取消", paused: "已暂停", partial: "部分完成",
   submission_unknown: "提交结果待核实", awaiting_video_url: "等待视频地址",
+  download_failed: "下载失败·可仅重试下载",
   interrupted_unknown: "执行中断·待核实",
 };
 
