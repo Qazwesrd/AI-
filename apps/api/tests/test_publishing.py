@@ -93,7 +93,8 @@ class PublishingInputTests(unittest.TestCase):
                 db=db,
             )
         self.assertTrue(result["success"])
-        validate.assert_called_once_with(Path(video))
+        validate.assert_called_once()
+        self.assertEqual(Path(validate.call_args.args[0]).name, "silent.mp4")
 
 
 if __name__ == "__main__":
