@@ -540,6 +540,7 @@ def render_episode_from_shots(
     render_stage = output.with_name("." + output.stem + ".rendering.mp4")
     mixed_stage = output.with_name("." + output.stem + ".mixed.mp4")
     subtitle_stage = None
+    render_warnings = []
     try:
         # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
         ffmpeg_args = []
@@ -606,36 +607,49 @@ def render_episode_from_shots(
         for speech_task in speech_tasks:
             speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
             if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
-                speech_path = safe_storage_file(speech_task.result_path)
-                validate_rendered_audio(speech_path)
-                break
-        music = safe_storage_file(music_path) if music_path else None
-        if music:
-            validate_rendered_audio(music)
+                try:
+                    candidate = safe_storage_file(speech_task.result_path)
+                    validate_rendered_audio(candidate)
+                    speech_path = candidate
+                    break
+                except Exception as exc:
+                    render_warnings.append(f"已有配音轨无法使用：{str(exc)[:240]}；保留原始配音素材。")
+                    break
+        music = None
+        if music_path:
+            try:
+                music = safe_storage_file(music_path)
+                validate_rendered_audio(music)
+            except Exception as exc:
+                render_warnings.append(f"背景音乐无法使用：{str(exc)[:240]}；本次跳过背景音乐。")
         if speech_path or music:
-            mix_args = ["-i", str(output)]
-            mix_filters = ["[0:a]volume=0.35[original]"]
-            mix_labels = ["[original]"]
-            mix_index = 1
-            if speech_path:
-                mix_args += ["-i", str(speech_path)]
-                mix_filters.append(f"[{mix_index}:a]volume=1.0[voice]")
-                mix_labels.append("[voice]")
-                mix_index += 1
-            if music:
-                mix_args += ["-stream_loop", "-1", "-i", str(music)]
-                mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
-                mix_labels.append("[music]")
-            mix_filters.append("".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2[mix]")
-            run_ffmpeg(mix_args + [
-                "-filter_complex", ";".join(mix_filters),
-                "-map", "0:v:0", "-map", "[mix]",
-                "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_stage),
-            ])
-            quality_report = finalize_rendered_video(
-                mixed_stage, output, expected_duration=total_video_duration,
-                duration_tolerance=2.0, require_audio=True,
-            )
+            try:
+                mix_args = ["-i", str(output)]
+                mix_filters = ["[0:a]volume=0.35[original]"]
+                mix_labels = ["[original]"]
+                mix_index = 1
+                if speech_path:
+                    mix_args += ["-i", str(speech_path)]
+                    mix_filters.append(f"[{mix_index}:a]volume=1.0[voice]")
+                    mix_labels.append("[voice]")
+                    mix_index += 1
+                if music:
+                    mix_args += ["-stream_loop", "-1", "-i", str(music)]
+                    mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
+                    mix_labels.append("[music]")
+                mix_filters.append("".join(mix_labels) + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2[mix]")
+                run_ffmpeg(mix_args + [
+                    "-filter_complex", ";".join(mix_filters),
+                    "-map", "0:v:0", "-map", "[mix]",
+                    "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_stage),
+                ])
+                quality_report = finalize_rendered_video(
+                    mixed_stage, output, expected_duration=total_video_duration,
+                    duration_tolerance=2.0, require_audio=True,
+                )
+            except Exception as exc:
+                mixed_stage.unlink(missing_ok=True)
+                render_warnings.append(f"音轨混合失败：{str(exc)[:300]}；已保留无额外配音/背景音乐的基础成片。")
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
@@ -654,12 +668,16 @@ def render_episode_from_shots(
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
             subtitle_stage = subtitle_file.with_name("." + subtitle_file.name + ".tmp")
-            subtitle_stage.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
-            if not subtitle_stage.is_file() or subtitle_stage.stat().st_size == 0:
-                raise RuntimeError("字幕文件生成失败或内容为空")
-            os.replace(subtitle_stage, subtitle_file)
-            subtitle_path = str(subtitle_file)
-            db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+            try:
+                subtitle_stage.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
+                if not subtitle_stage.is_file() or subtitle_stage.stat().st_size == 0:
+                    raise RuntimeError("字幕文件生成失败或内容为空")
+                os.replace(subtitle_stage, subtitle_file)
+                subtitle_path = str(subtitle_file)
+                db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+            except Exception as exc:
+                subtitle_stage.unlink(missing_ok=True)
+                render_warnings.append(f"字幕文件生成失败：{str(exc)[:240]}；视频成片已保留，可稍后重新生成字幕。")
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
@@ -673,7 +691,8 @@ def render_episode_from_shots(
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
                 "subtitle_count": subtitle_index - 1,
-                "quality_report": quality_report}
+                "quality_report": quality_report,
+                "warnings": render_warnings}
     except HTTPException:
         render_stage.unlink(missing_ok=True)
         mixed_stage.unlink(missing_ok=True)
