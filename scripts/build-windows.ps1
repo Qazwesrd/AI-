@@ -158,6 +158,7 @@ $WebLog = Join-Path $ManualDataDir "web.log"
 $WebErrorLog = Join-Path $ManualDataDir "web-error.log"
 $ApiProcess = $null
 $WebProcess = $null
+$ManualCaptureSuccess = $false
 $OldAppDataDir = $env:APP_DATA_DIR
 $OldFfmpegPath = $env:FFMPEG_PATH
 $OldFfprobePath = $env:FFPROBE_PATH
@@ -188,8 +189,14 @@ try {
 
     $Ready = $false
     for ($attempt = 1; $attempt -le 120; $attempt++) {
-        if ($ApiProcess.HasExited) { throw "Local API exited before manual screenshots could be captured. See $ApiErrorLog" }
-        if ($WebProcess.HasExited) { throw "Web server exited before manual screenshots could be captured. See $WebErrorLog" }
+        if ($ApiProcess.HasExited) {
+            $ApiDetails = (Get-Content $ApiErrorLog -Raw -ErrorAction SilentlyContinue) + (Get-Content $ApiLog -Raw -ErrorAction SilentlyContinue)
+            throw "Local API exited before manual screenshots could be captured. API diagnostics: $ApiDetails"
+        }
+        if ($WebProcess.HasExited) {
+            $WebDetails = (Get-Content $WebErrorLog -Raw -ErrorAction SilentlyContinue) + (Get-Content $WebLog -Raw -ErrorAction SilentlyContinue)
+            throw "Web server exited before manual screenshots could be captured. Web diagnostics: $WebDetails"
+        }
         try {
             $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2
             $webResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000" -TimeoutSec 2
@@ -213,6 +220,7 @@ try {
         throw "The illustrated PDF user manual was not generated correctly."
     }
     Write-Host "Captured $($CapturedScreenshots.Count) application screenshots and generated $ManualPdf"
+    $ManualCaptureSuccess = $true
 } finally {
     if ($WebProcess -and !$WebProcess.HasExited) { Stop-Process -Id $WebProcess.Id -Force -ErrorAction SilentlyContinue }
     if ($ApiProcess -and !$ApiProcess.HasExited) { Stop-Process -Id $ApiProcess.Id -Force -ErrorAction SilentlyContinue }
@@ -222,7 +230,13 @@ try {
     if ($null -eq $OldPort) { Remove-Item Env:PORT -ErrorAction SilentlyContinue } else { $env:PORT = $OldPort }
     if ($null -eq $OldHostname) { Remove-Item Env:HOSTNAME -ErrorAction SilentlyContinue } else { $env:HOSTNAME = $OldHostname }
     if ($null -eq $OldApiBaseUrl) { Remove-Item Env:NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:NEXT_PUBLIC_API_BASE_URL = $OldApiBaseUrl }
-    Remove-Item $ManualDataDir -Recurse -Force -ErrorAction SilentlyContinue
+    if ($ManualCaptureSuccess) {
+        Remove-Item $ManualDataDir -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Warning "Manual capture failed; diagnostic logs were preserved at $ManualDataDir"
+        if (Test-Path $ApiErrorLog) { Get-Content $ApiErrorLog | Write-Host }
+        if (Test-Path $WebErrorLog) { Get-Content $WebErrorLog | Write-Host }
+    }
 }
 
 # Generate a branded futuristic application icon before packaging.
