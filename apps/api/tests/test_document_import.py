@@ -42,6 +42,16 @@ class DocumentImportTests(unittest.TestCase):
             archive.writestr("word/document.xml", document_xml)
         self.assertIn("测试文档正文", docx_text(buffer.getvalue()))
 
+    def test_docx_extraction_from_seekable_stream(self):
+        buffer = BytesIO()
+        document_xml = (
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>流式 DOCX 正文</w:t></w:r></w:p></w:body></w:document>'
+        )
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("word/document.xml", document_xml)
+        self.assertIn("流式 DOCX 正文", docx_text(BytesIO(buffer.getvalue())))
+
     def test_epub_extraction(self):
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
