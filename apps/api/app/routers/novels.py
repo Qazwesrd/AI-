@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.document_import import extract_document_text
+from app.document_import import MAX_UPLOAD_BYTES, extract_document_text
 from app.models.novel import Novel, Chapter, AnalysisItem
 from app.models.story import StoryProject
 
@@ -150,6 +150,25 @@ def delete_novel(novel_id: int, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return {"success": True}
+
+async def _read_upload_limited(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
+    """Read an uploaded novel in bounded chunks and reject oversized bodies early."""
+    declared_size = getattr(file, "size", None)
+    if declared_size is not None and declared_size > max_bytes:
+        raise HTTPException(413, f"文件不能超过 {max_bytes // (1024 * 1024)} MB")
+
+    chunks = []
+    total = 0
+    while True:
+        chunk = await file.read(min(1024 * 1024, max_bytes - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(413, f"文件不能超过 {max_bytes // (1024 * 1024)} MB")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 @router.post("/novels/{novel_id}/import-txt")
 async def import_txt(
