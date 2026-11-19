@@ -942,10 +942,21 @@ def get_shot_assets(shot_id: int, db: Session = Depends(get_db)):
     for link in links:
         asset = db.query(VisualAsset).filter(VisualAsset.id == link.asset_id).first()
         if asset:
+            locked_snapshot = link.state_snapshot or snapshot_asset_state(asset, link.chapter_number)
+            latest_state = snapshot_asset_state(asset, None)
+            locked_chapter = link.chapter_number
+            latest_chapter = latest_state.get("chapter_number")
+            has_newer_state = bool(
+                locked_chapter is not None
+                and latest_chapter is not None
+                and int(latest_chapter) > int(locked_chapter)
+            )
             result.append({
                 "role": link.role,
                 "chapter_number": link.chapter_number,
-                "state_snapshot": link.state_snapshot or snapshot_asset_state(asset, link.chapter_number),
+                "state_snapshot": locked_snapshot,
+                "current_state": latest_state,
+                "newer_state_available": has_newer_state,
                 "asset": serialize_model(asset),
             })
     return result
