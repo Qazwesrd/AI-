@@ -11,7 +11,7 @@ on:
       - ".github/workflows/windows-release.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-installer:
