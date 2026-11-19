@@ -1006,6 +1006,7 @@ def generate_episode_voice_track(
             continue
         filename = f"episode_{episode_id}_shot_{shot.id}_{uuid.uuid4().hex[:8]}.mp3"
         destination = AUDIO_DIR / filename
+        temporary_audio = None
         payload = {
             "model": data.model, "input": text_value,
             "voice": data.voice, "response_format": "mp3",
@@ -1108,7 +1109,7 @@ def generate_episode_voice_track(
                     db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error if task else str(exc.detail))
-                if 'temporary_audio' in locals():
+                if temporary_audio is not None:
                     temporary_audio.unlink(missing_ok=True)
                 failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
                                  "status": task.status if task else "failed", "error": str(exc.detail)[:1000]})
@@ -1130,7 +1131,7 @@ def generate_episode_voice_track(
                 db.commit()
                 if lease_acquired:
                     release_task_lease(db, "media", task.id, False, task.error)
-            if 'temporary_audio' in locals():
+            if temporary_audio is not None:
                 temporary_audio.unlink(missing_ok=True)
             failures.append({"shot_number": shot.shot_number, "task_id": task.id if task else None,
                              "status": task.status if task else "failed", "error": str(exc)[:1000]})
