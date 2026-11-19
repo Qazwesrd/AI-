@@ -68,6 +68,31 @@ function requestHealth() {
   });
 }
 
+function requestWebHealth() {
+  return new Promise((resolve) => {
+    const req = http.get(
+      `http://127.0.0.1:${WEB_PORT}/`,
+      { timeout: 2500 },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => body += chunk);
+        res.on("end", () => {
+          resolve(
+            res.statusCode === 200 &&
+            body.includes("AI漫剧制作大师")
+          );
+        });
+      }
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve(false);
+    });
+  });
+}
+
 function waitForApi(timeout = 120000) {
   return new Promise((resolve, reject) => {
     const started = Date.now();
@@ -160,7 +185,7 @@ function stopServices() {
   apiProcess = null;
 }
 
-function startProductionServices() {
+function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
   const webServer = path.join(resources, "web", "server.js");
@@ -182,33 +207,35 @@ function startProductionServices() {
     fs.mkdirSync(storageDir, { recursive: true });
   }
 
-  apiProcess = spawn(apiExe, [], {
-    cwd: resources,
-    windowsHide: true,
-    env: {
-      ...process.env,
-      APP_DATA_DIR: dataDir,
-      PYTHONUNBUFFERED: "1",
-      FFMPEG_PATH: ffmpeg,
-      FFPROBE_PATH: ffprobe
-    }
-  });
+  if (startApi) {
+    apiProcess = spawn(apiExe, [], {
+      cwd: resources,
+      windowsHide: true,
+      env: {
+        ...process.env,
+        APP_DATA_DIR: dataDir,
+        PYTHONUNBUFFERED: "1",
+        FFMPEG_PATH: ffmpeg,
+        FFPROBE_PATH: ffprobe
+      }
+    });
+    logChild("API", apiProcess);
+  }
 
-  logChild("API", apiProcess);
-
-  webProcess = spawn(process.execPath, [webServer], {
-    cwd: path.join(resources, "web"),
-    windowsHide: true,
-    env: {
-      ...process.env,
-      ELECTRON_RUN_AS_NODE: "1",
-      PORT: String(WEB_PORT),
-      HOSTNAME: "127.0.0.1",
-      NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:8000"
-    }
-  });
-
-  logChild("WEB", webProcess);
+  if (startWeb) {
+    webProcess = spawn(process.execPath, [webServer], {
+      cwd: path.join(resources, "web"),
+      windowsHide: true,
+      env: {
+        ...process.env,
+        ELECTRON_RUN_AS_NODE: "1",
+        PORT: String(WEB_PORT),
+        HOSTNAME: "127.0.0.1",
+        NEXT_PUBLIC_API_BASE_URL: "http://127.0.0.1:8000"
+      }
+    });
+    logChild("WEB", webProcess);
+  }
 }
 
 async function createWindow() {
@@ -232,13 +259,33 @@ async function createWindow() {
     const apiPortFree = await checkPort(API_PORT);
     const webPortFree = await checkPort(WEB_PORT);
 
-    if (!apiPortFree || !webPortFree) {
+    // Reuse healthy orphaned services from a previous unclean exit instead of
+    // forcing users to find and kill processes manually.
+    if (!apiPortFree) {
+      const health = await requestHealth();
+      if (
+        !health ||
+        health.status !== "ok" ||
+        !Array.isArray(health.loaded_routers) ||
+        health.loaded_routers.length < 6 ||
+        (Array.isArray(health.missing_routers) && health.missing_routers.length > 0)
+      ) {
+        throw new Error(
+          "本地端口 8000 已被其他程序占用，而且不是可用的 AI 漫剧制作大师 API。请关闭占用程序后重新启动。软件不会强行结束其他程序。"
+        );
+      }
+    }
+
+    if (!webPortFree && !(await requestWebHealth())) {
       throw new Error(
-        "The application requires local ports 8000 and 3000. They are already in use. Close the conflicting processes and restart the application."
+        "本地端口 3000 已被其他程序占用，而且不是 AI 漫剧制作大师网页服务。请关闭占用程序后重新启动。软件不会强行结束其他程序。"
       );
     }
 
-    startProductionServices();
+    startProductionServices({
+      startApi: apiPortFree,
+      startWeb: webPortFree
+    });
     await waitForApi();
     await waitForWeb();
     await mainWindow.loadURL("http://127.0.0.1:3000");
