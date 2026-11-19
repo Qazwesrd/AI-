@@ -9,6 +9,8 @@ type Tool = { id: string; name: string; category: ToolCategory; url: string; not
 type ResultFile = { id: number; filename: string; size: number; downloadUrl: string; classification?: string; classificationStatus?: string; classificationReason?: string; visualAssetId?: number | null };
 type Task = {
   id: string;
+  novelId?: number;
+  chapterId?: number;
   title: string;
   category: ToolCategory;
   toolId: string;
@@ -411,6 +413,8 @@ export default function AIToolsPage() {
       status: "prepared",
       resultText: "",
       resultUrl: "",
+      novelId: selectedNovelId ? Number(selectedNovelId) : undefined,
+      chapterId: selectedChapterId ? Number(selectedChapterId) : undefined,
       createdAt: new Date().toISOString(),
     };
     setTasks((current) => [task, ...current]);
