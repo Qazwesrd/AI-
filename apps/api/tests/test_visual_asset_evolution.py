@@ -82,5 +82,49 @@ class VisualAssetEvolutionTests(unittest.TestCase):
         self.assertFalse(state["is_evolved"])
 
 
+    def test_sparse_later_change_preserves_prior_confirmed_state(self):
+        self.asset.data["evolution_history"].append({
+            "chapter_number": 30,
+            "event": "道具交给同伴",
+            "change_type": "持有人变化",
+            "holder": "同伴",
+            "confirmed": True,
+            "recorded_at": "2026-01-04T00:00:00",
+        })
+        state = resolve_asset_state(self.asset, 30)
+        self.assertEqual(state["appearance"], "左脸保留伤疤")
+        self.assertEqual(state["clothing"], "换成黑色轻甲，肩部有银色护甲")
+        self.assertEqual(state["holder"], "同伴")
+
+    def test_structured_character_and_prop_fields_are_resolved(self):
+        self.asset.data["evolution_history"].append({
+            "chapter_number": 25,
+            "event": "人物成长并获得新装备",
+            "age_after": "青年",
+            "hairstyle_after": "高马尾",
+            "injury_after": "右肩有旧伤",
+            "equipment_after": "银色护腕",
+            "condition_after": "护符已修复",
+            "holder": "主角",
+            "confirmed": True,
+            "recorded_at": "2026-01-03T12:00:00",
+        })
+        state = resolve_asset_state(self.asset, 25)
+        self.assertEqual(state["age"], "青年")
+        self.assertEqual(state["hairstyle"], "高马尾")
+        self.assertEqual(state["injury"], "右肩有旧伤")
+        self.assertEqual(state["equipment"], "银色护腕")
+        self.assertEqual(state["condition"], "护符已修复")
+
+    def test_storyboard_snapshot_carries_forward_sparse_state(self):
+        self.asset.data["evolution_history"].append({
+            "chapter_number": 30, "event": "转交道具", "holder": "同伴",
+            "confirmed": True, "recorded_at": "2026-01-04T00:00:00",
+        })
+        snapshot = snapshot_asset_state(self.asset, 30)
+        self.assertEqual(snapshot["appearance"], "左脸保留伤疤")
+        self.assertEqual(snapshot["clothing"], "换成黑色轻甲，肩部有银色护甲")
+        self.assertEqual(snapshot["holder"], "同伴")
+
 if __name__ == "__main__":
     unittest.main()
