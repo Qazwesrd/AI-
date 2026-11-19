@@ -66,7 +66,7 @@ class VideoEditorAudioModeTests(unittest.TestCase):
 
     def test_mix_mode_works_when_source_has_no_audio(self):
         args = self._run_plan("mix", original_has_audio=False)
-        self.assertIn("[1:a:0]", args)
+        self.assertIn("1:a:0", args)
         self.assertNotIn("-filter_complex", args)
 
 
