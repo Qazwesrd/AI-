@@ -80,6 +80,23 @@ def _group_counts(db: Session, model, status_column):
         result["total"] += int(count)
     return result
 
+def _counts_from_task_items(items):
+    keys = ("total", "active", "completed", "failed", "cancelled", "paused", "partial", "attention", "other")
+    counts = {key: 0 for key in keys}
+    by_source = {}
+    for item in items:
+        source = item.get("source") or "other"
+        if source not in by_source:
+            by_source[source] = {key: 0 for key in keys}
+        group = item.get("status_group") or "other"
+        if group not in counts or group == "total":
+            group = "other"
+        counts["total"] += 1
+        counts[group] += 1
+        by_source[source]["total"] += 1
+        by_source[source][group] += 1
+    return counts, by_source
+
 
 
 
@@ -370,6 +387,7 @@ def list_unified_tasks(
             "can_open": True,
         })
 
+    project_scoped_items = list(items) if project_id else []
     if task_type:
         items = [item for item in items if item["type"] == task_type or item["source"] == task_type]
     if status:
@@ -383,10 +401,16 @@ def list_unified_tasks(
     total_filtered = len(items)
     page = items[offset:offset + limit]
 
-    media_counts = _group_counts(db, MediaTask, MediaTask.status)
-    image_counts = _group_counts(db, ImageTask, ImageTask.status)
-    analysis_counts = _group_counts(db, NovelAnalysisJob, NovelAnalysisJob.status)
-    totals = {key: media_counts[key] + image_counts[key] + analysis_counts[key] for key in media_counts}
+    if project_id:
+        totals, scoped_by_source = _counts_from_task_items(project_scoped_items)
+        media_counts = scoped_by_source.get("media", _counts_from_task_items([])[0])
+        image_counts = scoped_by_source.get("image", _counts_from_task_items([])[0])
+        analysis_counts = scoped_by_source.get("analysis", _counts_from_task_items([])[0])
+    else:
+        media_counts = _group_counts(db, MediaTask, MediaTask.status)
+        image_counts = _group_counts(db, ImageTask, ImageTask.status)
+        analysis_counts = _group_counts(db, NovelAnalysisJob, NovelAnalysisJob.status)
+        totals = {key: media_counts[key] + image_counts[key] + analysis_counts[key] for key in media_counts}
 
     return {
         "items": page,
