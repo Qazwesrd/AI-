@@ -51,6 +51,32 @@ export default function EpisodeEditingPage() {
     if (kind !== "cut") transitions.push({ after_shot_id: shotId, transition: kind, duration_seconds: 0.5 });
     setTimeline({ ...timeline, transitions });
   }
+  async function replaceClip(shotId: number, file?: File) {
+    if (!file || !episodeId) return;
+    const form = new FormData();
+    form.append("file", file);
+    setBusy(true); setMessage("正在导入本地替换镜头……");
+    try {
+      const response = await fetch(`${API}/api/media/video/episodes/${episodeId}/shots/${shotId}/replace`, { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "镜头替换失败");
+      setMessage(data.message || `镜头 ${shotId} 已替换，历史素材仍保留。`);
+    } catch (e) { setMessage(e instanceof Error ? e.message : "镜头替换失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function renderEpisode() {
+    if (!episodeId) return;
+    setBusy(true); setMessage("正在使用已保存的剪辑方案本地合成成片……");
+    try {
+      const response = await fetch(`${API}/api/media/video/episodes/${episodeId}/render`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "成片合成失败");
+      setMessage(`成片已生成：${data.output} · ${data.duration_seconds || data.quality_report?.duration_seconds || "时长已检查"} 秒`);
+    } catch (e) { setMessage(e instanceof Error ? e.message : "成片合成失败"); }
+    finally { setBusy(false); }
+  }
+
   async function save() {
     setBusy(true); setMessage("正在保存本地剪辑方案……");
     try {
@@ -76,6 +102,7 @@ export default function EpisodeEditingPage() {
         </label>
         <button disabled={busy} onClick={() => void load(episodeId)} className="rounded-lg border border-white/20 px-4 py-3 disabled:opacity-50">载入分集</button>
         <button disabled={busy || !shots.length} onClick={() => void save()} className="rounded-lg bg-purple-600 px-5 py-3 font-semibold disabled:opacity-50">保存剪辑方案</button>
+        <button disabled={busy || !shots.length} onClick={() => void renderEpisode()} className="rounded-lg border border-emerald-300/40 bg-emerald-700/40 px-5 py-3 font-semibold disabled:opacity-50">按时间轴合成成片</button>
       </section>
       {message && <p role="status" className="rounded-lg border border-purple-300/20 bg-purple-500/10 p-3 text-sm">{message}</p>}
       {shots.length > 0 && <>
@@ -92,6 +119,10 @@ export default function EpisodeEditingPage() {
                 </div>
               </div>
               <p className="mt-2 text-sm text-white/70">{shot.visual_description}</p>
+              <label className="mt-3 inline-flex cursor-pointer items-center rounded border border-white/20 px-3 py-2 text-xs text-white/80">
+                导入本地视频替换此镜头
+                <input type="file" accept=".mp4,.mov,.mkv,.webm,video/*" disabled={busy} className="ml-2 max-w-48" onChange={e => { const file = e.target.files?.[0]; void replaceClip(shot.id, file); e.currentTarget.value = ""; }} />
+              </label>
               {shot.dialogue && <p className="mt-1 text-sm text-white/50">对白：{shot.dialogue}</p>}
               {index < orderedShots.length - 1 && <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/10 pt-3 text-sm">
                 <label>与下一镜头衔接
@@ -115,7 +146,7 @@ export default function EpisodeEditingPage() {
             <input type="range" min="0" max="1" step="0.01" value={timeline.music_volume} onChange={e => setTimeline({ ...timeline, music_volume: Number(e.target.value) })} className="mt-2 w-full" />
           </label>
         </section>
-        <p className="text-xs text-amber-200/80">说明：本阶段保存并校验剪辑时间轴方案；当前成片渲染接口仍按原有镜头顺序合成，转场、标题与淡入淡出尚未接入最终 FFmpeg 渲染。不会误导为已生效的成片效果。</p>
+        <p className="text-xs text-emerald-200/80">本地渲染现在会应用已保存的镜头顺序、淡入淡出/叠化、片头片尾标题和背景音乐淡入淡出。替换镜头只导入本地文件，不调用 AI；重新合成需要手动点击。</p>
       </>}
     </div>
   </main>;
