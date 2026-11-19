@@ -144,6 +144,52 @@ if (!(Test-Path "$Web\.next\static")) {
 
 Write-Host "Frontend standalone build created."
 
+# Generate a branded futuristic application icon before packaging.
+Write-Host "[3.5/4] Creating application icon..."
+Add-Type -AssemblyName System.Drawing
+$IconDirectory = Join-Path $Desktop "build-resources"
+New-Item -ItemType Directory -Path $IconDirectory -Force | Out-Null
+$IconPath = Join-Path $IconDirectory "icon.ico"
+$PngPath = Join-Path $env:TEMP ("ai-comic-icon-" + [guid]::NewGuid().ToString("N") + ".png")
+$Bitmap = New-Object System.Drawing.Bitmap(256, 256)
+$Graphics = [System.Drawing.Graphics]::FromImage($Bitmap)
+$Graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+$Graphics.Clear([System.Drawing.Color]::FromArgb(8, 8, 24))
+$Bounds = New-Object System.Drawing.Rectangle(0, 0, 256, 256)
+$Gradient = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
+    $Bounds,
+    [System.Drawing.Color]::FromArgb(22, 18, 58),
+    [System.Drawing.Color]::FromArgb(8, 8, 24),
+    [System.Drawing.Drawing2D.LinearGradientMode]::ForwardDiagonal
+)
+$Graphics.FillRectangle($Gradient, $Bounds)
+$OuterPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(150, 95, 255), 5)
+$InnerPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(65, 220, 255), 3)
+$Graphics.DrawEllipse($OuterPen, 25, 25, 206, 206)
+$Graphics.DrawEllipse($InnerPen, 48, 48, 160, 160)
+$Graphics.DrawArc($InnerPen, 12, 75, 232, 110, 205, 130)
+$Glow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(45, 70, 180, 255))
+$Graphics.FillEllipse($Glow, 72, 72, 112, 112)
+$TextBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(245, 245, 255))
+$Font = New-Object System.Drawing.Font("Arial", 76, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+$Format = New-Object System.Drawing.StringFormat
+$Format.Alignment = [System.Drawing.StringAlignment]::Center
+$Format.LineAlignment = [System.Drawing.StringAlignment]::Center
+$Graphics.DrawString("AI", $Font, $TextBrush, (New-Object System.Drawing.RectangleF(24, 55, 208, 145)), $Format)
+$Bitmap.Save($PngPath, [System.Drawing.Imaging.ImageFormat]::Png)
+$Graphics.Dispose(); $Bitmap.Dispose(); $Gradient.Dispose(); $OuterPen.Dispose(); $InnerPen.Dispose(); $Glow.Dispose(); $TextBrush.Dispose(); $Font.Dispose(); $Format.Dispose()
+$PngBytes = [System.IO.File]::ReadAllBytes($PngPath)
+$Memory = New-Object System.IO.MemoryStream
+$Writer = New-Object System.IO.BinaryWriter($Memory)
+$Writer.Write([UInt16]0); $Writer.Write([UInt16]1); $Writer.Write([UInt16]1)
+$Writer.Write([Byte]0); $Writer.Write([Byte]0); $Writer.Write([Byte]0); $Writer.Write([Byte]0)
+$Writer.Write([UInt16]1); $Writer.Write([UInt16]32)
+$Writer.Write([UInt32]$PngBytes.Length); $Writer.Write([UInt32]22); $Writer.Write($PngBytes)
+[System.IO.File]::WriteAllBytes($IconPath, $Memory.ToArray())
+$Writer.Dispose(); $Memory.Dispose(); Remove-Item $PngPath -Force
+if (!(Test-Path $IconPath) -or (Get-Item $IconPath).Length -lt 100) { throw "Application icon generation failed." }
+Write-Host "Application icon created: $IconPath"
+
 Write-Host "[4/4] Building Electron installer..."
 
 Set-Location $Desktop
