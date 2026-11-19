@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.novel import Novel, Chapter
+from app.models.novel import Novel, Chapter, AnalysisItem
 from app.models.visual import VisualAsset
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
 from app.models.ai_story_collaboration import AIStoryProposal
@@ -75,6 +75,100 @@ def evidence_matches_chapter(chapter, evidence):
 
 def chapter_exists(db, novel_id, number):
     return get_novel_chapter(db, novel_id, number) is not None
+
+
+class HandoffPackageRequest(BaseModel):
+    # Explicit acknowledgement: this endpoint returns selected novel text to the
+    # caller so the user can review it before copying it to a third-party AI site.
+    confirm_selected_chapter: bool = False
+    include_confirmed_analysis: bool = True
+    max_context_chars: int = Field(default=120000, ge=1000, le=150000)
+
+
+@router.post("/novels/{novel_id}/chapters/{chapter_number}/handoff-package")
+def build_chapter_handoff_package(
+    novel_id: int,
+    chapter_number: int,
+    payload: HandoffPackageRequest,
+    db: Session = Depends(get_db),
+):
+    if not payload.confirm_selected_chapter:
+        raise HTTPException(400, "请先在软件界面确认本次要交接的章节内容")
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if novel is None:
+        raise HTTPException(404, "小说不存在")
+    chapter = get_novel_chapter(db, novel_id, chapter_number)
+    if chapter is None:
+        raise HTTPException(404, "章节不存在")
+    if not (chapter.content or "").strip():
+        raise HTTPException(422, "章节正文为空，无法生成交接包")
+
+    analysis = []
+    if payload.include_confirmed_analysis:
+        records = db.query(AnalysisItem).filter(
+            AnalysisItem.novel_id == novel_id,
+            AnalysisItem.confirmed.is_(True),
+        ).order_by(AnalysisItem.category, AnalysisItem.id).limit(300).all()
+        analysis = [{
+            "category": item.category,
+            "name": item.name,
+            "description": item.description or "",
+            "data": item.data if isinstance(item.data, dict) else {},
+        } for item in records]
+
+    chapter_text = chapter.content[:payload.max_context_chars]
+    truncated = len(chapter.content) > len(chapter_text)
+    output_schema = {
+        "type": "object",
+        "required": ["chapter_number", "events", "characters", "scenes", "props", "relationships", "timeline", "proposals", "uncertainties"],
+        "properties": {
+            "chapter_number": {"type": "integer"},
+            "events": {"type": "array", "items": {"type": "object", "required": ["event", "evidence"]}},
+            "characters": {"type": "array", "items": {"type": "object", "required": ["name", "evidence"]}},
+            "scenes": {"type": "array", "items": {"type": "object", "required": ["name", "evidence"]}},
+            "props": {"type": "array", "items": {"type": "object", "required": ["name", "evidence"]}},
+            "relationships": {"type": "array"},
+            "timeline": {"type": "array"},
+            "proposals": {"type": "array", "items": {"type": "object", "required": ["chapter_number", "asset_name", "asset_category", "event", "evidence", "confidence"]}},
+            "uncertainties": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+    instruction = (
+        "你是小说与影视改编分析专家。请只分析本次交接包中的指定章节，并结合已确认资料识别变化。"
+        "严格区分原文事实、推断和未知；不得把推断当作事实。"
+        "每一项人物/场景/道具/事件及剧情变化都必须附带本章原文中的逐字证据。"
+        "没有证据的变化不得提交；置信度使用0到1。"
+        "只返回符合给定JSON Schema的JSON，不要使用Markdown代码围栏。"
+        "proposals仅用于提交待审核的变化提议，不代表正式素材已经更新。"
+    )
+    context = {
+        "novel": {"id": novel.id, "title": novel.title, "genre": novel.genre},
+        "chapter": {
+            "id": chapter.id,
+            "number": chapter.chapter_number,
+            "title": chapter.title,
+            "word_count": chapter.word_count,
+            "content": chapter_text,
+            "truncated": truncated,
+        },
+        "confirmed_analysis": analysis,
+        "handoff_scope": "仅本次选定章节；不包含整本小说其他章节原文",
+    }
+    return {
+        "success": True,
+        "handoff_version": "1.0",
+        "novel_id": novel.id,
+        "chapter_id": chapter.id,
+        "chapter_number": chapter.chapter_number,
+        "content_chars": len(chapter_text),
+        "truncated": truncated,
+        "user_review_required": True,
+        "third_party_transfer_started": False,
+        "instruction": instruction,
+        "output_schema": output_schema,
+        "context": context,
+        "notice": "这是交接预览数据包；本接口不会打开网页、发送内容给第三方或自动产生费用。",
+    }
 
 
 @router.get("/prompt-schema")
