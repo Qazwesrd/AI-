@@ -12,6 +12,8 @@ type Handoff = {
 type Proposal = {
   id: number; chapter_number: number; asset_name: string; asset_category: string;
   change_type: string; event: string; appearance_after: string; clothing_after: string;
+  age_after?: string; hairstyle_after?: string; injury_after?: string;
+  equipment_after?: string; condition_after?: string;
   holder: string; evidence: string; confidence: number; status: string; review_note?: string;
 };
 type ResultAttachment = {
@@ -296,6 +298,11 @@ export default function AICollaborationPage() {
               <p className="mt-2 text-sm text-slate-200">{item.event}</p>
               {item.appearance_after && <p className="mt-1 text-xs text-slate-300">外貌变化：{item.appearance_after}</p>}
               {item.clothing_after && <p className="mt-1 text-xs text-slate-300">服装变化：{item.clothing_after}</p>}
+              {item.age_after && <p className="mt-1 text-xs text-slate-300">年龄变化：{item.age_after}</p>}
+              {item.hairstyle_after && <p className="mt-1 text-xs text-slate-300">发型变化：{item.hairstyle_after}</p>}
+              {item.injury_after && <p className="mt-1 text-xs text-slate-300">伤势变化：{item.injury_after}</p>}
+              {item.equipment_after && <p className="mt-1 text-xs text-slate-300">装备变化：{item.equipment_after}</p>}
+              {item.condition_after && <p className="mt-1 text-xs text-slate-300">道具/场景状态：{item.condition_after}</p>}
               {item.holder && <p className="mt-1 text-xs text-slate-300">持有者：{item.holder}</p>}
               <blockquote className="mt-3 border-l-2 border-cyan-400/50 pl-3 text-xs leading-5 text-cyan-100">原文证据：{item.evidence}</blockquote>
               {item.review_note && <p className="mt-2 text-xs text-slate-500">审核备注：{item.review_note}</p>}
