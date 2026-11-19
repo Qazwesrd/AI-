@@ -720,15 +720,27 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
             "polling_skipped": True,
         }
     if task.result_path and Path(task.result_path).is_file():
-        task.status = "completed"
-        task.error = None
-        db.commit()
-        return {
-            "task_id": task.id,
-            "status": "completed",
-            "result_path": task.result_path,
-            "already_downloaded": True,
-        }
+        try:
+            validate_rendered_video(task.result_path)
+        except (ValueError, RuntimeError, OSError) as exc:
+            # Keep the previous file for diagnosis, but do not advertise it as a usable result.
+            settings = dict(task.request_data or {})
+            settings["invalid_result_path"] = task.result_path
+            task.request_data = settings
+            task.result_path = None
+            task.status = "download_failed"
+            task.error = f"上次下载文件未通过完整性检查：{str(exc)[:500]}；可刷新任务重新下载，不会重新提交生成请求。"
+            db.commit()
+        else:
+            task.status = "completed"
+            task.error = None
+            db.commit()
+            return {
+                "task_id": task.id,
+                "status": "completed",
+                "result_path": task.result_path,
+                "already_downloaded": True,
+            }
 
     config, key, base = get_provider(
         db, task.provider, bool((task.request_data or {}).get("confirm_paid"))
@@ -743,10 +755,30 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
         task.status = status
 
         video_url = value_at(result, settings.get("video_url_field", "video_url"))
-        if video_url and not (task.result_path and Path(task.result_path).is_file()):
+        if video_url:
             filename = f"video_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
             destination = VIDEO_DIR / filename
-            http_download(str(video_url), destination)
+            temporary = VIDEO_DIR / f".download_{task.id}_{uuid.uuid4().hex[:8]}.mp4"
+            try:
+                http_download(str(video_url), temporary)
+                # Never expose/register a partial or corrupt download as a completed video.
+                validate_rendered_video(temporary)
+                os.replace(temporary, destination)
+            except (ValueError, RuntimeError, OSError) as exc:
+                if temporary.exists():
+                    temporary.unlink()
+                task.status = "download_failed"
+                task.error = (
+                    f"视频已由服务商生成，但下载文件未通过完整性检查：{str(exc)[:500]}。"
+                    "可刷新任务重新下载；不会重新提交视频生成请求。"
+                )
+                db.commit()
+                return {
+                    "task_id": task.id,
+                    "status": task.status,
+                    "error": task.error,
+                    "retry_download_only": True,
+                }
             media = MediaFile(
                 name=filename, category="video", file_path=str(destination),
                 mime_type="video/mp4", file_size=destination.stat().st_size
@@ -754,6 +786,7 @@ def refresh_video_task(task_id: int, db: Session = Depends(get_db)):
             db.add(media)
             task.result_path = str(destination)
             task.status = "completed"
+            task.error = None
 
         db.commit()
         return {"task_id": task.id, "status": task.status,
