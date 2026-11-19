@@ -16,7 +16,16 @@ type Shot = {
   character_actions: string; dialogue: string; sound_effects: string; image_prompt: string;
 };
 type VisualAsset = { id: number; category: string; name: string; description: string };
-type ShotAssetLink = { role: string; chapter_number?: number | null; state_snapshot?: { appearance?: string; clothing?: string; holder?: string; change_type?: string; event?: string }; asset: { id: number; name: string; category: string } };
+type AssetStateSnapshot = {
+  chapter_number?: number | null; appearance?: string; clothing?: string; age?: string;
+  hairstyle?: string; injury?: string; equipment?: string; condition?: string;
+  holder?: string; change_type?: string; event?: string; is_evolved?: boolean;
+};
+type ShotAssetLink = {
+  role: string; chapter_number?: number | null; state_snapshot?: AssetStateSnapshot;
+  current_state?: AssetStateSnapshot; newer_state_available?: boolean;
+  asset: { id: number; name: string; category: string };
+};
 type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };
 
 const styles = [
@@ -614,11 +623,15 @@ export default function StoryboardPage() {
               )}
               {(shotAssetLinks[shot.id] || []).length > 0 && (
                 <div className="mt-3 space-y-2 rounded-lg border border-cyan-300/15 bg-cyan-950/20 p-3">
-                  <p className="text-xs font-semibold text-cyan-200">本镜头已锁定的素材版本</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs font-semibold text-cyan-200">本镜头已锁定的素材版本</p><a href="/asset-timeline" className="text-[11px] text-cyan-300 underline">查看完整剧情状态时间线</a></div>
                   {(shotAssetLinks[shot.id] || []).map(link => (
                     <div key={link.asset.id + ":" + link.role} className="text-xs text-slate-300">
                       <strong>{link.asset.name}</strong> · {link.chapter_number ? `第${link.chapter_number}章` : "最新状态"}
-                      <p className="mt-1 text-slate-400">{link.state_snapshot?.change_type || "基础状态"}：{link.state_snapshot?.appearance || "未填写外观"}；服装/装备：{link.state_snapshot?.clothing || "基础设定"}{link.state_snapshot?.holder ? `；持有人：${link.state_snapshot.holder}` : ""}</p>
+                      <p className="mt-1 text-slate-400">{link.state_snapshot?.change_type || "基础状态"}：{link.state_snapshot?.appearance || "未填写外观"}；服装：{link.state_snapshot?.clothing || "基础设定"}</p>
+                      <p className="mt-1 text-slate-400">年龄：{link.state_snapshot?.age || "未记录"} · 发型：{link.state_snapshot?.hairstyle || "未记录"} · 伤势：{link.state_snapshot?.injury || "未记录"}</p>
+                      <p className="mt-1 text-slate-400">装备：{link.state_snapshot?.equipment || "未记录"} · 道具状态：{link.state_snapshot?.condition || "未记录"} · 持有人：{link.state_snapshot?.holder || "未记录"}</p>
+                      {link.state_snapshot?.event && <p className="mt-1 text-slate-500">剧情事件：{link.state_snapshot.event}</p>}
+                      {link.newer_state_available && <div className="mt-2 rounded-lg border border-amber-300/25 bg-amber-950/25 p-2 text-amber-200">该镜头锁定的是第 {link.chapter_number} 章状态；素材在后续章节还有变化。为保持剧情连续性，当前镜头不会自动替换。需要时请重新确认匹配。</div>}
                     </div>
                   ))}
                 </div>
