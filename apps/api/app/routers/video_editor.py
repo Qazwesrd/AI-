@@ -51,6 +51,27 @@ def _get_job(db: Session, job_id: int):
     return job
 
 
+def _map_web_plan(plan: dict, sources: list[str]):
+    segments = plan.get("segments")
+    if not isinstance(segments, list) or not segments:
+        raise ValueError("AI 结果缺少有效的 segments 数组")
+    key_to_path = {f"video_{index}": path for index, path in enumerate(sources, 1)}
+    mapped = []
+    for index, segment in enumerate(segments, 1):
+        if not isinstance(segment, dict):
+            raise ValueError(f"第 {index} 个片段格式错误")
+        file_key = segment.get("file_key")
+        if file_key not in key_to_path:
+            raise ValueError(f"第 {index} 个片段引用了未授权的视频文件")
+        mapped.append({
+            "file_path": key_to_path[file_key],
+            "start": segment.get("start"),
+            "end": segment.get("end"),
+            "description": segment.get("description", ""),
+        })
+    return {**plan, "segments": mapped}
+
+
 def _web_file_manifest(paths: list[str]):
     manifest = []
     for index, raw in enumerate(paths, 1):
@@ -151,24 +172,8 @@ def import_web_result(job_id: int, data: WebPlanImportInput, db: Session = Depen
     sources = [str(safe_storage_file(x)) for x in (job.source_files or [])]
     key_to_path = {f"video_{index}": path for index, path in enumerate(sources, 1)}
     plan = data.plan
-    segments = plan.get("segments")
-    if not isinstance(segments, list) or not segments:
-        raise HTTPException(422, "AI 结果缺少有效的 segments 数组")
-    mapped = []
-    for index, segment in enumerate(segments, 1):
-        if not isinstance(segment, dict):
-            raise HTTPException(422, f"第 {index} 个片段格式错误")
-        file_key = segment.get("file_key")
-        if file_key not in key_to_path:
-            raise HTTPException(422, f"第 {index} 个片段引用了未授权的视频文件")
-        mapped.append({
-            "file_path": key_to_path[file_key],
-            "start": segment.get("start"),
-            "end": segment.get("end"),
-            "description": segment.get("description", ""),
-        })
-    normalized = {**plan, "segments": mapped}
     try:
+        normalized = _map_web_plan(plan, sources)
         validated = validate_plan(normalized, sources)
     except Exception as exc:
         raise HTTPException(422, f"网页版 AI 剪辑方案未通过校验：{exc}")
