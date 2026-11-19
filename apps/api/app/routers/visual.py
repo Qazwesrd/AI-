@@ -558,6 +558,9 @@ class PropEvolutionInput(BaseModel):
     clothing_after: str = Field(default="", max_length=4000)
     holder: str = Field(default="", max_length=300)
     confirmed: bool = False
+    evidence: str = Field(default="", max_length=2000)
+    source: str = Field(default="manual", max_length=40)
+    confidence: float = Field(default=1.0, ge=0, le=1)
 
 
 def resolve_asset_state(asset: VisualAsset, chapter_number: Optional[int] = None):
@@ -592,6 +595,9 @@ def append_asset_evolution(asset_id: int, payload: PropEvolutionInput, db: Sessi
         "appearance_after": payload.appearance_after.strip(),
         "clothing_after": payload.clothing_after.strip(),
         "holder": payload.holder.strip(),
+        "evidence": payload.evidence.strip(),
+        "source": payload.source.strip() or "manual",
+        "confidence": payload.confidence,
         "confirmed": payload.confirmed,
         "recorded_at": datetime.utcnow().isoformat(),
     })
