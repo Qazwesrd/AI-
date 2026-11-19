@@ -6,6 +6,7 @@ import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -208,6 +209,21 @@ def list_result_attachments(
         query = query.filter(AIResultAttachment.status == status)
     items = query.order_by(AIResultAttachment.id.desc()).limit(500).all()
     return {"items": [attachment_dict(item) for item in items]}
+
+
+@router.get("/results/attachments/{attachment_id}/file")
+def get_result_attachment_file(attachment_id: int, db: Session = Depends(get_db)):
+    item = db.query(AIResultAttachment).filter(AIResultAttachment.id == attachment_id).first()
+    if item is None:
+        raise HTTPException(404, "AI 结果文件不存在")
+    try:
+        path = safe_storage_file(item.file_path)
+    except Exception as exc:
+        raise HTTPException(410, f"AI 结果文件不存在或路径无效：{exc}")
+    return FileResponse(
+        path, media_type=item.mime_type,
+        headers={"Content-Disposition": f'inline; filename="{item.stored_filename}"'},
+    )
 
 
 @router.post("/results/attachments/{attachment_id}/review")
