@@ -1533,3 +1533,14 @@ def validate_media_output(path: str, expected_duration: Optional[float] = None):
         )
     except Exception as exc:
         raise HTTPException(422, "视频质量检查未通过：" + str(exc)[:1200]) from exc
+
+
+
+@router.get("/quality-scan")
+def scan_media_output_quality(path: str):
+    """Run an opt-in FFmpeg scan for sustained black frames and silence."""
+    try:
+        file_path = safe_storage_file(path)
+        return scan_media_quality(file_path)
+    except Exception as exc:
+        raise HTTPException(422, "媒体质量扫描失败：" + str(exc)[:1200]) from exc

@@ -5,6 +5,7 @@ import urllib.request
 import urllib.error
 import ipaddress
 import socket
+import re
 from urllib.parse import urlparse
 from pathlib import Path
 from cryptography.fernet import Fernet
@@ -232,4 +233,84 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
         "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
         "has_audio": bool(audio_stream),
         "warnings": warnings,
+    }
+
+
+
+def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, silence_noise="-50dB"):
+    """Detect sustained black frames and digital silence; findings are advisory, not automatic failures."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise ValueError("待检测的视频文件不存在")
+
+    info = probe_media(file_path)
+    streams = info.get("streams") or []
+    video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio_stream = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not video_stream:
+        raise ValueError("文件中没有可检测的视频流")
+
+    executable = _bundled_media_path("ffmpeg.exe")
+
+    def run_filter(arguments):
+        result = subprocess.run(
+            [executable, "-hide_banner", "-loglevel", "info", "-i", str(file_path), *arguments],
+            capture_output=True,
+            text=True,
+            timeout=7200,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "")[-2000:]
+            raise RuntimeError("媒体质量扫描失败：" + detail)
+        return (result.stderr or "") + "\\n" + (result.stdout or "")
+
+    black_log = run_filter([
+        "-vf", f"blackdetect=d={float(black_min_duration)}:pix_th=0.10",
+        "-an", "-f", "null", "-"
+    ])
+    black_segments = []
+    for match in re.finditer(
+        r"black_start:([0-9.]+)\\s+black_end:([0-9.]+)\\s+black_duration:([0-9.]+)",
+        black_log,
+    ):
+        black_segments.append({
+            "start_seconds": round(float(match.group(1)), 3),
+            "end_seconds": round(float(match.group(2)), 3),
+            "duration_seconds": round(float(match.group(3)), 3),
+        })
+
+    silence_segments = []
+    if audio_stream:
+        silence_log = run_filter([
+            "-vn", "-af", f"silencedetect=noise={silence_noise}:d={float(silence_min_duration)}",
+            "-f", "null", "-"
+        ])
+        for match in re.finditer(
+            r"silence_start:([0-9.]+).*?silence_end:([0-9.]+)\\s*\\|\\s*silence_duration:([0-9.]+)",
+            silence_log,
+            re.DOTALL,
+        ):
+            silence_segments.append({
+                "start_seconds": round(float(match.group(1)), 3),
+                "end_seconds": round(float(match.group(2)), 3),
+                "duration_seconds": round(float(match.group(3)), 3),
+            })
+
+    warnings = []
+    if black_segments:
+        warnings.append(f"检测到 {len(black_segments)} 段持续黑屏，请检查是否为转场或意外空镜")
+    if silence_segments:
+        warnings.append(f"检测到 {len(silence_segments)} 段持续静音，请确认是否符合剧情需要")
+    if not audio_stream:
+        warnings.append("文件没有音轨，已跳过静音检测")
+    return {
+        "scan_complete": True,
+        "black_frame_threshold_seconds": float(black_min_duration),
+        "silence_threshold_seconds": float(silence_min_duration),
+        "silence_noise_threshold": silence_noise,
+        "has_audio": bool(audio_stream),
+        "black_segments": black_segments,
+        "silence_segments": silence_segments,
+        "warnings": warnings,
+        "note": "黑屏和静音检测结果仅供复核；有意的转场、片头片尾或静音镜头可能被识别为提示。",
     }
