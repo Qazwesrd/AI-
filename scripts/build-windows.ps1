@@ -31,9 +31,19 @@ if (!(Test-Path "$Web\node_modules")) {
 }
 
 # Validate source code before producing an installer.
-Write-Host "[0/4] Running source validation..."
-& $Python -m compileall -q "$Api\app"
-Check-ExitCode "Python source compilation failed"
+Write-Host "[0/4] Running backend regression tests and source validation..."
+$TestDataRoot = Join-Path $env:TEMP ("ai-comic-build-test-" + [guid]::NewGuid().ToString("N"))
+$env:APP_DATA_DIR = $TestDataRoot
+Push-Location $Api
+try {
+    & $Python -m unittest discover -s tests -v
+    Check-ExitCode "Backend regression tests failed"
+    & $Python -m compileall -q "$Api\app"
+    Check-ExitCode "Python source compilation failed"
+} finally {
+    Pop-Location
+    Remove-Item Env:APP_DATA_DIR -ErrorAction SilentlyContinue
+}
 
 $FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
 $FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
