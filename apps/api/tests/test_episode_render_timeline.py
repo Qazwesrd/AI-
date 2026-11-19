@@ -1,6 +1,6 @@
 import unittest
 
-from app.routers.media import build_episode_video_filter
+from app.routers.media import build_episode_video_filter, build_episode_audio_filter
 
 
 class EpisodeRenderTimelineFilterTests(unittest.TestCase):
@@ -41,6 +41,17 @@ class EpisodeRenderTimelineFilterTests(unittest.TestCase):
         self.assertEqual(duration, 23.0)
         self.assertTrue(any("concat=n=2:v=1:a=0" in item for item in filters))
         self.assertTrue(any("xfade=transition=fade" in item for item in filters))
+
+    def test_audio_uses_acrossfade_at_video_transition_boundaries(self):
+        filters, output = build_episode_audio_filter(
+            [1, 2, 3],
+            [
+                {"after_shot_id": 1, "transition": "fade", "duration_seconds": 0.75},
+            ],
+        )
+        self.assertEqual(output, "ax1")
+        self.assertTrue(any("acrossfade=d=0.750" in item for item in filters))
+        self.assertTrue(any("concat=n=2:v=0:a=1" in item for item in filters))
 
     def test_rejects_transition_that_is_too_long(self):
         with self.assertRaises(ValueError):
