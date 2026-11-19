@@ -170,3 +170,20 @@ jobs:
           path: apps/desktop/release/*Setup*.exe
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish Windows installer to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-v1.0.3
+          name: AI漫剧制作大师 Windows 1.0.3
+          body: |
+            Windows 桌面安装包。
+
+            - 包含桌面启动器、本地 API 和 Web 前端。
+            - 包含 FFmpeg / FFprobe 媒体处理组件。
+            - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
+          files: apps/desktop/release/*Setup*.exe
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false
+          make_latest: true
