@@ -6,6 +6,7 @@ import urllib.error
 import ipaddress
 import socket
 import re
+import uuid
 from urllib.parse import urlparse
 from pathlib import Path
 from cryptography.fernet import Fernet
@@ -234,6 +235,41 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
         "has_audio": bool(audio_stream),
         "warnings": warnings,
     }
+
+
+def finalize_rendered_video(source, destination, expected_duration=None, duration_tolerance=2.0, require_audio=False):
+    """Validate a staged video before atomically promoting it to its final path."""
+    source_path = Path(source)
+    destination_path = Path(destination)
+    report = validate_rendered_video(
+        source_path,
+        expected_duration=expected_duration,
+        duration_tolerance=duration_tolerance,
+        require_audio=require_audio,
+    )
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    os.replace(source_path, destination_path)
+    return report
+
+
+def download_validated_video(url, destination, expected_duration=None, duration_tolerance=2.0, require_audio=False):
+    """Download to a private temporary file; expose it only after FFprobe validation."""
+    destination_path = Path(destination)
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination_path.with_name(
+        f".{destination_path.stem}.{uuid.uuid4().hex}.download{destination_path.suffix}"
+    )
+    try:
+        http_download(url, temporary)
+        return finalize_rendered_video(
+            temporary,
+            destination_path,
+            expected_duration=expected_duration,
+            duration_tolerance=duration_tolerance,
+            require_audio=require_audio,
+        )
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 
