@@ -34,6 +34,7 @@ if (!(Test-Path "$Web\node_modules")) {
 Write-Host "[0/4] Running backend regression tests and source validation..."
 $TestDataRoot = Join-Path $env:TEMP ("ai-comic-build-test-" + [guid]::NewGuid().ToString("N"))
 $env:APP_DATA_DIR = $TestDataRoot
+$env:PYTHONIOENCODING = "utf-8"
 Push-Location $Api
 try {
     & $Python -m unittest discover -s tests -v
@@ -43,6 +44,7 @@ try {
 } finally {
     Pop-Location
     Remove-Item Env:APP_DATA_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
 }
 
 $FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
