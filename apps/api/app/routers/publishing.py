@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.publishing import PublishAccount, PublishJob
-from app.services.media_service import safe_storage_file
+from app.services.media_service import safe_storage_file, validate_rendered_video
 
 router = APIRouter(prefix="/api/publishing", tags=["多平台视频发布"])
 
@@ -219,6 +219,15 @@ def create_jobs(data: list[PublishInput], db: Session = Depends(get_db)):
 
         video = validate_media_path(item.video_path, "video")
         cover = validate_media_path(item.cover_path, "cover") if item.cover_path else None
+        try:
+            # Validate the actual media container/streams, not just its filename and existence.
+            # Audio is optional: intentionally silent videos remain publishable.
+            validate_rendered_video(video)
+        except (ValueError, RuntimeError, OSError) as exc:
+            raise HTTPException(
+                400,
+                f"视频文件无法通过发布前完整性检查：{str(exc)[:500]}",
+            ) from exc
 
         account = None
         if item.account_id is not None:
