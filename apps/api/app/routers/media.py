@@ -782,7 +782,7 @@ def render_episode_from_shots(
                     fade_out_start = max(0.0, total_video_duration - start_at - fade_out)
                     track_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={min(fade_out, total_video_duration):.3f}")
                 track_filters.append(f"volume={volume:.3f}")
-                track_filters.append("asetpts=PTS-STARTPTS")
+                track_filters.append(f"asetpts=PTS-STARTPTS+{start_at:.3f}/TB")
                 mix_filters.append(",".join(track_filters) + f"[{track_label}]")
                 mix_labels.append(f"[{track_label}]")
                 mix_index += 1
