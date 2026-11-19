@@ -270,8 +270,16 @@ export default function StoryboardPage() {
         setMessage("视频生成前检查未通过：\n" + preflight.blockers.join("；"));
         return;
       }
-      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
-      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
+      const consistency = await request(`/api/story/episodes/${episode.id}/asset-consistency`) as ConsistencyReport;
+      if (consistency.error_count > 0) {
+        setConsistencyReport(consistency);
+        setMessage("视觉素材一致性检查发现 " + consistency.error_count + " 项错误，已阻止提交视频任务。请先修正跨小说素材或素材分类关联错误。");
+        return;
+      }
+      const consistencyWarnings = consistency.issues.map(issue => `镜头 ${issue.shot_number}：${issue.message}`);
+      const allWarnings = [...preflight.warnings, ...consistencyWarnings];
+      const warningText = allWarnings.length ? "\n\n预检提醒：\n" + allWarnings.join("\n") : "";
+      if (!window.confirm("预检完成：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒；已检查 " + consistency.checked_link_count + " 项素材关联。" + warningText + "\n\n将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
       let done = false;
       let batches = 0;
       let totalCreated = 0;
@@ -325,8 +333,16 @@ export default function StoryboardPage() {
         setMessage("成片合成前检查未通过：\n" + preflight.blockers.join("；"));
         return;
       }
-      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
-      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
+      const consistency = await request(`/api/story/episodes/${episode.id}/asset-consistency`) as ConsistencyReport;
+      if (consistency.error_count > 0) {
+        setConsistencyReport(consistency);
+        setMessage("成片合成前发现 " + consistency.error_count + " 项视觉素材错误，请先修正后再合成。");
+        return;
+      }
+      const consistencyWarnings = consistency.issues.map(issue => `镜头 ${issue.shot_number}：${issue.message}`);
+      const allWarnings = [...preflight.warnings, ...consistencyWarnings];
+      const warningText = allWarnings.length ? "\n\n预检提醒：\n" + allWarnings.join("\n") : "";
+      if (!window.confirm("预检完成：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒；已检查 " + consistency.checked_link_count + " 项素材关联。" + warningText + "\n\n只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
       const query = backgroundMusicPath.trim() ? "?music_path=" + encodeURIComponent(backgroundMusicPath.trim()) : "";
       const result = await request("/api/media/video/episodes/" + episode.id + "/render" + query, { method: "POST" });
       setMessage("第" + episode.episode_number + "集初版视频已合成：" + result.output);
