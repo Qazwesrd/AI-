@@ -605,7 +605,6 @@ def render_episode_from_shots(
         # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
         ffmpeg_args = []
         filters = []
-        audio_labels = []
         actual_durations = []
         input_index = 0
         for index, clip in enumerate(clips):
@@ -635,7 +634,6 @@ def render_episode_from_shots(
                 filters.append(
                     f"[{input_index}:a:0]atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
                 )
-            audio_labels.append(f"[a{index}]")
             input_index += 1
         transition_items = timeline.get("transitions") or []
         try:
