@@ -613,23 +613,37 @@ def render_episode_from_shots(
         filters = []
         actual_durations = []
         input_index = 0
+        trim_by_shot = {
+            int(item["shot_id"]): item
+            for item in (timeline.get("shot_trims") or [])
+        }
         for index, clip in enumerate(clips):
             info = probe_media(clip)
             streams = info.get("streams", [])
-            duration = float((info.get("format") or {}).get("duration") or shots[index].duration_seconds or 5)
-            duration = max(1.0, duration)
+            source_duration = float((info.get("format") or {}).get("duration") or shots[index].duration_seconds or 5)
+            source_duration = max(0.1, source_duration)
+            trim = trim_by_shot.get(shots[index].id, {})
+            trim_start = max(0.0, float(trim.get("start_seconds", 0) or 0))
+            requested_end = trim.get("end_seconds")
+            trim_end = source_duration if requested_end is None else float(requested_end)
+            if trim_start >= source_duration or trim_end > source_duration or trim_end <= trim_start:
+                raise HTTPException(
+                    422,
+                    f"镜头 {shots[index].shot_number} 的裁剪区间超出素材实际时长 {source_duration:.2f} 秒",
+                )
+            duration = trim_end - trim_start
             actual_durations.append(duration)
             ffmpeg_args += ["-i", str(clip)]
             filters.append(
                 f"[{input_index}:v:0]scale=1920:1080:force_original_aspect_ratio=decrease,"
                 f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,"
-                f"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]"
+                f"trim=start={trim_start:.3f}:duration={duration:.3f},setpts=PTS-STARTPTS[v{index}]"
             )
             has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
             if has_audio:
                 filters.append(
                     f"[{input_index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,"
-                    f"atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+                    f"atrim=start={trim_start:.3f}:duration={duration:.3f},asetpts=PTS-STARTPTS[a{index}]"
                 )
             else:
                 input_index += 1
@@ -638,7 +652,7 @@ def render_episode_from_shots(
                     "anullsrc=channel_layout=stereo:sample_rate=48000",
                 ]
                 filters.append(
-                    f"[{input_index}:a:0]atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
+                    f"[{input_index}:a:0]atrim=duration={duration:.3f},asetpts=PTS-STARTPTS[a{index}]"
                 )
             input_index += 1
         transition_items = timeline.get("transitions") or []
@@ -720,7 +734,11 @@ def render_episode_from_shots(
         music_volume = float(timeline.get("music_volume", music_volume))
         music_fade_in = max(0.0, min(30.0, float(timeline.get("music_fade_in_seconds", 1.0))))
         music_fade_out = max(0.0, min(30.0, float(timeline.get("music_fade_out_seconds", 2.0))))
-        if speech_path or music:
+        audio_track_specs = [
+            item for item in (timeline.get("audio_tracks") or [])
+            if isinstance(item, dict) and item.get("enabled", True)
+        ]
+        if speech_path or music or audio_track_specs:
             mixed_output = output.with_name(output.stem + "_mixed.mp4")
             mix_args = ["-i", str(output)]
             mix_filters = ["[0:a]volume=0.35[original]"]
@@ -742,6 +760,32 @@ def render_episode_from_shots(
                     f"{fade_in_filter}{fade_out_filter}[music]"
                 )
                 mix_labels.append("[music]")
+                mix_index += 1
+            for track_index, track in enumerate(audio_track_specs):
+                try:
+                    track_path = safe_storage_file(track.get("file_path", ""))
+                    track_info = probe_media(track_path)
+                except Exception as exc:
+                    raise HTTPException(422, "独立音轨无法读取：" + str(exc)[:300]) from exc
+                if not any(stream.get("codec_type") == "audio" for stream in track_info.get("streams", [])):
+                    raise HTTPException(422, "独立音轨不包含音频流")
+                start_at = max(0.0, min(3600.0, float(track.get("start_seconds", 0) or 0)))
+                volume = max(0.0, min(2.0, float(track.get("volume", 1.0))))
+                fade_in = max(0.0, min(30.0, float(track.get("fade_in_seconds", 0) or 0)))
+                fade_out = max(0.0, min(30.0, float(track.get("fade_out_seconds", 0) or 0)))
+                mix_args += ["-itsoffset", f"{start_at:.3f}", "-i", str(track_path)]
+                track_label = f"track{track_index}"
+                track_filters = [f"[{mix_index}:a]atrim=duration={max(0.1, total_video_duration-start_at):.3f}"]
+                if fade_in > 0:
+                    track_filters.append(f"afade=t=in:st=0:d={fade_in:.3f}")
+                if fade_out > 0:
+                    fade_out_start = max(0.0, total_video_duration - start_at - fade_out)
+                    track_filters.append(f"afade=t=out:st={fade_out_start:.3f}:d={min(fade_out, total_video_duration):.3f}")
+                track_filters.append(f"volume={volume:.3f}")
+                track_filters.append("asetpts=PTS-STARTPTS")
+                mix_filters.append(",".join(track_filters) + f"[{track_label}]")
+                mix_labels.append(f"[{track_label}]")
+                mix_index += 1
             mix_filters.append(
                 "".join(mix_labels)
                 + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2,"
@@ -1818,9 +1862,26 @@ class TimelineTransitionInput(BaseModel):
     duration_seconds: float = Field(default=0.5, ge=0, le=2)
 
 
+class ShotTrimInput(BaseModel):
+    shot_id: int
+    start_seconds: float = Field(default=0, ge=0, le=600)
+    end_seconds: Optional[float] = Field(default=None, gt=0, le=600)
+
+
+class AudioTrackInput(BaseModel):
+    file_path: str = Field(min_length=1, max_length=2000)
+    start_seconds: float = Field(default=0, ge=0, le=3600)
+    volume: float = Field(default=1.0, ge=0, le=2)
+    fade_in_seconds: float = Field(default=0, ge=0, le=30)
+    fade_out_seconds: float = Field(default=0, ge=0, le=30)
+    enabled: bool = True
+
+
 class EpisodeTimelineInput(BaseModel):
     shot_order: list[int]
     transitions: list[TimelineTransitionInput] = Field(default_factory=list)
+    shot_trims: list[ShotTrimInput] = Field(default_factory=list)
+    audio_tracks: list[AudioTrackInput] = Field(default_factory=list, max_length=8)
     intro_title: str = Field(default="", max_length=120)
     outro_title: str = Field(default="", max_length=120)
     music_fade_in_seconds: float = Field(default=1.0, ge=0, le=30)
@@ -1853,6 +1914,8 @@ def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
             "music_fade_in_seconds": 1.0,
             "music_fade_out_seconds": 2.0,
             "music_volume": 0.18,
+            "shot_trims": [],
+            "audio_tracks": [],
         }
     return {
         "episode_id": episode.id,
@@ -1879,6 +1942,22 @@ def save_episode_edit_timeline(
         raise HTTPException(422, "镜头顺序中存在重复镜头")
     if set(data.shot_order) != valid_ids:
         raise HTTPException(422, "镜头顺序必须完整包含本集全部镜头，不能遗漏或加入其他分集镜头")
+    trim_ids = [item.shot_id for item in data.shot_trims]
+    if len(trim_ids) != len(set(trim_ids)):
+        raise HTTPException(422, "同一镜头不能重复设置裁剪区间")
+    if any(shot_id not in valid_ids for shot_id in trim_ids):
+        raise HTTPException(422, "裁剪配置引用了不属于本集的镜头")
+    for trim in data.shot_trims:
+        if trim.end_seconds is not None and trim.end_seconds <= trim.start_seconds:
+            raise HTTPException(422, "镜头裁剪结束时间必须大于开始时间")
+    for track in data.audio_tracks:
+        try:
+            audio_path = safe_storage_file(track.file_path)
+            audio_info = probe_media(audio_path)
+        except Exception as exc:
+            raise HTTPException(422, "音轨文件不存在或路径无效：" + str(exc)[:300]) from exc
+        if not any(stream.get("codec_type") == "audio" for stream in audio_info.get("streams", [])):
+            raise HTTPException(422, "音轨文件不包含音频流")
     transition_ids = [item.after_shot_id for item in data.transitions]
     if len(transition_ids) != len(set(transition_ids)):
         raise HTTPException(422, "同一镜头后不能重复设置转场")
