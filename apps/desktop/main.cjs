@@ -215,6 +215,8 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         ...process.env,
         APP_DATA_DIR: dataDir,
         PYTHONUNBUFFERED: "1",
+        PYTHONIOENCODING: "utf-8",
+        PYTHONUTF8: "1",
         FFMPEG_PATH: ffmpeg,
         FFPROBE_PATH: ffprobe
       }
