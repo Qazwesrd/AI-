@@ -49,6 +49,77 @@ const taskExamples: Record<ToolCategory, string> = {
   video: "请根据以下分镜描述生成视频片段。保持人物外观、服装、场景和镜头方向连续，画面比例与项目设置一致。",
 };
 
+function buildProductionPrompt(input: {
+  category: ToolCategory;
+  title: string;
+  source: string;
+  mode: string;
+  toolName?: string;
+  instruction?: string;
+}) {
+  const { category, title, source, mode, toolName = "", instruction = "" } = input;
+  const style = mode === "concise"
+    ? "表达精炼、结构清楚、避免空话；但不得省略制作所需信息。"
+    : mode === "cinematic"
+      ? "采用电影级视听语言，强化情绪弧线、镜头调度、构图层次、光影质感和节奏。"
+      : "采用专业影视动画制作标准，描述具体、可执行、前后一致，方便后续制作与归档。";
+  const common = [
+    "你是资深 AI 漫剧导演、编剧与视听制作专家。请严格依据输入资料完成任务。",
+    "【任务】\n" + title.trim(),
+    "【原始资料】\n" + (source.trim() || "当前没有提供原文或设定。请先列出需要补充的信息，不要虚构关键设定。"),
+    "【创作与一致性规则】\n1. 尊重原著主线、人物性格、人物关系和事件因果，不擅自改写关键事实。\n2. 区分原文事实、合理推断和新增创意；推断或新增内容必须标注。\n3. 人物姓名、年龄感、脸型、发型、服装、配色、身份标识保持统一。\n4. 场景的空间结构、时间、天气、光源和道具位置保持连续。\n5. 不确定的信息列入“待确认”，不得自行补成事实。\n6. 输出使用中文，专有名词和必要的生成参数可保留英文。",
+    "【质量要求】\n" + style,
+  ];
+  let specialist = "";
+  if (category === "text") {
+    specialist = [
+      "【文本/剧本专用要求】",
+      "先识别本次任务属于剧情分析、人物分析、剧本改编还是对白润色，并按任务目标输出。",
+      "剧情分析需包含事件顺序、时间线、地点、人物动机、冲突、转折、伏笔及因果关系。",
+      "剧本改编需按场次输出：场次编号、内外景、时间、地点、出场人物、动作、对白、旁白、情绪和转场。",
+      "保留原著核心信息与关键情节；对白自然、有角色差异；避免流水账、重复解释和无意义扩写。",
+      "结尾附：新增/删减内容说明、原著一致性检查、待确认事项。",
+    ].join("\n");
+  } else if (category === "image") {
+    const midjourney = /midjourney/i.test(toolName);
+    specialist = [
+      "【图片生成专用要求】",
+      "先判断素材类型：人物、人物三视图、场景、道具、建筑、服装或关键物品；每个主体分别输出独立提示词。",
+      "人物提示词必须包含身份气质、年龄感、面部特征、发型、服装层次、材质、配色、姿态、表情、光线和背景；三视图必须是同一角色的正面/侧面/背面，比例和服装细节严格一致。",
+      "场景提示词必须包含空间布局、前中后景、建筑结构、时间天气、光源方向、氛围和可用于构图的视觉焦点。",
+      "道具提示词必须包含轮廓、尺寸感、材质、结构、磨损/纹样、颜色和独立展示背景。",
+      "画风默认沿用项目已设定风格；没有明确风格时，先给出风格建议，不要混用写实、2D和3D风格。",
+      "输出格式：素材名称｜素材类型｜正向提示词｜负面提示词｜画幅建议｜一致性注意事项。",
+      "避免文字、水印、Logo、畸形肢体、重复人物、错误手指、结构破损和无关元素。",
+      midjourney ? "针对 Midjourney：提示词采用主体+细节+环境+光线+构图+风格的短语结构；参数单独放在末尾，默认建议 --ar 16:9，参数仅作建议，用户可按网页版本调整。" : "提示词使用清晰自然语言，避免堆砌互相冲突的形容词；不假定网站支持特定参数。",
+    ].join("\n");
+  } else if (category === "storyboard") {
+    specialist = [
+      "【分镜专用要求】",
+      "先按场景和动作节拍拆分镜头，保证动作连续、空间关系清楚、情绪递进自然。",
+      "使用表格输出：镜头号｜场景/时间｜景别｜机位/角度｜构图｜画面内容｜人物动作表情｜对白/旁白｜镜头运动｜建议时长｜关联人物/场景/道具｜图片生成提示词。",
+      "每个镜头只表达一个主要视觉动作；明确人物在画面中的位置、视线方向、动作起止状态和道具位置。",
+      "相邻镜头保持轴线、视线、光线方向和人物服装一致；重要动作提供全景/中景/特写的合理衔接。",
+      "分镜图片提示词必须可直接用于图像生成；镜头时长需合理，总时长与场景节奏匹配。",
+      "最后附镜头连续性检查和需要补充的素材清单。",
+    ].join("\n");
+  } else {
+    specialist = [
+      "【视频生成专用要求】",
+      "将每个镜头写成可独立生成的视频提示词，描述主体、动作、场景、时间、光线、构图、景别、机位、镜头运动和情绪。",
+      "明确动作起始状态、连续运动过程和结束状态；避免一个片段包含过多不相关动作。",
+      "人物外观、服装、发型、道具、场景布局必须与参考图和前后镜头一致；不要擅自增加角色或改变空间。",
+      "建议每段 3–8 秒，按工具实际能力调整；说明是否需要首帧/尾帧参考图、图生视频或文生视频。",
+      "输出：镜头编号｜时长建议｜正向视频提示词｜负面提示词｜参考素材｜与前后镜头的衔接说明。",
+      "负面约束包含：人物变脸、服装跳变、肢体扭曲、物体瞬移、画面闪烁、背景结构变化、无意义镜头抖动和字幕水印。",
+      /kling|可灵/i.test(toolName) ? "针对可灵：优先写清主体动作、镜头运动、首尾帧变化与运动幅度，避免含糊的多动作指令。" :
+      /runway/i.test(toolName) ? "针对 Runway：优先使用清晰的主体动作与摄像机运动描述，区分场景运动和镜头运动。" :
+      "不要假定网站支持特定控制参数；将参数建议与自然语言提示词分开。",
+    ].join("\n");
+  }
+  return [...common, specialist, "【最终交付】\n先给出可直接复制到所选 AI 网站的完整提示词；再给出简短执行注意事项。不要声称已经生成文件。"].join("\n\n");
+}
+
 function makeId() {
   return `task-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -211,7 +282,7 @@ export default function AIToolsPage() {
           queued.push({
             id: makeId(), title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`,
             category: stage.category, toolId: target.id,
-            prompt: `${stage.instruction}\n\n【小说章节原文】\n${source}\n\n【统一要求】尊重原著；不确定处明确标记；输出结构清晰，便于 AI 漫剧制作大师整理归档。\n\n【提示词风格】\n${promptQuality}`,
+            prompt: buildProductionPrompt({ category: stage.category, title: `${novelName} · 第${chapter.chapter_number}章 · ${stage.label}`, source, mode: promptMode, toolName: target.name, instruction: stage.instruction }),
             status: "prepared", resultText: "", resultUrl: "", createdAt: new Date().toISOString(),
           });
         }
@@ -303,8 +374,14 @@ export default function AIToolsPage() {
   }, [selectedTool, toolId]);
 
   function buildPrompt() {
-    const quality = promptMode === "concise" ? "请使用简洁、明确、结构化的表达，避免重复。" : promptMode === "cinematic" ? "请采用电影级叙事与视觉表达，强调镜头感、情绪节奏、构图和光影。" : "请采用专业影视制作标准，细节完整、逻辑严谨、可直接进入后续制作流程。";
-    return `${taskExamples[category]}\n\n【任务名称】\n${title.trim()}\n\n【项目资料 / 原文 / 设定】\n${sourceText.trim() || "请在此处补充小说原文、人物设定、场景设定或分镜要求。"}\n\n【提示词风格】\n${quality}\n\n【输出要求】\n请输出可供 AI 漫剧制作大师整理归档的清晰内容；不要省略关键设定。若生成图片或视频，请按当前工具支持的方式提供可下载的原始文件。`;
+    return buildProductionPrompt({
+      category,
+      title,
+      source: sourceText,
+      mode: promptMode,
+      toolName: selectedTool?.name || "",
+      instruction: taskExamples[category],
+    });
   }
 
   async function copyText(value: string) {
