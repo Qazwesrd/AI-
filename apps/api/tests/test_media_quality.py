@@ -67,9 +67,6 @@ class RenderedVideoValidationTests(unittest.TestCase):
                 validate_rendered_video(path)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 
 class AdvancedMediaQualityScanTests(unittest.TestCase):
@@ -131,3 +128,7 @@ class AdvancedMediaQualityScanTests(unittest.TestCase):
             probe.return_value = {"streams": [{"codec_type": "audio"}]}
             with self.assertRaisesRegex(ValueError, "没有可检测的视频流"):
                 scan_media_quality(path)
+
+
+if __name__ == "__main__":
+    unittest.main()
