@@ -5,10 +5,19 @@ from datetime import datetime
 from pathlib import Path
 from importlib import import_module
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, Table, Column, Integer, String, select
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
+
+SCHEMA_VERSION = 1
+schema_migrations = Table(
+    "schema_migrations",
+    Base.metadata,
+    Column("version", Integer, primary_key=True),
+    Column("name", String(160), nullable=False),
+    Column("applied_at", String(40), nullable=False),
+)
 
 APP_ROOT = Path(__file__).resolve().parents[3]
 DATA_ROOT = Path(os.environ.get("APP_DATA_DIR", str(APP_ROOT))).expanduser().resolve()
@@ -231,6 +240,36 @@ def _migrate_missing_columns(backup_path=None):
     return [f"{table.name}.{column.name}" for table, column in missing]
 
 
+
+def get_schema_version():
+    from sqlalchemy import inspect
+    if not inspect(engine).has_table("schema_migrations"):
+        return 0
+    with engine.connect() as connection:
+        value = connection.execute(
+            select(schema_migrations.c.version).order_by(schema_migrations.c.version.desc()).limit(1)
+        ).scalar()
+    return int(value or 0)
+
+
+def _record_schema_version():
+    with engine.begin() as connection:
+        current = connection.execute(
+            select(schema_migrations.c.version).order_by(schema_migrations.c.version.desc()).limit(1)
+        ).scalar()
+        current = int(current or 0)
+        if current > SCHEMA_VERSION:
+            raise RuntimeError(
+                f"数据库结构版本 {current} 高于当前软件支持版本 {SCHEMA_VERSION}，"
+                "为防止降级破坏数据，已停止启动。"
+            )
+        if current < 1:
+            connection.execute(schema_migrations.insert().values(
+                version=1,
+                name="baseline_schema",
+                applied_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            ))
+
 def init_database():
     print("正在注册数据库模型……")
 
@@ -262,6 +301,7 @@ def init_database():
     try:
         Base.metadata.create_all(bind=engine)
         _migrate_missing_columns(backup_path=backup)
+        _record_schema_version()
     except Exception as migration_error:
         rollback_message = ""
         try:
