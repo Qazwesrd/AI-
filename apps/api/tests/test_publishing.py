@@ -1,7 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
@@ -63,6 +63,38 @@ class PublishingInputTests(unittest.TestCase):
             video_path="/storage/publishing/video/example.mp4",
         )
         self.assertIsNone(payload.cover_path)
+
+    @patch("app.routers.publishing.validate_rendered_video")
+    def test_corrupt_video_is_rejected_before_publish_job_creation(self, validate):
+        validate.side_effect = ValueError("FFprobe 无法确认导出视频时长")
+        with tempfile.TemporaryDirectory(dir=str(STORAGE)) as folder:
+            video = Path(folder) / "corrupt.mp4"
+            video.write_bytes(b"x" * 2048)
+            with self.assertRaises(HTTPException) as raised:
+                create_jobs(
+                    [PublishInput(platform="youtube", video_path=str(video))],
+                    db=Mock(),
+                )
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("完整性检查", raised.exception.detail)
+        self.assertIn("无法确认", raised.exception.detail)
+
+    @patch("app.routers.publishing.validate_rendered_video")
+    def test_valid_silent_video_is_allowed_for_manual_publishing(self, validate):
+        validate.return_value = {
+            "valid": True, "has_audio": False, "warnings": ["没有音频流"]
+        }
+        with tempfile.TemporaryDirectory(dir=str(STORAGE)) as folder:
+            video = Path(folder) / "silent.mp4"
+            video.write_bytes(b"x" * 2048)
+            db = Mock()
+            result = create_jobs(
+                [PublishInput(platform="youtube", video_path=str(video))],
+                db=db,
+            )
+        self.assertTrue(result["success"])
+        validate.assert_called_once()
+        self.assertEqual(Path(validate.call_args.args[0]).name, "silent.mp4")
 
 
 if __name__ == "__main__":
