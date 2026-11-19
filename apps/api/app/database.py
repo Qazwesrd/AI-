@@ -113,23 +113,33 @@ def _backup_database_before_migration():
 
 
 def _restore_database_backup(backup_path: Path):
-    """Restore a pre-migration SQLite snapshot after a failed schema upgrade."""
+    """Restore a pre-migration SQLite snapshot without replacing an open Windows file."""
     if not backup_path or not Path(backup_path).is_file():
         raise RuntimeError("找不到迁移前数据库备份，无法自动回滚")
+
     engine.dispose()
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = DATABASE_PATH.with_name(
-        DATABASE_PATH.name + f".rollback-{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}.tmp"
-    )
+
+    # Replacing an open SQLite file with os.replace is unreliable on Windows.
+    # SQLite's backup API restores the snapshot into the existing database file
+    # and handles the destination journal safely.
+    source = sqlite3.connect(str(backup_path), timeout=30)
+    destination = sqlite3.connect(str(DATABASE_PATH), timeout=30)
     try:
-        shutil.copy2(backup_path, temporary)
-        # Remove stale WAL sidecars before atomically replacing the main database.
-        for suffix in ("-wal", "-shm"):
-            Path(str(DATABASE_PATH) + suffix).unlink(missing_ok=True)
-        os.replace(temporary, DATABASE_PATH)
+        destination.execute("PRAGMA journal_mode=DELETE")
+        source.backup(destination)
+        destination.commit()
+        integrity = destination.execute("PRAGMA integrity_check").fetchone()
+        if not integrity or integrity[0] != "ok":
+            raise RuntimeError(f"恢复后的数据库完整性检查失败：{integrity}")
     finally:
-        temporary.unlink(missing_ok=True)
-        engine.dispose()
+        destination.close()
+        source.close()
+
+    for suffix in ("-wal", "-shm"):
+        Path(str(DATABASE_PATH) + suffix).unlink(missing_ok=True)
+
+    engine.dispose()
 
 
 def _pending_schema_changes():

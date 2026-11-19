@@ -90,7 +90,8 @@ const navigation = [
       ["🗄️", "素材库", "/assets"],
       ["🔧", "网络与付费权限", "/ai-center"],
       ["💾", "项目数据备份与恢复", "/backup-center"],
-      ["🩺", "系统运行诊断", "/system-diagnostics"]
+      ["🩺", "系统运行诊断", "/system-diagnostics"],
+      ["📘", "使用说明书", "/help"]
     ]
   }
 ];
@@ -271,7 +272,9 @@ export default function Home() {
                   ["📖", "小说解析", "/novels"],
                   ["👥", "人物识别", "/visual-studio"],
                   ["🎞️", "智能分镜", "/storyboard"],
-                  ["🎥", "视频生成", "/media-studio"]
+                  ["🎥", "视频生成", "/media-studio"],
+                  ["🧭", "统一任务", "/tasks"],
+                  ["📘", "使用说明", "/help"]
                 ].map(([icon, name, href]) => (
                   <a
                     href={href}

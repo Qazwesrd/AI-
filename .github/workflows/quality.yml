@@ -58,7 +58,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Check Electron main and preload syntax
+      - name: Check Electron main, preload and manual capture syntax
         run: |
           node --check apps/desktop/main.cjs
           node --check apps/desktop/preload.cjs
+          node --check apps/desktop/capture-manual-screenshots.cjs

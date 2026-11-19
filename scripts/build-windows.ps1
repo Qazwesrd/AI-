@@ -144,6 +144,107 @@ if (!(Test-Path "$Web\.next\static")) {
 
 Write-Host "Frontend standalone build created."
 
+# Start the freshly built local services and capture real UI screenshots for the Chinese manual.
+Write-Host "[3.4/4] Capturing application screenshots and generating the PDF manual..."
+$ManualDir = Join-Path $Root "docs\manual"
+$ManualImageDir = Join-Path $ManualDir "images"
+$ManualPdf = Join-Path $ManualDir "AI漫剧制作大师-使用说明书.pdf"
+$ManualDataDir = Join-Path $env:TEMP ("ai-comic-manual-data-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $ManualImageDir -Force | Out-Null
+New-Item -ItemType Directory -Path $ManualDataDir -Force | Out-Null
+$ApiLog = Join-Path $ManualDataDir "api.log"
+$ApiErrorLog = Join-Path $ManualDataDir "api-error.log"
+$WebLog = Join-Path $ManualDataDir "web.log"
+$WebErrorLog = Join-Path $ManualDataDir "web-error.log"
+$ApiProcess = $null
+$WebProcess = $null
+$ManualCaptureSuccess = $false
+$OldAppDataDir = $env:APP_DATA_DIR
+$OldFfmpegPath = $env:FFMPEG_PATH
+$OldFfprobePath = $env:FFPROBE_PATH
+$OldPort = $env:PORT
+$OldHostname = $env:HOSTNAME
+$OldApiBaseUrl = $env:NEXT_PUBLIC_API_BASE_URL
+$OldPythonIoEncoding = $env:PYTHONIOENCODING
+$OldPythonUtf8 = $env:PYTHONUTF8
+try {
+    $env:APP_DATA_DIR = $ManualDataDir
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
+    $env:FFMPEG_PATH = $FfmpegSource
+    $env:FFPROBE_PATH = $FfprobeSource
+    $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
+
+    $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+    $StandaloneRoot = Join-Path $Web ".next\standalone"
+    $StandaloneStatic = Join-Path $StandaloneRoot ".next\static"
+    New-Item -ItemType Directory -Path $StandaloneStatic -Force | Out-Null
+    Copy-Item (Join-Path $Web ".next\static\*") $StandaloneStatic -Recurse -Force
+    if (Test-Path (Join-Path $Web "public")) {
+        $StandalonePublic = Join-Path $StandaloneRoot "public"
+        New-Item -ItemType Directory -Path $StandalonePublic -Force | Out-Null
+        Copy-Item (Join-Path $Web "public\*") $StandalonePublic -Recurse -Force
+    }
+    $WebServer = Join-Path $StandaloneRoot "server.js"
+    $env:PORT = "3000"
+    $env:HOSTNAME = "127.0.0.1"
+    $env:NEXT_PUBLIC_API_BASE_URL = "http://127.0.0.1:8000"
+    $WebProcess = Start-Process -FilePath $NodeCommand.Source -ArgumentList @("server.js") -WorkingDirectory (Split-Path $WebServer) -PassThru -WindowStyle Hidden -RedirectStandardOutput $WebLog -RedirectStandardError $WebErrorLog
+
+    $Ready = $false
+    for ($attempt = 1; $attempt -le 120; $attempt++) {
+        if ($ApiProcess.HasExited) {
+            $ApiDetails = (Get-Content $ApiErrorLog -Raw -ErrorAction SilentlyContinue) + (Get-Content $ApiLog -Raw -ErrorAction SilentlyContinue)
+            throw "Local API exited before manual screenshots could be captured. API diagnostics: $ApiDetails"
+        }
+        if ($WebProcess.HasExited) {
+            $WebDetails = (Get-Content $WebErrorLog -Raw -ErrorAction SilentlyContinue) + (Get-Content $WebLog -Raw -ErrorAction SilentlyContinue)
+            throw "Web server exited before manual screenshots could be captured. Web diagnostics: $WebDetails"
+        }
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:8000/health" -TimeoutSec 2
+            $webResponse = Invoke-WebRequest -Uri "http://127.0.0.1:3000" -TimeoutSec 2
+            if ($health.status -eq "ok" -and $webResponse.StatusCode -eq 200) { $Ready = $true; break }
+        } catch { Start-Sleep -Seconds 1 }
+    }
+    if (!$Ready) { throw "Local API and web frontend did not become ready for manual screenshots." }
+
+    $ElectronCommand = Join-Path $Desktop "node_modules\.bin\electron.cmd"
+    $CaptureScript = Join-Path $Desktop "capture-manual-screenshots.cjs"
+    if (!(Test-Path $ElectronCommand) -or !(Test-Path $CaptureScript)) { throw "Electron screenshot capture tool is missing." }
+    & $ElectronCommand $CaptureScript $ManualDir
+    Check-ExitCode "Capturing screenshots and rendering the PDF manual failed"
+
+    $ExpectedScreenshots = 17
+    $CapturedScreenshots = @(Get-ChildItem $ManualImageDir -File -Filter "*.png")
+    if ($CapturedScreenshots.Count -ne $ExpectedScreenshots) {
+        throw "Expected $ExpectedScreenshots real application screenshots; captured $($CapturedScreenshots.Count)."
+    }
+    if (!(Test-Path $ManualPdf) -or (Get-Item $ManualPdf).Length -lt 100KB) {
+        throw "The illustrated PDF user manual was not generated correctly."
+    }
+    Write-Host "Captured $($CapturedScreenshots.Count) application screenshots and generated $ManualPdf"
+    $ManualCaptureSuccess = $true
+} finally {
+    if ($WebProcess -and !$WebProcess.HasExited) { Stop-Process -Id $WebProcess.Id -Force -ErrorAction SilentlyContinue }
+    if ($ApiProcess -and !$ApiProcess.HasExited) { Stop-Process -Id $ApiProcess.Id -Force -ErrorAction SilentlyContinue }
+    if ($null -eq $OldAppDataDir) { Remove-Item Env:APP_DATA_DIR -ErrorAction SilentlyContinue } else { $env:APP_DATA_DIR = $OldAppDataDir }
+    if ($null -eq $OldFfmpegPath) { Remove-Item Env:FFMPEG_PATH -ErrorAction SilentlyContinue } else { $env:FFMPEG_PATH = $OldFfmpegPath }
+    if ($null -eq $OldFfprobePath) { Remove-Item Env:FFPROBE_PATH -ErrorAction SilentlyContinue } else { $env:FFPROBE_PATH = $OldFfprobePath }
+    if ($null -eq $OldPort) { Remove-Item Env:PORT -ErrorAction SilentlyContinue } else { $env:PORT = $OldPort }
+    if ($null -eq $OldHostname) { Remove-Item Env:HOSTNAME -ErrorAction SilentlyContinue } else { $env:HOSTNAME = $OldHostname }
+    if ($null -eq $OldApiBaseUrl) { Remove-Item Env:NEXT_PUBLIC_API_BASE_URL -ErrorAction SilentlyContinue } else { $env:NEXT_PUBLIC_API_BASE_URL = $OldApiBaseUrl }
+    if ($null -eq $OldPythonIoEncoding) { Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue } else { $env:PYTHONIOENCODING = $OldPythonIoEncoding }
+    if ($null -eq $OldPythonUtf8) { Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue } else { $env:PYTHONUTF8 = $OldPythonUtf8 }
+    if ($ManualCaptureSuccess) {
+        Remove-Item $ManualDataDir -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Warning "Manual capture failed; diagnostic logs were preserved at $ManualDataDir"
+        if (Test-Path $ApiErrorLog) { Get-Content $ApiErrorLog | Write-Host }
+        if (Test-Path $WebErrorLog) { Get-Content $WebErrorLog | Write-Host }
+    }
+}
+
 # Generate a branded futuristic application icon before packaging.
 Write-Host "[3.5/4] Creating application icon..."
 Add-Type -AssemblyName System.Drawing
@@ -212,6 +313,53 @@ $Installers = @(Get-ChildItem $Release -File -Filter "*.exe")
 if ($Installers.Count -eq 0) {
     throw "No installer EXE was generated."
 }
+
+# Assemble the single-click local testing ZIP with installer, checksums and illustrated manual.
+$DesktopPackage = Get-Content (Join-Path $Desktop "package.json") -Raw | ConvertFrom-Json
+$BundleName = "AI漫剧制作大师-本地测试包-$($DesktopPackage.version)"
+$BundleZip = Join-Path $Release "$BundleName.zip"
+$BundleStage = Join-Path $Release ("bundle-stage-" + [guid]::NewGuid().ToString("N"))
+$InstallFolder = Join-Path $BundleStage "安装程序"
+$GuideFolder = Join-Path $BundleStage "使用说明书"
+New-Item -ItemType Directory -Path $InstallFolder -Force | Out-Null
+New-Item -ItemType Directory -Path $GuideFolder -Force | Out-Null
+$InstallerForBundle = $Installers | Where-Object { $_.Name -match "Setup" } | Select-Object -First 1
+if (!$InstallerForBundle) { throw "The Windows Setup installer is missing from the release folder." }
+Copy-Item $InstallerForBundle.FullName $InstallFolder -Force
+$InstallerHashFile = Join-Path $Release ($InstallerForBundle.Name + ".sha256")
+$InstallerHash = (Get-FileHash -LiteralPath $InstallerForBundle.FullName -Algorithm SHA256).Hash
+"$InstallerHash  $($InstallerForBundle.Name)" | Set-Content -LiteralPath $InstallerHashFile -Encoding ascii
+Copy-Item $InstallerHashFile $InstallFolder -Force
+Copy-Item $ManualPdf $GuideFolder -Force
+Copy-Item (Join-Path $ManualDir "manual.html") $GuideFolder -Force
+Copy-Item $ManualImageDir (Join-Path $GuideFolder "images") -Recurse -Force
+$BundleReadme = @"
+AI漫剧制作大师 Windows 本地测试包 $($DesktopPackage.version)
+
+1. 先打开“使用说明书\AI漫剧制作大师-使用说明书.pdf”阅读安装与首次启动说明。
+2. 运行“安装程序\$($InstallerForBundle.Name)”并按向导安装。
+3. 安装完成后从桌面快捷方式打开软件。
+4. 首次使用请配置 AI 服务商；第三方 AI 费用、账号权限和额度由用户自行确认。
+5. 建议先用少量测试小说和素材验证流程，再导入重要项目。
+6. “使用说明书\images”包含本次构建时从实际软件页面采集的界面截图。
+7. 安装程序 SHA-256：$InstallerHash
+
+重要提醒：
+- 此 ZIP 是 Windows 安装程序和使用说明书的组合包，不是源码包。
+- 正式使用前请在“项目数据备份与恢复中心”创建完整工作空间备份。
+- 网页版第三方 AI 需要用户手动提交任务并导回结果；不会自动控制第三方网页。
+- 若付费任务状态不确定，先在服务商后台核实，避免重复扣费。
+"@
+Set-Content -LiteralPath (Join-Path $BundleStage "测试前必读.txt") -Value $BundleReadme -Encoding utf8
+if (Test-Path $BundleZip) { Remove-Item $BundleZip -Force }
+Compress-Archive -Path (Join-Path $BundleStage "*") -DestinationPath $BundleZip -CompressionLevel Optimal -Force
+Remove-Item $BundleStage -Recurse -Force
+if (!(Test-Path $BundleZip) -or (Get-Item $BundleZip).Length -lt 1MB) { throw "The combined installer and manual ZIP was not created correctly." }
+$BundleHash = (Get-FileHash -LiteralPath $BundleZip -Algorithm SHA256).Hash
+"$BundleHash  $([System.IO.Path]::GetFileName($BundleZip))" | Set-Content -LiteralPath "$BundleZip.sha256" -Encoding ascii
+Write-Host "Testing bundle: $BundleZip"
+Write-Host ("Bundle size: {0} MB" -f [math]::Round((Get-Item $BundleZip).Length / 1MB, 2))
+Write-Host "Bundle SHA256: $BundleHash"
 
 Write-Host "========== BUILD SUCCESS =========="
 

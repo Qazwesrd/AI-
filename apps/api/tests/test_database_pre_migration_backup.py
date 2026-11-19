@@ -1,12 +1,26 @@
 import sqlite3
 import tempfile
+from contextlib import contextmanager
 import unittest
 from unittest.mock import patch
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.pool import NullPool
 
 from app import database
+
+
+
+@contextmanager
+def sqlite_connection(path):
+    """Close SQLite handles explicitly; sqlite3's connection context manager does not close."""
+    connection = sqlite3.connect(path)
+    try:
+        yield connection
+        connection.commit()
+    finally:
+        connection.close()
 
 
 class DatabasePreMigrationBackupTests(unittest.TestCase):
@@ -16,7 +30,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             db_path = root / "existing.db"
             storage_path = root / "storage"
 
-            with sqlite3.connect(db_path) as connection:
+            with sqlite_connection(db_path) as connection:
                 connection.execute(
                     "CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
                 )
@@ -31,6 +45,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
 
@@ -45,7 +60,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 backups = list(backup_dir.glob("*.db"))
                 self.assertEqual(len(backups), 1)
 
-                with sqlite3.connect(backups[0]) as backup:
+                with sqlite_connection(backups[0]) as backup:
                     backup_tables = {
                         row[0]
                         for row in backup.execute(
@@ -68,7 +83,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 self.assertIn("legacy_marker", live_tables)
                 self.assertGreater(len(live_tables), 1)
 
-                with sqlite3.connect(db_path) as live:
+                with sqlite_connection(db_path) as live:
                     self.assertEqual(
                         live.execute(
                             "SELECT value FROM legacy_marker WHERE id=1"
@@ -86,7 +101,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             root = Path(temp)
             db_path = root / "existing.db"
             storage_path = root / "storage"
-            with sqlite3.connect(db_path) as connection:
+            with sqlite_connection(db_path) as connection:
                 connection.execute(
                     "CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
                 )
@@ -101,6 +116,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
             try:
@@ -111,7 +127,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, "已自动恢复迁移前数据库备份"):
                         database.init_database()
 
-                with sqlite3.connect(db_path) as restored:
+                with sqlite_connection(db_path) as restored:
                     tables = {
                         row[0] for row in restored.execute(
                             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -141,6 +157,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
             try:
@@ -167,6 +184,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
             try:
@@ -176,7 +194,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 database.init_database()
                 database.init_database()
                 self.assertEqual(database.get_schema_version(), 1)
-                with sqlite3.connect(db_path) as connection:
+                with sqlite_connection(db_path) as connection:
                     rows = connection.execute(
                         "SELECT version, name FROM schema_migrations ORDER BY version"
                     ).fetchall()

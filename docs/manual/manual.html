@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI漫剧制作大师使用说明书</title>
+<style>
+@page{size:A4;margin:16mm 15mm 17mm}*{box-sizing:border-box}body{font-family:"Microsoft YaHei","Noto Sans CJK SC",Arial,sans-serif;color:#1d2030;line-height:1.72;font-size:10.5pt;margin:0}h1,h2,h3{line-height:1.35;color:#30205e}h1{font-size:27pt;margin:0 0 10mm}h2{font-size:19pt;border-bottom:2px solid #8b5cf6;padding-bottom:3mm;margin:0 0 5mm}h3{font-size:13pt;margin:5mm 0 2mm}.cover{height:245mm;display:flex;flex-direction:column;justify-content:center;background:linear-gradient(145deg,#100b2b,#33206d 55%,#071c39);color:#fff;padding:18mm;border-radius:8mm}.cover h1{color:#fff;font-size:32pt}.cover p{color:#e5ddff;font-size:13pt}.pill{display:inline-block;border:1px solid #c4b5fd;border-radius:20px;padding:2mm 5mm;color:#ede9fe;font-size:9pt;width:max-content}.page{page-break-before:always}.lead{font-size:12pt;color:#4b4564}.note{background:#f3efff;border-left:4px solid #8b5cf6;padding:4mm 5mm;margin:4mm 0}.warn{background:#fff7e8;border-left:4px solid #e5a32b;padding:4mm 5mm;margin:4mm 0}.steps li{margin:2mm 0}figure{margin:5mm 0 7mm;page-break-inside:avoid}figure img{width:100%;max-height:150mm;object-fit:contain;border:1px solid #d8d2e8;border-radius:3mm;background:#09091b}figcaption{font-size:9pt;color:#6b6680;margin-top:2mm}.small{font-size:9pt;color:#625d70}.toc li{margin:2mm 0}table{width:100%;border-collapse:collapse;margin:4mm 0}td,th{border:1px solid #ddd6ee;padding:2.5mm;text-align:left;vertical-align:top}th{background:#f1edfb}.footer{margin-top:12mm;border-top:1px solid #ddd6ee;padding-top:3mm;color:#777;font-size:8.5pt}
+</style>
+</head>
+<body>
+<section class="cover">
+<span class="pill">WINDOWS DESKTOP · 本地测试版使用指南</span>
+<h1>AI漫剧制作大师<br>使用说明书</h1>
+<p>从小说导入、剧情分析、人物与场景素材，到剧本分镜、视频制作和发布。</p>
+<p>本手册按软件实际页面整理，截图由本次 Windows 构建流程自动从应用界面采集。</p>
+<p class="small">版本：1.0.5（本次测试包）　|　语言：简体中文</p>
+</section>
+<section class="page">
+<h2>目录与开始前准备</h2>
+<ol class="toc"><li>软件安装与首次启动</li><li>首页工作台与项目创建</li><li>小说导入与深度分析</li><li>人物、场景、道具与素材库</li><li>剧本、分集和智能分镜</li><li>网页版 AI 协作与结果导入</li><li>视频剪辑、配音和字幕</li><li>统一任务中心</li><li>多平台发布与成片检查</li><li>AI 模型、网络和费用设置</li><li>备份恢复、系统诊断与故障排查</li></ol>
+<div class="note"><b>推荐顺序：</b>先安装并启动软件 → 配置 AI 服务 → 创建项目并导入小说 → 分析剧情 → 确认人物/场景/道具 → 制作剧本和分镜 → 生成视频 → 检查成片 → 发布。</div>
+<h3>开始前准备</h3>
+<ul><li>Windows 10/11 64 位电脑；建议预留充足磁盘空间，视频素材会占用较多空间。</li><li>AI 服务商账号及 API Key（如果使用 API）；网页版 AI 可按软件提示手动交接。</li><li>稳定网络连接；图片、视频和语音服务是否可用取决于服务商、地区、额度和账号权限。</li><li>重要项目定期创建完整工作空间归档，并将归档另存到安全位置。</li></ul>
+<div class="warn"><b>费用与安全：</b>软件不会自动购买、充值或替你同意付费。提交付费任务前请确认服务商、模型和预计费用。若任务状态不确定，先到服务商后台核实是否已接单，不要盲目重复提交。</div>
+</section>
+<section class="page">
+<h2>1. 软件安装与首次启动</h2>
+<ol class="steps"><li>解压本 ZIP 文件到本地文件夹。</li><li>双击 <b>AI漫剧制作大师-Setup-1.0.5.exe</b>，按安装向导选择安装位置。</li><li>安装完成后，从桌面快捷方式或 Windows 开始菜单打开软件。</li><li>首次启动会自动启动本地 API 与网页界面；请等待首页出现。</li><li>如果启动失败，先查看错误窗口，再按本手册“系统诊断”章节排查。</li></ol>
+<div class="note">本程序是 Windows 桌面应用，前端和本地 API 已随安装包一起提供。正常使用不需要手动打开两个终端。</div>
+<figure><img src="images/01-home.png"><figcaption>图 1：首页工作台（实际程序截图）</figcaption></figure>
+<h3>首页各区域是什么意思</h3><ul><li>左侧导航：进入小说、素材、AI、分镜、剪辑、任务、发布和系统管理。</li><li>功能卡片：常用制作入口。</li><li>创作工作台：开始创建项目或继续常见制作任务。</li><li>系统状态：查看本地服务、AI 服务和媒体组件入口提示。</li><li>页面左下角“使用说明”：从任意功能页面返回本手册。</li></ul>
+</section>
+<section class="page">
+<h2>2. 首页工作台与项目创建</h2>
+<figure><img src="images/02-novels.png"><figcaption>图 2：小说与项目管理页面</figcaption></figure>
+<ol class="steps"><li>首页点击“创建新项目”，或左侧选择“小说创作 / 项目管理”。</li><li>新建项目并填写项目名称、题材等信息。</li><li>进入小说管理，导入 TXT 文件；导入后检查章节数量、章节标题和正文。</li><li>选择项目后再开展分析、素材制作和分镜工作，避免把结果存入错误项目。</li></ol>
+<p>项目是小说、章节、人物、场景、道具、剧本、分镜、视频和任务记录的归属单位。一个项目内的素材尽量保持统一管理。</p>
+</section>
+<section class="page">
+<h2>3. 小说导入与深度分析</h2>
+<figure><img src="images/03-analysis.png"><figcaption>图 3：小说深度分析页面</figcaption></figure>
+<ol class="steps"><li>打开小说深度分析与剧情审核。</li><li>选择项目、小说和章节范围。</li><li>按需要选择分析任务，检查分析要求和模型配置。</li><li>确认后提交；分析过程中可到任务中心查看进度。</li><li>分析完成后核对人物、事件、时间线、关系、地点、伏笔和世界观，不确定内容应保留待确认状态。</li></ol>
+<div class="warn">AI 分析是辅助整理，不应把原文没有的信息当作事实。重要人物关系、时间线和剧情证据请人工确认。</div>
+</section>
+<section class="page">
+<h2>4. 人物、场景、道具与素材库</h2>
+<figure><img src="images/04-visual-studio.png"><figcaption>图 4：视觉素材工作室</figcaption></figure>
+<figure><img src="images/05-assets.png"><figcaption>图 5：素材库</figcaption></figure>
+<ol class="steps"><li>进入视觉素材工作室，选择人物、场景或道具类别。</li><li>检查 AI 生成的提示词、画风和参考信息。</li><li>选择已配置的图片服务商，或使用网页版 AI 协作流程。</li><li>将生成结果导入软件，预览并确认后再归档。</li><li>在素材库搜索、查看、下载和管理文件；在剧情状态追踪中检查版本变化。</li></ol>
+<p>人物素材重点关注脸型、年龄感、发型、服装、伤势和装备；场景关注空间结构、光线与时间；道具关注外观、材质、损坏状态和持有人。</p>
+<figure><img src="images/06-asset-timeline.png"><figcaption>图 6：人物与素材状态时间线</figcaption></figure>
+</section>
+<section class="page">
+<h2>5. 剧本、分集和智能分镜</h2>
+<figure><img src="images/07-storyboard.png"><figcaption>图 7：剧本与分镜页面</figcaption></figure>
+<ol class="steps"><li>选择小说和章节，准备剧本或分集计划。</li><li>检查每集的剧情主线、人物行为和场景转换。</li><li>检查每个镜头的景别、机位、构图、动作、对白、时长和素材关联。</li><li>按需要合并、拆分和调整镜头顺序。</li><li>缺少人物/场景/道具或版本冲突时先处理提醒；已经确认的素材不要被未确认结果覆盖。</li></ol>
+<div class="note">漫剧集时长目标约 2 分钟，允许范围按项目规划控制在 90–150 秒；具体分集由剧情内容决定，不强制一章只对应一集。</div>
+</section>
+<section class="page">
+<h2>6. 网页版 AI 协作与结果导入</h2>
+<figure><img src="images/08-ai-tools.png"><figcaption>图 8：AI 网页工具协同中心</figcaption></figure>
+<figure><img src="images/09-ai-collaboration.png"><figcaption>图 9：网页版 AI 协作执行中心</figcaption></figure>
+<ol class="steps"><li>选择文本、图片或视频任务类别和目标工具。</li><li>选择项目、小说或章节，生成包含上下文和输出格式的任务提示词。</li><li>点击打开目标 AI 网页；按页面指引手动复制提示词并提交。</li><li>将 AI 返回的文本、JSON、图片、视频、音频或字幕文件导入软件。</li><li>核对项目归属、文件类型和内容，确认后再保存到正式素材。</li></ol>
+<div class="warn">打开第三方网页不代表网页能自动读取本地项目，也不代表软件会自动点击、上传或控制第三方网站。是否支持 API、会员权限和服务额度由服务商决定。</div>
+</section>
+<section class="page">
+<h2>7. 视频剪辑、配音和字幕</h2>
+<figure><img src="images/10-video-editor.png"><figcaption>图 10：AI 视频剪辑页面</figcaption></figure>
+<figure><img src="images/11-media-studio.png"><figcaption>图 11：视频与媒体制作页面</figcaption></figure>
+<ol class="steps"><li>进入 AI 视频剪辑，上传原视频或选择已有素材。</li><li>用文字说明剪辑目标、保留内容、节奏和镜头要求。</li><li>按需要选择字幕文件、字幕语言、配音和背景音乐。</li><li>检查原声替换或混音模式；不选择外部音轨时应确认是否保留原声。</li><li>生成预览并检查成片。可使用视频质量检查与黑屏/静音扫描辅助发现问题。</li></ol>
+<p>质量扫描结果是提醒，不会自动删除黑屏转场或静音镜头；需要人工判断其是否符合创作意图。</p>
+</section>
+<section class="page">
+<h2>8. 统一任务中心</h2>
+<figure><img src="images/12-tasks.png"><figcaption>图 12：统一任务中心</figcaption></figure>
+<ul><li>搜索：按任务标题、模型、小说或错误信息定位任务。</li><li>模块筛选：区分小说分析、视觉生成、视频与配音。</li><li>状态筛选：查看进行中、已完成、失败、暂停、部分完成或需要核实的任务。</li><li>操作：按任务类型支持暂停、恢复、刷新、取消或重新排队。</li></ul>
+<div class="warn">如果任务标记为状态不确定/需要核实，先查看服务商后台。不要因为软件没有收到结果就直接重复提交付费请求。</div>
+</section>
+<section class="page">
+<h2>9. 多平台发布与成片检查</h2>
+<figure><img src="images/13-publishing.png"><figcaption>图 13：多平台视频发布中心</figcaption></figure>
+<ol class="steps"><li>选择成片并选择目标平台。</li><li>检查平台规格提示：画幅、分辨率、时长、封面、标题和描述。</li><li>根据平台当前支持方式完成上传或手动发布。</li><li>记录发布结果、视频链接和后续状态。</li></ol>
+<p>平台规格和发布接口可能变化，始终以平台当前页面与官方规则为准。若某个平台只支持准备素材或手动发布，不应将其理解为已实现自动上传。</p>
+</section>
+<section class="page">
+<h2>10. AI 模型、网络和费用设置</h2>
+<figure><img src="images/14-ai-center.png"><figcaption>图 14：AI 模型管理中心</figcaption></figure>
+<ol class="steps"><li>打开 AI 模型管理，选择服务商并填写服务商要求的账号信息、API Key 或模型设置。</li><li>保存后执行连通性或模型验证。</li><li>分别检查全局网络开关、付费 API 许可和服务商授权状态。</li><li>查看 AI 调用记录和可用额度；服务商未提供的数据可能无法显示。</li></ol>
+<div class="warn">API Key 不要截图发给他人，也不要写进公开文档。软件不会替你自动购买、充值或开启未知费用。</div>
+</section>
+<section class="page">
+<h2>11. 备份恢复、系统诊断与故障排查</h2>
+<figure><img src="images/15-backup-center.png"><figcaption>图 15：备份与恢复中心</figcaption></figure>
+<figure><img src="images/16-system-diagnostics.png"><figcaption>图 16：系统运行诊断</figcaption></figure>
+<ul><li>数据库备份：保存项目结构和数据库记录。</li><li>完整工作空间归档：包含数据库及 storage 中的素材、视频、音频、字幕和本地配置。</li><li>恢复：先创建安全归档；有活动任务时可能拒绝恢复。恢复期间不要关闭软件。</li><li>系统诊断：检查数据库、磁盘空间、FFmpeg/FFprobe、本地 API、AI 网络与任务状态。</li></ul>
+<div class="warn">完整工作空间归档可能包含本地密钥文件。归档不是加密压缩包，请妥善保管，不要公开分享。</div>
+</section>
+<section class="page">
+<h2>12. 使用说明页面与常见问题</h2>
+<figure><img src="images/17-help.png"><figcaption>图 17：软件内置使用说明页面</figcaption></figure>
+<table><tr><th>问题</th><th>建议处理方式</th></tr>
+<tr><td>启动时提示本地服务异常</td><td>关闭重复的软件进程，重新启动；检查系统诊断和本地端口占用。</td></tr>
+<tr><td>AI 请求失败</td><td>检查网络开关、服务商授权、API Key、模型名称、额度和服务商状态。</td></tr>
+<tr><td>任务一直没有结果</td><td>在任务中心刷新状态；若显示状态不确定，先到服务商后台核实。</td></tr>
+<tr><td>素材或项目不见了</td><td>确认当前项目；检查素材库和工作空间路径；不要先删除或覆盖数据。</td></tr>
+<tr><td>恢复备份失败</td><td>检查归档文件完整性和磁盘空间，确认没有活动任务；保留恢复前安全归档。</td></tr></table>
+<p class="lead">如果问题仍无法解决，请保存任务 ID、错误提示和系统诊断结果，再进行进一步排查。不要分享 API Key 或密钥文件。</p>
+<div class="footer">AI漫剧制作大师 · Windows 桌面版使用说明书 · 随测试安装包一同提供</div>
+</section>
+</body></html>
