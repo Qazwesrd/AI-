@@ -5,6 +5,7 @@ from unittest.mock import patch
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.pool import NullPool
 
 from app import database
 
@@ -31,6 +32,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
 
@@ -101,6 +103,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
             try:
@@ -141,6 +144,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
             try:
@@ -167,6 +171,7 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
             test_engine = create_engine(
                 f"sqlite:///{db_path.as_posix()}",
                 connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
                 future=True,
             )
             try:
