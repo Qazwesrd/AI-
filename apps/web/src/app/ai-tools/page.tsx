@@ -66,6 +66,7 @@ function buildProductionPrompt(input: {
   const common = [
     "你是资深 AI 漫剧导演、编剧与视听制作专家。请严格依据输入资料完成任务。",
     "【任务】\n" + title.trim(),
+    instruction ? "【本次具体要求】\n" + instruction : "",
     "【原始资料】\n" + (source.trim() || "当前没有提供原文或设定。请先列出需要补充的信息，不要虚构关键设定。"),
     "【创作与一致性规则】\n1. 尊重原著主线、人物性格、人物关系和事件因果，不擅自改写关键事实。\n2. 区分原文事实、合理推断和新增创意；推断或新增内容必须标注。\n3. 人物姓名、年龄感、脸型、发型、服装、配色、身份标识保持统一。\n4. 场景的空间结构、时间、天气、光源和道具位置保持连续。\n5. 不确定的信息列入“待确认”，不得自行补成事实。\n6. 输出使用中文，专有名词和必要的生成参数可保留英文。",
     "【质量要求】\n" + style,
@@ -257,7 +258,6 @@ export default function AIToolsPage() {
     if (!chosen.length) { setNotice("请先勾选需要加入队列的章节。"); return; }
     if (chosen.length > 5) { setNotice("单批最多选择 5 个章节，请分批加入。"); return; }
     const plannedCount = chosen.length * 4;
-    const promptQuality = promptMode === "concise" ? "提示词风格：简洁、明确、结构化，避免重复。" : promptMode === "cinematic" ? "提示词风格：电影级叙事与视觉表达，强调镜头感、情绪节奏、构图和光影。" : "提示词风格：专业影视制作标准，细节完整、逻辑严谨、便于执行。";
     if (!window.confirm(`将读取所选 ${chosen.length} 个章节，为每章准备深度分析、剧本改编、视觉素材提示词、分镜规划 4 项任务，共 ${plannedCount} 项。内容只会保存在本地任务中，不会自动发送到 AI 网页。继续吗？`)) return;
     setLoadingChapter(true);
     setNotice("正在读取章节并准备任务队列，请稍候…");
