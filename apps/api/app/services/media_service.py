@@ -237,6 +237,53 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
 
 
 
+def media_stream_sync_report(streams, tolerance_seconds=0.5):
+    """Compare FFprobe stream start/duration metadata; this is a preflight hint, not lip-sync analysis."""
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not video:
+        return None
+
+    def number(value):
+        try:
+            result = float(value)
+            return result if result >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    video_duration = number(video.get("duration"))
+    audio_duration = number(audio.get("duration")) if audio else None
+    video_start = number(video.get("start_time")) or 0.0
+    audio_start = number(audio.get("start_time")) if audio else None
+    duration_difference = (
+        abs(video_duration - audio_duration)
+        if video_duration is not None and audio_duration is not None else None
+    )
+    start_offset = abs(video_start - audio_start) if audio_start is not None else None
+    measurable = duration_difference is not None and start_offset is not None
+    out_of_sync = measurable and (
+        duration_difference > tolerance_seconds or start_offset > tolerance_seconds
+    )
+    return {
+        "measurable": measurable,
+        "tolerance_seconds": float(tolerance_seconds),
+        "video_duration_seconds": round(video_duration, 3) if video_duration is not None else None,
+        "audio_duration_seconds": round(audio_duration, 3) if audio_duration is not None else None,
+        "duration_difference_seconds": round(duration_difference, 3) if duration_difference is not None else None,
+        "video_start_seconds": round(video_start, 3),
+        "audio_start_seconds": round(audio_start, 3) if audio_start is not None else None,
+        "start_offset_seconds": round(start_offset, 3) if start_offset is not None else None,
+        "status": "warning" if out_of_sync else ("ok" if measurable else "unknown"),
+        "note": (
+            "音视频轨起始位置或时长差超过阈值，请试听/试看复核"
+            if out_of_sync else (
+                "轨道元数据差异在阈值内；仍建议抽查对白口型"
+                if measurable else "文件缺少可比较的音频/视频轨时长元数据，无法判断轨道同步"
+            )
+        ),
+    }
+
+
 def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, silence_noise="-50dB"):
     """Detect sustained black frames and digital silence; findings are advisory, not automatic failures."""
     file_path = Path(path)
@@ -296,7 +343,12 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
                 "duration_seconds": round(float(match.group(3)), 3),
             })
 
+    sync_report = media_stream_sync_report(streams)
     warnings = []
+    if sync_report and sync_report["status"] == "warning":
+        warnings.append(sync_report["note"])
+    if sync_report and sync_report["status"] == "unknown":
+        warnings.append(sync_report["note"])
     if black_segments:
         warnings.append(f"检测到 {len(black_segments)} 段持续黑屏，请检查是否为转场或意外空镜")
     if silence_segments:
@@ -309,6 +361,7 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         "silence_threshold_seconds": float(silence_min_duration),
         "silence_noise_threshold": silence_noise,
         "has_audio": bool(audio_stream),
+        "audio_video_sync": sync_report,
         "black_segments": black_segments,
         "silence_segments": silence_segments,
         "warnings": warnings,
