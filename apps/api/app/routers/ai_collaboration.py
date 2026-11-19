@@ -88,30 +88,29 @@ RESULT_FILE_TYPES = {
 
 def validate_result_file_signature(extension: str, prefix: bytes):
     valid = {
-        ".png": prefix.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
-        ".jpg": prefix.startswith(b"\\xff\\xd8\\xff"),
-        ".jpeg": prefix.startswith(b"\\xff\\xd8\\xff"),
+        ".png": prefix.startswith(b"\x89PNG\r\n\x1a\n"),
+        ".jpg": prefix.startswith(b"\xff\xd8\xff"),
+        ".jpeg": prefix.startswith(b"\xff\xd8\xff"),
         ".gif": prefix.startswith((b"GIF87a", b"GIF89a")),
         ".webp": len(prefix) >= 12 and prefix[:4] == b"RIFF" and prefix[8:12] == b"WEBP",
         ".mp4": len(prefix) >= 8 and prefix[4:8] == b"ftyp",
         ".mov": len(prefix) >= 8 and prefix[4:8] == b"ftyp",
-        ".mkv": prefix.startswith(b"\\x1a\\x45\\xdf\\xa3"),
-        ".webm": prefix.startswith(b"\\x1a\\x45\\xdf\\xa3"),
+        ".mkv": prefix.startswith(b"\x1a\x45\xdf\xa3"),
+        ".webm": prefix.startswith(b"\x1a\x45\xdf\xa3"),
         ".wav": len(prefix) >= 12 and prefix[:4] == b"RIFF" and prefix[8:12] == b"WAVE",
         ".ogg": prefix.startswith(b"OggS"),
         ".mp3": prefix.startswith(b"ID3") or (len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xE0) == 0xE0),
         ".aac": len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xF6) == 0xF0,
         ".m4a": len(prefix) >= 8 and prefix[4:8] == b"ftyp",
-        ".srt": bool(prefix) and b"\\x00" not in prefix,
-        ".vtt": prefix.lstrip(b"\\xef\\xbb\\xbf").startswith(b"WEBVTT"),
-        ".txt": bool(prefix) and b"\\x00" not in prefix,
-        ".md": bool(prefix) and b"\\x00" not in prefix,
-        ".json": bool(prefix) and b"\\x00" not in prefix,
+        ".srt": bool(prefix) and b"\x00" not in prefix,
+        ".vtt": prefix.lstrip(b"\xef\xbb\xbf").startswith(b"WEBVTT"),
+        ".txt": bool(prefix) and b"\x00" not in prefix,
+        ".md": bool(prefix) and b"\x00" not in prefix,
+        ".json": bool(prefix) and b"\x00" not in prefix,
         ".pdf": prefix.startswith(b"%PDF-"),
     }
     if not valid.get(extension, False):
         raise HTTPException(415, "文件内容与扩展名不匹配，已拒绝导入")
-
 
 def attachment_dict(item: AIResultAttachment):
     return {
