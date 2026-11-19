@@ -70,9 +70,14 @@ def decode_text(raw):
 
 def docx_text(raw):
     validate_compressed_document(raw)
-    with zipfile.ZipFile(BytesIO(raw)) as z:
-        xml = z.read("word/document.xml")
-    root = ET.fromstring(xml)
+    try:
+        with zipfile.ZipFile(BytesIO(raw)) as z:
+            xml = z.read("word/document.xml")
+        root = ET.fromstring(xml)
+    except KeyError as exc:
+        raise ValueError("DOCX 文件缺少正文文档，无法导入") from exc
+    except ET.ParseError as exc:
+        raise ValueError("DOCX 正文 XML 损坏，无法导入") from exc
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
     result = []
     for p in root.findall(".//w:p", ns):
