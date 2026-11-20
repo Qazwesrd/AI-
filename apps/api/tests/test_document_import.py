@@ -1,9 +1,11 @@
 import unittest
 import zipfile
 from io import BytesIO
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from app.document_import import decode_text, docx_text, epub_text, extract_document_text
+from app.document_import import (
+    _verify_compressed_archive, decode_text, docx_text, epub_text, extract_document_text,
+)
 from app.routers.novels import split_chapters
 
 
@@ -99,11 +101,29 @@ class DocumentImportTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "单文件解压限制"):
                 docx_text(buffer.getvalue())
 
+    def test_streamed_validation_enforces_actual_single_member_limit(self):
+        entry = MagicMock()
+        entry.is_dir.return_value = False
+        entry.file_size = 5
+        archive = MagicMock()
+        archive.infolist.return_value = [entry]
+        archive.open.return_value = BytesIO(b"x" * 20)
+        with patch("app.document_import.MAX_ARCHIVE_MEMBER_BYTES", 10):
+            with self.assertRaisesRegex(ValueError, "实际解压"):
+                _verify_compressed_archive(archive)
+
+    def test_streamed_validation_rejects_size_metadata_mismatch(self):
+        entry = MagicMock()
+        entry.is_dir.return_value = False
+        entry.file_size = 5
+        archive = MagicMock()
+        archive.infolist.return_value = [entry]
+        archive.open.return_value = BytesIO(b"valid output")
+        with self.assertRaisesRegex(ValueError, "大小与声明不一致"):
+            _verify_compressed_archive(archive)
+
     def test_txt_document_import(self):
-        self.assertEqual(
-            extract_document_text("novel.txt", "正文内容".encode("utf-8")),
-            "正文内容",
-        )
+        self.assertEqual(extract_document_text("novel.txt", "正文内容".encode("utf-8")), "正文内容")
 
     def test_reject_unsupported_format(self):
         with self.assertRaises(ValueError):
