@@ -27,6 +27,8 @@ type ShotAssetLink = {
   asset: { id: number; name: string; category: string };
 };
 type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };
+type ConsistencyIssue = { shot_id: number; shot_number: number; asset_id?: number; asset_name?: string; code: string; severity: "error" | "warning"; message: string };
+type ConsistencyReport = { episode_id: number; episode_number: number; shot_count: number; checked_link_count: number; error_count: number; warning_count: number; ready: boolean; issues: ConsistencyIssue[]; note: string };
 
 function inspectEpisodeShots(episode: Episode, rows: Shot[]) {
   const blockers: string[] = [];
@@ -59,6 +61,7 @@ export default function StoryboardPage() {
   const [shotAssetLinks, setShotAssetLinks] = useState<Record<number, ShotAssetLink[]>>({});
   const [assetChapterNumber, setAssetChapterNumber] = useState("");
   const [matchSuggestions, setMatchSuggestions] = useState<Record<number, any[]>>({});
+  const [consistencyReport, setConsistencyReport] = useState<ConsistencyReport | null>(null);
   const [novelId, setNovelId] = useState("");
   const [projectId, setProjectId] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -142,6 +145,7 @@ export default function StoryboardPage() {
     const result = await request(`/api/story/episodes/${id}/shots`);
     setShots(result);
     setEpisodeId(id);
+    setConsistencyReport(null);
     const linked = await Promise.all((result as Shot[]).map(async shot => {
       try { return [shot.id, await request(`/api/story/shots/${shot.id}/assets`)] as const; }
       catch { return [shot.id, []] as const; }
@@ -266,8 +270,16 @@ export default function StoryboardPage() {
         setMessage("视频生成前检查未通过：\n" + preflight.blockers.join("；"));
         return;
       }
-      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
-      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
+      const consistency = await request(`/api/story/episodes/${episode.id}/asset-consistency`) as ConsistencyReport;
+      if (consistency.error_count > 0) {
+        setConsistencyReport(consistency);
+        setMessage("视觉素材一致性检查发现 " + consistency.error_count + " 项错误，已阻止提交视频任务。请先修正跨小说素材或素材分类关联错误。");
+        return;
+      }
+      const consistencyWarnings = consistency.issues.map(issue => `镜头 ${issue.shot_number}：${issue.message}`);
+      const allWarnings = [...preflight.warnings, ...consistencyWarnings];
+      const warningText = allWarnings.length ? "\n\n预检提醒：\n" + allWarnings.join("\n") : "";
+      if (!window.confirm("预检完成：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒；已检查 " + consistency.checked_link_count + " 项素材关联。" + warningText + "\n\n将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
       let done = false;
       let batches = 0;
       let totalCreated = 0;
@@ -321,8 +333,16 @@ export default function StoryboardPage() {
         setMessage("成片合成前检查未通过：\n" + preflight.blockers.join("；"));
         return;
       }
-      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
-      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
+      const consistency = await request(`/api/story/episodes/${episode.id}/asset-consistency`) as ConsistencyReport;
+      if (consistency.error_count > 0) {
+        setConsistencyReport(consistency);
+        setMessage("成片合成前发现 " + consistency.error_count + " 项视觉素材错误，请先修正后再合成。");
+        return;
+      }
+      const consistencyWarnings = consistency.issues.map(issue => `镜头 ${issue.shot_number}：${issue.message}`);
+      const allWarnings = [...preflight.warnings, ...consistencyWarnings];
+      const warningText = allWarnings.length ? "\n\n预检提醒：\n" + allWarnings.join("\n") : "";
+      if (!window.confirm("预检完成：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒；已检查 " + consistency.checked_link_count + " 项素材关联。" + warningText + "\n\n只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
       const query = backgroundMusicPath.trim() ? "?music_path=" + encodeURIComponent(backgroundMusicPath.trim()) : "";
       const result = await request("/api/media/video/episodes/" + episode.id + "/render" + query, { method: "POST" });
       setMessage("第" + episode.episode_number + "集初版视频已合成：" + result.output);
@@ -417,6 +437,20 @@ export default function StoryboardPage() {
       if (episodeId) await loadShots(episodeId);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "删除镜头失败");
+    }
+  }
+
+  async function checkEpisodeConsistency(id: number) {
+    try {
+      const report = await request(`/api/story/episodes/${id}/asset-consistency`) as ConsistencyReport;
+      setConsistencyReport(report);
+      if (episodeId !== id) await loadShots(id);
+      setConsistencyReport(report);
+      setMessage(report.ready
+        ? `第 ${report.episode_number} 集视觉素材检查通过，共检查 ${report.shot_count} 个镜头和 ${report.checked_link_count} 项素材关联。`
+        : `第 ${report.episode_number} 集检查完成：${report.error_count} 项错误，${report.warning_count} 项提醒。请按结果逐项核对。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "视觉一致性检查失败");
     }
   }
 
@@ -535,6 +569,7 @@ export default function StoryboardPage() {
                 <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
                 <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
+                <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs" disabled={busy} onClick={() => checkEpisodeConsistency(ep.id)}>检查视觉一致性</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => splitEpisode(ep.id)}>拆分本集</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => moveEpisode(index, -1)}>上移</button>
@@ -587,6 +622,26 @@ export default function StoryboardPage() {
 
       <section className={panel}>
         <h2 className="mb-4 text-xl font-semibold">分镜镜头编辑器</h2>
+        {consistencyReport && consistencyReport.episode_id === episodeId && (
+          <div className="mb-4 rounded-xl border border-cyan-300/25 bg-cyan-950/20 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <strong className="text-sm text-cyan-100">第 {consistencyReport.episode_number} 集视觉一致性检查</strong>
+              <span className={consistencyReport.ready ? "text-xs text-emerald-300" : "text-xs text-amber-200"}>
+                {consistencyReport.ready ? "检查通过" : `错误 ${consistencyReport.error_count} 项 · 提醒 ${consistencyReport.warning_count} 项`}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-slate-300">已检查 {consistencyReport.shot_count} 个镜头、{consistencyReport.checked_link_count} 项素材关联。{consistencyReport.note}</p>
+            {consistencyReport.issues.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {consistencyReport.issues.map((issue, index) => (
+                  <div key={issue.shot_id + ":" + issue.code + ":" + index} className={issue.severity === "error" ? "rounded-lg border border-red-300/25 bg-red-950/25 p-2 text-xs text-red-100" : "rounded-lg border border-amber-300/20 bg-amber-950/20 p-2 text-xs text-amber-100"}>
+                    <strong>镜头 {issue.shot_number}</strong>{issue.asset_name ? ` · ${issue.asset_name}` : ""}：{issue.message}
+                  </div>
+                ))}
+              </div>
+            ) : <p className="mt-3 text-xs text-emerald-200">没有发现素材关联问题。</p>}
+          </div>
+        )}
         {episodeId && (
           <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-950/30 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
