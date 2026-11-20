@@ -64,7 +64,7 @@ export default function EpisodeReadinessPage() {
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [timelineBusy, setTimelineBusy] = useState(false);
 
-  async function loadTimeline(id: number) {
+  async function loadTimeline(id: number, readiness?: Readiness) {
     try {
       const response = await fetch(API + "/api/media/video/episodes/" + id + "/timeline");
       const data = await response.json();
@@ -75,13 +75,14 @@ export default function EpisodeReadinessPage() {
           (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot])
         );
         const transitionByShot = new Map<number, { transition: string; duration_seconds: number }>(
-          (saved.transitions || []).map(item => [item.after_shot_id, item])
+          (saved.transitions || []).map(item => [item.after_shot_id, item] as const)
         );
         let elapsed = 0;
         const cues: { start: number; end: number; text: string }[] = [];
         for (const shotId of saved.shot_order || []) {
           const shot = shotById.get(shotId);
-          const duration = Math.max(1, Number(shot?.duration_seconds) || 5);
+          const actualDuration = readiness?.items.find(item => item.shot_id === shotId)?.video?.duration_seconds;
+          const duration = Math.max(1, Number(actualDuration || shot?.duration_seconds) || 5);
           const dialogue = (shot?.dialogue || "").trim();
           if (dialogue) cues.push({ start: Number(elapsed.toFixed(2)), end: Number((elapsed + duration).toFixed(2)), text: dialogue });
           const transition = transitionByShot.get(shotId);
@@ -182,7 +183,7 @@ export default function EpisodeReadinessPage() {
       if (!response.ok) throw new Error(data.detail || "检查失败");
       setReport(data);
       setMessage(data.message);
-      await loadTimeline(id);
+      await loadTimeline(id, data as Readiness);
     } catch (error) {
       setReport(null);
       setMessage(error instanceof Error ? error.message : "检查失败");
