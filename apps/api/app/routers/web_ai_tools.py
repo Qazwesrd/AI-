@@ -370,9 +370,9 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
                         asset_name = payload.assetName.strip().casefold()
                         if not asset_name or asset_name not in searchable:
                             continue
-                        if category_map[payload.classification] == "scenes" and (
-                            asset_name in (shot.scene_name or "").casefold()
-                            or (shot.scene_name or "").casefold() in asset_name
+                        if category_map[payload.classification] == "scenes" and (shot.scene_name or "").strip() and (
+                            asset_name in shot.scene_name.casefold()
+                            or shot.scene_name.casefold() in asset_name
                         ):
                             shot.scene_asset_id = asset.id
                         exists = db.query(StoryAssetLink).filter(
