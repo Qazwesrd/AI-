@@ -195,9 +195,17 @@ export default function AICollaborationPage() {
           try {
             const data = await request<Handoff>("/api/ai-collaboration/novels/" + novelId + "/chapters/" + chapterNo + "/handoff-package", { method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: task }) });
             const taskId = "task-" + crypto.randomUUID();
-            const routedProvider = AI_WEB_PROVIDERS[providerRoutes[task]];
-            await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
+            const providerKey = providerRoutes[task];
+            const routedProvider = AI_WEB_PROVIDERS[providerKey];
             const prompt = [data.instruction, visualPromptRequirements(visualStyle, task), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
+            const selectedChapterForTask = chapters.find((item) => String(item.chapter_number) === chapterNo);
+            const taskCategory = task === "分镜设计" ? "storyboard" : (task === "角色设定" || task === "场景设定") ? "image" : "text";
+            await request("/api/web-ai/tasks", { method: "POST", body: JSON.stringify({
+              id: taskId, title: "第" + chapterNo + "章 · " + task, category: taskCategory,
+              toolId: providerKey, status: "prepared", prompt, sourceText: "第" + chapterNo + "章 · " + task,
+              novelId: Number(novelId), chapterId: selectedChapterForTask?.id ?? null,
+            }) });
+            await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
             await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
             completed += 1;
           } catch (error) { failures.push("第 " + chapterNo + " 章「" + task + "」：" + (error instanceof Error ? error.message : "失败")); }
@@ -224,8 +232,14 @@ export default function AICollaborationPage() {
       if (autoOpenAi && window.aiBrowserDesktop?.openTask && window.aiBrowserDesktop?.fillPrompt) {
         const taskId = "task-" + crypto.randomUUID();
         try {
-          await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
           const prompt = [data.instruction, visualPromptRequirements(visualStyle, taskType), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
+          const taskCategory = taskType === "分镜设计" ? "storyboard" : (taskType === "角色设定" || taskType === "场景设定") ? "image" : "text";
+          await request("/api/web-ai/tasks", { method: "POST", body: JSON.stringify({
+            id: taskId, title: "第" + chapterNumber + "章 · " + taskType, category: taskCategory,
+            toolId: aiProvider, status: "prepared", prompt, sourceText: "第" + chapterNumber + "章 · " + taskType,
+            novelId: Number(novelId), chapterId: selectedChapter?.id ?? null,
+          }) });
+          await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
           await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
           openNotice = "已在软件内打开" + selectedAi.label + "并填入交接包。请检查后手动点击发送。";
         } catch (fillError) { openNotice = "网页自动填入未完成，请使用复制按钮手动粘贴：" + (fillError instanceof Error ? fillError.message : "未知错误"); }
