@@ -404,12 +404,17 @@ def get_reference_upload_info(file_id: int, db: Session = Depends(get_db)):
     actual_size = path.stat().st_size
     if actual_size > 100 * 1024 * 1024:
         raise HTTPException(413, "单张参考图片不能超过 100 MB")
+    source_task = db.query(WebAITask).filter(WebAITask.task_key == item.task_key).first()
+    if source_task is None:
+        raise HTTPException(410, "参考图片所属任务不存在")
     return {
         "id": item.id,
         "storedName": item.stored_name,
         "filename": item.original_name,
         "contentType": expected_type,
         "size": actual_size,
+        "novelId": source_task.novel_id,
+        "chapterId": source_task.chapter_id,
     }
 
 
