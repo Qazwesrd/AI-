@@ -13,7 +13,8 @@ from app.database import STORAGE_DIR
 from app.database import get_db
 from app.models.web_ai_tool import WebAITool, WebAITask, WebAIResultFile
 from app.models.visual import VisualAsset
-from app.models.novel import Novel
+from app.models.novel import Novel, Chapter
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
 
 router = APIRouter(prefix="/api/web-ai", tags=["AI网页工具协同中心"])
 
@@ -297,6 +298,7 @@ class ConfirmResultClassification(BaseModel):
     assetName: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=4000)
     novelId: int | None = Field(default=None, ge=1)
+    chapterId: int | None = Field(default=None, ge=1)
 
 @router.patch("/files/{file_id}/classification")
 def confirm_result_classification(file_id: int, payload: ConfirmResultClassification, db: Session = Depends(get_db)):
@@ -307,19 +309,85 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
     if target.parent != root or not target.is_file(): raise HTTPException(410, "结果文件已不存在")
     if item.classification_status == "confirmed": raise HTTPException(409, "该文件已经确认归档，不能重复创建素材")
     asset_id = None
-    if payload.novelId is not None and db.query(Novel).filter(Novel.id == payload.novelId).first() is None:
+    task = db.query(WebAITask).filter(WebAITask.task_key == item.task_key).first()
+    resolved_novel_id = payload.novelId or (task.novel_id if task else None)
+    resolved_chapter_id = payload.chapterId or (task.chapter_id if task else None)
+    chapter = None
+    if resolved_novel_id is not None and db.query(Novel).filter(Novel.id == resolved_novel_id).first() is None:
         raise HTTPException(404, "指定的小说不存在")
+    if resolved_chapter_id is not None:
+        chapter = db.query(Chapter).filter(
+            Chapter.id == resolved_chapter_id,
+            Chapter.novel_id == resolved_novel_id,
+        ).first()
+        if chapter is None:
+            raise HTTPException(404, "指定章节不存在或不属于该小说")
     if payload.classification in {"character", "scene", "prop", "weapon", "costume", "building", "special_item"}:
         if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}: raise HTTPException(400, "人物、场景和道具素材必须是图片文件")
         if not payload.assetName.strip(): raise HTTPException(400, "请填写素材名称后再确认归档")
         category_map = {"character": "characters", "scene": "scenes", "prop": "props", "weapon": "weapons", "costume": "costumes", "building": "buildings", "special_item": "special_items"}
         asset_data = {"source": "web_ai_result", "result_file_id": item.id, "task_key": item.task_key, "original_filename": item.original_name}
-        if payload.novelId is not None:
-            asset_data["source_novel_id"] = payload.novelId
+        if resolved_novel_id is not None:
+            asset_data["source_novel_id"] = resolved_novel_id
+        if chapter is not None:
+            asset_data["source_chapter_id"] = chapter.id
+            asset_data["source_chapter_number"] = chapter.chapter_number
         asset = VisualAsset(category=category_map[payload.classification], name=payload.assetName.strip(), description=payload.description.strip() or ("从 AI 网页任务 " + item.task_key + " 导入"), image_path=str(target), style="待确认", data=asset_data, confirmed=True)
         db.add(asset)
         db.flush()
         asset_id = asset.id
+
+        # 将已确认的图片资产挂到本小说对应的分集，并尽可能关联到名称明确匹配的镜头。
+        if resolved_novel_id is not None:
+            projects_query = db.query(StoryProject).filter(StoryProject.novel_id == resolved_novel_id)
+            if task and task.project_id:
+                projects_query = projects_query.filter(StoryProject.id == task.project_id)
+            projects = projects_query.all()
+            for project in projects:
+                episodes_query = db.query(EpisodePlan).filter(EpisodePlan.project_id == project.id)
+                episodes = episodes_query.all()
+                for episode in episodes:
+                    source_ids = episode.source_chapter_ids if isinstance(episode.source_chapter_ids, list) else []
+                    if chapter is not None and chapter.id not in source_ids:
+                        continue
+                    if chapter is None and not source_ids:
+                        continue
+                    episode_link = StoryAssetLink(
+                        project_id=project.id, episode_id=episode.id, shot_id=None,
+                        asset_id=asset.id, role=category_map[payload.classification],
+                        chapter_number=chapter.chapter_number if chapter else None,
+                    )
+                    db.add(episode_link)
+                    shots = db.query(StoryboardShot).filter(
+                        StoryboardShot.episode_id == episode.id
+                    ).all()
+                    for shot in shots:
+                        searchable = " ".join([
+                            shot.scene_name or "", shot.visual_description or "",
+                            shot.character_actions or "", shot.dialogue or "",
+                            shot.image_prompt or "",
+                        ]).casefold()
+                        asset_name = payload.assetName.strip().casefold()
+                        if not asset_name or asset_name not in searchable:
+                            continue
+                        if category_map[payload.classification] == "scenes" and (
+                            asset_name in (shot.scene_name or "").casefold()
+                            or (shot.scene_name or "").casefold() in asset_name
+                        ):
+                            shot.scene_asset_id = asset.id
+                        exists = db.query(StoryAssetLink).filter(
+                            StoryAssetLink.project_id == project.id,
+                            StoryAssetLink.episode_id == episode.id,
+                            StoryAssetLink.shot_id == shot.id,
+                            StoryAssetLink.asset_id == asset.id,
+                        ).first()
+                        if exists is None:
+                            db.add(StoryAssetLink(
+                                project_id=project.id, episode_id=episode.id,
+                                shot_id=shot.id, asset_id=asset.id,
+                                role=category_map[payload.classification],
+                                chapter_number=chapter.chapter_number if chapter else None,
+                            ))
     item.classification = payload.classification
     item.classification_status = "confirmed"
     item.classification_reason = "用户已确认分类"
