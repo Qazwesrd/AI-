@@ -241,6 +241,116 @@ def list_task_result_files(task_key: str, db: Session = Depends(get_db)):
     return {"items": [result_file_dict(item) for item in items]}
 
 
+@router.get("/tasks/{task_key}/reference-suggestions")
+def list_reference_suggestions(task_key: str, db: Session = Depends(get_db)):
+    task = db.query(WebAITask).filter(WebAITask.task_key == task_key).first()
+    if task is None:
+        raise HTTPException(404, "目标任务不存在")
+    if task.category != "video":
+        raise HTTPException(409, "只有视频分镜任务可以自动匹配参考图")
+    if not task.novel_id or not task.chapter_id:
+        raise HTTPException(409, "该视频任务没有关联小说章节，无法自动匹配素材")
+    chapter = db.query(Chapter).filter(
+        Chapter.id == task.chapter_id, Chapter.novel_id == task.novel_id
+    ).first()
+    if chapter is None:
+        raise HTTPException(404, "视频任务关联的章节不存在")
+
+    project_query = db.query(StoryProject).filter(StoryProject.novel_id == task.novel_id)
+    project = (
+        project_query.filter(StoryProject.id == task.project_id).first()
+        if task.project_id
+        else project_query.order_by(StoryProject.updated_at.desc()).first()
+    )
+    links = []
+    episode_by_id = {}
+    if project is not None:
+        episodes = db.query(EpisodePlan).filter(EpisodePlan.project_id == project.id).all()
+        episode_by_id = {
+            episode.id: episode for episode in episodes
+            if chapter.id in (episode.source_chapter_ids or [])
+        }
+        links = db.query(StoryAssetLink).filter(
+            StoryAssetLink.project_id == project.id,
+            StoryAssetLink.chapter_number == chapter.chapter_number,
+        ).all()
+        links = [
+            link for link in links
+            if link.episode_id is None or link.episode_id in episode_by_id
+        ]
+
+    linked_asset_ids = {link.asset_id for link in links}
+    files_by_asset = {}
+    if linked_asset_ids:
+        linked_files = db.query(WebAIResultFile).filter(
+            WebAIResultFile.visual_asset_id.in_(linked_asset_ids),
+            WebAIResultFile.classification_status == "confirmed",
+            WebAIResultFile.content_type.like("image/%"),
+        ).all()
+        allowed_reference_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        for result_file in linked_files:
+            if Path(result_file.stored_name).suffix.lower() not in allowed_reference_extensions:
+                continue
+            files_by_asset.setdefault(result_file.visual_asset_id, []).append(result_file)
+
+    suggestions = {}
+    for link in links:
+        shot = db.query(StoryboardShot).filter(StoryboardShot.id == link.shot_id).first() if link.shot_id else None
+        episode = episode_by_id.get(link.episode_id)
+        for result_file in files_by_asset.get(link.asset_id, []):
+            entry = suggestions.setdefault(result_file.id, {
+                "fileId": result_file.id,
+                "filename": result_file.original_name,
+                "classification": result_file.classification,
+                "role": link.role,
+                "matches": [],
+            })
+            if shot is not None:
+                entry["matches"].append({
+                    "episodeNumber": episode.episode_number if episode else None,
+                    "shotNumber": shot.shot_number,
+                    "shotType": shot.shot_type,
+                    "sceneName": shot.scene_name,
+                    "visualDescription": shot.visual_description,
+                })
+
+    if not suggestions:
+        fallback_files = db.query(WebAIResultFile).join(
+            WebAITask, WebAITask.task_key == WebAIResultFile.task_key
+        ).filter(
+            WebAITask.novel_id == task.novel_id,
+            WebAITask.chapter_id == task.chapter_id,
+            WebAIResultFile.classification_status == "confirmed",
+            WebAIResultFile.visual_asset_id.isnot(None),
+            WebAIResultFile.content_type.like("image/%"),
+        ).order_by(WebAIResultFile.id.desc()).all()
+        allowed_reference_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+        for result_file in fallback_files:
+            if Path(result_file.stored_name).suffix.lower() not in allowed_reference_extensions:
+                continue
+            suggestions[result_file.id] = {
+                "fileId": result_file.id,
+                "filename": result_file.original_name,
+                "classification": result_file.classification,
+                "role": "chapter_asset",
+                "matches": [],
+            }
+
+    items = sorted(
+        suggestions.values(),
+        key=lambda item: (
+            min((match["shotNumber"] for match in item["matches"]), default=10**9),
+            item["fileId"],
+        ),
+    )
+    return {
+        "taskId": task_key,
+        "chapterNumber": chapter.chapter_number,
+        "items": items,
+        "matchedShotCount": len({(match["episodeNumber"], match["shotNumber"]) for item in items for match in item["matches"]}),
+    }
+
+
 @router.get("/files")
 def list_all_result_files(
     novel_id: int | None = None,
@@ -270,6 +380,42 @@ def list_all_result_files(
         })
         items.append(item)
     return {"items": items}
+
+
+@router.get("/files/{file_id}/upload-info")
+def get_reference_upload_info(file_id: int, db: Session = Depends(get_db)):
+    item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if item is None:
+        raise HTTPException(404, "结果文件不存在")
+    if item.classification_status != "confirmed" or item.visual_asset_id is None:
+        raise HTTPException(409, "请先确认图片分类并归档到视觉素材库")
+    allowed_types = {
+        ".png": "image/png", ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+    }
+    extension = Path(item.stored_name).suffix.lower()
+    expected_type = allowed_types.get(extension)
+    if expected_type is None or not (item.content_type or "").lower().startswith("image/"):
+        raise HTTPException(415, "仅允许上传已归档的 PNG、JPG、WebP 或 GIF 图片")
+    result_dir = (STORAGE_DIR / "web_ai_results").resolve()
+    path = (result_dir / item.stored_name).resolve()
+    if path.parent != result_dir or not path.is_file():
+        raise HTTPException(410, "参考图片文件已不存在")
+    actual_size = path.stat().st_size
+    if actual_size > 100 * 1024 * 1024:
+        raise HTTPException(413, "单张参考图片不能超过 100 MB")
+    source_task = db.query(WebAITask).filter(WebAITask.task_key == item.task_key).first()
+    if source_task is None:
+        raise HTTPException(410, "参考图片所属任务不存在")
+    return {
+        "id": item.id,
+        "storedName": item.stored_name,
+        "filename": item.original_name,
+        "contentType": expected_type,
+        "size": actual_size,
+        "novelId": source_task.novel_id,
+        "chapterId": source_task.chapter_id,
+    }
 
 
 @router.get("/files/{file_id}/preview")
