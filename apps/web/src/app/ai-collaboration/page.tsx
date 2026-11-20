@@ -46,7 +46,7 @@ const AI_WEB_PROVIDERS = {
   grok: { label: "Grok", url: "https://grok.com/" },
 } as const;
 type AIWebProvider = keyof typeof AI_WEB_PROVIDERS;
-type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "道具设定" | "对白整理";
+type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "道具设定" | "视频分镜提示词" | "对白整理";
 type VisualStyle = "国漫" | "仿真人" | "3D漫" | "2D漫";
 const VISUAL_STYLE_GUIDES: Record<VisualStyle, string> = {
   国漫: "中国动画电影美术语言，东方审美，符合题材时代的服饰与建筑，精细线稿与层次丰富的色彩，电影级构图；避免日式动漫脸和现代元素错置。",
@@ -56,10 +56,11 @@ const VISUAL_STYLE_GUIDES: Record<VisualStyle, string> = {
 };
 function visualPromptRequirements(style: VisualStyle, task: HandoffTaskType): string {
   const imageTasks = task === "分镜设计" || task === "角色设定" || task === "场景设定" || task === "道具设定";
+  const videoTask = task === "视频分镜提示词";
   return [
     "【用户指定的统一视觉风格】" + style + "。" + VISUAL_STYLE_GUIDES[style],
     "【视觉连续性硬性要求】同一角色跨镜头保持脸型、五官、年龄感、发型、体型和服装一致；同一场景保持建筑结构、时间、天气、主色调和空间布局一致；道具外观与持有者一致。若剧情明确发生变化，按章节先后呈现变化，不得提前或遗漏。",
-    imageTasks ? "【必须生成可直接用于图片模型的提示词】为每个主要角色分别输出角色定妆图提示词（正面、侧面、全身、表情与服装细节）；为每个重要场景输出环境概念图提示词；为每件关键道具、武器和服装输出独立设定图提示词；分镜中的每个镜头输出独立画面提示词。提示词必须包含主体、外观、动作、场景、构图、景别、光线、色彩、风格、画幅及负面提示词，并明确引用本次统一画风。" : "【图片提示词联动】剧本和剧情分析中标记需要制作角色设定图、场景图、道具图及关键剧情插图的位置，并给出可供后续图片提示词生成使用的具体视觉描述。",
+    videoTask ? "【必须生成可直接用于视频模型的镜头提示词】每个镜头独立成段，建议 4-8 秒；明确主体、动作起止状态、动作节奏、镜头运动、景别、构图、环境动态、光线、风格、画幅、音效/对白建议、字幕文本、负面提示词和前后镜头连续性。输出可直接复制到视频生成网页的中文主提示词，并提供精简版。不得要求模型直接渲染可读文字，字幕单独输出；不得出现人物外貌、服装、道具或场景跳变。 : imageTasks ? "【必须生成可直接用于图片模型的提示词】为每个主要角色分别输出角色定妆图提示词（正面、侧面、全身、表情与服装细节）；为每个重要场景输出环境概念图提示词；为每件关键道具、武器和服装输出独立设定图提示词；分镜中的每个镜头输出独立画面提示词。提示词必须包含主体、外观、动作、场景、构图、景别、光线、色彩、风格、画幅及负面提示词，并明确引用本次统一画风。" : "【图片提示词联动】剧本和剧情分析中标记需要制作角色设定图、场景图、道具图及关键剧情插图的位置，并给出可供后续图片提示词生成使用的具体视觉描述。",
     "【输出要求】内容必须依据本章原文，不得擅自新增角色设定或剧情事实；缺失信息标记为待确认；图片提示词不得只写‘好看’‘电影感’，必须具体可执行。",
   ].join("\n\n");
 }
@@ -98,7 +99,7 @@ export default function AICollaborationPage() {
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
-  const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "道具设定": "doubao", "对白整理": "deepseek" });
+  const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "道具设定": "doubao", "视频分镜提示词": "doubao", "对白整理": "deepseek" });
   const [autoOpenAi, setAutoOpenAi] = useState(true);
   const [visualStyle, setVisualStyle] = useState<VisualStyle>("国漫");
   const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
@@ -274,14 +275,14 @@ export default function AICollaborationPage() {
     window.open(selectedAi.url, "_blank", "noopener,noreferrer");
   }
 
-  const FULL_WORKFLOW_TASKS: HandoffTaskType[] = ["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "道具设定", "对白整理"];
+  const FULL_WORKFLOW_TASKS: HandoffTaskType[] = ["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "道具设定", "视频分镜提示词", "对白整理"];
 
   async function prepareFullWorkflow() {
     if (!novelId || selectedChapterNumbers.length === 0) { setMessage("请至少选择一个章节。"); return; }
     if (!window.aiBrowserDesktop?.openTask || !window.aiBrowserDesktop?.fillPrompt) { setMessage("全流程自动填入需要在 AI 漫剧大师电脑版内运行。"); return; }
     if (selectedChapterNumbers.length > 5) { setMessage("为避免一次打开过多网页，请每次最多选择 5 个章节。"); return; }
     const taskCount = selectedChapterNumbers.length * FULL_WORKFLOW_TASKS.length;
-    const approved = window.confirm("将为 " + selectedChapterNumbers.length + " 个章节准备 " + taskCount + " 项任务（剧情、剧本、分镜、角色、场景、道具、对白），并在内嵌 AI 浏览器中逐项填入。每项仍需你检查后手动发送；不会自动提交或调用视频 API。继续吗？");
+    const approved = window.confirm("将为 " + selectedChapterNumbers.length + " 个章节准备 " + taskCount + " 项任务（剧情、剧本、分镜、角色、场景、道具、视频提示词、对白），并在内嵌 AI 浏览器中逐项填入。每项仍需你检查后手动发送；不会自动提交或调用视频 API。继续吗？");
     if (!approved) return;
     setBusy(true); setBatchProgress("正在创建全流程任务…");
     let completed = 0;
@@ -297,7 +298,7 @@ export default function AICollaborationPage() {
             const routedProvider = AI_WEB_PROVIDERS[providerKey];
             const prompt = [data.instruction, visualPromptRequirements(visualStyle, task), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
             const selectedChapterForTask = chapters.find((item) => String(item.chapter_number) === chapterNo);
-            const taskCategory = task === "分镜设计" ? "storyboard" : (task === "角色设定" || task === "场景设定" || task === "道具设定") ? "image" : "text";
+            const taskCategory = task === "分镜设计" ? "storyboard" : task === "视频分镜提示词" ? "video" : (task === "角色设定" || task === "场景设定" || task === "道具设定") ? "image" : "text";
             await request("/api/web-ai/tasks", { method: "POST", body: JSON.stringify({
               id: taskId, title: "第" + chapterNo + "章 · " + task, category: taskCategory,
               toolId: providerKey, status: "prepared", prompt, sourceText: "第" + chapterNo + "章 · " + task,
@@ -331,7 +332,7 @@ export default function AICollaborationPage() {
         const taskId = "task-" + crypto.randomUUID();
         try {
           const prompt = [data.instruction, visualPromptRequirements(visualStyle, taskType), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
-          const taskCategory = taskType === "分镜设计" ? "storyboard" : (taskType === "角色设定" || taskType === "场景设定" || taskType === "道具设定") ? "image" : "text";
+          const taskCategory = taskType === "分镜设计" ? "storyboard" : taskType === "视频分镜提示词" ? "video" : (taskType === "角色设定" || taskType === "场景设定" || taskType === "道具设定") ? "image" : "text";
           await request("/api/web-ai/tasks", { method: "POST", body: JSON.stringify({
             id: taskId, title: "第" + chapterNumber + "章 · " + taskType, category: taskCategory,
             toolId: aiProvider, status: "prepared", prompt, sourceText: "第" + chapterNumber + "章 · " + taskType,
@@ -476,7 +477,7 @@ export default function AICollaborationPage() {
           </div>
           <div className="mt-4 rounded-xl border border-cyan-300/15 bg-slate-950/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定、道具设定和对白整理任务。</p></div>
+              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定、道具设定、视频分镜提示词和对白整理任务。</p></div>
               <div className="flex gap-2 text-xs"><button type="button" onClick={() => setSelectedChapterNumbers(chapters.map((item) => String(item.chapter_number)))} className="rounded border border-white/15 px-2 py-1">全选</button><button type="button" onClick={() => setSelectedChapterNumbers([])} className="rounded border border-white/15 px-2 py-1">清空</button></div>
             </div>
             <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
@@ -497,14 +498,14 @@ export default function AICollaborationPage() {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button type="button" onClick={() => void prepareFullWorkflow()} disabled={busy || selectedChapterNumbers.length === 0} className="rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">为选中的章节生成全流程任务</button>
-              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 7 项任务，并按所选画风生成视觉提示词。网页支持时自动填入，但必须由你确认发送。</span>
+              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 8 项任务，并按所选画风生成视觉提示词。网页支持时自动填入，但必须由你确认发送。</span>
             </div>
             {batchProgress && <p className="mt-2 text-xs text-cyan-200">{batchProgress}</p>}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3 md:items-end">
             <label className="text-sm text-slate-300">本次交接任务类型
               <select value={taskType} onChange={(event) => { setTaskType(event.target.value as HandoffTaskType); setHandoff(null); }} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
-                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="道具设定">道具设定</option><option value="对白整理">对白整理</option>
+                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="道具设定">道具设定</option><option value="视频分镜提示词">视频分镜提示词</option><option value="对白整理">对白整理</option>
               </select>
             </label>
             <label className="text-sm text-slate-300">读取章节后打开哪个 AI 网页？
