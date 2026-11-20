@@ -158,6 +158,36 @@ export default function AICollaborationPage() {
     window.open(selectedAi.url, "_blank", "noopener,noreferrer");
   }
 
+  const FULL_WORKFLOW_TASKS: HandoffTaskType[] = ["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "对白整理"];
+
+  async function prepareFullWorkflow() {
+    if (!novelId || selectedChapterNumbers.length === 0) { setMessage("请至少选择一个章节。"); return; }
+    if (!window.aiBrowserDesktop?.openTask || !window.aiBrowserDesktop?.fillPrompt) { setMessage("全流程自动填入需要在 AI 漫剧大师电脑版内运行。"); return; }
+    if (selectedChapterNumbers.length > 5) { setMessage("为避免一次打开过多网页，请每次最多选择 5 个章节。"); return; }
+    const taskCount = selectedChapterNumbers.length * FULL_WORKFLOW_TASKS.length;
+    const approved = window.confirm("将为 " + selectedChapterNumbers.length + " 个章节准备 " + taskCount + " 项任务（剧情、剧本、分镜、角色、场景、对白），并在内嵌 AI 浏览器中逐项填入。每项仍需你检查后手动发送；不会自动提交或调用视频 API。继续吗？");
+    if (!approved) return;
+    setBusy(true); setBatchProgress("正在创建全流程任务…");
+    let completed = 0;
+    const failures: string[] = [];
+    try {
+      for (const chapterNo of selectedChapterNumbers) {
+        for (const task of FULL_WORKFLOW_TASKS) {
+          setBatchProgress("正在准备第 " + chapterNo + " 章 · " + task + "（" + (completed + failures.length + 1) + "/" + taskCount + "）");
+          try {
+            const data = await request<Handoff>("/api/ai-collaboration/novels/" + novelId + "/chapters/" + chapterNo + "/handoff-package", { method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: task }) });
+            const taskId = "task-" + crypto.randomUUID();
+            await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
+            const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
+            await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
+            completed += 1;
+          } catch (error) { failures.push("第 " + chapterNo + " 章「" + task + "」：" + (error instanceof Error ? error.message : "失败")); }
+        }
+      }
+      setMessage("全流程任务准备结束：成功填入 " + completed + "/" + taskCount + " 项。" + (failures.length ? "失败项：" + failures.join("；") : "所有任务均已填入对应 AI 网页。") + "请逐个检查网页并手动点击发送。");
+    } finally { setBusy(false); setBatchProgress(""); }
+  }
+
   async function prepareHandoff() {
     if (!novelId || !chapterNumber) { setMessage("请先选择小说和章节。"); return; }
     if (!window.confirm(`即将读取“${selectedNovel?.title || "所选小说"}”第 ${chapterNumber} 章，并将章节正文及已确认分析摘要展示在交接预览中。只会打开所选 AI 网站，不会自动发送章节内容。继续吗？`)) return;
