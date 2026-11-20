@@ -57,6 +57,8 @@ export default function AICollaborationPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [novelId, setNovelId] = useState("");
   const [chapterNumber, setChapterNumber] = useState("");
+  const [selectedChapterNumbers, setSelectedChapterNumbers] = useState<string[]>([]);
+  const [batchProgress, setBatchProgress] = useState("");
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [resultJson, setResultJson] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -89,7 +91,7 @@ export default function AICollaborationPage() {
   useEffect(() => {
     if (!novelId) { setChapters([]); setChapterNumber(""); setProposals([]); setHandoff(null); return; }
     request<{ items: Chapter[] }>(`/api/novels/${novelId}/chapters`)
-      .then((data) => { setChapters(data.items || []); setChapterNumber(data.items?.length ? String(data.items[0].chapter_number) : ""); })
+      .then((data) => { setChapters(data.items || []); setChapterNumber(data.items?.length ? String(data.items[0].chapter_number) : ""); setSelectedChapterNumbers(data.items?.length ? [String(data.items[0].chapter_number)] : []); })
       .catch((error) => setMessage(error.message));
     void loadProposals(novelId, filter);
     void loadAttachments(novelId);
