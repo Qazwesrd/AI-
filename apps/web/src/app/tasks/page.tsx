@@ -9,6 +9,8 @@ type TaskItem = {
   id: string;
   source: "media" | "image" | "analysis" | "image3d_asset";
   source_id: number;
+  project_id?: number | null;
+  novel_id?: number | null;
   type: string;
   title: string;
   status: string;
@@ -27,6 +29,7 @@ type TaskItem = {
   updated_at: string | null;
 };
 
+type ProjectOption = { id: number; name: string; novel_id: number; };
 type QueueItem = { id:number; source:string; task_id:number; priority:number; status:"waiting"|"ready_to_run"; queued_at:string|null; wait_seconds:number; reason:string };
 type RuntimeInfo = { max_concurrency: number; active_count: number; available_slots: number; leases: Array<{source:string;task_id:number;age_seconds:number;started_at:string|null}>; stale_leases: Array<{source:string;task_id:number;age_seconds:number}>; queue?: {items:QueueItem[];total:number;dispatch_mode:string;note:string}; note?: string };
 
@@ -59,10 +62,14 @@ const groupStyles: Record<string, string> = {
 };
 
 function taskHref(task: TaskItem) {
-  if (task.source === "analysis") return "/novels";
-  if (task.source === "image") return "/visual-studio";
-  if (task.type === "speech") return "/media-studio";
-  return task.type === "video" ? "/video-editor" : "/storyboard";
+  const path = task.source === "analysis" ? "/novels"
+    : task.source === "image" ? "/visual-studio"
+    : task.type === "speech" || task.type === "episode_speech" ? "/media-studio"
+    : task.type === "video" ? "/video-editor" : "/storyboard";
+  const params = new URLSearchParams();
+  if (task.project_id) params.set("projectId", String(task.project_id));
+  if (task.novel_id) params.set("novelId", String(task.novel_id));
+  return params.size ? `${path}?${params.toString()}` : path;
 }
 
 function formatTime(value: string | null) {
@@ -75,6 +82,8 @@ export default function TasksPage() {
   const [items, setItems] = useState<TaskItem[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [source, setSource] = useState("all");
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [projectId, setProjectId] = useState("all");
   const [status, setStatus] = useState("all");
   const [keyword, setKeyword] = useState("");
   const [offset, setOffset] = useState(0);
@@ -93,6 +102,7 @@ export default function TasksPage() {
     try {
       const params = new URLSearchParams({ limit: "100", offset: String(offset) });
       if (source !== "all") params.set("task_type", source);
+      if (projectId !== "all") params.set("project_id", projectId);
       if (status !== "all") params.set("status", status);
       if (keyword.trim()) params.set("q", keyword.trim());
       const response = await fetch(`${API}/api/tasks?${params.toString()}`, { cache: "no-store" });
@@ -120,9 +130,21 @@ export default function TasksPage() {
     } finally {
       setLoading(false);
     }
-  }, [source, status, keyword, offset]);
+  }, [source, status, keyword, projectId, offset]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);
+
+  useEffect(() => {
+    const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
+    if (requestedProjectId && /^\\d+$/.test(requestedProjectId)) setProjectId(requestedProjectId);
+    fetch(`${API}/api/story/projects`, { cache: "no-store" })
+      .then(async response => {
+        if (!response.ok) throw new Error("项目列表加载失败");
+        const data = await response.json();
+        setProjects(Array.isArray(data) ? data : []);
+      })
+      .catch(error => setMessage(error instanceof Error ? error.message : "项目列表加载失败"));
+  }, []);
 
   const runAction = async (task: TaskItem, action: string) => {
     const actionNames: Record<string, string> = {
@@ -288,11 +310,23 @@ export default function TasksPage() {
           ))}
         </div>
 
-        <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/45 p-4 md:grid-cols-[1fr_180px_180px_auto]">
+        <div className="mb-5 grid gap-3 rounded-2xl border border-white/10 bg-slate-950/45 p-4 md:grid-cols-[1fr_220px_160px_160px_auto]">
           <input value={keyword} onChange={event => { setKeyword(event.target.value); setOffset(0); }}
             onKeyDown={event => { if (event.key === "Enter") void loadTasks(); }}
             placeholder="搜索任务、模型、小说名称或错误信息"
             className="min-w-0 rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-purple-300/50" />
+          <select value={projectId} onChange={event => {
+            const value = event.target.value;
+            setProjectId(value);
+            setOffset(0);
+            const url = new URL(window.location.href);
+            if (value === "all") url.searchParams.delete("projectId");
+            else url.searchParams.set("projectId", value);
+            window.history.replaceState({}, "", url.toString());
+          }} className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
+            <option value="all">全部项目</option>
+            {projects.map(project => <option key={project.id} value={String(project.id)}>{project.name || `项目 #${project.id}`}</option>)}
+          </select>
           <select value={source} onChange={event => { setSource(event.target.value); setOffset(0); }}
             className="rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm">
             <option value="all">全部模块</option>
@@ -327,7 +361,7 @@ export default function TasksPage() {
                     </span>
                     <span className="text-xs text-slate-500">#{task.source_id}</span>
                   </div>
-                  <p className="mt-1 text-xs text-purple-200">{task.context || task.type} · {task.provider || "本地任务"}{task.model ? ` / ${task.model}` : ""}</p>
+                  <p className="mt-1 text-xs text-purple-200">{task.context || task.type} · {task.provider || "本地任务"}{task.model ? ` / ${task.model}` : ""}{task.project_id ? ` · 项目 #${task.project_id}` : ""}</p>
                   {task.summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">{task.summary}</p>}
                   {task.source === "analysis" && (
                     <div className="mt-3 max-w-xl">
