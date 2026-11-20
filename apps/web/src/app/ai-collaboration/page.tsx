@@ -204,8 +204,15 @@ export default function AICollaborationPage() {
             proposals: proposalsToImport,
           }) },
         );
-        setMessage(`已导入 ${data.created_count} 项待审核剧情变化；跳过重复项 ${data.duplicates_skipped} 项。尚未覆盖正式素材。`);
-        await loadProposals();
+        const archived = await request<{ message: string }>(
+          "/api/ai-collaboration/results/text",
+          { method: "POST", body: JSON.stringify({
+            novel_id: Number(novelId), chapter_number: Number(chapterNumber),
+            content: resultJson, source_task_key: `web-ai-${novelId}-chapter-${chapterNumber}`,
+          }) },
+        );
+        setMessage(`已导入 ${data.created_count} 项待审核剧情变化；跳过重复项 ${data.duplicates_skipped} 项。完整 AI 返回内容也已归档：${archived.message}`);
+        await Promise.all([loadProposals(), loadAttachments()]);
       } else {
         const data = await request<{ message: string; detected_type: string; duplicate?: boolean }>(
           "/api/ai-collaboration/results/text",
@@ -351,7 +358,7 @@ export default function AICollaborationPage() {
                   <a href={`${API}/api/ai-collaboration/results/attachments/${item.id}/file`} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-300 underline">预览 / 打开文件</a>
                   {item.description && <p className="mt-1 text-xs text-slate-300">{item.description}</p>}
                   {item.media_file_id && <p className="mt-1 text-xs text-emerald-300">媒体素材 ID：{item.media_file_id}</p>}
-                  {item.media_type === "document" && /\\.(json|md)$/i.test(item.original_filename) && <button onClick={() => setCompareIds(current => current.includes(item.id) ? current.filter(id => id !== item.id) : current.length < 2 ? [...current, item.id] : [current[1], item.id])} className={`mt-2 rounded-md border px-3 py-1.5 text-xs ${compareIds.includes(item.id) ? "border-cyan-300 bg-cyan-950 text-cyan-100" : "border-white/15 text-slate-300"}`}>{compareIds.includes(item.id) ? "已加入对比" : "加入结果对比"}</button>}
+                  {item.media_type === "document" && /\.(json|md)$/i.test(item.original_filename) && <button onClick={() => setCompareIds(current => current.includes(item.id) ? current.filter(id => id !== item.id) : current.length < 2 ? [...current, item.id] : [current[1], item.id])} className={`mt-2 rounded-md border px-3 py-1.5 text-xs ${compareIds.includes(item.id) ? "border-cyan-300 bg-cyan-950 text-cyan-100" : "border-white/15 text-slate-300"}`}>{compareIds.includes(item.id) ? "已加入对比" : "加入结果对比"}</button>}
                 </div>
                 <span className={`rounded-full px-2 py-1 text-[10px] ${item.status === "approved" ? "bg-emerald-900/50 text-emerald-200" : item.status === "rejected" ? "bg-red-900/50 text-red-200" : "bg-amber-900/50 text-amber-200"}`}>{item.status === "approved" ? "已入库" : item.status === "rejected" ? "已拒绝" : "待审核"}</span>
               </div>
