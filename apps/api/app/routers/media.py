@@ -853,7 +853,18 @@ def render_episode_from_shots(
             if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
                 speech_path = safe_storage_file(speech_task.result_path)
                 break
-        music = safe_storage_file(music_path) if music_path else None
+        selected_music_path = timeline.get("music_path") or music_path
+        music = safe_storage_file(selected_music_path) if selected_music_path else None
+        if music:
+            music_record = db.query(MediaFile).filter(
+                MediaFile.category == "audio",
+                MediaFile.file_path == str(music),
+            ).first()
+            if not music_record:
+                raise HTTPException(422, "背景音乐必须先上传并登记到本地音频素材库")
+            music_info = probe_media(music)
+            if not any(stream.get("codec_type") == "audio" for stream in music_info.get("streams", [])):
+                raise HTTPException(422, "所选背景音乐文件不包含可用音轨")
         music_volume = float(timeline.get("music_volume", music_volume))
         music_fade_in = max(0.0, min(30.0, float(timeline.get("music_fade_in_seconds", 1.0))))
         music_fade_out = max(0.0, min(30.0, float(timeline.get("music_fade_out_seconds", 2.0))))
@@ -892,25 +903,40 @@ def render_episode_from_shots(
             output.unlink(missing_ok=True)
             os.replace(mixed_output, output)
         subtitle_lines = []
-        elapsed = 0.0
         subtitle_index = 1
-        transition_by_shot = {
-            item["after_shot_id"]: item
-            for item in transition_items
-            if item.get("transition") in ("fade", "dissolve")
-        }
-        for shot, duration in zip(shots, actual_durations):
-            dialogue = (shot.dialogue or "").strip()
-            if dialogue:
+        custom_cues = timeline.get("subtitle_cues")
+        if custom_cues is not None:
+            for cue in sorted(custom_cues, key=lambda item: float(item["start"])):
+                start = float(cue["start"])
+                end = float(cue["end"])
+                if start < 0 or end <= start or end > total_video_duration + 0.05:
+                    raise HTTPException(422, "字幕时间必须位于成片时长范围内，且结束时间大于开始时间")
                 subtitle_lines.extend([
                     str(subtitle_index),
-                    f"{srt_time(elapsed)} --> {srt_time(elapsed + duration)}",
-                    dialogue,
+                    f"{srt_time(start)} --> {srt_time(end)}",
+                    str(cue["text"]).strip(),
                     "",
                 ])
                 subtitle_index += 1
-            overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
-            elapsed += duration - overlap
+        else:
+            elapsed = 0.0
+            transition_by_shot = {
+                item["after_shot_id"]: item
+                for item in transition_items
+                if item.get("transition") in ("fade", "dissolve")
+            }
+            for shot, duration in zip(shots, actual_durations):
+                dialogue = (shot.dialogue or "").strip()
+                if dialogue:
+                    subtitle_lines.extend([
+                        str(subtitle_index),
+                        f"{srt_time(elapsed)} --> {srt_time(elapsed + duration)}",
+                        dialogue,
+                        "",
+                    ])
+                    subtitle_index += 1
+                overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
+                elapsed += duration - overlap
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
@@ -1958,6 +1984,12 @@ class TimelineTransitionInput(BaseModel):
     duration_seconds: float = Field(default=0.5, ge=0, le=2)
 
 
+class EpisodeSubtitleCueInput(BaseModel):
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class EpisodeTimelineInput(BaseModel):
     shot_order: list[int]
     transitions: list[TimelineTransitionInput] = Field(default_factory=list)
@@ -1966,6 +1998,9 @@ class EpisodeTimelineInput(BaseModel):
     music_fade_in_seconds: float = Field(default=1.0, ge=0, le=30)
     music_fade_out_seconds: float = Field(default=2.0, ge=0, le=30)
     music_volume: float = Field(default=0.18, ge=0, le=1)
+    music_path: Optional[str] = Field(default=None, max_length=2000)
+    music_name: Optional[str] = Field(default=None, max_length=300)
+    subtitle_cues: Optional[list[EpisodeSubtitleCueInput]] = None
 
 
 def _timeline_episode_shots(db, episode_id):
@@ -2040,6 +2075,17 @@ def save_episode_edit_timeline(
             ) / 2
             if item.duration_seconds <= 0 or item.duration_seconds >= adjacent_limit:
                 raise HTTPException(422, "转场时长必须大于 0，且小于相邻较短镜头时长的一半")
+    if data.music_path:
+        music_path = safe_storage_file(data.music_path)
+        music_record = db.query(MediaFile).filter(
+            MediaFile.category == "audio",
+            MediaFile.file_path == str(music_path),
+        ).first()
+        if not music_record:
+            raise HTTPException(422, "背景音乐必须来自本地音频素材库")
+    for cue in data.subtitle_cues or []:
+        if cue.end <= cue.start:
+            raise HTTPException(422, "字幕结束时间必须大于开始时间")
     payload = data.model_dump()
     record = db.query(EpisodeEditTimeline).filter(
         EpisodeEditTimeline.episode_id == episode_id
