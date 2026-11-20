@@ -71,7 +71,7 @@ class WebAIVideoShotAttachmentTests(unittest.TestCase):
         self.db.flush()
         self.stored_name = "a" * 32 + ".mp4"
         self.video_path = self.storage / "web_ai_results" / self.stored_name
-        self.video_path.write_bytes(b"\x00\\x00\\x00\\x18ftypisom" + b"\x00" * 128)
+        self.video_path.write_bytes(b"\x00\x00\x00\x18ftypisom" + b"\x00" * 128)
         self.result = WebAIResultFile(
             task_key=self.task.task_key, original_name="shot-04.mp4",
             stored_name=self.stored_name, content_type="video/mp4",
