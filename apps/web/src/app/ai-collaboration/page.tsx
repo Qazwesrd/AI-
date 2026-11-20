@@ -352,6 +352,13 @@ export default function AICollaborationPage() {
             <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
               {chapters.map((chapter) => <label key={chapter.id} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-200"><input type="checkbox" checked={selectedChapterNumbers.includes(String(chapter.chapter_number))} onChange={(event) => setSelectedChapterNumbers((current) => event.target.checked ? [...current, String(chapter.chapter_number)] : current.filter((value) => value !== String(chapter.chapter_number)))} className="accent-cyan-500" />第 {chapter.chapter_number} 章 · {chapter.title}</label>)}
             </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {FULL_WORKFLOW_TASKS.map((task) => <label key={task} className="text-xs text-slate-300">{task}分配给
+                <select value={providerRoutes[task]} onChange={(event) => setProviderRoutes((current) => ({ ...current, [task]: event.target.value as AIWebProvider }))} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white">
+                  {Object.entries(AI_WEB_PROVIDERS).map(([key, provider]) => <option key={key} value={key}>{provider.label}</option>)}
+                </select>
+              </label>)}
+            </div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button type="button" onClick={() => void prepareFullWorkflow()} disabled={busy || selectedChapterNumbers.length === 0} className="rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">为选中的章节生成全流程任务</button>
               <span className="text-xs text-slate-400">最多同时选择 5 章；每章 6 项任务。网页支持时自动填入，但必须由你确认发送。</span>
