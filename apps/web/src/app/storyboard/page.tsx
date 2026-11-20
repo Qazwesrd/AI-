@@ -28,6 +28,22 @@ type ShotAssetLink = {
 };
 type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };
 
+function inspectEpisodeShots(episode: Episode, rows: Shot[]) {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+  if (rows.length === 0) blockers.push("当前分集还没有分镜镜头");
+  const missingDescription = rows.filter((shot) => !shot.visual_description?.trim() && !shot.image_prompt?.trim());
+  if (missingDescription.length) blockers.push(`${missingDescription.length} 个镜头缺少画面描述和生成提示词（镜头号：${missingDescription.map((shot) => shot.shot_number).join("、")}）`);
+  const invalidDuration = rows.filter((shot) => !Number.isFinite(shot.duration_seconds) || shot.duration_seconds <= 0);
+  if (invalidDuration.length) blockers.push(`${invalidDuration.length} 个镜头的时长无效`);
+  const totalSeconds = rows.reduce((sum, shot) => sum + (Number.isFinite(shot.duration_seconds) ? shot.duration_seconds : 0), 0);
+  if (totalSeconds < 90 || totalSeconds > 150) warnings.push(`镜头总时长为 ${totalSeconds} 秒，常规单集目标为 90–150 秒`);
+  if (episode.duration_seconds > 0 && Math.abs(totalSeconds - episode.duration_seconds) > 15) {
+    warnings.push(`镜头合计 ${totalSeconds} 秒，与分集设置 ${episode.duration_seconds} 秒相差超过 15 秒`);
+  }
+  return { blockers, warnings, totalSeconds };
+}
+
 const styles = [
   "3D动漫电影风格", "真人电影风格", "2D动漫风格",
   "国风漫画风格", "水墨动画风格", "自定义参考图风格",
@@ -242,9 +258,16 @@ export default function StoryboardPage() {
   }
   async function generateEpisodeVideos(episode: Episode) {
     if (!videoModel.trim()) return setMessage("请填写已开通的视频模型 ID");
-    if (!window.confirm("将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
     setBusy(true);
     try {
+      const episodeShots = episodeId === episode.id ? shots : await request(`/api/story/episodes/${episode.id}/shots`);
+      const preflight = inspectEpisodeShots(episode, episodeShots as Shot[]);
+      if (preflight.blockers.length) {
+        setMessage("视频生成前检查未通过：\n" + preflight.blockers.join("；"));
+        return;
+      }
+      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
+      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
       let done = false;
       let batches = 0;
       let totalCreated = 0;
@@ -271,9 +294,16 @@ export default function StoryboardPage() {
 
   async function generateEpisodeSpeech(episode: Episode) {
     if (!speechModel.trim()) return setMessage("请填写已开通的语音模型 ID");
-    if (!window.confirm("将按每个分镜的对白/旁白生成语音，并按镜头时长合成整集配音轨。语音 API 可能产生费用，是否继续？")) return;
     setBusy(true);
     try {
+      const episodeShots = episodeId === episode.id ? shots : await request(`/api/story/episodes/${episode.id}/shots`);
+      const preflight = inspectEpisodeShots(episode, episodeShots as Shot[]);
+      if (preflight.blockers.length) {
+        setMessage("配音生成前检查未通过：\n" + preflight.blockers.join("；"));
+        return;
+      }
+      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
+      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n将按分镜对白/旁白生成语音，并按镜头时长合成整集配音轨。语音 API 可能产生费用，是否继续？")) return;
       const result = await request("/api/media/speech/episodes/" + episode.id + "/generate", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ provider: speechProvider, model: speechModel, voice: speechVoice, confirm_paid: speechPaidConfirmed }),
@@ -283,9 +313,16 @@ export default function StoryboardPage() {
     finally { setBusy(false); }
   }
   async function renderEpisodeVideo(episode: Episode) {
-    if (!window.confirm("只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
     setBusy(true);
     try {
+      const episodeShots = episodeId === episode.id ? shots : await request(`/api/story/episodes/${episode.id}/shots`);
+      const preflight = inspectEpisodeShots(episode, episodeShots as Shot[]);
+      if (preflight.blockers.length) {
+        setMessage("成片合成前检查未通过：\n" + preflight.blockers.join("；"));
+        return;
+      }
+      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
+      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n只有本集所有镜头视频均已生成并下载到本地，才能合成。现在尝试合成吗？")) return;
       const query = backgroundMusicPath.trim() ? "?music_path=" + encodeURIComponent(backgroundMusicPath.trim()) : "";
       const result = await request("/api/media/video/episodes/" + episode.id + "/render" + query, { method: "POST" });
       setMessage("第" + episode.episode_number + "集初版视频已合成：" + result.output);
