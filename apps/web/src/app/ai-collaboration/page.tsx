@@ -163,6 +163,30 @@ export default function AICollaborationPage() {
     }
   }
 
+  async function autoMatchReferenceFiles() {
+    if (!referenceTargetTaskId) { setMessage("请先选择一个已打开的视频分镜提示词任务。"); return; }
+    setBusy(true);
+    try {
+      const data = await request<{
+        items: Array<{ fileId: number; filename: string; matches: Array<{ shotNumber: number }> }>;
+        matchedShotCount: number;
+        chapterNumber: number;
+      }>(`/api/web-ai/tasks/${encodeURIComponent(referenceTargetTaskId)}/reference-suggestions`);
+      const availableIds = new Set(webAiFiles.filter((item) =>
+        item.classificationStatus === "confirmed" && Boolean(item.visualAssetId) && (item.contentType || "").startsWith("image/")
+      ).map((item) => item.id));
+      const ids = data.items.map((item) => item.fileId).filter((id) => availableIds.has(id));
+      setSelectedReferenceFileIds(ids);
+      setMessage(ids.length
+        ? `已按第 ${data.chapterNumber} 章的分镜关联匹配 ${ids.length} 张参考图，覆盖 ${data.matchedShotCount} 个镜头。请检查选择结果后再上传。`
+        : `第 ${data.chapterNumber} 章暂时没有找到已确认归档的匹配图片。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "自动匹配章节参考图失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function uploadSelectedReferenceFiles() {
     if (!window.aiBrowserDesktop) { setMessage("自动上传参考图需要使用电脑版 AI 漫剧制作大师。"); return; }
     if (!referenceTargetTaskId) { setMessage("请先选择一个已打开的 AI 网页任务。"); return; }
@@ -649,6 +673,7 @@ export default function AICollaborationPage() {
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setSelectedWebAiFileIds(webAiFiles.filter((item) => item.classificationStatus !== "confirmed").map((item) => item.id))} className="rounded-lg border border-white/15 px-3 py-2 text-xs">全选待归档</button>
               <button onClick={() => void refreshOpenAiBrowserTasks()} className="rounded-lg border border-sky-300/30 px-3 py-2 text-xs text-sky-200">刷新已打开 AI 网页</button>
+              <button disabled={busy || !referenceTargetTaskId} onClick={() => void autoMatchReferenceFiles()} className="rounded-lg border border-violet-300/30 px-3 py-2 text-xs text-violet-200 disabled:opacity-40">按分镜自动匹配参考图</button>
               <button disabled={busy || selectedWebAiFileIds.length === 0} onClick={() => void confirmSelectedWebAiFiles()} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">批量归档（{selectedWebAiFileIds.length}）</button>
               <select value={referenceTargetTaskId} onChange={(event) => setReferenceTargetTaskId(event.target.value)} className="max-w-56 rounded-lg border border-white/15 bg-slate-950 px-2 py-2 text-xs text-white" disabled={!openAiBrowserTasks.length}>
                 <option value="">选择参考图目标 AI 网页</option>
