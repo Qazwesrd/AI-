@@ -209,7 +209,7 @@ def validate_downloaded_media_signature(path: Path, extension: str) -> bool:
     if extension in {".mp4", ".mov", ".m4a"}:
         return len(prefix) >= 8 and prefix[4:8] == b"ftyp"
     if extension in {".mkv", ".webm"}:
-        return prefix.startswith(b"\\x1a\\x45\\xdf\\xa3")
+        return prefix.startswith(b"\x1a\x45\xdf\xa3")
     if extension == ".wav":
         return len(prefix) >= 12 and prefix[:4] == b"RIFF" and prefix[8:12] == b"WAVE"
     if extension == ".mp3":
@@ -217,9 +217,9 @@ def validate_downloaded_media_signature(path: Path, extension: str) -> bool:
     if extension == ".aac":
         return len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xF6) == 0xF0
     if extension == ".vtt":
-        return prefix.lstrip(b"\\xef\\xbb\\xbf").startswith(b"WEBVTT")
+        return prefix.lstrip(b"\xef\xbb\xbf").startswith(b"WEBVTT")
     if extension == ".srt":
-        return bool(prefix) and b"\\x00" not in prefix
+        return bool(prefix) and b"\x00" not in prefix
     return False
 
 
