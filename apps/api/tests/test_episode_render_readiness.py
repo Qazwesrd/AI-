@@ -82,8 +82,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         }
 
     def call_readiness(self):
-        with patch.object(media, "ensure_episode_source_current"):
-            return media.get_episode_render_readiness(self.episode.id, self.db)
+        return media.get_episode_render_readiness(self.episode.id, self.db)
 
     def test_all_shots_ready(self):
         a = self.storage / "a.mp4"
@@ -140,9 +139,8 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         self.assertTrue(item["warnings"])
 
     def test_rejects_unknown_episode(self):
-        with patch.object(media, "ensure_episode_source_current"):
-            with self.assertRaises(HTTPException) as caught:
-                media.get_episode_render_readiness(99999, self.db)
+        with self.assertRaises(HTTPException) as caught:
+            media.get_episode_render_readiness(99999, self.db)
         self.assertEqual(caught.exception.status_code, 404)
 
 
