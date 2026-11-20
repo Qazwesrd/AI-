@@ -72,6 +72,7 @@ export default function AICollaborationPage() {
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
+  const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "对白整理": "deepseek" });
   const [autoOpenAi, setAutoOpenAi] = useState(true);
   const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
   const selectedAi = AI_WEB_PROVIDERS[aiProvider];
@@ -177,7 +178,8 @@ export default function AICollaborationPage() {
           try {
             const data = await request<Handoff>("/api/ai-collaboration/novels/" + novelId + "/chapters/" + chapterNo + "/handoff-package", { method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: task }) });
             const taskId = "task-" + crypto.randomUUID();
-            await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
+            const routedProvider = AI_WEB_PROVIDERS[providerRoutes[task]];
+            await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
             const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
             await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
             completed += 1;
