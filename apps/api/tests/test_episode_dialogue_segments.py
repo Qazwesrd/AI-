@@ -164,6 +164,25 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
             save_episode_edit_timeline(self.episode_id, payload, self.db)
         self.assertEqual(caught.exception.status_code, 422)
 
+    def test_rejects_blank_dialogue_segment_text(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            dialogue_segments_by_shot_id={
+                str(self.shot_a.id): [{"text": "   "}],
+            },
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_empty_segment_list_falls_back_to_original_dialogue(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            dialogue_segments_by_shot_id={str(self.shot_a.id): []},
+        )
+        saved = save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(saved["timeline"]["dialogue_segments_by_shot_id"][str(self.shot_a.id)], [])
+
     def test_rejects_missing_or_foreign_shots(self):
         payload = EpisodeTimelineInput(shot_order=[self.shot_a.id])
         with self.assertRaises(HTTPException) as caught:
