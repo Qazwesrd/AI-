@@ -102,7 +102,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         a = self.storage / "a.mp4"
         a.write_bytes(b"video")
         self.add_task(self.shot_a, path=a)
-        with patch.object(media, "safe_storage_file", side_effect=lambda p: Path(p)), \
+        with patch.object(media, "safe_storage_file", side_effect=self.safe_existing_path), \
              patch.object(media, "probe_media", side_effect=self.probe_ok):
             result = self.call_readiness()
         self.assertFalse(result["ready"])
@@ -112,7 +112,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
     def test_completed_task_with_missing_file_is_broken(self):
         missing = self.storage / "gone.mp4"
         self.add_task(self.shot_a, path=missing)
-        with patch.object(media, "safe_storage_file", side_effect=lambda p: Path(p)), \
+        with patch.object(media, "safe_storage_file", side_effect=self.safe_existing_path), \
              patch.object(media, "probe_media", side_effect=self.probe_ok):
             result = self.call_readiness()
         self.assertEqual(result["broken_count"], 1)
@@ -120,7 +120,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
 
     def test_processing_task_is_not_reported_as_missing(self):
         self.add_task(self.shot_a, status="processing")
-        with patch.object(media, "safe_storage_file", side_effect=lambda p: Path(p)), \
+        with patch.object(media, "safe_storage_file", side_effect=self.safe_existing_path), \
              patch.object(media, "probe_media", side_effect=self.probe_ok):
             result = self.call_readiness()
         self.assertEqual(result["processing_count"], 1)
@@ -131,7 +131,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         valid.write_bytes(b"video")
         self.add_task(self.shot_a, path=valid)
         self.add_task(self.shot_a, path=self.storage / "new-broken.mp4")
-        with patch.object(media, "safe_storage_file", side_effect=lambda p: Path(p)), \
+        with patch.object(media, "safe_storage_file", side_effect=self.safe_existing_path), \
              patch.object(media, "probe_media", side_effect=self.probe_ok):
             result = self.call_readiness()
         item = result["items"][0]
