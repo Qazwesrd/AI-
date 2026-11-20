@@ -527,44 +527,41 @@ def build_chapter_handoff_package(
     }
     task_schemas = {
         "剧本改编": {
-            "type": "object", "required": ["chapter_number", "title", "synopsis", "screenplay"],
-            "properties": {"chapter_number": {"type": "integer"}, "title": {"type": "string"},
+            "type": "object",
+            "required": ["chapter_number", "title", "synopsis", "screenplay"],
+            "properties": {
+                "chapter_number": {"type": "integer"}, "title": {"type": "string"},
                 "synopsis": {"type": "string"}, "screenplay": {"type": "string"},
-                "characters": {"type": "array"}, "scenes": {"type": "array"}, "dialogues": {"type": "array"}},
+                "characters": {"type": "array"}, "scenes": {"type": "array"}, "dialogues": {"type": "array"},
+            },
         },
         "分镜设计": {
-            "type": "object", "required": ["chapter_number", "shots"],
-            "properties": {"chapter_number": {"type": "integer"}, "shots": {"type": "array", "items": {
-                "type": "object", "required": ["shot_number", "scene_name", "visual_description"],
-                "properties": {"shot_number": {"type": "integer"}, "scene_name": {"type": "string"},
-                    "shot_type": {"type": "string"}, "camera_movement": {"type": "string"},
-                    "duration_seconds": {"type": "number"}, "visual_description": {"type": "string"},
-                    "character_actions": {"type": "string"}, "dialogue": {"type": "string"},
-                    "sound_effects": {"type": "string"}, "image_prompt": {"type": "string"}}}},
+            "type": "object",
+            "required": ["chapter_number", "shots"],
+            "properties": {
+                "chapter_number": {"type": "integer"}, "shots": {"type": "array"},
+            },
         },
         "角色设定": {
-            "type": "object", "required": ["chapter_number", "characters"],
-            "properties": {"chapter_number": {"type": "integer"}, "characters": {"type": "array", "items": {
-                "type": "object", "required": ["name", "appearance", "evidence"],
-                "properties": {"name": {"type": "string"}, "appearance": {"type": "string"},
-                    "clothing": {"type": "string"}, "personality": {"type": "string"},
-                    "abilities": {"type": "array"}, "evidence": {"type": "string"}}}},
+            "type": "object",
+            "required": ["chapter_number", "characters"],
+            "properties": {
+                "chapter_number": {"type": "integer"}, "characters": {"type": "array"},
+            },
         },
         "场景设定": {
-            "type": "object", "required": ["chapter_number", "scenes"],
-            "properties": {"chapter_number": {"type": "integer"}, "scenes": {"type": "array", "items": {
-                "type": "object", "required": ["name", "visual_description", "evidence"],
-                "properties": {"name": {"type": "string"}, "visual_description": {"type": "string"},
-                    "atmosphere": {"type": "string"}, "time_of_day": {"type": "string"},
-                    "lighting": {"type": "string"}, "evidence": {"type": "string"}}}},
+            "type": "object",
+            "required": ["chapter_number", "scenes"],
+            "properties": {
+                "chapter_number": {"type": "integer"}, "scenes": {"type": "array"},
+            },
         },
         "对白整理": {
-            "type": "object", "required": ["chapter_number", "dialogues"],
-            "properties": {"chapter_number": {"type": "integer"}, "dialogues": {"type": "array", "items": {
-                "type": "object", "required": ["character", "line", "evidence"],
-                "properties": {"character": {"type": "string"}, "line": {"type": "string"},
-                    "emotion": {"type": "string"}, "scene": {"type": "string"},
-                    "evidence": {"type": "string"}}}},
+            "type": "object",
+            "required": ["chapter_number", "dialogues"],
+            "properties": {
+                "chapter_number": {"type": "integer"}, "dialogues": {"type": "array"},
+            },
         },
     }
     if payload.task_type in task_schemas:
