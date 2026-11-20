@@ -13,7 +13,8 @@ from app.database import STORAGE_DIR
 from app.database import get_db
 from app.models.web_ai_tool import WebAITool, WebAITask, WebAIResultFile
 from app.models.visual import VisualAsset
-from app.models.novel import Novel
+from app.models.novel import Novel, Chapter
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
 
 router = APIRouter(prefix="/api/web-ai", tags=["AI网页工具协同中心"])
 
@@ -240,6 +241,61 @@ def list_task_result_files(task_key: str, db: Session = Depends(get_db)):
     return {"items": [result_file_dict(item) for item in items]}
 
 
+@router.get("/files")
+def list_all_result_files(
+    novel_id: int | None = None,
+    chapter_id: int | None = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+):
+    if limit < 1 or limit > 500:
+        raise HTTPException(400, "limit 必须在 1 到 500 之间")
+    query = db.query(WebAIResultFile, WebAITask).join(
+        WebAITask, WebAITask.task_key == WebAIResultFile.task_key
+    )
+    if novel_id is not None:
+        query = query.filter(WebAITask.novel_id == novel_id)
+    if chapter_id is not None:
+        query = query.filter(WebAITask.chapter_id == chapter_id)
+    rows = query.order_by(WebAIResultFile.id.desc()).limit(limit).all()
+    items = []
+    for result_file, task in rows:
+        item = result_file_dict(result_file)
+        item.update({
+            "taskTitle": task.title,
+            "taskCategory": task.category,
+            "toolId": task.tool_key,
+            "novelId": task.novel_id,
+            "chapterId": task.chapter_id,
+        })
+        items.append(item)
+    return {"items": items}
+
+
+@router.get("/files/{file_id}/preview")
+def preview_task_result_file(file_id: int, db: Session = Depends(get_db)):
+    item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if item is None:
+        raise HTTPException(404, "结果文件不存在")
+    preview_types = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif",
+    }
+    extension = Path(item.stored_name).suffix.lower()
+    media_type = preview_types.get(extension)
+    if media_type is None:
+        raise HTTPException(415, "目前仅支持 PNG、JPG、WebP 和 GIF 图片在线预览")
+    path = (STORAGE_DIR / "web_ai_results" / item.stored_name).resolve()
+    root = (STORAGE_DIR / "web_ai_results").resolve()
+    if path.parent != root or not path.is_file():
+        raise HTTPException(410, "结果文件已不存在")
+    return FileResponse(
+        path, media_type=media_type, filename=item.original_name,
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/files/{file_id}")
 def download_task_result_file(file_id: int, db: Session = Depends(get_db)):
     item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
@@ -297,6 +353,7 @@ class ConfirmResultClassification(BaseModel):
     assetName: str = Field(default="", max_length=200)
     description: str = Field(default="", max_length=4000)
     novelId: int | None = Field(default=None, ge=1)
+    chapterId: int | None = Field(default=None, ge=1)
 
 @router.patch("/files/{file_id}/classification")
 def confirm_result_classification(file_id: int, payload: ConfirmResultClassification, db: Session = Depends(get_db)):
@@ -307,19 +364,87 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
     if target.parent != root or not target.is_file(): raise HTTPException(410, "结果文件已不存在")
     if item.classification_status == "confirmed": raise HTTPException(409, "该文件已经确认归档，不能重复创建素材")
     asset_id = None
-    if payload.novelId is not None and db.query(Novel).filter(Novel.id == payload.novelId).first() is None:
+    task = db.query(WebAITask).filter(WebAITask.task_key == item.task_key).first()
+    resolved_novel_id = payload.novelId or (task.novel_id if task else None)
+    resolved_chapter_id = payload.chapterId or (task.chapter_id if task else None)
+    chapter = None
+    if resolved_novel_id is not None and db.query(Novel).filter(Novel.id == resolved_novel_id).first() is None:
         raise HTTPException(404, "指定的小说不存在")
+    if resolved_chapter_id is not None:
+        chapter = db.query(Chapter).filter(
+            Chapter.id == resolved_chapter_id,
+            Chapter.novel_id == resolved_novel_id,
+        ).first()
+        if chapter is None:
+            raise HTTPException(404, "指定章节不存在或不属于该小说")
     if payload.classification in {"character", "scene", "prop", "weapon", "costume", "building", "special_item"}:
         if target.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}: raise HTTPException(400, "人物、场景和道具素材必须是图片文件")
         if not payload.assetName.strip(): raise HTTPException(400, "请填写素材名称后再确认归档")
         category_map = {"character": "characters", "scene": "scenes", "prop": "props", "weapon": "weapons", "costume": "costumes", "building": "buildings", "special_item": "special_items"}
         asset_data = {"source": "web_ai_result", "result_file_id": item.id, "task_key": item.task_key, "original_filename": item.original_name}
-        if payload.novelId is not None:
-            asset_data["source_novel_id"] = payload.novelId
+        if resolved_novel_id is not None:
+            asset_data["source_novel_id"] = resolved_novel_id
+        if chapter is not None:
+            asset_data["source_chapter_id"] = chapter.id
+            asset_data["source_chapter_number"] = chapter.chapter_number
         asset = VisualAsset(category=category_map[payload.classification], name=payload.assetName.strip(), description=payload.description.strip() or ("从 AI 网页任务 " + item.task_key + " 导入"), image_path=str(target), style="待确认", data=asset_data, confirmed=True)
         db.add(asset)
         db.flush()
         asset_id = asset.id
+
+        # 将已确认的图片资产挂到本小说对应的分集，并尽可能关联到名称明确匹配的镜头。
+        if resolved_novel_id is not None:
+            projects_query = db.query(StoryProject).filter(StoryProject.novel_id == resolved_novel_id)
+            if task and task.project_id:
+                projects_query = projects_query.filter(StoryProject.id == task.project_id)
+            else:
+                projects_query = projects_query.order_by(StoryProject.updated_at.desc()).limit(1)
+            projects = projects_query.all()
+            for project in projects:
+                episodes_query = db.query(EpisodePlan).filter(EpisodePlan.project_id == project.id)
+                episodes = episodes_query.all()
+                for episode in episodes:
+                    source_ids = episode.source_chapter_ids if isinstance(episode.source_chapter_ids, list) else []
+                    if chapter is not None and chapter.id not in source_ids:
+                        continue
+                    if chapter is None and not source_ids:
+                        continue
+                    episode_link = StoryAssetLink(
+                        project_id=project.id, episode_id=episode.id, shot_id=None,
+                        asset_id=asset.id, role=category_map[payload.classification],
+                        chapter_number=chapter.chapter_number if chapter else None,
+                    )
+                    db.add(episode_link)
+                    shots = db.query(StoryboardShot).filter(
+                        StoryboardShot.episode_id == episode.id
+                    ).all()
+                    for shot in shots:
+                        searchable = " ".join([
+                            shot.scene_name or "", shot.visual_description or "",
+                            shot.character_actions or "", shot.dialogue or "",
+                            shot.image_prompt or "",
+                        ]).casefold()
+                        asset_name = payload.assetName.strip().casefold()
+                        if not asset_name or asset_name not in searchable:
+                            continue
+                        if category_map[payload.classification] == "scenes" and (shot.scene_name or "").strip() and (
+                            asset_name in shot.scene_name.casefold()
+                            or shot.scene_name.casefold() in asset_name
+                        ):
+                            shot.scene_asset_id = asset.id
+                        exists = db.query(StoryAssetLink).filter(
+                            StoryAssetLink.project_id == project.id,
+                            StoryAssetLink.episode_id == episode.id,
+                            StoryAssetLink.shot_id == shot.id,
+                            StoryAssetLink.asset_id == asset.id,
+                        ).first()
+                        if exists is None:
+                            db.add(StoryAssetLink(
+                                project_id=project.id, episode_id=episode.id,
+                                shot_id=shot.id, asset_id=asset.id,
+                                role=category_map[payload.classification],
+                                chapter_number=chapter.chapter_number if chapter else None,
+                            ))
     item.classification = payload.classification
     item.classification_status = "confirmed"
     item.classification_reason = "用户已确认分类"

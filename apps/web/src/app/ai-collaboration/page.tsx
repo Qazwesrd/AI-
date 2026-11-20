@@ -31,6 +31,12 @@ type ResultAttachment = {
   description: string; status: string; review_note?: string; media_file_id?: number | null;
   created_at?: string;
 };
+type WebAIResultFile = {
+  id: number; taskId: string; filename: string; contentType: string; size: number;
+  downloadUrl: string; createdAt: string; classification: string; classificationStatus: string;
+  classificationReason: string; visualAssetId?: number | null; taskTitle: string;
+  taskCategory: string; toolId: string; novelId?: number | null; chapterId?: number | null;
+};
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 const AI_WEB_PROVIDERS = {
@@ -40,7 +46,7 @@ const AI_WEB_PROVIDERS = {
   grok: { label: "Grok", url: "https://grok.com/" },
 } as const;
 type AIWebProvider = keyof typeof AI_WEB_PROVIDERS;
-type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "对白整理";
+type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "道具设定" | "对白整理";
 type VisualStyle = "国漫" | "仿真人" | "3D漫" | "2D漫";
 const VISUAL_STYLE_GUIDES: Record<VisualStyle, string> = {
   国漫: "中国动画电影美术语言，东方审美，符合题材时代的服饰与建筑，精细线稿与层次丰富的色彩，电影级构图；避免日式动漫脸和现代元素错置。",
@@ -49,11 +55,11 @@ const VISUAL_STYLE_GUIDES: Record<VisualStyle, string> = {
   "2D漫": "高品质二维动画风格，清晰稳定的轮廓线、赛璐璐或细腻手绘上色、分层背景与动画电影构图；人物比例、线条和色彩体系保持统一。",
 };
 function visualPromptRequirements(style: VisualStyle, task: HandoffTaskType): string {
-  const imageTasks = task === "分镜设计" || task === "角色设定" || task === "场景设定";
+  const imageTasks = task === "分镜设计" || task === "角色设定" || task === "场景设定" || task === "道具设定";
   return [
     "【用户指定的统一视觉风格】" + style + "。" + VISUAL_STYLE_GUIDES[style],
     "【视觉连续性硬性要求】同一角色跨镜头保持脸型、五官、年龄感、发型、体型和服装一致；同一场景保持建筑结构、时间、天气、主色调和空间布局一致；道具外观与持有者一致。若剧情明确发生变化，按章节先后呈现变化，不得提前或遗漏。",
-    imageTasks ? "【必须生成可直接用于图片模型的提示词】为每个主要角色分别输出角色定妆图提示词（正面、侧面、全身、表情与服装细节）；为每个重要场景输出环境概念图提示词；分镜中的每个镜头输出独立画面提示词。提示词必须包含主体、外观、动作、场景、构图、景别、光线、色彩、风格、画幅及负面提示词，并明确引用本次统一画风。" : "【图片提示词联动】剧本和剧情分析中标记需要制作角色设定图、场景图、道具图及关键剧情插图的位置，并给出可供后续图片提示词生成使用的具体视觉描述。",
+    imageTasks ? "【必须生成可直接用于图片模型的提示词】为每个主要角色分别输出角色定妆图提示词（正面、侧面、全身、表情与服装细节）；为每个重要场景输出环境概念图提示词；为每件关键道具、武器和服装输出独立设定图提示词；分镜中的每个镜头输出独立画面提示词。提示词必须包含主体、外观、动作、场景、构图、景别、光线、色彩、风格、画幅及负面提示词，并明确引用本次统一画风。" : "【图片提示词联动】剧本和剧情分析中标记需要制作角色设定图、场景图、道具图及关键剧情插图的位置，并给出可供后续图片提示词生成使用的具体视觉描述。",
     "【输出要求】内容必须依据本章原文，不得擅自新增角色设定或剧情事实；缺失信息标记为待确认；图片提示词不得只写‘好看’‘电影感’，必须具体可执行。",
   ].join("\n\n");
 }
@@ -79,6 +85,10 @@ export default function AICollaborationPage() {
   const [resultJson, setResultJson] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [attachments, setAttachments] = useState<ResultAttachment[]>([]);
+  const [webAiFiles, setWebAiFiles] = useState<WebAIResultFile[]>([]);
+  const [webAiClassifications, setWebAiClassifications] = useState<Record<number, string>>({});
+  const [webAiAssetNames, setWebAiAssetNames] = useState<Record<number, string>>({});
+  const [selectedWebAiFileIds, setSelectedWebAiFileIds] = useState<number[]>([]);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -88,7 +98,7 @@ export default function AICollaborationPage() {
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
-  const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "对白整理": "deepseek" });
+  const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "道具设定": "doubao", "对白整理": "deepseek" });
   const [autoOpenAi, setAutoOpenAi] = useState(true);
   const [visualStyle, setVisualStyle] = useState<VisualStyle>("国漫");
   const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
@@ -113,6 +123,7 @@ export default function AICollaborationPage() {
       .catch((error) => setMessage(error.message));
     void loadProposals(novelId, filter);
     void loadAttachments(novelId);
+    void loadWebAiFiles(novelId);
   }, [novelId]);
 
   async function loadProposals(id = novelId, status = filter) {
@@ -129,6 +140,93 @@ export default function AICollaborationPage() {
       const data = await request<{ items: ResultAttachment[] }>(`/api/ai-collaboration/results/attachments?novel_id=${id}&status=all`);
       setAttachments(data.items || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : "读取 AI 结果文件失败"); }
+  }
+
+  async function loadWebAiFiles(id = novelId) {
+    if (!id) { setWebAiFiles([]); return; }
+    try {
+      const data = await request<{ items: WebAIResultFile[] }>(`/api/web-ai/files?novel_id=${id}&limit=200`);
+      setWebAiFiles(data.items || []);
+      setWebAiClassifications((current) => {
+        const next = { ...current };
+        for (const item of data.items || []) if (!next[item.id]) next[item.id] = item.classification || "other";
+        return next;
+      });
+      setWebAiAssetNames((current) => {
+        const next = { ...current };
+        for (const item of data.items || []) if (!next[item.id]) next[item.id] = item.filename.replace(/\\.[^.]+$/, "");
+        return next;
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取内嵌 AI 浏览器下载结果失败");
+    }
+  }
+
+  async function confirmWebAiFile(item: WebAIResultFile) {
+    const classification = webAiClassifications[item.id] || item.classification || "other";
+    const needsAsset = ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(classification);
+    const assetName = (webAiAssetNames[item.id] || "").trim();
+    if (needsAsset && !assetName) { setMessage("请先填写素材名称，再确认归档。"); return; }
+    if (!window.confirm("确认将“" + item.filename + "”按“" + classification + "”归档？确认后会写入本地素材库，并按任务章节尝试关联分集和分镜。")) return;
+    setBusy(true);
+    try {
+      await request(`/api/web-ai/files/${item.id}/classification`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          classification,
+          assetName,
+          description: "来自 " + item.taskTitle + "（" + item.toolId + "）",
+          novelId: item.novelId || Number(novelId),
+          chapterId: item.chapterId || null,
+        }),
+      });
+      setMessage("文件已确认归档；素材关联已更新。");
+      await loadWebAiFiles();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "文件归档失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmSelectedWebAiFiles() {
+    const selected = webAiFiles.filter((item) => selectedWebAiFileIds.includes(item.id) && item.classificationStatus !== "confirmed");
+    if (!selected.length) { setMessage("请先选择待归档文件。"); return; }
+    const invalid = selected.find((item) => {
+      const category = webAiClassifications[item.id] || item.classification || "other";
+      return ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(category)
+        && !(webAiAssetNames[item.id] || "").trim();
+    });
+    if (invalid) { setMessage("请先为所有人物、场景、道具等视觉素材填写名称：" + invalid.filename); return; }
+    if (!window.confirm("确认批量归档选中的 " + selected.length + " 个文件？系统会逐个按当前分类写入本地素材库。")) return;
+    setBusy(true);
+    let succeeded = 0;
+    const failures: string[] = [];
+    try {
+      for (const item of selected) {
+        try {
+          const classification = webAiClassifications[item.id] || item.classification || "other";
+          await request(`/api/web-ai/files/${item.id}/classification`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              classification,
+              assetName: (webAiAssetNames[item.id] || "").trim(),
+              description: "来自 " + item.taskTitle + "（" + item.toolId + "）",
+              novelId: item.novelId || Number(novelId),
+              chapterId: item.chapterId || null,
+            }),
+          });
+          succeeded += 1;
+        } catch (error) {
+          failures.push(item.filename + "：" + (error instanceof Error ? error.message : "归档失败"));
+        }
+      }
+      setSelectedWebAiFileIds([]);
+      setMessage("批量归档完成：成功 " + succeeded + " 个，失败 " + failures.length + " 个。" + (failures.length ? " " + failures.slice(0, 3).join("；") : ""));
+      await loadWebAiFiles();
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadAttachment() {
@@ -176,14 +274,14 @@ export default function AICollaborationPage() {
     window.open(selectedAi.url, "_blank", "noopener,noreferrer");
   }
 
-  const FULL_WORKFLOW_TASKS: HandoffTaskType[] = ["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "对白整理"];
+  const FULL_WORKFLOW_TASKS: HandoffTaskType[] = ["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "道具设定", "对白整理"];
 
   async function prepareFullWorkflow() {
     if (!novelId || selectedChapterNumbers.length === 0) { setMessage("请至少选择一个章节。"); return; }
     if (!window.aiBrowserDesktop?.openTask || !window.aiBrowserDesktop?.fillPrompt) { setMessage("全流程自动填入需要在 AI 漫剧大师电脑版内运行。"); return; }
     if (selectedChapterNumbers.length > 5) { setMessage("为避免一次打开过多网页，请每次最多选择 5 个章节。"); return; }
     const taskCount = selectedChapterNumbers.length * FULL_WORKFLOW_TASKS.length;
-    const approved = window.confirm("将为 " + selectedChapterNumbers.length + " 个章节准备 " + taskCount + " 项任务（剧情、剧本、分镜、角色、场景、对白），并在内嵌 AI 浏览器中逐项填入。每项仍需你检查后手动发送；不会自动提交或调用视频 API。继续吗？");
+    const approved = window.confirm("将为 " + selectedChapterNumbers.length + " 个章节准备 " + taskCount + " 项任务（剧情、剧本、分镜、角色、场景、道具、对白），并在内嵌 AI 浏览器中逐项填入。每项仍需你检查后手动发送；不会自动提交或调用视频 API。继续吗？");
     if (!approved) return;
     setBusy(true); setBatchProgress("正在创建全流程任务…");
     let completed = 0;
@@ -195,9 +293,17 @@ export default function AICollaborationPage() {
           try {
             const data = await request<Handoff>("/api/ai-collaboration/novels/" + novelId + "/chapters/" + chapterNo + "/handoff-package", { method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: task }) });
             const taskId = "task-" + crypto.randomUUID();
-            const routedProvider = AI_WEB_PROVIDERS[providerRoutes[task]];
-            await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
+            const providerKey = providerRoutes[task];
+            const routedProvider = AI_WEB_PROVIDERS[providerKey];
             const prompt = [data.instruction, visualPromptRequirements(visualStyle, task), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
+            const selectedChapterForTask = chapters.find((item) => String(item.chapter_number) === chapterNo);
+            const taskCategory = task === "分镜设计" ? "storyboard" : (task === "角色设定" || task === "场景设定" || task === "道具设定") ? "image" : "text";
+            await request("/api/web-ai/tasks", { method: "POST", body: JSON.stringify({
+              id: taskId, title: "第" + chapterNo + "章 · " + task, category: taskCategory,
+              toolId: providerKey, status: "prepared", prompt, sourceText: "第" + chapterNo + "章 · " + task,
+              novelId: Number(novelId), chapterId: selectedChapterForTask?.id ?? null,
+            }) });
+            await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
             await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
             completed += 1;
           } catch (error) { failures.push("第 " + chapterNo + " 章「" + task + "」：" + (error instanceof Error ? error.message : "失败")); }
@@ -224,8 +330,14 @@ export default function AICollaborationPage() {
       if (autoOpenAi && window.aiBrowserDesktop?.openTask && window.aiBrowserDesktop?.fillPrompt) {
         const taskId = "task-" + crypto.randomUUID();
         try {
-          await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
           const prompt = [data.instruction, visualPromptRequirements(visualStyle, taskType), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
+          const taskCategory = taskType === "分镜设计" ? "storyboard" : (taskType === "角色设定" || taskType === "场景设定" || taskType === "道具设定") ? "image" : "text";
+          await request("/api/web-ai/tasks", { method: "POST", body: JSON.stringify({
+            id: taskId, title: "第" + chapterNumber + "章 · " + taskType, category: taskCategory,
+            toolId: aiProvider, status: "prepared", prompt, sourceText: "第" + chapterNumber + "章 · " + taskType,
+            novelId: Number(novelId), chapterId: selectedChapter?.id ?? null,
+          }) });
+          await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
           await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
           openNotice = "已在软件内打开" + selectedAi.label + "并填入交接包。请检查后手动点击发送。";
         } catch (fillError) { openNotice = "网页自动填入未完成，请使用复制按钮手动粘贴：" + (fillError instanceof Error ? fillError.message : "未知错误"); }
@@ -364,7 +476,7 @@ export default function AICollaborationPage() {
           </div>
           <div className="mt-4 rounded-xl border border-cyan-300/15 bg-slate-950/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定和对白整理任务。</p></div>
+              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定、道具设定和对白整理任务。</p></div>
               <div className="flex gap-2 text-xs"><button type="button" onClick={() => setSelectedChapterNumbers(chapters.map((item) => String(item.chapter_number)))} className="rounded border border-white/15 px-2 py-1">全选</button><button type="button" onClick={() => setSelectedChapterNumbers([])} className="rounded border border-white/15 px-2 py-1">清空</button></div>
             </div>
             <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
@@ -375,7 +487,7 @@ export default function AICollaborationPage() {
                 <select value={visualStyle} onChange={(event) => setVisualStyle(event.target.value as VisualStyle)} className="mt-1 w-full rounded-lg border border-cyan-300/30 bg-slate-950 px-3 py-2 text-white">
                   <option value="国漫">国漫</option><option value="仿真人">仿真人</option><option value="3D漫">3D漫</option><option value="2D漫">2D漫</option>
                 </select>
-                <span className="mt-1 block text-[11px] text-slate-500">自动写入剧本、分镜、角色图、场景图和道具图相关提示词。</span>
+                <span className="mt-1 block text-[11px] text-slate-500">自动写入剧本、分镜、角色图、场景图、道具图相关提示词。</span>
               </label>
               {FULL_WORKFLOW_TASKS.map((task) => <label key={task} className="text-xs text-slate-300">{task}分配给
                 <select value={providerRoutes[task]} onChange={(event) => setProviderRoutes((current) => ({ ...current, [task]: event.target.value as AIWebProvider }))} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white">
@@ -385,14 +497,14 @@ export default function AICollaborationPage() {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button type="button" onClick={() => void prepareFullWorkflow()} disabled={busy || selectedChapterNumbers.length === 0} className="rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">为选中的章节生成全流程任务</button>
-              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 6 项任务，并按所选画风生成视觉提示词。网页支持时自动填入，但必须由你确认发送。</span>
+              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 7 项任务，并按所选画风生成视觉提示词。网页支持时自动填入，但必须由你确认发送。</span>
             </div>
             {batchProgress && <p className="mt-2 text-xs text-cyan-200">{batchProgress}</p>}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3 md:items-end">
             <label className="text-sm text-slate-300">本次交接任务类型
               <select value={taskType} onChange={(event) => { setTaskType(event.target.value as HandoffTaskType); setHandoff(null); }} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
-                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="对白整理">对白整理</option>
+                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="道具设定">道具设定</option><option value="对白整理">对白整理</option>
               </select>
             </label>
             <label className="text-sm text-slate-300">读取章节后打开哪个 AI 网页？
@@ -486,9 +598,49 @@ export default function AICollaborationPage() {
           </div>
         </section>
 
+        <section className="rounded-2xl border border-cyan-300/20 bg-slate-900/80 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-lg font-semibold">④ 内嵌 AI 网页下载结果 · 图片预览与素材归档</h2><p className="mt-1 text-xs leading-5 text-slate-400">桌面端 AI 网页下载的文件会自动出现在这里。图片可直接预览；分类由你确认后才会进入视觉素材库，并关联任务所属章节。</p></div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setSelectedWebAiFileIds(webAiFiles.filter((item) => item.classificationStatus !== "confirmed").map((item) => item.id))} className="rounded-lg border border-white/15 px-3 py-2 text-xs">全选待归档</button>
+              <button disabled={busy || selectedWebAiFileIds.length === 0} onClick={() => void confirmSelectedWebAiFiles()} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">批量归档（{selectedWebAiFileIds.length}）</button>
+              <button onClick={() => void loadWebAiFiles()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">刷新下载结果</button>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {webAiFiles.map((item) => {
+              const classification = webAiClassifications[item.id] || item.classification || "other";
+              const needsAsset = ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(classification);
+              const isImage = (item.contentType || "").startsWith("image/");
+              return <article key={item.id} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/70">
+                {isImage ? <img src={API + "/api/web-ai/files/" + item.id + "/preview"} alt={item.filename} className="h-48 w-full bg-black/40 object-contain" loading="lazy" /> : <div className="flex h-28 items-center justify-center bg-slate-950 text-4xl">{item.contentType.startsWith("video/") ? "🎬" : item.contentType.startsWith("audio/") ? "🎵" : "📄"}</div>}
+                <div className="space-y-2 p-3">
+                  {item.classificationStatus !== "confirmed" && <label className="flex items-center gap-2 text-xs text-cyan-200"><input type="checkbox" checked={selectedWebAiFileIds.includes(item.id)} onChange={(event) => setSelectedWebAiFileIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="accent-cyan-500" />加入批量归档</label>}
+                  <p className="break-all text-sm font-semibold">{item.filename}</p>
+                  <p className="text-[11px] text-slate-400">{item.taskTitle} · {item.toolId} · {(item.size / 1024 / 1024).toFixed(1)} MB</p>
+                  <p className="text-[11px] text-slate-500">{item.classificationReason}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className={item.classificationStatus === "confirmed" ? "text-xs text-emerald-300" : "text-xs text-amber-300"}>{item.classificationStatus === "confirmed" ? "已归档" : "待确认分类"}</span>
+                    <a href={API + item.downloadUrl} className="text-xs text-cyan-300 underline">下载原文件</a>
+                  </div>
+                  {item.classificationStatus !== "confirmed" && <>
+                    <select value={classification} onChange={(event) => setWebAiClassifications((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs text-white">
+                      <option value="character">人物图片</option><option value="scene">场景图片</option><option value="prop">道具图片</option><option value="weapon">武器图片</option><option value="costume">服装图片</option><option value="building">建筑图片</option><option value="special_item">特殊物品图片</option><option value="storyboard">分镜图</option><option value="script">剧本</option><option value="subtitle">字幕</option><option value="video">视频</option><option value="audio">音频</option><option value="document">文档</option><option value="image">普通图片</option><option value="other">其他</option>
+                    </select>
+                    {needsAsset && <input value={webAiAssetNames[item.id] || ""} onChange={(event) => setWebAiAssetNames((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="素材名称，例如：主角·林风·正面设定图" className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs text-white" />}
+                    <button disabled={busy} onClick={() => void confirmWebAiFile(item)} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">确认分类并归档</button>
+                  </>}
+                  {item.visualAssetId && <p className="text-xs text-emerald-300">视觉素材 ID：{item.visualAssetId}</p>}
+                </div>
+              </article>;
+            })}
+            {!webAiFiles.length && <p className="rounded-xl border border-dashed border-white/15 p-6 text-center text-xs text-slate-400 md:col-span-2 xl:col-span-3">还没有从内嵌 AI 网页下载的文件。完成网页生成并下载后，这里会自动显示结果。</p>}
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-purple-300/20 bg-slate-900/80 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">④ 剧情变化审核与素材状态记录</h2>
+            <h2 className="text-lg font-semibold">⑤ 剧情变化审核与素材状态记录</h2>
             <div className="flex gap-2">
               <select value={filter} onChange={(event) => { setFilter(event.target.value); void loadProposals(novelId, event.target.value); }} className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs">
                 <option value="pending_review">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="all">全部</option>
