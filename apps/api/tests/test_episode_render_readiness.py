@@ -101,7 +101,8 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
             result = self.call_readiness()
         self.assertTrue(result["ready"])
         self.assertEqual(result["ready_count"], 2)
-        self.assertEqual([item["status"] for item in result["items"]], ["ready", "ready"])\n        self.assertEqual(result["items"][0]["video"]["preview_url"], f"/api/media/files/1/download")
+        self.assertEqual([item["status"] for item in result["items"]], ["ready", "ready"])
+        self.assertEqual(result["items"][0]["video"]["preview_url"], f"/api/media/files/1/download")
 
     def test_missing_shot_is_reported(self):
         a = self.storage / "a.mp4"
