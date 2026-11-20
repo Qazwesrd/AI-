@@ -609,11 +609,15 @@ def get_episode_render_readiness(episode_id: int, db: Session = Depends(get_db))
                 if not video_stream or duration <= 0 or duration > 600:
                     raise ValueError("视频流缺失、时长无效或超过 10 分钟")
                 selected = task
+                registered_media = db.query(MediaFile).filter(
+                    MediaFile.file_path == str(clip_path)
+                ).order_by(MediaFile.id.desc()).first()
                 selected_info = {
                     "duration_seconds": round(duration, 3),
                     "width": video_stream.get("width"),
                     "height": video_stream.get("height"),
                     "path": str(clip_path),
+                    "preview_url": f"/api/media/files/{registered_media.id}/download" if registered_media else None,
                 }
                 break
             except Exception as exc:
