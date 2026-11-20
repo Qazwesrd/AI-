@@ -181,6 +181,13 @@ def speech_task_is_in_flight(task):
     return task.status in ("queued", "submitting", "submission_unknown", "interrupted_unknown")
 
 
+def resolve_episode_shot_voice(shot, voice_by_character_id, default_voice):
+    character_ids = getattr(shot, "character_ids", None) or []
+    if len(character_ids) == 1:
+        return voice_by_character_id.get(str(character_ids[0]), default_voice)
+    return default_voice
+
+
 def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3", instructions=None):
     return json.dumps({
         "provider": provider, "model": model, "text": text, "voice": voice,
@@ -1291,10 +1298,9 @@ def generate_episode_voice_track(
         raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
 
     def voice_for_shot(shot):
-        ids = shot.character_ids or []
-        if len(ids) == 1:
-            return data.voice_by_character_id.get(str(ids[0]), data.voice)
-        return data.voice
+        return resolve_episode_shot_voice(
+            shot, data.voice_by_character_id, data.voice
+        )
 
     # Prefer the real generated clip duration over the planned storyboard duration.
     # This keeps the voice timeline aligned with the video that will actually be rendered.
