@@ -624,7 +624,7 @@ def get_episode_render_readiness(episode_id: int, db: Session = Depends(get_db))
         }:
             status = "processing"
             processing_count += 1
-        elif history and rejected:
+        elif history and (rejected or (latest and latest.status == "completed" and not latest.result_path)):
             status = "broken"
             broken_count += 1
         else:
