@@ -21,6 +21,13 @@ on:
 permissions:
   contents: write
 
+# Serialize master release builds so two commits cannot upload the same
+# versioned assets to one GitHub Release at the same time. PR validation
+# builds remain independent per pull request and never publish releases.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('windows-installer-pr-{0}', github.event.pull_request.number) || 'windows-installer-master-release' }}
+  cancel-in-progress: false
+
 jobs:
   build-installer:
     runs-on: windows-latest
