@@ -197,11 +197,11 @@ export default function EpisodeReadinessPage() {
       return;
     }
     const paidConsent = window.confirm(
-      "即将调用所选语音服务商，为本集逐镜头生成对白配音。该服务可能产生 API 费用或消耗额度。只有在你已核实价格、额度并明确同意时才继续。是否授权本次配音请求？"
+      "即将调用所选语音服务商，为本集逐镜头/逐句生成对白配音。拆分对白会按每句说话角色分别调用语音服务。该服务可能产生 API 费用或消耗额度。只有在你已核实价格、额度并明确同意时才继续。是否授权本次配音请求？"
     );
     if (!paidConsent) return;
     setTimelineBusy(true);
-    setMessage("正在按角色音色配置生成分镜对白配音……");
+    setMessage("正在按角色音色及逐句说话人配置生成分镜对白配音……");
     try {
       const response = await fetch(API + "/api/media/speech/episodes/" + report.episode_id + "/generate", {
         method: "POST",
@@ -429,7 +429,7 @@ export default function EpisodeReadinessPage() {
                   {episodeCharacters.length > 0 && (
                     <div className="mt-4 rounded-lg border border-white/10 p-3">
                       <h4 className="text-sm font-semibold">角色专属音色</h4>
-                      <p className="mt-1 text-xs text-white/45">按角色素材 ID 配置语音服务商支持的 voice 名称。仅当镜头只关联一个角色时自动采用该角色音色；多角色镜头因对白说话人不明确，会使用默认音色并提示你拆分对白。</p>
+                      <p className="mt-1 text-xs text-white/45">按角色素材 ID 配置语音服务商支持的 voice 名称。单角色镜头自动采用对应音色；多角色镜头拆分对白并指定每句说话人后，会逐句使用对应角色音色。未拆分的多角色对白仍使用默认音色。</p>
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         {episodeCharacters.map(character => (
                           <label key={character.id} className="text-xs text-white/65">{character.name}
