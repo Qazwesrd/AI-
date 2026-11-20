@@ -39,6 +39,11 @@ type WebAIResultFile = {
   classificationReason: string; visualAssetId?: number | null; taskTitle: string;
   taskCategory: string; toolId: string; novelId?: number | null; chapterId?: number | null;
 };
+type VideoShotOption = {
+  shotId: number; shotNumber: number; episodeId: number; episodeNumber: number;
+  episodeTitle: string; sceneName: string; shotType: string;
+  visualDescription: string; durationSeconds: number; status: string;
+};
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 const AI_WEB_PROVIDERS = {
@@ -95,6 +100,9 @@ export default function AICollaborationPage() {
   const [selectedReferenceFileIds, setSelectedReferenceFileIds] = useState<number[]>([]);
   const [openAiBrowserTasks, setOpenAiBrowserTasks] = useState<Array<{ taskId: string; host: string; title: string }>>([]);
   const [referenceTargetTaskId, setReferenceTargetTaskId] = useState("");
+  const [videoShotOptions, setVideoShotOptions] = useState<Record<number, VideoShotOption[]>>({});
+  const [selectedVideoShot, setSelectedVideoShot] = useState<Record<number, string>>({});
+  const [attachedVideoFileIds, setAttachedVideoFileIds] = useState<number[]>([]);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -146,6 +154,50 @@ export default function AICollaborationPage() {
       const data = await request<{ items: ResultAttachment[] }>(`/api/ai-collaboration/results/attachments?novel_id=${id}&status=all`);
       setAttachments(data.items || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : "读取 AI 结果文件失败"); }
+  }
+
+  async function loadVideoShotOptions(item: WebAIResultFile) {
+    setBusy(true);
+    try {
+      const data = await request<{ items: VideoShotOption[]; chapterNumber: number }>(
+        `/api/web-ai/files/${item.id}/shot-options`
+      );
+      setVideoShotOptions((current) => ({ ...current, [item.id]: data.items || [] }));
+      setSelectedVideoShot((current) => ({
+        ...current,
+        [item.id]: current[item.id] || (data.items?.[0] ? String(data.items[0].shotId) : ""),
+      }));
+      setMessage(data.items?.length
+        ? `已找到第 ${data.chapterNumber} 章可关联的 ${data.items.length} 个镜头，请选择正确镜头后确认关联。`
+        : `第 ${data.chapterNumber} 章目前没有可关联的分镜，请先完善分镜。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取可关联分镜失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function attachDownloadedVideo(item: WebAIResultFile) {
+    const shotId = Number(selectedVideoShot[item.id] || 0);
+    const options = videoShotOptions[item.id] || [];
+    const target = options.find((option) => option.shotId === shotId);
+    if (!target) { setMessage("请先加载并选择一个有效分镜。"); return; }
+    if (!window.confirm(
+      `确认将视频“${item.filename}”关联到第 ${target.episodeNumber} 集 · 第 ${target.shotNumber} 镜（${target.sceneName || target.shotType}）？关联后可参与该分集时间轴和本地 FFmpeg 合成。`
+    )) return;
+    setBusy(true);
+    try {
+      const result = await request<{ success: boolean; reused: boolean; message: string }>(
+        `/api/web-ai/files/${item.id}/attach-shot`,
+        { method: "POST", body: JSON.stringify({ shotId }) }
+      );
+      setAttachedVideoFileIds((current) => current.includes(item.id) ? current : [...current, item.id]);
+      setMessage(result.message);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "关联视频到分镜失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function refreshOpenAiBrowserTasks() {
@@ -708,6 +760,24 @@ export default function AICollaborationPage() {
                     <button disabled={busy} onClick={() => void confirmWebAiFile(item)} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">确认分类并归档</button>
                   </>}
                   {item.visualAssetId && <p className="text-xs text-emerald-300">视觉素材 ID：{item.visualAssetId}</p>}
+                  {item.contentType.startsWith("video/") && (
+                    <div className="space-y-2 rounded-lg border border-cyan-300/20 bg-cyan-950/20 p-3">
+                      <p className="text-xs font-semibold text-cyan-100">关联到分镜 · 进入分集成片</p>
+                      {attachedVideoFileIds.includes(item.id)
+                        ? <p className="text-xs text-emerald-300">已关联到分镜，可在分集时间轴中合成</p>
+                        : <>
+                            <button disabled={busy} onClick={() => void loadVideoShotOptions(item)} className="w-full rounded-md border border-cyan-300/30 px-3 py-2 text-xs disabled:opacity-40">读取本章节可关联镜头</button>
+                            {(videoShotOptions[item.id] || []).length > 0 && <>
+                              <select value={selectedVideoShot[item.id] || ""} onChange={(event) => setSelectedVideoShot((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-md border border-white/10 bg-slate-900 px-3 py-2 text-xs text-white">
+                                {(videoShotOptions[item.id] || []).map((shot) => (
+                                  <option key={shot.shotId} value={shot.shotId}>第{shot.episodeNumber}集 · 镜头{shot.shotNumber} · {shot.sceneName || shot.shotType} · {shot.durationSeconds}s</option>
+                                ))}
+                              </select>
+                              <button disabled={busy || !selectedVideoShot[item.id]} onClick={() => void attachDownloadedVideo(item)} className="w-full rounded-md bg-cyan-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">确认关联到所选分镜</button>
+                            </>}
+                          </>}
+                    </div>
+                  )}
                 </div>
               </article>;
             })}
