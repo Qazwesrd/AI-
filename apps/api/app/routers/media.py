@@ -1402,19 +1402,19 @@ def generate_episode_voice_track(
                 segment_paths.append(segment_path)
                 segment_durations.append(segment_duration)
                 continue
-            if prior_segment and (prior_segment.status == "pending" or speech_task_is_in_flight(prior_segment)):
+            if prior_segment and speech_task_is_in_flight(prior_segment):
                 segment_failed = True
                 failures.append({
                     "shot_number": shot.shot_number,
                     "segment_index": segment_index,
                     "task_id": prior_segment.id,
                     "status": prior_segment.status,
-                    "error": "该句对白已有任务排队、提交或等待核实；为避免重复扣费，本次不会再次提交。",
+                    "error": "该句对白已有任务正在提交或等待核实；为避免重复扣费，本次不会再次提交。",
                 })
                 break
             filename = f"episode_{episode_id}_shot_{shot.id}_line_{segment_index + 1}_{uuid.uuid4().hex[:8]}.mp3"
             destination = AUDIO_DIR / filename
-            task = MediaTask(
+            task = prior_segment if prior_segment and prior_segment.status == "pending" else MediaTask(
                 task_type="episode_speech_segment", provider=data.provider, model=data.model,
                 status="pending", prompt=text_value,
                 request_data={
@@ -1425,9 +1425,10 @@ def generate_episode_voice_track(
                     "confirm_paid": data.confirm_paid,
                 },
             )
-            db.add(task)
-            db.commit()
-            db.refresh(task)
+            if prior_segment is None:
+                db.add(task)
+                db.commit()
+                db.refresh(task)
             request_started = False
             lease_acquired = False
             try:
