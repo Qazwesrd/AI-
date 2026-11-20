@@ -6,6 +6,28 @@ import zipfile
 import xml.etree.ElementTree as ET
 
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
+MAX_ARCHIVE_EXPANDED_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 50000
+
+
+def validate_compressed_document(raw):
+    """Reject ZIP-based documents whose declared expansion exceeds safe limits."""
+    try:
+        with zipfile.ZipFile(BytesIO(raw)) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_ARCHIVE_ENTRIES:
+                raise ValueError("文档压缩包内文件数量过多，已拒绝解析")
+            expanded_total = 0
+            for entry in entries:
+                if entry.file_size < 0 or entry.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+                    raise ValueError("文档压缩包包含超出单文件解压限制的内容")
+                expanded_total += entry.file_size
+                if expanded_total > MAX_ARCHIVE_EXPANDED_BYTES:
+                    raise ValueError("文档解压后超过 512 MB 安全限制，已拒绝解析")
+    except zipfile.BadZipFile as exc:
+        raise ValueError("DOCX/EPUB 文件不是有效的 ZIP 文档") from exc
+
 
 def decode_text(raw):
     for encoding in ("utf-8-sig", "utf-8", "gb18030", "big5"):
@@ -16,6 +38,7 @@ def decode_text(raw):
     raise ValueError("无法识别文本编码，请转换为 UTF-8")
 
 def docx_text(raw):
+    validate_compressed_document(raw)
     with zipfile.ZipFile(BytesIO(raw)) as z:
         xml = z.read("word/document.xml")
     root = ET.fromstring(xml)
@@ -28,6 +51,7 @@ def docx_text(raw):
     return "\n".join(result)
 
 def epub_text(raw):
+    validate_compressed_document(raw)
     with zipfile.ZipFile(BytesIO(raw)) as z:
         archive_names = set(z.namelist())
         names = []

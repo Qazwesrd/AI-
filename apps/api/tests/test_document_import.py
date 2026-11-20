@@ -1,6 +1,7 @@
 import unittest
 import zipfile
 from io import BytesIO
+from unittest.mock import patch
 
 from app.document_import import decode_text, docx_text, epub_text, extract_document_text
 from app.routers.novels import split_chapters
@@ -68,6 +69,35 @@ class DocumentImportTests(unittest.TestCase):
 
         extracted = epub_text(buffer.getvalue())
         self.assertLess(extracted.index("第一章"), extracted.index("第二章"))
+
+    def test_docx_rejects_archive_expansion_over_limit(self):
+        buffer = BytesIO()
+        document_xml = (
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>' + ("正文" * 100) + '</w:t></w:r></w:p></w:body></w:document>'
+        )
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("word/document.xml", document_xml)
+        with patch("app.document_import.MAX_ARCHIVE_EXPANDED_BYTES", 20):
+            with self.assertRaisesRegex(ValueError, "解压后超过"):
+                docx_text(buffer.getvalue())
+
+    def test_epub_rejects_too_many_archive_entries(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("chapter1.xhtml", "<p>第一章</p>")
+            archive.writestr("chapter2.xhtml", "<p>第二章</p>")
+        with patch("app.document_import.MAX_ARCHIVE_ENTRIES", 1):
+            with self.assertRaisesRegex(ValueError, "文件数量过多"):
+                epub_text(buffer.getvalue())
+
+    def test_docx_rejects_oversized_single_member(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("word/document.xml", "<p>" + ("x" * 100) + "</p>")
+        with patch("app.document_import.MAX_ARCHIVE_MEMBER_BYTES", 50):
+            with self.assertRaisesRegex(ValueError, "单文件解压限制"):
+                docx_text(buffer.getvalue())
 
     def test_txt_document_import(self):
         self.assertEqual(
