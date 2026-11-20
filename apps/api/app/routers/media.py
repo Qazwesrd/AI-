@@ -1338,10 +1338,11 @@ def generate_episode_voice_track(
         prior_shot_id = prior_meta.get("shot_id")
         current_shot = next((item for item in shots if item.id == prior_shot_id), None)
         current_dialogue = (current_shot.dialogue or "").strip() if current_shot else None
+        selected_voice = voice_for_shot(current_shot) if current_shot else data.voice
         matches = (
             prior.provider == data.provider
             and prior.model == data.model
-            and prior_meta.get("voice") == voice_for_shot(current_shot) if current_shot else False
+            and prior_meta.get("voice") == selected_voice
             and float(prior_meta.get("speed", 1.0)) == float(data.speed)
             and prior_meta.get("episode_id") == episode_id
             and prior_shot_id
