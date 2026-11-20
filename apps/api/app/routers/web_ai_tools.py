@@ -582,6 +582,76 @@ class ConfirmResultClassification(BaseModel):
     novelId: int | None = Field(default=None, ge=1)
     chapterId: int | None = Field(default=None, ge=1)
 
+def _downloaded_video_shot_context(file_id: int, db: Session):
+    result_file = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if result_file is None:
+        raise HTTPException(404, "AI 网页结果文件不存在")
+    if Path(result_file.stored_name).suffix.lower() not in {".mp4", ".mov", ".webm", ".mkv"}:
+        raise HTTPException(415, "只有视频文件可以关联到分镜")
+    source_task = db.query(WebAITask).filter(
+        WebAITask.task_key == result_file.task_key
+    ).first()
+    if source_task is None:
+        raise HTTPException(410, "视频所属的 AI 网页任务不存在")
+    if source_task.category != "video":
+        raise HTTPException(409, "只有视频类 AI 网页任务的结果可以关联分镜")
+    if not source_task.novel_id or not source_task.chapter_id:
+        raise HTTPException(409, "原始 AI 任务没有关联小说章节")
+    chapter = db.query(Chapter).filter(
+        Chapter.id == source_task.chapter_id,
+        Chapter.novel_id == source_task.novel_id,
+    ).first()
+    if chapter is None:
+        raise HTTPException(404, "原始任务关联的章节不存在或已变更")
+    projects_query = db.query(StoryProject).filter(
+        StoryProject.novel_id == source_task.novel_id
+    )
+    if source_task.project_id is not None:
+        projects_query = projects_query.filter(StoryProject.id == source_task.project_id)
+    projects = projects_query.order_by(StoryProject.updated_at.desc()).all()
+    if not projects:
+        raise HTTPException(404, "没有找到该小说对应的漫剧项目")
+    project_ids = [project.id for project in projects]
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id.in_(project_ids)
+    ).order_by(EpisodePlan.episode_number, EpisodePlan.sort_order).all()
+    eligible_episodes = [
+        episode for episode in episodes
+        if chapter.id in (episode.source_chapter_ids or [])
+    ]
+    return result_file, source_task, chapter, eligible_episodes
+
+
+@router.get("/files/{file_id}/shot-options")
+def list_downloaded_video_shot_options(file_id: int, db: Session = Depends(get_db)):
+    result_file, source_task, chapter, episodes = _downloaded_video_shot_context(file_id, db)
+    items = []
+    for episode in episodes:
+        shots = db.query(StoryboardShot).filter(
+            StoryboardShot.episode_id == episode.id
+        ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+        for shot in shots:
+            items.append({
+                "shotId": shot.id,
+                "shotNumber": shot.shot_number,
+                "episodeId": episode.id,
+                "episodeNumber": episode.episode_number,
+                "episodeTitle": episode.title,
+                "sceneName": shot.scene_name,
+                "shotType": shot.shot_type,
+                "visualDescription": shot.visual_description,
+                "durationSeconds": shot.duration_seconds,
+                "status": shot.status,
+            })
+    return {
+        "fileId": result_file.id,
+        "taskId": source_task.task_key,
+        "chapterId": source_task.chapter_id,
+        "chapterNumber": chapter.chapter_number,
+        "items": items,
+    }
+
+
 class AttachDownloadedVideoInput(BaseModel):
     shotId: int = Field(ge=1)
 
