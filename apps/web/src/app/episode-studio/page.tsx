@@ -72,7 +72,7 @@ export default function EpisodeReadinessPage() {
       const saved = data.timeline as EpisodeTimeline;
       if (saved.subtitle_cues === undefined || saved.subtitle_cues === null) {
         const shotById = new Map<number, { id: number; duration_seconds?: number; dialogue?: string }>(
-          (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot])
+          (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot] as const)
         );
         const transitionByShot = new Map<number, { transition: string; duration_seconds: number }>(
           (saved.transitions || []).map(item => [item.after_shot_id, item] as const)
