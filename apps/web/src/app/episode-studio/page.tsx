@@ -27,6 +27,9 @@ type EpisodeTimeline = {
   music_fade_in_seconds: number;
   music_fade_out_seconds: number;
   music_volume: number;
+  music_path?: string | null;
+  music_name?: string | null;
+  subtitle_cues?: { start: number; end: number; text: string }[] | null;
 };
 
 type Readiness = {
@@ -66,7 +69,28 @@ export default function EpisodeReadinessPage() {
       const response = await fetch(API + "/api/media/video/episodes/" + id + "/timeline");
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "读取剪辑时间轴失败");
-      setTimeline(data.timeline);
+      const saved = data.timeline as EpisodeTimeline;
+      if (saved.subtitle_cues === undefined || saved.subtitle_cues === null) {
+        const shotById = new Map<number, { id: number; duration_seconds?: number; dialogue?: string }>(
+          (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot])
+        );
+        const transitionByShot = new Map<number, { transition: string; duration_seconds: number }>(
+          (saved.transitions || []).map(item => [item.after_shot_id, item])
+        );
+        let elapsed = 0;
+        const cues: { start: number; end: number; text: string }[] = [];
+        for (const shotId of saved.shot_order || []) {
+          const shot = shotById.get(shotId);
+          const duration = Math.max(1, Number(shot?.duration_seconds) || 5);
+          const dialogue = (shot?.dialogue || "").trim();
+          if (dialogue) cues.push({ start: Number(elapsed.toFixed(2)), end: Number((elapsed + duration).toFixed(2)), text: dialogue });
+          const transition = transitionByShot.get(shotId);
+          const overlap = transition && transition.transition !== "cut" ? Number(transition.duration_seconds) || 0 : 0;
+          elapsed += duration - overlap;
+        }
+        saved.subtitle_cues = cues;
+      }
+      setTimeline(saved);
       setTimelineVersion(data.version || 0);
     } catch (error) {
       setTimeline(null);
@@ -111,6 +135,36 @@ export default function EpisodeReadinessPage() {
     } finally {
       setTimelineBusy(false);
     }
+  }
+
+  async function uploadBackgroundMusic(file: File | null) {
+    if (!file || !timeline) return;
+    if (!file.type.startsWith("audio/") && !/\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(file.name)) {
+      setMessage("请选择 MP3、WAV、M4A、AAC、OGG、FLAC 或 OPUS 音频文件。");
+      return;
+    }
+    setTimelineBusy(true);
+    setMessage("正在将背景音乐保存到本地音频素材库……");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(API + "/api/media/files/upload?category=audio", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "背景音乐上传失败");
+      setTimeline({ ...timeline, music_path: data.path, music_name: data.name });
+      setMessage("背景音乐已保存到本地素材库。保存时间轴后，下一次合成会应用该音乐。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "背景音乐上传失败");
+    } finally {
+      setTimelineBusy(false);
+    }
+  }
+
+  function updateSubtitleCue(index: number, patch: Partial<{ start: number; end: number; text: string }>) {
+    if (!timeline) return;
+    const cues = [...(timeline.subtitle_cues || [])];
+    cues[index] = { ...cues[index], ...patch };
+    setTimeline({ ...timeline, subtitle_cues: cues });
   }
 
   async function checkReadiness(clearPreviousRender = true) {
@@ -257,6 +311,39 @@ export default function EpisodeReadinessPage() {
                   <label className="text-sm text-white/65">音乐淡出（秒）
                     <input type="number" min="0" max="30" step="0.5" value={timeline.music_fade_out_seconds} onChange={event => setTimeline({ ...timeline, music_fade_out_seconds: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" />
                   </label>
+                </div>
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <h3 className="font-semibold">背景音乐轨道</h3>
+                  <p className="mt-1 text-xs text-white/45">选择本地音频文件；上传只保存到素材库，不会调用 AI 或产生 API 费用。</p>
+                  {timeline.music_name && <p className="mt-2 break-all text-sm text-emerald-200">当前音乐：{timeline.music_name}</p>}
+                  <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadBackgroundMusic(event.target.files?.[0] || null)} className="mt-3 block w-full text-xs" />
+                  {timeline.music_path && <button type="button" onClick={() => setTimeline({ ...timeline, music_path: null, music_name: null })} className="mt-2 rounded border border-white/15 px-3 py-1 text-xs">移除背景音乐</button>}
+                </div>
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-semibold">对白字幕时间轴</h3>
+                      <p className="mt-1 text-xs text-white/45">可调整每条字幕的开始/结束时间和文本；保存后由本地 FFmpeg 生成 SRT。</p>
+                    </div>
+                    <button type="button" onClick={() => setTimeline({ ...timeline, subtitle_cues: [...(timeline.subtitle_cues || []), { start: 0, end: 2, text: "" }] })} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">添加字幕</button>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {(timeline.subtitle_cues || []).map((cue, index) => (
+                      <div key={index} className="grid gap-2 rounded-lg border border-white/10 p-3 md:grid-cols-[110px_110px_1fr_auto]">
+                        <label className="text-xs text-white/55">开始（秒）
+                          <input type="number" min="0" step="0.05" value={cue.start} onChange={event => updateSubtitleCue(index, { start: Number(event.target.value) })} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-2 py-2 text-white" />
+                        </label>
+                        <label className="text-xs text-white/55">结束（秒）
+                          <input type="number" min="0.01" step="0.05" value={cue.end} onChange={event => updateSubtitleCue(index, { end: Number(event.target.value) })} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-2 py-2 text-white" />
+                        </label>
+                        <label className="text-xs text-white/55">字幕内容
+                          <textarea value={cue.text} maxLength={2000} rows={2} onChange={event => updateSubtitleCue(index, { text: event.target.value })} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-2 py-2 text-white" />
+                        </label>
+                        <button type="button" onClick={() => setTimeline({ ...timeline, subtitle_cues: (timeline.subtitle_cues || []).filter((_, cueIndex) => cueIndex !== index) })} className="self-end rounded border border-rose-300/30 px-3 py-2 text-xs text-rose-200">删除</button>
+                      </div>
+                    ))}
+                    {!(timeline.subtitle_cues || []).length && <p className="text-xs text-white/45">当前没有字幕条目。可以添加字幕，或保留空白以生成无对白字幕的成片。</p>}
+                  </div>
                 </div>
                 <h3 className="mt-5 font-semibold">镜头顺序与转场</h3>
                 <div className="mt-3 space-y-2">
