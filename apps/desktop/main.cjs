@@ -472,6 +472,35 @@ function getAiBrowserSession() {
   return aiBrowserSession;
 }
 
+ipcMain.handle("ai-browser:fill-prompt", async (_event, payload = {}) => {
+  const taskId = String(payload.taskId || "");
+  const prompt = String(payload.prompt || "");
+  if (!/^task-[a-zA-Z0-9-]{5,110}$/.test(taskId)) throw new Error("无效的任务编号");
+  if (!prompt.trim() || prompt.length > 50000) throw new Error("提示词不能为空且不能超过 50000 个字符");
+  const entry = [...aiBrowserTasks.entries()].find(([, value]) => value === taskId);
+  if (!entry) throw new Error("找不到该任务对应的 AI 网页，请先打开任务网页");
+  const browser = aiBrowserWindows.get(entry[0]);
+  if (!browser || browser.isDestroyed() || browser.webContents.isDestroyed()) throw new Error("AI 网页已关闭，请重新打开");
+  const currentUrl = new URL(browser.webContents.getURL());
+  const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
+  if (currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) throw new Error("当前网页不在允许自动填入的 AI 网站范围内");
+  const script = "(" + function (text) {
+    const visible = (el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none"; };
+    const candidates = [...document.querySelectorAll('textarea, [contenteditable="true"], [role="textbox"]')].filter(visible).filter((el) => !el.disabled && el.getAttribute("aria-disabled") !== "true");
+    const preferred = candidates.find((el) => /message|prompt|发送|消息|输入|问/i.test([el.getAttribute("placeholder"), el.getAttribute("aria-label"), el.getAttribute("data-placeholder"), el.getAttribute("name")].filter(Boolean).join(" ")));
+    const target = preferred || candidates[candidates.length - 1];
+    if (!target) return { ok: false, reason: "没有找到消息输入框；请先登录并打开对话后重试。" };
+    target.focus();
+    if (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) { const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(target), "value")?.set; if (setter) setter.call(target, text); else target.value = text; }
+    else target.textContent = text;
+    target.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+    return { ok: true, length: text.length };
+  }.toString() + ")(" + JSON.stringify(prompt) + ")";
+  const result = await browser.webContents.executeJavaScript(script);
+  if (!result || !result.ok) throw new Error((result && result.reason) || "自动填入失败，请手动粘贴交接包");
+  return { filled: true, length: result.length, submitted: false };
+});
 ipcMain.handle("ai-browser:open", async (_event, payload = {}) => {
   const taskId = String(payload.taskId || "");
   const rawUrl = String(payload.url || "");
