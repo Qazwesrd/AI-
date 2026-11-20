@@ -342,6 +342,20 @@ export default function AICollaborationPage() {
               </select>
             </label>
           </div>
+          <div className="mt-4 rounded-xl border border-cyan-300/15 bg-slate-950/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定和对白整理任务。</p></div>
+              <div className="flex gap-2 text-xs"><button type="button" onClick={() => setSelectedChapterNumbers(chapters.map((item) => String(item.chapter_number)))} className="rounded border border-white/15 px-2 py-1">全选</button><button type="button" onClick={() => setSelectedChapterNumbers([])} className="rounded border border-white/15 px-2 py-1">清空</button></div>
+            </div>
+            <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+              {chapters.map((chapter) => <label key={chapter.id} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-200"><input type="checkbox" checked={selectedChapterNumbers.includes(String(chapter.chapter_number))} onChange={(event) => setSelectedChapterNumbers((current) => event.target.checked ? [...current, String(chapter.chapter_number)] : current.filter((value) => value !== String(chapter.chapter_number)))} className="accent-cyan-500" />第 {chapter.chapter_number} 章 · {chapter.title}</label>)}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button type="button" onClick={() => void prepareFullWorkflow()} disabled={busy || selectedChapterNumbers.length === 0} className="rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">为选中的章节生成全流程任务</button>
+              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 6 项任务。网页支持时自动填入，但必须由你确认发送。</span>
+            </div>
+            {batchProgress && <p className="mt-2 text-xs text-cyan-200">{batchProgress}</p>}
+          </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3 md:items-end">
             <label className="text-sm text-slate-300">本次交接任务类型
               <select value={taskType} onChange={(event) => { setTaskType(event.target.value as HandoffTaskType); setHandoff(null); }} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
