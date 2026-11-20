@@ -287,7 +287,10 @@ def list_reference_suggestions(task_key: str, db: Session = Depends(get_db)):
             WebAIResultFile.classification_status == "confirmed",
             WebAIResultFile.content_type.like("image/%"),
         ).all()
+        allowed_reference_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
         for result_file in linked_files:
+            if Path(result_file.stored_name).suffix.lower() not in allowed_reference_extensions:
+                continue
             files_by_asset.setdefault(result_file.visual_asset_id, []).append(result_file)
 
     suggestions = {}
@@ -321,7 +324,10 @@ def list_reference_suggestions(task_key: str, db: Session = Depends(get_db)):
             WebAIResultFile.visual_asset_id.isnot(None),
             WebAIResultFile.content_type.like("image/%"),
         ).order_by(WebAIResultFile.id.desc()).all()
+        allowed_reference_extensions = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
         for result_file in fallback_files:
+            if Path(result_file.stored_name).suffix.lower() not in allowed_reference_extensions:
+                continue
             suggestions[result_file.id] = {
                 "fileId": result_file.id,
                 "filename": result_file.original_name,
@@ -341,7 +347,7 @@ def list_reference_suggestions(task_key: str, db: Session = Depends(get_db)):
         "taskId": task_key,
         "chapterNumber": chapter.chapter_number,
         "items": items,
-        "matchedShotCount": len({match["shotNumber"] for item in items for match in item["matches"]}),
+        "matchedShotCount": len({(match["episodeNumber"], match["shotNumber"]) for item in items for match in item["matches"]}),
     }
 
 
