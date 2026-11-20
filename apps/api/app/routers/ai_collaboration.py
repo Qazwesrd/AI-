@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from pathlib import Path
 import hashlib
+import json
 import re
 import uuid
 
@@ -122,6 +123,103 @@ def attachment_dict(item: AIResultAttachment):
         "review_note": item.review_note, "media_file_id": item.media_file_id,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
+
+
+
+class TextResultPayload(BaseModel):
+    novel_id: int
+    chapter_number: int = Field(ge=1)
+    content: str = Field(min_length=1, max_length=15000000)
+    source_task_key: str = Field(default="", max_length=120)
+
+
+def classify_ai_text_result(content: str):
+    """Classify structured AI output without treating model text as trusted instructions."""
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        keys = {str(key).lower() for key in parsed.keys()}
+        if "proposals" in keys:
+            return "剧情变化提议"
+        if keys.intersection({"storyboard", "shots", "镜头", "分镜"}):
+            return "分镜设计"
+        if keys.intersection({"screenplay", "script", "episode_screenplay", "剧本"}):
+            return "剧本"
+        if keys.intersection({"characters", "character_profiles", "角色", "人物设定"}):
+            return "角色设定"
+        if keys.intersection({"scenes", "scene_design", "场景"}):
+            return "场景设定"
+        if keys.intersection({"dialogues", "dialogue", "对白"}):
+            return "对白"
+        if keys.intersection({"events", "relationships", "timeline"}):
+            return "剧情分析"
+    sample = content[:12000].lower()
+    if any(word in sample for word in ("分镜", "镜头号", "景别", "运镜")):
+        return "分镜设计"
+    if any(word in sample for word in ("场景设定", "场景描述", "环境设计")):
+        return "场景设定"
+    if any(word in sample for word in ("角色设定", "人物设定", "角色档案")):
+        return "角色设定"
+    if any(word in sample for word in ("对白", "台词", "角色台词")):
+        return "对白"
+    if any(word in sample for word in ("剧本", "场次", "内景", "外景")):
+        return "剧本"
+    return "综合分析"
+
+
+@router.post("/results/text")
+def save_text_result(payload: TextResultPayload, db: Session = Depends(get_db)):
+    if db.query(Novel).filter(Novel.id == payload.novel_id).first() is None:
+        raise HTTPException(404, "小说不存在")
+    if not chapter_exists(db, payload.novel_id, payload.chapter_number):
+        raise HTTPException(404, "指定章节不存在")
+    content = payload.content.strip()
+    if not content:
+        raise HTTPException(400, "AI 返回内容为空")
+    result_type = classify_ai_text_result(content)
+    extension = ".json"
+    mime_type = "application/json"
+    try:
+        json.loads(content)
+    except (TypeError, ValueError):
+        extension, mime_type = ".md", "text/markdown"
+    folder = STORAGE / "ai_results" / str(payload.novel_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    stored_name = uuid.uuid4().hex + extension
+    destination = folder / stored_name
+    encoded = content.encode("utf-8")
+    if len(encoded) > 20 * 1024 * 1024:
+        raise HTTPException(413, "文本结果超过 20 MB")
+    checksum = hashlib.sha256(encoded).hexdigest()
+    duplicate = db.query(AIResultAttachment).filter(
+        AIResultAttachment.novel_id == payload.novel_id,
+        AIResultAttachment.sha256 == checksum,
+    ).first()
+    if duplicate:
+        return {"success": True, "duplicate": True, "detected_type": result_type,
+                "attachment": attachment_dict(duplicate), "message": "检测到相同结果，未重复保存。"}
+    try:
+        destination.write_bytes(encoded)
+        item = AIResultAttachment(
+            novel_id=payload.novel_id, chapter_number=payload.chapter_number,
+            original_filename=f"第{payload.chapter_number}章-{result_type}{extension}",
+            stored_filename=stored_name, media_type="document", mime_type=mime_type,
+            file_path=str(destination), file_size=len(encoded), sha256=checksum,
+            description=f"网页版 AI 文本结果｜自动识别类型：{result_type}",
+            source_task_key=payload.source_task_key[:120], status="pending_review",
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return {"success": True, "duplicate": False, "detected_type": result_type,
+                "attachment": attachment_dict(item),
+                "message": f"已识别为「{result_type}」，并保存到第 {payload.chapter_number} 章的待审核结果区。"}
+    except Exception:
+        destination.unlink(missing_ok=True)
+        db.rollback()
+        raise
 
 
 @router.post("/results/attachments")
