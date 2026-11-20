@@ -740,8 +740,9 @@ export default function AICollaborationPage() {
               const classification = webAiClassifications[item.id] || item.classification || "other";
               const needsAsset = ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(classification);
               const isImage = (item.contentType || "").startsWith("image/");
+              const isVideo = (item.contentType || "").startsWith("video/") || /\\.(mp4|mov|webm|mkv)$/i.test(item.filename);
               return <article key={item.id} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/70">
-                {isImage ? <img src={API + "/api/web-ai/files/" + item.id + "/preview"} alt={item.filename} className="h-48 w-full bg-black/40 object-contain" loading="lazy" /> : <div className="flex h-28 items-center justify-center bg-slate-950 text-4xl">{item.contentType.startsWith("video/") ? "🎬" : item.contentType.startsWith("audio/") ? "🎵" : "📄"}</div>}
+                {isImage ? <img src={API + "/api/web-ai/files/" + item.id + "/preview"} alt={item.filename} className="h-48 w-full bg-black/40 object-contain" loading="lazy" /> : <div className="flex h-28 items-center justify-center bg-slate-950 text-4xl">{isVideo ? "🎬" : item.contentType.startsWith("audio/") ? "🎵" : "📄"}</div>}
                 <div className="space-y-2 p-3">
                   {item.classificationStatus !== "confirmed" && <label className="flex items-center gap-2 text-xs text-cyan-200"><input type="checkbox" checked={selectedWebAiFileIds.includes(item.id)} onChange={(event) => setSelectedWebAiFileIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="accent-cyan-500" />加入批量归档</label>}
                   {isImage && item.classificationStatus === "confirmed" && item.visualAssetId && <label className="flex items-center gap-2 text-xs text-sky-200"><input type="checkbox" checked={selectedReferenceFileIds.includes(item.id)} onChange={(event) => setSelectedReferenceFileIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="accent-sky-500" />选作 AI 视频参考图</label>}
@@ -760,7 +761,7 @@ export default function AICollaborationPage() {
                     <button disabled={busy} onClick={() => void confirmWebAiFile(item)} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">确认分类并归档</button>
                   </>}
                   {item.visualAssetId && <p className="text-xs text-emerald-300">视觉素材 ID：{item.visualAssetId}</p>}
-                  {item.contentType.startsWith("video/") && (
+                  {isVideo && (
                     <div className="space-y-2 rounded-lg border border-cyan-300/20 bg-cyan-950/20 p-3">
                       <p className="text-xs font-semibold text-cyan-100">关联到分镜 · 进入分集成片</p>
                       {attachedVideoFileIds.includes(item.id)
