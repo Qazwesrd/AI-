@@ -15,6 +15,7 @@ from app.models.web_ai_tool import WebAITool, WebAITask, WebAIResultFile
 from app.models.visual import VisualAsset
 from app.models.novel import Novel, Chapter
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
+from app.models.media import MediaFile, SubtitleTrack
 
 router = APIRouter(prefix="/api/web-ai", tags=["AI网页工具协同中心"])
 
@@ -183,6 +184,82 @@ ALLOWED_RESULT_EXTENSIONS = {
     ".pdf", ".docx", ".csv",
 }
 MAX_RESULT_FILE_BYTES = 2 * 1024 * 1024 * 1024
+
+MEDIA_LIBRARY_TYPES = {
+    ".mp4": ("video", "video/mp4"),
+    ".mov": ("video", "video/quicktime"),
+    ".webm": ("video", "video/webm"),
+    ".mkv": ("video", "video/x-matroska"),
+    ".mp3": ("audio", "audio/mpeg"),
+    ".wav": ("audio", "audio/wav"),
+    ".m4a": ("audio", "audio/mp4"),
+    ".aac": ("audio", "audio/aac"),
+    ".srt": ("other", "application/x-subrip"),
+    ".vtt": ("other", "text/vtt"),
+}
+
+
+def validate_downloaded_media_signature(path: Path, extension: str) -> bool:
+    """Check downloaded media magic bytes before adding it to the editor library."""
+    try:
+        with path.open("rb") as source:
+            prefix = source.read(64)
+    except OSError:
+        return False
+    if extension in {".mp4", ".mov", ".m4a"}:
+        return len(prefix) >= 8 and prefix[4:8] == b"ftyp"
+    if extension in {".mkv", ".webm"}:
+        return prefix.startswith(b"\x1a\x45\xdf\xa3")
+    if extension == ".wav":
+        return len(prefix) >= 12 and prefix[:4] == b"RIFF" and prefix[8:12] == b"WAVE"
+    if extension == ".mp3":
+        return prefix.startswith(b"ID3") or (len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xE0) == 0xE0)
+    if extension == ".aac":
+        return len(prefix) >= 2 and prefix[0] == 0xFF and (prefix[1] & 0xF6) == 0xF0
+    if extension == ".vtt":
+        return prefix.lstrip(b"\xef\xbb\xbf").startswith(b"WEBVTT")
+    if extension == ".srt":
+        return bool(prefix) and b"\x00" not in prefix
+    return False
+
+
+def add_download_to_media_library(db: Session, task: WebAITask, result_file: WebAIResultFile, path: Path):
+    extension = path.suffix.lower()
+    media_type = MEDIA_LIBRARY_TYPES.get(extension)
+    if media_type is None:
+        return None
+    category, fallback_mime = media_type
+    if not validate_downloaded_media_signature(path, extension):
+        raise HTTPException(415, "下载文件内容与扩展名不匹配，已阻止加入媒体库")
+    metadata = {
+        "source": "ai_web_browser",
+        "web_ai_task_key": task.task_key,
+        "web_ai_result_file_id": result_file.id,
+        "task_title": task.title,
+        "task_category": task.category,
+        "novel_id": task.novel_id,
+        "chapter_id": task.chapter_id,
+        "project_id": task.project_id,
+        "classification_status": result_file.classification_status,
+    }
+    media = MediaFile(
+        name=result_file.original_name,
+        category=category,
+        file_path=str(path),
+        mime_type=fallback_mime,
+        file_size=result_file.file_size,
+        metadata_json=metadata,
+    )
+    db.add(media)
+    if extension == ".srt":
+        db.add(SubtitleTrack(
+            name=result_file.original_name,
+            file_path=str(path),
+            format="srt",
+            language="und",
+        ))
+    return media
+
 
 
 @router.post("/tasks/{task_key}/files")
@@ -489,6 +566,10 @@ def register_downloaded_file(payload: RegisterDownloadedFile, db: Session = Depe
         classification_status="pending", classification_reason=reason,
     )
     db.add(item)
+    db.flush()
+    add_download_to_media_library(db, task, item, target)
+    task.status = "completed"
+    task.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(item)
     return result_file_dict(item)
