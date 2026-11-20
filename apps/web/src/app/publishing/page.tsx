@@ -322,6 +322,10 @@ export default function PublishingPage() {
             {qualityScan && <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm space-y-2">
               <div className="font-medium">质量扫描结果</div>
               <div className="text-white/70">持续黑屏：{qualityScan.black_segments?.length || 0} 段；持续静音：{qualityScan.silence_segments?.length || 0} 段</div>
+              {qualityScan.audio_levels && <div className="text-white/70">
+                音频平均音量：{qualityScan.audio_levels.mean_volume_db ?? "无法测量"} dB · 峰值：{qualityScan.audio_levels.max_volume_db ?? "无法测量"} dB
+              </div>}
+              {(qualityScan.warnings || []).map((warning: string, index: number) => <p key={`warning-${index}`} className="text-amber-200/90">{warning}</p>)}
               {(qualityScan.black_segments || []).map((item: any, index: number) => <div key={`black-${index}`} className="text-yellow-200/80">
                 黑屏 {item.start_seconds}s – {item.end_seconds}s（{item.duration_seconds}s）
               </div>)}
