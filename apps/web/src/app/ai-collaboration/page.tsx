@@ -89,7 +89,8 @@ export default function AICollaborationPage() {
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
   const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "对白整理": "deepseek" });
-  const [autoOpenAi, setAutoOpenAi] = useState(true);\n  const [visualStyle, setVisualStyle] = useState<VisualStyle>("国漫");
+  const [autoOpenAi, setAutoOpenAi] = useState(true);
+  const [visualStyle, setVisualStyle] = useState<VisualStyle>("国漫");
   const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
   const selectedAi = AI_WEB_PROVIDERS[aiProvider];
 
@@ -196,7 +197,7 @@ export default function AICollaborationPage() {
             const taskId = "task-" + crypto.randomUUID();
             const routedProvider = AI_WEB_PROVIDERS[providerRoutes[task]];
             await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
-            const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
+            const prompt = [data.instruction, visualPromptRequirements(visualStyle, task), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
             await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
             completed += 1;
           } catch (error) { failures.push("第 " + chapterNo + " 章「" + task + "」：" + (error instanceof Error ? error.message : "失败")); }
@@ -224,7 +225,7 @@ export default function AICollaborationPage() {
         const taskId = "task-" + crypto.randomUUID();
         try {
           await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
-          const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
+          const prompt = [data.instruction, visualPromptRequirements(visualStyle, taskType), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
           await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
           openNotice = "已在软件内打开" + selectedAi.label + "并填入交接包。请检查后手动点击发送。";
         } catch (fillError) { openNotice = "网页自动填入未完成，请使用复制按钮手动粘贴：" + (fillError instanceof Error ? fillError.message : "未知错误"); }
@@ -241,6 +242,7 @@ export default function AICollaborationPage() {
 
   const handoffText = handoff ? [
     handoff.instruction,
+    visualPromptRequirements(visualStyle, taskType),
     "【结构化输出规范】",
     JSON.stringify(handoff.output_schema, null, 2),
     "【软件交接资料】",
@@ -369,6 +371,12 @@ export default function AICollaborationPage() {
               {chapters.map((chapter) => <label key={chapter.id} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-200"><input type="checkbox" checked={selectedChapterNumbers.includes(String(chapter.chapter_number))} onChange={(event) => setSelectedChapterNumbers((current) => event.target.checked ? [...current, String(chapter.chapter_number)] : current.filter((value) => value !== String(chapter.chapter_number)))} className="accent-cyan-500" />第 {chapter.chapter_number} 章 · {chapter.title}</label>)}
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="text-xs text-slate-300">全流程图片风格
+                <select value={visualStyle} onChange={(event) => setVisualStyle(event.target.value as VisualStyle)} className="mt-1 w-full rounded-lg border border-cyan-300/30 bg-slate-950 px-3 py-2 text-white">
+                  <option value="国漫">国漫</option><option value="仿真人">仿真人</option><option value="3D漫">3D漫</option><option value="2D漫">2D漫</option>
+                </select>
+                <span className="mt-1 block text-[11px] text-slate-500">自动写入剧本、分镜、角色图、场景图和道具图相关提示词。</span>
+              </label>
               {FULL_WORKFLOW_TASKS.map((task) => <label key={task} className="text-xs text-slate-300">{task}分配给
                 <select value={providerRoutes[task]} onChange={(event) => setProviderRoutes((current) => ({ ...current, [task]: event.target.value as AIWebProvider }))} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white">
                   {Object.entries(AI_WEB_PROVIDERS).map(([key, provider]) => <option key={key} value={key}>{provider.label}</option>)}
