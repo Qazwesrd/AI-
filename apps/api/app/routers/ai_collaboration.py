@@ -453,7 +453,7 @@ class HandoffPackageRequest(BaseModel):
     # caller so the user can review it before copying it to a third-party AI site.
     confirm_selected_chapter: bool = False
     include_confirmed_analysis: bool = True
-    task_type: Literal["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "对白整理"] = "剧情分析"
+    task_type: Literal["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "道具设定", "对白整理"] = "剧情分析"
     max_context_chars: int = Field(default=120000, ge=1000, le=150000)
 
 
@@ -556,6 +556,14 @@ def build_chapter_handoff_package(
                 "chapter_number": {"type": "integer"}, "scenes": {"type": "array"},
             },
         },
+        "道具设定": {
+            "type": "object",
+            "required": ["chapter_number", "props"],
+            "properties": {
+                "chapter_number": {"type": "integer"},
+                "props": {"type": "array", "items": {"type": "object", "required": ["name", "description", "image_prompt"]}},
+            },
+        },
         "对白整理": {
             "type": "object",
             "required": ["chapter_number", "dialogues"],
@@ -570,8 +578,9 @@ def build_chapter_handoff_package(
         "剧情分析": "分析剧情事件、人物、场景、道具、关系、时间线及有证据的变化提议。",
         "剧本改编": "将本章改编为可拍摄的漫剧剧本，保留核心剧情，输出场次、动作、对白和场景说明。",
         "分镜设计": "将本章拆解为连续镜头，明确景别、运镜、时长、画面、人物动作、对白、音效和绘图提示词。",
-        "角色设定": "提取本章出现的角色，整理外貌、服装、性格、能力及原文证据；未知内容标注未知。",
-        "场景设定": "提取本章场景，整理空间结构、环境、氛围、时间、光线及原文证据。",
+        "角色设定": "提取本章出现的角色，整理外貌、服装、性格、能力及原文证据；为每个主要角色输出正面、侧面、全身和表情设定图提示词；未知内容标注未知。",
+        "场景设定": "提取本章场景，整理空间结构、环境、氛围、时间、光线及原文证据，并为每个重要场景输出独立环境概念图提示词。",
+        "道具设定": "提取本章出现的重要道具、武器、服装和特殊物品，整理名称、持有人、外观、材质、尺寸、用途、剧情状态及原文证据；为每件道具输出独立、可直接用于图片模型的设定图提示词和负面提示词。",
         "对白整理": "按角色整理本章对白，保留原意，标注情绪和场景，并提供原文证据。",
     }
     instruction = (
