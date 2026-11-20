@@ -541,10 +541,13 @@ ipcMain.handle("ai-browser:upload-reference-files", async (_event, payload = {})
     if (!/^[a-f0-9]{32}\.(png|jpg|jpeg|webp|gif)$/.test(storedName)) throw new Error("参考图片文件标识无效");
     const targetPath = path.resolve(resultDir, storedName);
     if (path.dirname(targetPath) !== resultDir || !fs.existsSync(targetPath)) throw new Error("参考图片文件不存在或路径无效");
-    const stat = fs.statSync(targetPath);
+    const realResultDir = fs.realpathSync(resultDir);
+    const realTargetPath = fs.realpathSync(targetPath);
+    if (path.dirname(realTargetPath) !== realResultDir) throw new Error("参考图片不能通过目录外的符号链接访问");
+    const stat = fs.statSync(realTargetPath);
     if (!stat.isFile() || stat.size !== info.size || stat.size > 100 * 1024 * 1024) throw new Error("参考图片大小校验失败");
     totalBytes += stat.size;
-    uploadPaths.push(targetPath);
+    uploadPaths.push(realTargetPath);
   }
   if (totalBytes > 200 * 1024 * 1024) throw new Error("本次参考图片总大小不能超过 200 MB");
 
