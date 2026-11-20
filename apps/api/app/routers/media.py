@@ -1267,8 +1267,10 @@ class EpisodeDialogueSegmentInput(BaseModel):
 
 
 def validate_dialogue_segments_for_shot(shot, segments):
-    if not segments or len(segments) > 20:
-        raise HTTPException(422, "每个镜头必须配置 1 至 20 条对白")
+    if not segments:
+        return
+    if len(segments) > 20:
+        raise HTTPException(422, "每个镜头最多配置 20 条对白")
     allowed_speakers = {
         int(value) for value in (shot.character_ids or []) if str(value).isdigit()
     }
@@ -1373,9 +1375,13 @@ def generate_episode_voice_track(
     ).order_by(MediaTask.id.desc()).all()
     # Explicitly segmented dialogue is generated line-by-line so each speaker can use
     # their own configured voice. Each line has its own idempotent task record.
-    segmented_shot_ids = {int(key) for key in data.dialogue_segments_by_shot_id}
+    segmented_shot_ids = {
+        int(key) for key, segments in data.dialogue_segments_by_shot_id.items() if segments
+    }
     segmented_audio = {}
     for shot_key, segments in data.dialogue_segments_by_shot_id.items():
+        if not segments:
+            continue
         shot = shot_by_id[shot_key]
         segment_paths = []
         segment_durations = []
