@@ -88,6 +88,7 @@ export default function AICollaborationPage() {
   const [webAiFiles, setWebAiFiles] = useState<WebAIResultFile[]>([]);
   const [webAiClassifications, setWebAiClassifications] = useState<Record<number, string>>({});
   const [webAiAssetNames, setWebAiAssetNames] = useState<Record<number, string>>({});
+  const [selectedWebAiFileIds, setSelectedWebAiFileIds] = useState<number[]>([]);
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -183,6 +184,46 @@ export default function AICollaborationPage() {
       await loadWebAiFiles();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "文件归档失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmSelectedWebAiFiles() {
+    const selected = webAiFiles.filter((item) => selectedWebAiFileIds.includes(item.id) && item.classificationStatus !== "confirmed");
+    if (!selected.length) { setMessage("请先选择待归档文件。"); return; }
+    const invalid = selected.find((item) => {
+      const category = webAiClassifications[item.id] || item.classification || "other";
+      return ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(category)
+        && !(webAiAssetNames[item.id] || "").trim();
+    });
+    if (invalid) { setMessage("请先为所有人物、场景、道具等视觉素材填写名称：" + invalid.filename); return; }
+    if (!window.confirm("确认批量归档选中的 " + selected.length + " 个文件？系统会逐个按当前分类写入本地素材库。")) return;
+    setBusy(true);
+    let succeeded = 0;
+    const failures: string[] = [];
+    try {
+      for (const item of selected) {
+        try {
+          const classification = webAiClassifications[item.id] || item.classification || "other";
+          await request(`/api/web-ai/files/${item.id}/classification`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              classification,
+              assetName: (webAiAssetNames[item.id] || "").trim(),
+              description: "来自 " + item.taskTitle + "（" + item.toolId + "）",
+              novelId: item.novelId || Number(novelId),
+              chapterId: item.chapterId || null,
+            }),
+          });
+          succeeded += 1;
+        } catch (error) {
+          failures.push(item.filename + "：" + (error instanceof Error ? error.message : "归档失败"));
+        }
+      }
+      setSelectedWebAiFileIds([]);
+      setMessage("批量归档完成：成功 " + succeeded + " 个，失败 " + failures.length + " 个。" + (failures.length ? " " + failures.slice(0, 3).join("；") : ""));
+      await loadWebAiFiles();
     } finally {
       setBusy(false);
     }
@@ -560,7 +601,11 @@ export default function AICollaborationPage() {
         <section className="rounded-2xl border border-cyan-300/20 bg-slate-900/80 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-lg font-semibold">④ 内嵌 AI 网页下载结果 · 图片预览与素材归档</h2><p className="mt-1 text-xs leading-5 text-slate-400">桌面端 AI 网页下载的文件会自动出现在这里。图片可直接预览；分类由你确认后才会进入视觉素材库，并关联任务所属章节。</p></div>
-            <button onClick={() => void loadWebAiFiles()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">刷新下载结果</button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setSelectedWebAiFileIds(webAiFiles.filter((item) => item.classificationStatus !== "confirmed").map((item) => item.id))} className="rounded-lg border border-white/15 px-3 py-2 text-xs">全选待归档</button>
+              <button disabled={busy || selectedWebAiFileIds.length === 0} onClick={() => void confirmSelectedWebAiFiles()} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">批量归档（{selectedWebAiFileIds.length}）</button>
+              <button onClick={() => void loadWebAiFiles()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">刷新下载结果</button>
+            </div>
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {webAiFiles.map((item) => {
@@ -570,6 +615,7 @@ export default function AICollaborationPage() {
               return <article key={item.id} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/70">
                 {isImage ? <img src={API + "/api/web-ai/files/" + item.id + "/preview"} alt={item.filename} className="h-48 w-full bg-black/40 object-contain" loading="lazy" /> : <div className="flex h-28 items-center justify-center bg-slate-950 text-4xl">{item.contentType.startsWith("video/") ? "🎬" : item.contentType.startsWith("audio/") ? "🎵" : "📄"}</div>}
                 <div className="space-y-2 p-3">
+                  {item.classificationStatus !== "confirmed" && <label className="flex items-center gap-2 text-xs text-cyan-200"><input type="checkbox" checked={selectedWebAiFileIds.includes(item.id)} onChange={(event) => setSelectedWebAiFileIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="accent-cyan-500" />加入批量归档</label>}
                   <p className="break-all text-sm font-semibold">{item.filename}</p>
                   <p className="text-[11px] text-slate-400">{item.taskTitle} · {item.toolId} · {(item.size / 1024 / 1024).toFixed(1)} MB</p>
                   <p className="text-[11px] text-slate-500">{item.classificationReason}</p>
