@@ -41,6 +41,22 @@ const AI_WEB_PROVIDERS = {
 } as const;
 type AIWebProvider = keyof typeof AI_WEB_PROVIDERS;
 type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "对白整理";
+type VisualStyle = "国漫" | "仿真人" | "3D漫" | "2D漫";
+const VISUAL_STYLE_GUIDES: Record<VisualStyle, string> = {
+  国漫: "中国动画电影美术语言，东方审美，符合题材时代的服饰与建筑，精细线稿与层次丰富的色彩，电影级构图；避免日式动漫脸和现代元素错置。",
+  仿真人: "写实真人影视质感，真实人体比例、自然皮肤纹理、可信的服装材质与光影，电影摄影构图；角色外貌稳定，不要塑料皮肤或夸张卡通比例。",
+  "3D漫": "高品质3D动画电影风格，立体角色模型、精细材质、自然布料与头发模拟、电影级全局光照和景深；所有镜头保持同一角色模型设定。",
+  "2D漫": "高品质二维动画风格，清晰稳定的轮廓线、赛璐璐或细腻手绘上色、分层背景与动画电影构图；人物比例、线条和色彩体系保持统一。",
+};
+function visualPromptRequirements(style: VisualStyle, task: HandoffTaskType): string {
+  const imageTasks = task === "分镜设计" || task === "角色设定" || task === "场景设定";
+  return [
+    "【用户指定的统一视觉风格】" + style + "。" + VISUAL_STYLE_GUIDES[style],
+    "【视觉连续性硬性要求】同一角色跨镜头保持脸型、五官、年龄感、发型、体型和服装一致；同一场景保持建筑结构、时间、天气、主色调和空间布局一致；道具外观与持有者一致。若剧情明确发生变化，按章节先后呈现变化，不得提前或遗漏。",
+    imageTasks ? "【必须生成可直接用于图片模型的提示词】为每个主要角色分别输出角色定妆图提示词（正面、侧面、全身、表情与服装细节）；为每个重要场景输出环境概念图提示词；分镜中的每个镜头输出独立画面提示词。提示词必须包含主体、外观、动作、场景、构图、景别、光线、色彩、风格、画幅及负面提示词，并明确引用本次统一画风。" : "【图片提示词联动】剧本和剧情分析中标记需要制作角色设定图、场景图、道具图及关键剧情插图的位置，并给出可供后续图片提示词生成使用的具体视觉描述。",
+    "【输出要求】内容必须依据本章原文，不得擅自新增角色设定或剧情事实；缺失信息标记为待确认；图片提示词不得只写‘好看’‘电影感’，必须具体可执行。",
+  ].join("\n\n");
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(API + path, {
@@ -57,6 +73,8 @@ export default function AICollaborationPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [novelId, setNovelId] = useState("");
   const [chapterNumber, setChapterNumber] = useState("");
+  const [selectedChapterNumbers, setSelectedChapterNumbers] = useState<string[]>([]);
+  const [batchProgress, setBatchProgress] = useState("");
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [resultJson, setResultJson] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -70,7 +88,9 @@ export default function AICollaborationPage() {
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
+  const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "对白整理": "deepseek" });
   const [autoOpenAi, setAutoOpenAi] = useState(true);
+  const [visualStyle, setVisualStyle] = useState<VisualStyle>("国漫");
   const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
   const selectedAi = AI_WEB_PROVIDERS[aiProvider];
 
@@ -89,7 +109,7 @@ export default function AICollaborationPage() {
   useEffect(() => {
     if (!novelId) { setChapters([]); setChapterNumber(""); setProposals([]); setHandoff(null); return; }
     request<{ items: Chapter[] }>(`/api/novels/${novelId}/chapters`)
-      .then((data) => { setChapters(data.items || []); setChapterNumber(data.items?.length ? String(data.items[0].chapter_number) : ""); })
+      .then((data) => { setChapters(data.items || []); setChapterNumber(data.items?.length ? String(data.items[0].chapter_number) : ""); setSelectedChapterNumbers(data.items?.length ? [String(data.items[0].chapter_number)] : []); })
       .catch((error) => setMessage(error.message));
     void loadProposals(novelId, filter);
     void loadAttachments(novelId);
@@ -156,6 +176,37 @@ export default function AICollaborationPage() {
     window.open(selectedAi.url, "_blank", "noopener,noreferrer");
   }
 
+  const FULL_WORKFLOW_TASKS: HandoffTaskType[] = ["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "对白整理"];
+
+  async function prepareFullWorkflow() {
+    if (!novelId || selectedChapterNumbers.length === 0) { setMessage("请至少选择一个章节。"); return; }
+    if (!window.aiBrowserDesktop?.openTask || !window.aiBrowserDesktop?.fillPrompt) { setMessage("全流程自动填入需要在 AI 漫剧大师电脑版内运行。"); return; }
+    if (selectedChapterNumbers.length > 5) { setMessage("为避免一次打开过多网页，请每次最多选择 5 个章节。"); return; }
+    const taskCount = selectedChapterNumbers.length * FULL_WORKFLOW_TASKS.length;
+    const approved = window.confirm("将为 " + selectedChapterNumbers.length + " 个章节准备 " + taskCount + " 项任务（剧情、剧本、分镜、角色、场景、对白），并在内嵌 AI 浏览器中逐项填入。每项仍需你检查后手动发送；不会自动提交或调用视频 API。继续吗？");
+    if (!approved) return;
+    setBusy(true); setBatchProgress("正在创建全流程任务…");
+    let completed = 0;
+    const failures: string[] = [];
+    try {
+      for (const chapterNo of selectedChapterNumbers) {
+        for (const task of FULL_WORKFLOW_TASKS) {
+          setBatchProgress("正在准备第 " + chapterNo + " 章 · " + task + "（" + (completed + failures.length + 1) + "/" + taskCount + "）");
+          try {
+            const data = await request<Handoff>("/api/ai-collaboration/novels/" + novelId + "/chapters/" + chapterNo + "/handoff-package", { method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: task }) });
+            const taskId = "task-" + crypto.randomUUID();
+            const routedProvider = AI_WEB_PROVIDERS[providerRoutes[task]];
+            await window.aiBrowserDesktop.openTask(taskId, routedProvider.url);
+            const prompt = [data.instruction, visualPromptRequirements(visualStyle, task), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的结果；剧情变化必须引用章节原文证据，不得把推断当事实。"].join("\n\n");
+            await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
+            completed += 1;
+          } catch (error) { failures.push("第 " + chapterNo + " 章「" + task + "」：" + (error instanceof Error ? error.message : "失败")); }
+        }
+      }
+      setMessage("全流程任务准备结束：成功填入 " + completed + "/" + taskCount + " 项。" + (failures.length ? "失败项：" + failures.join("；") : "所有任务均已填入对应 AI 网页。") + "请逐个检查网页并手动点击发送。");
+    } finally { setBusy(false); setBatchProgress(""); }
+  }
+
   async function prepareHandoff() {
     if (!novelId || !chapterNumber) { setMessage("请先选择小说和章节。"); return; }
     if (!window.confirm(`即将读取“${selectedNovel?.title || "所选小说"}”第 ${chapterNumber} 章，并将章节正文及已确认分析摘要展示在交接预览中。只会打开所选 AI 网站，不会自动发送章节内容。继续吗？`)) return;
@@ -174,7 +225,7 @@ export default function AICollaborationPage() {
         const taskId = "task-" + crypto.randomUUID();
         try {
           await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
-          const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
+          const prompt = [data.instruction, visualPromptRequirements(visualStyle, taskType), "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
           await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
           openNotice = "已在软件内打开" + selectedAi.label + "并填入交接包。请检查后手动点击发送。";
         } catch (fillError) { openNotice = "网页自动填入未完成，请使用复制按钮手动粘贴：" + (fillError instanceof Error ? fillError.message : "未知错误"); }
@@ -191,6 +242,7 @@ export default function AICollaborationPage() {
 
   const handoffText = handoff ? [
     handoff.instruction,
+    visualPromptRequirements(visualStyle, taskType),
     "【结构化输出规范】",
     JSON.stringify(handoff.output_schema, null, 2),
     "【软件交接资料】",
@@ -309,6 +361,33 @@ export default function AICollaborationPage() {
                 <option value="">选择章节</option>{chapters.map((item) => <option key={item.id} value={item.chapter_number}>第 {item.chapter_number} 章 · {item.title}（{item.word_count} 字）</option>)}
               </select>
             </label>
+          </div>
+          <div className="mt-4 rounded-xl border border-cyan-300/15 bg-slate-950/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定和对白整理任务。</p></div>
+              <div className="flex gap-2 text-xs"><button type="button" onClick={() => setSelectedChapterNumbers(chapters.map((item) => String(item.chapter_number)))} className="rounded border border-white/15 px-2 py-1">全选</button><button type="button" onClick={() => setSelectedChapterNumbers([])} className="rounded border border-white/15 px-2 py-1">清空</button></div>
+            </div>
+            <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
+              {chapters.map((chapter) => <label key={chapter.id} className="flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-slate-200"><input type="checkbox" checked={selectedChapterNumbers.includes(String(chapter.chapter_number))} onChange={(event) => setSelectedChapterNumbers((current) => event.target.checked ? [...current, String(chapter.chapter_number)] : current.filter((value) => value !== String(chapter.chapter_number)))} className="accent-cyan-500" />第 {chapter.chapter_number} 章 · {chapter.title}</label>)}
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <label className="text-xs text-slate-300">全流程图片风格
+                <select value={visualStyle} onChange={(event) => setVisualStyle(event.target.value as VisualStyle)} className="mt-1 w-full rounded-lg border border-cyan-300/30 bg-slate-950 px-3 py-2 text-white">
+                  <option value="国漫">国漫</option><option value="仿真人">仿真人</option><option value="3D漫">3D漫</option><option value="2D漫">2D漫</option>
+                </select>
+                <span className="mt-1 block text-[11px] text-slate-500">自动写入剧本、分镜、角色图、场景图和道具图相关提示词。</span>
+              </label>
+              {FULL_WORKFLOW_TASKS.map((task) => <label key={task} className="text-xs text-slate-300">{task}分配给
+                <select value={providerRoutes[task]} onChange={(event) => setProviderRoutes((current) => ({ ...current, [task]: event.target.value as AIWebProvider }))} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white">
+                  {Object.entries(AI_WEB_PROVIDERS).map(([key, provider]) => <option key={key} value={key}>{provider.label}</option>)}
+                </select>
+              </label>)}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button type="button" onClick={() => void prepareFullWorkflow()} disabled={busy || selectedChapterNumbers.length === 0} className="rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">为选中的章节生成全流程任务</button>
+              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 6 项任务，并按所选画风生成视觉提示词。网页支持时自动填入，但必须由你确认发送。</span>
+            </div>
+            {batchProgress && <p className="mt-2 text-xs text-cyan-200">{batchProgress}</p>}
           </div>
           <div className="mt-4 grid gap-3 md:grid-cols-3 md:items-end">
             <label className="text-sm text-slate-300">本次交接任务类型
