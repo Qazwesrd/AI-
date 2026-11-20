@@ -453,6 +453,7 @@ class HandoffPackageRequest(BaseModel):
     # caller so the user can review it before copying it to a third-party AI site.
     confirm_selected_chapter: bool = False
     include_confirmed_analysis: bool = True
+    task_type: Literal["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "对白整理"] = "剧情分析"
     max_context_chars: int = Field(default=120000, ge=1000, le=150000)
 
 
@@ -524,8 +525,68 @@ def build_chapter_handoff_package(
             "uncertainties": {"type": "array", "items": {"type": "string"}},
         },
     }
+    task_schemas = {
+        "剧本改编": {
+            "type": "object", "required": ["chapter_number", "title", "synopsis", "screenplay"],
+            "properties": {"chapter_number": {"type": "integer"}, "title": {"type": "string"},
+                "synopsis": {"type": "string"}, "screenplay": {"type": "string"},
+                "characters": {"type": "array"}, "scenes": {"type": "array"}, "dialogues": {"type": "array"}},
+        },
+        "分镜设计": {
+            "type": "object", "required": ["chapter_number", "shots"],
+            "properties": {"chapter_number": {"type": "integer"}, "shots": {"type": "array", "items": {
+                "type": "object", "required": ["shot_number", "scene_name", "visual_description"],
+                "properties": {"shot_number": {"type": "integer"}, "scene_name": {"type": "string"},
+                    "shot_type": {"type": "string"}, "camera_movement": {"type": "string"},
+                    "duration_seconds": {"type": "number"}, "visual_description": {"type": "string"},
+                    "character_actions": {"type": "string"}, "dialogue": {"type": "string"},
+                    "sound_effects": {"type": "string"}, "image_prompt": {"type": "string"}}}},
+        },
+        "角色设定": {
+            "type": "object", "required": ["chapter_number", "characters"],
+            "properties": {"chapter_number": {"type": "integer"}, "characters": {"type": "array", "items": {
+                "type": "object", "required": ["name", "appearance", "evidence"],
+                "properties": {"name": {"type": "string"}, "appearance": {"type": "string"},
+                    "clothing": {"type": "string"}, "personality": {"type": "string"},
+                    "abilities": {"type": "array"}, "evidence": {"type": "string"}}}},
+        },
+        "场景设定": {
+            "type": "object", "required": ["chapter_number", "scenes"],
+            "properties": {"chapter_number": {"type": "integer"}, "scenes": {"type": "array", "items": {
+                "type": "object", "required": ["name", "visual_description", "evidence"],
+                "properties": {"name": {"type": "string"}, "visual_description": {"type": "string"},
+                    "atmosphere": {"type": "string"}, "time_of_day": {"type": "string"},
+                    "lighting": {"type": "string"}, "evidence": {"type": "string"}}}},
+        },
+        "对白整理": {
+            "type": "object", "required": ["chapter_number", "dialogues"],
+            "properties": {"chapter_number": {"type": "integer"}, "dialogues": {"type": "array", "items": {
+                "type": "object", "required": ["character", "line", "evidence"],
+                "properties": {"character": {"type": "string"}, "line": {"type": "string"},
+                    "emotion": {"type": "string"}, "scene": {"type": "string"},
+                    "evidence": {"type": "string"}}}},
+        },
+    }
+    if payload.task_type in task_schemas:
+        output_schema = task_schemas[payload.task_type]
+    task_instructions = {
+        "剧情分析": "分析剧情事件、人物、场景、道具、关系、时间线及有证据的变化提议。",
+        "剧本改编": "将本章改编为可拍摄的漫剧剧本，保留核心剧情，输出场次、动作、对白和场景说明。",
+        "分镜设计": "将本章拆解为连续镜头，明确景别、运镜、时长、画面、人物动作、对白、音效和绘图提示词。",
+        "角色设定": "提取本章出现的角色，整理外貌、服装、性格、能力及原文证据；未知内容标注未知。",
+        "场景设定": "提取本章场景，整理空间结构、环境、氛围、时间、光线及原文证据。",
+        "对白整理": "按角色整理本章对白，保留原意，标注情绪和场景，并提供原文证据。",
+    }
     instruction = (
-        "你是小说与影视改编分析专家。请只分析本次交接包中的指定章节，并结合已确认资料识别变化。"
+        f"你是专业的小说漫剧改编与制作助手。本次任务类型：{payload.task_type}。"
+        f"{task_instructions[payload.task_type]}"
+        "只处理本次交接包中的指定章节，并结合已确认资料。严格区分原文事实、推断和未知；"
+        "所有从原文提取的事实必须附带逐字证据，不得把推断当作事实。"
+        "只返回符合给定JSON Schema的JSON，不要使用Markdown代码围栏。"
+        "如内容无法从原文确定，请标注未知或写入uncertainties。"
+    )
+    context = {
+        "novel": {"id": novel.id, "title": novel.title, "genre": novel.genre},
         "严格区分原文事实、推断和未知；不得把推断当作事实。"
         "每一项人物/场景/道具/事件及剧情变化都必须附带本章原文中的逐字证据。"
         "没有证据的变化不得提交；置信度使用0到1。"
@@ -544,10 +605,12 @@ def build_chapter_handoff_package(
         },
         "confirmed_analysis": analysis,
         "handoff_scope": "仅本次选定章节；不包含整本小说其他章节原文",
+        "task_type": payload.task_type,
     }
     return {
         "success": True,
-        "handoff_version": "1.0",
+        "handoff_version": "1.1",
+        "task_type": payload.task_type,
         "novel_id": novel.id,
         "chapter_id": chapter.id,
         "chapter_number": chapter.chapter_number,
