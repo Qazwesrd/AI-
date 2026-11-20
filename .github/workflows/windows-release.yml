@@ -230,10 +230,24 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$releaseResponse) {
             gh release create $tag --title $title --notes $notes --draft --target $env:GITHUB_SHA
             if ($LASTEXITCODE -ne 0) { throw "创建 GitHub Release 失败。" }
-            $releaseResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag"
-            if ($LASTEXITCODE -ne 0 -or !$releaseResponse) { throw "创建 Release 后无法读取 Release 信息。" }
+
+            # GitHub may create the draft before the tag lookup endpoint is
+            # immediately consistent. Retry instead of failing a valid release.
+            $releaseResponse = $null
+            for ($attempt = 1; $attempt -le 10; $attempt++) {
+              Start-Sleep -Seconds 3
+              $releaseResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>$null
+              if ($LASTEXITCODE -eq 0 -and $releaseResponse) { break }
+              $releaseResponse = $null
+            }
+            if (!$releaseResponse) {
+              throw "创建 Release 后多次尝试仍无法读取 Release 信息：$tag"
+            }
           }
           $release = $releaseResponse | ConvertFrom-Json
+          if ($release.tag_name -ne $tag -or !$release.id) {
+            throw "Release 标识校验失败，拒绝上传或发布。"
+          }
 
           $releaseDir = Join-Path $PWD "apps/desktop/release"
           $files = @(Get-ChildItem $releaseDir -File | Where-Object {
