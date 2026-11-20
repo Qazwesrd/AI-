@@ -31,6 +31,12 @@ type ResultAttachment = {
   description: string; status: string; review_note?: string; media_file_id?: number | null;
   created_at?: string;
 };
+type WebAIResultFile = {
+  id: number; taskId: string; filename: string; contentType: string; size: number;
+  downloadUrl: string; createdAt: string; classification: string; classificationStatus: string;
+  classificationReason: string; visualAssetId?: number | null; taskTitle: string;
+  taskCategory: string; toolId: string; novelId?: number | null; chapterId?: number | null;
+};
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 const AI_WEB_PROVIDERS = {
@@ -79,6 +85,9 @@ export default function AICollaborationPage() {
   const [resultJson, setResultJson] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [attachments, setAttachments] = useState<ResultAttachment[]>([]);
+  const [webAiFiles, setWebAiFiles] = useState<WebAIResultFile[]>([]);
+  const [webAiClassifications, setWebAiClassifications] = useState<Record<number, string>>({});
+  const [webAiAssetNames, setWebAiAssetNames] = useState<Record<number, string>>({});
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -113,6 +122,7 @@ export default function AICollaborationPage() {
       .catch((error) => setMessage(error.message));
     void loadProposals(novelId, filter);
     void loadAttachments(novelId);
+    void loadWebAiFiles(novelId);
   }, [novelId]);
 
   async function loadProposals(id = novelId, status = filter) {
@@ -129,6 +139,53 @@ export default function AICollaborationPage() {
       const data = await request<{ items: ResultAttachment[] }>(`/api/ai-collaboration/results/attachments?novel_id=${id}&status=all`);
       setAttachments(data.items || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : "读取 AI 结果文件失败"); }
+  }
+
+  async function loadWebAiFiles(id = novelId) {
+    if (!id) { setWebAiFiles([]); return; }
+    try {
+      const data = await request<{ items: WebAIResultFile[] }>(`/api/web-ai/files?novel_id=${id}&limit=200`);
+      setWebAiFiles(data.items || []);
+      setWebAiClassifications((current) => {
+        const next = { ...current };
+        for (const item of data.items || []) if (!next[item.id]) next[item.id] = item.classification || "other";
+        return next;
+      });
+      setWebAiAssetNames((current) => {
+        const next = { ...current };
+        for (const item of data.items || []) if (!next[item.id]) next[item.id] = item.filename.replace(/\\.[^.]+$/, "");
+        return next;
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取内嵌 AI 浏览器下载结果失败");
+    }
+  }
+
+  async function confirmWebAiFile(item: WebAIResultFile) {
+    const classification = webAiClassifications[item.id] || item.classification || "other";
+    const needsAsset = ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(classification);
+    const assetName = (webAiAssetNames[item.id] || "").trim();
+    if (needsAsset && !assetName) { setMessage("请先填写素材名称，再确认归档。"); return; }
+    if (!window.confirm("确认将“" + item.filename + "”按“" + classification + "”归档？确认后会写入本地素材库，并按任务章节尝试关联分集和分镜。")) return;
+    setBusy(true);
+    try {
+      await request(`/api/web-ai/files/${item.id}/classification`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          classification,
+          assetName,
+          description: "来自 " + item.taskTitle + "（" + item.toolId + "）",
+          novelId: item.novelId || Number(novelId),
+          chapterId: item.chapterId || null,
+        }),
+      });
+      setMessage("文件已确认归档；素材关联已更新。");
+      await loadWebAiFiles();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "文件归档失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadAttachment() {
@@ -500,9 +557,44 @@ export default function AICollaborationPage() {
           </div>
         </section>
 
+        <section className="rounded-2xl border border-cyan-300/20 bg-slate-900/80 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-lg font-semibold">④ 内嵌 AI 网页下载结果 · 图片预览与素材归档</h2><p className="mt-1 text-xs leading-5 text-slate-400">桌面端 AI 网页下载的文件会自动出现在这里。图片可直接预览；分类由你确认后才会进入视觉素材库，并关联任务所属章节。</p></div>
+            <button onClick={() => void loadWebAiFiles()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">刷新下载结果</button>
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {webAiFiles.map((item) => {
+              const classification = webAiClassifications[item.id] || item.classification || "other";
+              const needsAsset = ["character", "scene", "prop", "weapon", "costume", "building", "special_item"].includes(classification);
+              const isImage = (item.contentType || "").startsWith("image/");
+              return <article key={item.id} className="overflow-hidden rounded-xl border border-white/10 bg-slate-950/70">
+                {isImage ? <img src={API + "/api/web-ai/files/" + item.id + "/preview"} alt={item.filename} className="h-48 w-full bg-black/40 object-contain" loading="lazy" /> : <div className="flex h-28 items-center justify-center bg-slate-950 text-4xl">{item.contentType.startsWith("video/") ? "🎬" : item.contentType.startsWith("audio/") ? "🎵" : "📄"}</div>}
+                <div className="space-y-2 p-3">
+                  <p className="break-all text-sm font-semibold">{item.filename}</p>
+                  <p className="text-[11px] text-slate-400">{item.taskTitle} · {item.toolId} · {(item.size / 1024 / 1024).toFixed(1)} MB</p>
+                  <p className="text-[11px] text-slate-500">{item.classificationReason}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className={item.classificationStatus === "confirmed" ? "text-xs text-emerald-300" : "text-xs text-amber-300"}>{item.classificationStatus === "confirmed" ? "已归档" : "待确认分类"}</span>
+                    <a href={API + item.downloadUrl} className="text-xs text-cyan-300 underline">下载原文件</a>
+                  </div>
+                  {item.classificationStatus !== "confirmed" && <>
+                    <select value={classification} onChange={(event) => setWebAiClassifications((current) => ({ ...current, [item.id]: event.target.value }))} className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs text-white">
+                      <option value="character">人物图片</option><option value="scene">场景图片</option><option value="prop">道具图片</option><option value="weapon">武器图片</option><option value="costume">服装图片</option><option value="building">建筑图片</option><option value="special_item">特殊物品图片</option><option value="storyboard">分镜图</option><option value="script">剧本</option><option value="subtitle">字幕</option><option value="video">视频</option><option value="audio">音频</option><option value="document">文档</option><option value="image">普通图片</option><option value="other">其他</option>
+                    </select>
+                    {needsAsset && <input value={webAiAssetNames[item.id] || ""} onChange={(event) => setWebAiAssetNames((current) => ({ ...current, [item.id]: event.target.value }))} placeholder="素材名称，例如：主角·林风·正面设定图" className="w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-xs text-white" />}
+                    <button disabled={busy} onClick={() => void confirmWebAiFile(item)} className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">确认分类并归档</button>
+                  </>}
+                  {item.visualAssetId && <p className="text-xs text-emerald-300">视觉素材 ID：{item.visualAssetId}</p>}
+                </div>
+              </article>;
+            })}
+            {!webAiFiles.length && <p className="rounded-xl border border-dashed border-white/15 p-6 text-center text-xs text-slate-400 md:col-span-2 xl:col-span-3">还没有从内嵌 AI 网页下载的文件。完成网页生成并下载后，这里会自动显示结果。</p>}
+          </div>
+        </section>
+
         <section className="rounded-2xl border border-purple-300/20 bg-slate-900/80 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold">④ 剧情变化审核与素材状态记录</h2>
+            <h2 className="text-lg font-semibold">⑤ 剧情变化审核与素材状态记录</h2>
             <div className="flex gap-2">
               <select value={filter} onChange={(event) => { setFilter(event.target.value); void loadProposals(novelId, event.target.value); }} className="rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-xs">
                 <option value="pending_review">待审核</option><option value="approved">已通过</option><option value="rejected">已拒绝</option><option value="all">全部</option>
