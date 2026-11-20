@@ -894,6 +894,28 @@ def render_episode_from_shots(
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
+        speech_duration_by_shot = {}
+        speech_tasks = db.query(MediaTask).filter(
+            MediaTask.task_type == "episode_speech",
+            MediaTask.status == "completed",
+        ).order_by(MediaTask.id.desc()).all()
+        for speech_task in speech_tasks:
+            speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
+            shot_id = speech_meta.get("shot_id")
+            if speech_meta.get("episode_id") != episode_id or shot_id not in shot_by_id or shot_id in speech_duration_by_shot:
+                continue
+            if not speech_task.result_path:
+                continue
+            try:
+                speech_file = safe_storage_file(speech_task.result_path)
+                speech_info = probe_media(speech_file)
+                speech_duration = float((speech_info.get("format") or {}).get("duration") or 0)
+                if speech_duration > 0:
+                    speech_duration_by_shot[shot_id] = speech_duration
+            except Exception:
+                # Missing/invalid speech audio falls back to the full-shot subtitle timing.
+                continue
+        speech_synced_subtitle_count = 0
         transition_by_shot = {
             item["after_shot_id"]: item
             for item in transition_items
@@ -901,16 +923,21 @@ def render_episode_from_shots(
         }
         for shot, duration in zip(shots, actual_durations):
             dialogue = (shot.dialogue or "").strip()
+            overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
+            visible_duration = max(0.1, duration - overlap)
             if dialogue:
+                speech_duration = speech_duration_by_shot.get(shot.id)
+                cue_duration = subtitle_cue_duration(visible_duration, speech_duration)
+                if speech_duration is not None:
+                    speech_synced_subtitle_count += 1
                 subtitle_lines.extend([
                     str(subtitle_index),
-                    f"{srt_time(elapsed)} --> {srt_time(elapsed + duration)}",
+                    f"{srt_time(elapsed)} --> {srt_time(elapsed + cue_duration)}",
                     dialogue,
                     "",
                 ])
                 subtitle_index += 1
-            overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
-            elapsed += duration - overlap
+            elapsed += visible_duration
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
@@ -936,6 +963,8 @@ def render_episode_from_shots(
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
                 "subtitle_count": subtitle_index - 1,
+                "speech_synced_subtitle_count": speech_synced_subtitle_count,
+                "subtitle_timing_mode": "speech_audio_aligned_with_full_shot_fallback",
                 "applied_timeline_version": timeline_record.version if timeline_record else 0,
                 "applied_transitions": len(transition_items),
                 "quality_report": quality_report}
@@ -1795,6 +1824,25 @@ def srt_time(seconds):
     minutes, ms = divmod(ms, 60000)
     secs, ms = divmod(ms, 1000)
     return f"{hours:02}:{minutes:02}:{secs:02},{ms:03}"
+
+
+def subtitle_cue_duration(clip_duration: float, speech_duration: Optional[float]) -> float:
+    """Return the visible dialogue subtitle duration after the speech track's tempo adjustment."""
+    clip = max(0.0, float(clip_duration or 0))
+    if clip <= 0:
+        return 0.0
+    if speech_duration is None:
+        return clip
+    speech = max(0.0, float(speech_duration or 0))
+    if speech <= 0:
+        return clip
+    speed_ratio = speech / clip
+    tempo = min(1.5, max(1.0, speed_ratio)) if speed_ratio > 1.02 else 1.0
+    effective = min(clip, speech / tempo)
+    # Keep short dialogue readable without extending beyond its shot.
+    return min(clip, max(min(0.8, clip), effective))
+
+
 
 
 @router.post("/subtitles")
