@@ -48,7 +48,7 @@ export default function EpisodeReadinessPage() {
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
 
-  async function checkReadiness() {
+  async function checkReadiness(clearPreviousRender = true) {
     const id = Number(episodeId);
     if (!Number.isInteger(id) || id <= 0) {
       setMessage("请输入有效的分集 ID（正整数）。");
@@ -56,7 +56,7 @@ export default function EpisodeReadinessPage() {
     }
     setBusy(true);
     setMessage("正在逐镜头检查视频文件、视频流和时长……");
-    setRenderResult(null);
+    if (clearPreviousRender) setRenderResult(null);
     try {
       const response = await fetch(`${API}/api/media/video/episodes/${id}/render-readiness`);
       const data = await response.json();
@@ -113,7 +113,7 @@ export default function EpisodeReadinessPage() {
       if (!response.ok) throw new Error(data.detail || "合成失败");
       setRenderResult(data);
       setMessage("分集成片已生成，并完成基础音视频质量检查。");
-      await checkReadiness();
+      await checkReadiness(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "合成失败");
     } finally {
