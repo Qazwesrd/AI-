@@ -1,4 +1,3 @@
-import asyncio
 import unittest
 import zipfile
 from io import BytesIO
@@ -7,8 +6,7 @@ from unittest.mock import MagicMock, patch
 from app.document_import import (
     _verify_compressed_archive, decode_text, docx_text, epub_text, extract_document_text,
 )
-from app.routers.novels import _read_upload_limited, split_chapters
-from fastapi import HTTPException
+from app.routers.novels import split_chapters
 
 
 class DocumentImportTests(unittest.TestCase):
@@ -43,6 +41,16 @@ class DocumentImportTests(unittest.TestCase):
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr("word/document.xml", document_xml)
         self.assertIn("测试文档正文", docx_text(buffer.getvalue()))
+
+    def test_docx_extraction_from_seekable_stream(self):
+        buffer = BytesIO()
+        document_xml = (
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>流式 DOCX 正文</w:t></w:r></w:p></w:body></w:document>'
+        )
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("word/document.xml", document_xml)
+        self.assertIn("流式 DOCX 正文", docx_text(BytesIO(buffer.getvalue())))
 
     def test_epub_extraction(self):
         buffer = BytesIO()
@@ -125,46 +133,23 @@ class DocumentImportTests(unittest.TestCase):
             _verify_compressed_archive(archive)
 
 
-    def test_upload_reader_rejects_declared_oversize_before_reading(self):
-        class FakeUpload:
-            size = 11
-
-            async def read(self, size=-1):
-                raise AssertionError("must reject before reading")
-
-        with self.assertRaises(HTTPException) as caught:
-            asyncio.run(_read_upload_limited(FakeUpload(), max_bytes=10))
-        self.assertEqual(caught.exception.status_code, 413)
-
-    def test_upload_reader_enforces_limit_when_size_is_unknown(self):
-        class FakeUpload:
-            size = None
-
-            def __init__(self):
-                self.remaining = [b"123456", b"78901", b""]
-
-            async def read(self, size=-1):
-                chunk = self.remaining.pop(0)
-                return chunk
-
-        with self.assertRaises(HTTPException) as caught:
-            asyncio.run(_read_upload_limited(FakeUpload(), max_bytes=10))
-        self.assertEqual(caught.exception.status_code, 413)
-
-    def test_upload_reader_accepts_exact_limit(self):
-        class FakeUpload:
-            size = None
-
-            def __init__(self):
-                self.remaining = [b"12345", b"67890", b""]
-
-            async def read(self, size=-1):
-                return self.remaining.pop(0)
-
+    def test_text_import_accepts_seekable_stream(self):
+        source = BytesIO("第一章\n正文内容".encode("utf-8"))
         self.assertEqual(
-            asyncio.run(_read_upload_limited(FakeUpload(), max_bytes=10)),
-            b"1234567890",
+            extract_document_text("novel.txt", source),
+            "第一章\n正文内容",
         )
+
+    def test_stream_text_import_supports_gb18030(self):
+        expected = "第一章\n中文正文"
+        source = BytesIO(expected.encode("gb18030"))
+        self.assertEqual(extract_document_text("novel.txt", source), expected)
+
+    def test_stream_import_rejects_oversized_upload(self):
+        source = BytesIO(b"123456")
+        with patch("app.document_import.MAX_UPLOAD_BYTES", 5):
+            with self.assertRaisesRegex(ValueError, "不能超过 1 GB"):
+                extract_document_text("novel.txt", source)
 
     def test_txt_document_import(self):
         self.assertEqual(extract_document_text("novel.txt", "正文内容".encode("utf-8")), "正文内容")
