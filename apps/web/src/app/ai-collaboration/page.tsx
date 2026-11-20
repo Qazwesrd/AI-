@@ -51,6 +51,8 @@ export default function AICollaborationPage() {
   const [resultJson, setResultJson] = useState("");
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [attachments, setAttachments] = useState<ResultAttachment[]>([]);
+  const [compareIds, setCompareIds] = useState<number[]>([]);
+  const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [attachmentDescription, setAttachmentDescription] = useState("");
   const [attachmentChapter, setAttachmentChapter] = useState("");
@@ -183,26 +185,63 @@ export default function AICollaborationPage() {
   }
 
   async function importResult() {
-    if (!novelId || !chapterNumber) return;
+    if (!novelId || !chapterNumber || !resultJson.trim()) return;
     setBusy(true);
     try {
-      const parsed = JSON.parse(resultJson);
-      const proposalsToImport = Array.isArray(parsed) ? parsed : parsed.proposals;
-      if (!Array.isArray(proposalsToImport) || !proposalsToImport.length) throw new Error("JSON 中没有 proposals 数组。");
-      const data = await request<{ created_count: number; duplicates_skipped: number; message: string }>(
-        `/api/ai-collaboration/novels/${novelId}/proposals/import`,
-        { method: "POST", body: JSON.stringify({
-          novel_id: Number(novelId),
-          source_text: handoff?.context ? (handoff.context as { chapter?: { content?: string } }).chapter?.content || "selected chapter" : "selected chapter",
-          source_task_key: `web-ai-${novelId}-chapter-${chapterNumber}`,
-          proposals: proposalsToImport,
-        }) },
+      let parsed: unknown = null;
+      try { parsed = JSON.parse(resultJson); } catch { /* Markdown/plain text is also accepted and archived. */ }
+      const proposalsToImport = Array.isArray(parsed) ? parsed : (
+        parsed && typeof parsed === "object" && Array.isArray((parsed as { proposals?: unknown }).proposals)
+          ? (parsed as { proposals: unknown[] }).proposals : null
       );
-      setMessage(`已导入 ${data.created_count} 项待审核剧情变化；跳过重复项 ${data.duplicates_skipped} 项。尚未覆盖正式素材。`);
+      if (proposalsToImport?.length) {
+        const data = await request<{ created_count: number; duplicates_skipped: number; message: string }>(
+          `/api/ai-collaboration/novels/${novelId}/proposals/import`,
+          { method: "POST", body: JSON.stringify({
+            novel_id: Number(novelId),
+            source_text: handoff?.context ? (handoff.context as { chapter?: { content?: string } }).chapter?.content || "selected chapter" : "selected chapter",
+            source_task_key: `web-ai-${novelId}-chapter-${chapterNumber}`,
+            proposals: proposalsToImport,
+          }) },
+        );
+        setMessage(`已导入 ${data.created_count} 项待审核剧情变化；跳过重复项 ${data.duplicates_skipped} 项。尚未覆盖正式素材。`);
+        await loadProposals();
+      } else {
+        const data = await request<{ message: string; detected_type: string; duplicate?: boolean }>(
+          "/api/ai-collaboration/results/text",
+          { method: "POST", body: JSON.stringify({
+            novel_id: Number(novelId), chapter_number: Number(chapterNumber),
+            content: resultJson, source_task_key: `web-ai-${novelId}-chapter-${chapterNumber}`,
+          }) },
+        );
+        setMessage(data.message);
+        await loadAttachments();
+      }
       setResultJson("");
-      await loadProposals();
     } catch (error) { setMessage(error instanceof Error ? error.message : "结果导入失败"); }
     finally { setBusy(false); }
+  }
+
+  async function compareSelectedResults() {
+    if (compareIds.length !== 2) { setMessage("请选择两份 AI 文本结果进行对比。"); return; }
+    setBusy(true);
+    try {
+      const [left, right] = await Promise.all(compareIds.map(async id => {
+        const response = await fetch(`${API}/api/ai-collaboration/results/attachments/${id}/file`);
+        if (!response.ok) throw new Error("读取对比文件失败");
+        return response.text();
+      }));
+      setComparison({ left, right });
+      setMessage("已加载两份 AI 结果，可并排检查差异；合并草稿需要你确认和编辑。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "结果对比失败"); }
+    finally { setBusy(false); }
+  }
+
+  function createMergedDraft() {
+    if (!comparison) return;
+    setResultJson(`# AI 结果合并草稿\n\n## 结果 A\n\n${comparison.left}\n\n---\n\n## 结果 B\n\n${comparison.right}\n\n---\n\n请人工检查、去重并整合以上内容。\n`);
+    setMessage("已将两份结果合并到上方结果输入框作为草稿。请检查、编辑后再保存；不会自动覆盖原结果。");
+    setComparison(null);
   }
 
   async function reviewProposal(id: number, action: "approve" | "reject") {
@@ -277,9 +316,9 @@ export default function AICollaborationPage() {
 
         <section className="rounded-2xl border border-purple-300/20 bg-slate-900/80 p-5">
           <h2 className="text-lg font-semibold">② 接收 AI 返回的剧情分析与变化提议</h2>
-          <p className="mt-2 text-xs leading-5 text-slate-400">请让网页 AI 按交接包要求返回 JSON，再粘贴到这里。服务端会用数据库中保存的章节原文逐字核对证据；不匹配的证据不会入库。</p>
-          <textarea value={resultJson} onChange={(event) => setResultJson(event.target.value)} rows={12} placeholder={'粘贴 AI 返回的 JSON，例如：{"chapter_number":1,"proposals":[...]}'} className="mt-3 w-full rounded-xl border border-white/10 bg-slate-950 p-3 font-mono text-xs leading-5 text-white" />
-          <button onClick={() => void importResult()} disabled={busy || !resultJson.trim() || !novelId} className="mt-3 rounded-lg bg-emerald-700 px-5 py-3 text-sm font-semibold disabled:opacity-40">校验并导入待审核提议</button>
+          <p className="mt-2 text-xs leading-5 text-slate-400">请把网页 AI 返回的 JSON、Markdown 或普通文本粘贴到这里。系统会自动识别剧本、分镜、角色、场景、对白或综合分析；剧情变化提议仍会逐字核对章节原文。普通文本结果会保存为关联当前小说和章节的待审核文档。</p>
+          <textarea value={resultJson} onChange={(event) => setResultJson(event.target.value)} rows={12} placeholder={'粘贴 AI 返回的 JSON、Markdown 或普通文本；含 proposals 数组的结果会进入剧情变化审核'} className="mt-3 w-full rounded-xl border border-white/10 bg-slate-950 p-3 font-mono text-xs leading-5 text-white" />
+          <button onClick={() => void importResult()} disabled={busy || !resultJson.trim() || !novelId} className="mt-3 rounded-lg bg-emerald-700 px-5 py-3 text-sm font-semibold disabled:opacity-40">自动识别类型并保存 / 导入</button>
         </section>
 
         <section className="rounded-2xl border border-purple-300/20 bg-slate-900/80 p-5">
@@ -312,6 +351,7 @@ export default function AICollaborationPage() {
                   <a href={`${API}/api/ai-collaboration/results/attachments/${item.id}/file`} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-300 underline">预览 / 打开文件</a>
                   {item.description && <p className="mt-1 text-xs text-slate-300">{item.description}</p>}
                   {item.media_file_id && <p className="mt-1 text-xs text-emerald-300">媒体素材 ID：{item.media_file_id}</p>}
+                  {item.media_type === "document" && /\\.(json|md)$/i.test(item.original_filename) && <button onClick={() => setCompareIds(current => current.includes(item.id) ? current.filter(id => id !== item.id) : current.length < 2 ? [...current, item.id] : [current[1], item.id])} className={`mt-2 rounded-md border px-3 py-1.5 text-xs ${compareIds.includes(item.id) ? "border-cyan-300 bg-cyan-950 text-cyan-100" : "border-white/15 text-slate-300"}`}>{compareIds.includes(item.id) ? "已加入对比" : "加入结果对比"}</button>}
                 </div>
                 <span className={`rounded-full px-2 py-1 text-[10px] ${item.status === "approved" ? "bg-emerald-900/50 text-emerald-200" : item.status === "rejected" ? "bg-red-900/50 text-red-200" : "bg-amber-900/50 text-amber-200"}`}>{item.status === "approved" ? "已入库" : item.status === "rejected" ? "已拒绝" : "待审核"}</span>
               </div>
@@ -321,6 +361,17 @@ export default function AICollaborationPage() {
               </div>}
             </article>)}
             {!attachments.length && <p className="rounded-xl border border-dashed border-white/15 p-5 text-center text-xs text-slate-400">还没有导入 AI 结果文件。</p>}
+          </div>
+          <div className="mt-4 rounded-xl border border-cyan-300/20 bg-slate-950/60 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><h3 className="text-sm font-semibold text-cyan-100">多 AI 结果对比与合并</h3><p className="mt-1 text-xs text-slate-400">从上方已保存的 JSON / Markdown 文档中选择两份，查看并排内容，再生成可编辑的合并草稿。</p></div>
+              <button disabled={busy || compareIds.length !== 2} onClick={() => void compareSelectedResults()} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-xs text-cyan-100 disabled:opacity-40">对比所选结果（{compareIds.length}/2）</button>
+            </div>
+            {comparison && <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="text-xs text-slate-300">AI 结果 A<textarea readOnly value={comparison.left} rows={12} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 p-3 font-mono text-xs text-white" /></label>
+              <label className="text-xs text-slate-300">AI 结果 B<textarea readOnly value={comparison.right} rows={12} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 p-3 font-mono text-xs text-white" /></label>
+              <button onClick={createMergedDraft} className="rounded-lg bg-cyan-700 px-4 py-2 text-xs font-semibold md:col-span-2">生成可编辑合并草稿</button>
+            </div>}
           </div>
         </section>
 
