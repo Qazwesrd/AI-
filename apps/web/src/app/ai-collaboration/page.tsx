@@ -160,11 +160,20 @@ export default function AICollaborationPage() {
         method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: taskType }),
       });
       setHandoff(data);
-      if (aiTab && !aiTab.closed) aiTab.location.assign(selectedAi.url);
-      const openNotice = autoOpenAi
-        ? (aiTab ? `已在独立浏览器标签页打开${selectedAi.label}，请手动复制交接包并提交。` : `浏览器拦截了自动打开，请点击“打开${selectedAi.label}网页”。`)
-        : "自动打开已关闭，可稍后手动打开 AI 网页。";
-      setMessage(`${data.truncated ? "交接包已准备，但章节正文已按长度上限截断，请先确认。" : "交接包已准备。"}${openNotice}`);
+      let openNotice = "自动打开已关闭，可稍后手动打开 AI 网页。";
+      if (autoOpenAi && window.aiBrowserDesktop?.openTask && window.aiBrowserDesktop?.fillPrompt) {
+        const taskId = "task-" + crypto.randomUUID();
+        try {
+          await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
+          const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
+          await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
+          openNotice = "已在软件内打开" + selectedAi.label + "并填入交接包。请检查后手动点击发送。";
+        } catch (fillError) { openNotice = "网页自动填入未完成，请使用复制按钮手动粘贴：" + (fillError instanceof Error ? fillError.message : "未知错误"); }
+      } else if (aiTab && !aiTab.closed) {
+        aiTab.location.assign(selectedAi.url);
+        openNotice = "已打开" + selectedAi.label + "网页，请使用复制按钮手动粘贴并提交。";
+      } else if (autoOpenAi) { openNotice = "浏览器拦截了自动打开，请点击打开网页按钮。"; }
+      setMessage((data.truncated ? "交接包已准备，但章节正文已按长度上限截断，请先确认。" : "交接包已准备。") + openNotice);
     } catch (error) {
       if (aiTab && !aiTab.closed) aiTab.close();
       setMessage(error instanceof Error ? error.message : "交接包准备失败");
