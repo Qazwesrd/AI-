@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+declare global {
+  interface Window {
+    aiBrowserDesktop?: {
+      openTask: (taskId: string, url: string) => Promise<{ opened: boolean; taskId: string }>;
+      fillPrompt: (taskId: string, prompt: string) => Promise<{ filled: boolean; length: number; submitted: false }>;
+    };
+  }
+}
+
 type Novel = { id: number; title: string; genre?: string };
 type Chapter = { id: number; novel_id: number; chapter_number: number; title: string; word_count: number };
 type Handoff = {
@@ -152,7 +161,7 @@ export default function AICollaborationPage() {
     if (!window.confirm(`即将读取“${selectedNovel?.title || "所选小说"}”第 ${chapterNumber} 章，并将章节正文及已确认分析摘要展示在交接预览中。只会打开所选 AI 网站，不会自动发送章节内容。继续吗？`)) return;
     // Open a blank tab synchronously inside the click gesture so popup blockers
     // do not block the later navigation after the chapter request completes.
-    const aiTab = autoOpenAi ? window.open("about:blank", "_blank") : null;
+    const aiTab = autoOpenAi && !(window.aiBrowserDesktop?.openTask && window.aiBrowserDesktop?.fillPrompt) ? window.open("about:blank", "_blank") : null;
     if (aiTab) aiTab.opener = null;
     setBusy(true); setMessage("正在从本地数据库准备章节交接包……");
     try {
@@ -160,11 +169,20 @@ export default function AICollaborationPage() {
         method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: taskType }),
       });
       setHandoff(data);
-      if (aiTab && !aiTab.closed) aiTab.location.assign(selectedAi.url);
-      const openNotice = autoOpenAi
-        ? (aiTab ? `已在独立浏览器标签页打开${selectedAi.label}，请手动复制交接包并提交。` : `浏览器拦截了自动打开，请点击“打开${selectedAi.label}网页”。`)
-        : "自动打开已关闭，可稍后手动打开 AI 网页。";
-      setMessage(`${data.truncated ? "交接包已准备，但章节正文已按长度上限截断，请先确认。" : "交接包已准备。"}${openNotice}`);
+      let openNotice = "自动打开已关闭，可稍后手动打开 AI 网页。";
+      if (autoOpenAi && window.aiBrowserDesktop?.openTask && window.aiBrowserDesktop?.fillPrompt) {
+        const taskId = "task-" + crypto.randomUUID();
+        try {
+          await window.aiBrowserDesktop.openTask(taskId, selectedAi.url);
+          const prompt = [data.instruction, "【结构化输出规范】", JSON.stringify(data.output_schema, null, 2), "【软件交接资料】", JSON.stringify(data.context, null, 2), "【重要】请只返回符合结构规范的 JSON。剧情变化必须逐字引用章节证据，不得把推断当事实。"].join("\n\n");
+          await window.aiBrowserDesktop.fillPrompt(taskId, prompt);
+          openNotice = "已在软件内打开" + selectedAi.label + "并填入交接包。请检查后手动点击发送。";
+        } catch (fillError) { openNotice = "网页自动填入未完成，请使用复制按钮手动粘贴：" + (fillError instanceof Error ? fillError.message : "未知错误"); }
+      } else if (aiTab && !aiTab.closed) {
+        aiTab.location.assign(selectedAi.url);
+        openNotice = "已打开" + selectedAi.label + "网页，请使用复制按钮手动粘贴并提交。";
+      } else if (autoOpenAi) { openNotice = "浏览器拦截了自动打开，请点击打开网页按钮。"; }
+      setMessage((data.truncated ? "交接包已准备，但章节正文已按长度上限截断，请先确认。" : "交接包已准备。") + openNotice);
     } catch (error) {
       if (aiTab && !aiTab.closed) aiTab.close();
       setMessage(error instanceof Error ? error.message : "交接包准备失败");
