@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
-from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink
+from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink, EpisodeEditTimeline
 from app.models.visual import VisualAsset
 from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
 from app.services.task_runtime import acquire_task_lease, release_task_lease
@@ -27,6 +27,97 @@ from app.services.media_service import (
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
+
+
+def build_episode_audio_filter(shot_ids, transitions):
+    """Build audio concat/acrossfade graph matching the video transition groups."""
+    transition_by_shot = {
+        item["after_shot_id"]: item
+        for item in transitions
+        if item.get("transition") in ("fade", "dissolve")
+    }
+    groups = []
+    boundaries = []
+    current = []
+    for index, shot_id in enumerate(shot_ids):
+        current.append(index)
+        transition = transition_by_shot.get(shot_id)
+        if transition and index < len(shot_ids) - 1:
+            groups.append(current)
+            boundaries.append(transition)
+            current = []
+    if current:
+        groups.append(current)
+
+    filters = []
+    for group_index, indexes in enumerate(groups):
+        labels = "".join(f"[a{index}]" for index in indexes)
+        label = f"ag{group_index}"
+        if len(indexes) == 1:
+            filters.append(f"{labels}anull[{label}]")
+        else:
+            filters.append(f"{labels}concat=n={len(indexes)}:v=0:a=1[{label}]")
+    current_label = "ag0"
+    for index, transition in enumerate(boundaries, 1):
+        duration = float(transition["duration_seconds"])
+        next_label = f"ax{index}"
+        filters.append(
+            f"[{current_label}][ag{index}]acrossfade=d={duration:.3f}:c1=tri:c2=tri[{next_label}]"
+        )
+        current_label = next_label
+    return filters, current_label
+
+
+def build_episode_video_filter(shot_ids, durations, transitions):
+    """Build grouped concat + xfade filters while preserving hard cuts."""
+    if not shot_ids or len(shot_ids) != len(durations):
+        raise ValueError("镜头编号和时长必须一一对应")
+    transition_by_shot = {
+        item["after_shot_id"]: item
+        for item in transitions
+        if item.get("transition") in ("fade", "dissolve")
+    }
+    groups = []
+    boundaries = []
+    current = []
+    for index, shot_id in enumerate(shot_ids):
+        current.append(index)
+        transition = transition_by_shot.get(shot_id)
+        if transition and index < len(shot_ids) - 1:
+            groups.append(current)
+            boundaries.append(transition)
+            current = []
+    if current:
+        groups.append(current)
+
+    filters = []
+    group_durations = []
+    for group_index, indexes in enumerate(groups):
+        labels = "".join(f"[v{index}]" for index in indexes)
+        group_label = f"vg{group_index}"
+        if len(indexes) == 1:
+            filters.append(f"{labels}null[{group_label}]")
+        else:
+            filters.append(f"{labels}concat=n={len(indexes)}:v=1:a=0[{group_label}]")
+        group_durations.append(sum(float(durations[index]) for index in indexes))
+
+    current_label = "vg0"
+    current_duration = group_durations[0]
+    for index, transition in enumerate(boundaries, 1):
+        duration = float(transition["duration_seconds"])
+        if duration <= 0 or duration >= min(group_durations[index - 1], group_durations[index]) / 2:
+            raise ValueError("转场时长超出相邻镜头允许范围")
+        next_label = f"vx{index}"
+        offset = current_duration - duration
+        effect = "dissolve" if transition["transition"] == "dissolve" else "fade"
+        filters.append(
+            f"[{current_label}][vg{index}]xfade=transition={effect}:"
+            f"duration={duration:.3f}:offset={offset:.3f}[{next_label}]"
+        )
+        current_label = next_label
+        current_duration += group_durations[index] - duration
+    return filters, current_label, current_duration
+
 
 
 def get_provider(db, provider_name, confirm_paid=False, check_paid=True):
@@ -479,14 +570,29 @@ def render_episode_from_shots(
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
     if not shots:
         raise HTTPException(400, "本集没有分镜")
+    timeline_record = db.query(EpisodeEditTimeline).filter(
+        EpisodeEditTimeline.episode_id == episode_id
+    ).first()
+    timeline = timeline_record.edit_data if timeline_record and isinstance(timeline_record.edit_data, dict) else {}
+    shot_by_id = {shot.id: shot for shot in shots}
+    requested_order = timeline.get("shot_order") or [shot.id for shot in shots]
+    if len(requested_order) != len(shot_by_id) or set(requested_order) != set(shot_by_id):
+        raise HTTPException(409, "已保存的剪辑时间轴与当前分镜不一致，请重新载入并保存时间轴")
+    shots = [shot_by_id[shot_id] for shot_id in requested_order]
     tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "storyboard_video"
-    ).all()
+    ).order_by(MediaTask.id.desc()).all()
     by_shot = {}
     for task in tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
-        if metadata.get("episode_id") == episode_id and metadata.get("shot_id"):
-            by_shot[metadata["shot_id"]] = task
+        if (
+            metadata.get("episode_id") == episode_id
+            and metadata.get("shot_id")
+            and task.status == "completed"
+            and task.result_path
+            and Path(task.result_path).is_file()
+        ):
+            by_shot.setdefault(metadata["shot_id"], task)
     clips = []
     missing = []
     for shot in shots:
@@ -505,7 +611,6 @@ def render_episode_from_shots(
         # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
         ffmpeg_args = []
         filters = []
-        concat_labels = []
         actual_durations = []
         input_index = 0
         for index, clip in enumerate(clips):
@@ -535,20 +640,68 @@ def render_episode_from_shots(
                 filters.append(
                     f"[{input_index}:a:0]atrim=duration={duration},asetpts=PTS-STARTPTS[a{index}]"
                 )
-            concat_labels.append(f"[v{index}][a{index}]")
             input_index += 1
-        total_video_duration = sum(actual_durations)
+        transition_items = timeline.get("transitions") or []
+        try:
+            video_filters, video_label, total_video_duration = build_episode_video_filter(
+                [shot.id for shot in shots], actual_durations, transition_items
+            )
+        except (TypeError, ValueError, KeyError) as exc:
+            raise HTTPException(422, "剪辑转场配置无效：" + str(exc)) from exc
         if total_video_duration < 90 or total_video_duration > 150:
             raise HTTPException(
                 400,
                 f"本集镜头视频总时长为 {total_video_duration:.1f} 秒，必须控制在 90–150 秒；请调整镜头时长或视频生成设置后再合成。",
             )
-        filters.append(
-            "".join(concat_labels) + f"concat=n={len(clips)}:v=1:a=1[vout][aout]"
+        filters.extend(video_filters)
+        audio_filters, audio_label = build_episode_audio_filter(
+            [shot.id for shot in shots], transition_items
         )
+        filters.extend(audio_filters)
+        filters.append(
+            f"[{audio_label}]atrim=duration={total_video_duration:.3f},"
+            "asetpts=PTS-STARTPTS[aout]"
+        )
+        filters.append(f"[{video_label}]null[vout]")
+        title_files = []
+        title_texts = []
+        intro_title = str(timeline.get("intro_title") or "").strip()
+        outro_title = str(timeline.get("outro_title") or "").strip()
+        if intro_title or outro_title:
+            font_candidates = [
+                Path("C:/Windows/Fonts/msyh.ttc"),
+                Path("C:/Windows/Fonts/arial.ttf"),
+                Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+                Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+                Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+            ]
+            font_path = next((item for item in font_candidates if item.is_file()), None)
+            if not font_path:
+                raise HTTPException(422, "已设置片头/片尾标题，但未找到可用字体；请安装微软雅黑或 DejaVu Sans 字体")
+            def escape_filter_path(value):
+                return str(value).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+            for title, start, end, suffix in [
+                (intro_title, 0, min(4.0, total_video_duration), "intro"),
+                (outro_title, max(0.0, total_video_duration - 4.0), total_video_duration, "outro"),
+            ]:
+                if not title:
+                    continue
+                text_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex}_{suffix}.txt"
+                text_file.write_text(title, encoding="utf-8")
+                title_files.append(text_file)
+                title_texts.append(
+                    f"drawtext=fontfile='{escape_filter_path(font_path)}':"
+                    f"textfile='{escape_filter_path(text_file)}':reload=0:"
+                    f"fontcolor=white:fontsize=64:borderw=3:bordercolor=black:"
+                    f"x=(w-text_w)/2:y=h*0.12:enable='between(t,{start:.3f},{end:.3f})'"
+                )
+            filters.append(f"[vout]{','.join(title_texts)}[vtitled]")
+            final_video_label = "vtitled"
+        else:
+            final_video_label = "vout"
         run_ffmpeg(ffmpeg_args + [
             "-filter_complex", ";".join(filters),
-            "-map", "[vout]", "-map", "[aout]",
+            "-map", f"[{final_video_label}]", "-map", "[aout]",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
             str(output),
@@ -564,6 +717,9 @@ def render_episode_from_shots(
                 speech_path = safe_storage_file(speech_task.result_path)
                 break
         music = safe_storage_file(music_path) if music_path else None
+        music_volume = float(timeline.get("music_volume", music_volume))
+        music_fade_in = max(0.0, min(30.0, float(timeline.get("music_fade_in_seconds", 1.0))))
+        music_fade_out = max(0.0, min(30.0, float(timeline.get("music_fade_out_seconds", 2.0))))
         if speech_path or music:
             mixed_output = output.with_name(output.stem + "_mixed.mp4")
             mix_args = ["-i", str(output)]
@@ -577,7 +733,14 @@ def render_episode_from_shots(
                 mix_index += 1
             if music:
                 mix_args += ["-stream_loop", "-1", "-i", str(music)]
-                mix_filters.append(f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}[music]")
+                fade_in_filter = f",afade=t=in:st=0:d={music_fade_in:.3f}" if music_fade_in > 0 else ""
+                fade_out_duration = min(music_fade_out, total_video_duration)
+                fade_out_start = max(0.0, total_video_duration - fade_out_duration)
+                fade_out_filter = f",afade=t=out:st={fade_out_start:.3f}:d={fade_out_duration:.3f}" if fade_out_duration > 0 else ""
+                mix_filters.append(
+                    f"[{mix_index}:a]volume={max(0.0, min(2.0, music_volume))}"
+                    f"{fade_in_filter}{fade_out_filter}[music]"
+                )
                 mix_labels.append("[music]")
             mix_filters.append(
                 "".join(mix_labels)
@@ -594,6 +757,11 @@ def render_episode_from_shots(
         subtitle_lines = []
         elapsed = 0.0
         subtitle_index = 1
+        transition_by_shot = {
+            item["after_shot_id"]: item
+            for item in transition_items
+            if item.get("transition") in ("fade", "dissolve")
+        }
         for shot, duration in zip(shots, actual_durations):
             dialogue = (shot.dialogue or "").strip()
             if dialogue:
@@ -604,7 +772,8 @@ def render_episode_from_shots(
                     "",
                 ])
                 subtitle_index += 1
-            elapsed += duration
+            overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
+            elapsed += duration - overlap
         subtitle_path = None
         if subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
@@ -623,18 +792,107 @@ def render_episode_from_shots(
         ))
         episode.status = "rendered"
         db.commit()
+        for title_file in locals().get("title_files", []):
+            title_file.unlink(missing_ok=True)
         return {"success": True, "episode_id": episode_id,
                 "output": str(output), "subtitle_path": subtitle_path,
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
                 "subtitle_count": subtitle_index - 1,
+                "applied_timeline_version": timeline_record.version if timeline_record else 0,
+                "applied_transitions": len(transition_items),
                 "quality_report": quality_report}
     except HTTPException:
         output.unlink(missing_ok=True)
+        for title_file in locals().get("title_files", []):
+            title_file.unlink(missing_ok=True)
         raise
     except Exception as exc:
         output.unlink(missing_ok=True)
+        for title_file in locals().get("title_files", []):
+            title_file.unlink(missing_ok=True)
         raise HTTPException(500, "分集视频合成失败：" + str(exc))
+
+
+
+@router.post("/video/episodes/{episode_id}/shots/{shot_id}/replace")
+async def replace_episode_shot_video(
+    episode_id: int,
+    shot_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Replace one shot with a user-supplied local clip; never submits an AI task."""
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    shot = db.query(StoryboardShot).filter(
+        StoryboardShot.id == shot_id,
+        StoryboardShot.episode_id == episode_id,
+    ).first()
+    if not episode or not shot:
+        raise HTTPException(404, "分集或镜头不存在")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".mp4", ".mov", ".mkv", ".webm"}:
+        raise HTTPException(415, "仅支持 MP4、MOV、MKV 或 WebM 视频文件")
+    destination = VIDEO_DIR / f"local_replace_ep{episode_id}_shot{shot_id}_{uuid.uuid4().hex[:8]}{suffix}"
+    temporary = destination.with_suffix(destination.suffix + ".uploading")
+    size = 0
+    try:
+        with temporary.open("wb") as output:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > 1024 * 1024 * 1024:
+                    raise HTTPException(413, "单个替换镜头视频不能超过 1GB")
+                output.write(chunk)
+        if size < 1024:
+            raise HTTPException(400, "视频文件为空或过小")
+        os.replace(temporary, destination)
+        info = probe_media(destination)
+        streams = info.get("streams") or []
+        video_stream = next((item for item in streams if item.get("codec_type") == "video"), None)
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if not video_stream or duration <= 0 or duration > 600:
+            raise HTTPException(422, "替换文件不是有效视频，或时长超过 10 分钟")
+        task = MediaTask(
+            task_type="storyboard_video",
+            provider="local",
+            model="local-import",
+            status="completed",
+            prompt="用户手动替换镜头素材",
+            request_data={
+                "episode_id": episode_id, "shot_id": shot_id,
+                "shot_number": shot.shot_number, "local_replacement": True,
+                "source_filename": Path(file.filename or "replacement").name,
+            },
+            result_path=str(destination),
+        )
+        db.add(task)
+        db.add(MediaFile(
+            name=destination.name, category="video", file_path=str(destination),
+            mime_type=file.content_type or "video/mp4", file_size=size,
+            duration=duration,
+            metadata_json={"episode_id": episode_id, "shot_id": shot_id, "local_replacement": True},
+        ))
+        db.commit()
+        db.refresh(task)
+        return {
+            "success": True, "episode_id": episode_id, "shot_id": shot_id,
+            "task_id": task.id, "duration_seconds": round(duration, 3),
+            "message": "镜头替换素材已保存。原视频和历史任务均保留；重新合成时将优先使用本次替换素材。",
+        }
+    except HTTPException:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise HTTPException(422, "镜头替换失败：" + str(exc)[:1000]) from exc
+    finally:
+        temporary.unlink(missing_ok=True)
+        await file.close()
 
 
 
