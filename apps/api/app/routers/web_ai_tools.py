@@ -342,6 +342,8 @@ def confirm_result_classification(file_id: int, payload: ConfirmResultClassifica
             projects_query = db.query(StoryProject).filter(StoryProject.novel_id == resolved_novel_id)
             if task and task.project_id:
                 projects_query = projects_query.filter(StoryProject.id == task.project_id)
+            else:
+                projects_query = projects_query.order_by(StoryProject.updated_at.desc()).limit(1)
             projects = projects_query.all()
             for project in projects:
                 episodes_query = db.query(EpisodePlan).filter(EpisodePlan.project_id == project.id)
