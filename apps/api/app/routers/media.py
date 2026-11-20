@@ -181,6 +181,13 @@ def speech_task_is_in_flight(task):
     return task.status in ("queued", "submitting", "submission_unknown", "interrupted_unknown")
 
 
+def resolve_episode_shot_voice(shot, voice_by_character_id, default_voice):
+    character_ids = getattr(shot, "character_ids", None) or []
+    if len(character_ids) == 1:
+        return voice_by_character_id.get(str(character_ids[0]), default_voice)
+    return default_voice
+
+
 def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3", instructions=None):
     return json.dumps({
         "provider": provider, "model": model, "text": text, "voice": voice,
@@ -1258,6 +1265,7 @@ class EpisodeSpeechInput(BaseModel):
     provider: str
     model: str
     voice: str = "alloy"
+    voice_by_character_id: dict[str, str] = Field(default_factory=dict)
     confirm_paid: bool = False
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
@@ -1278,6 +1286,21 @@ def generate_episode_voice_track(
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
     if not shots:
         raise HTTPException(400, "本集没有分镜")
+    episode_character_ids = {
+        str(character_id)
+        for shot in shots
+        for character_id in (shot.character_ids or [])
+    }
+    unknown_voice_profiles = set(data.voice_by_character_id) - episode_character_ids
+    if unknown_voice_profiles:
+        raise HTTPException(422, "角色音色配置引用了不属于本集分镜的角色")
+    if any(not str(value).strip() or len(str(value)) > 100 for value in data.voice_by_character_id.values()):
+        raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
+
+    def voice_for_shot(shot):
+        return resolve_episode_shot_voice(
+            shot, data.voice_by_character_id, data.voice
+        )
 
     # Prefer the real generated clip duration over the planned storyboard duration.
     # This keeps the voice timeline aligned with the video that will actually be rendered.
@@ -1310,6 +1333,7 @@ def generate_episode_voice_track(
     generated = {}
     speech_durations = {}
     failures = []
+    warnings = []
     blocked_shots = set()
     pending_tasks = {}
     prior_tasks = db.query(MediaTask).filter(
@@ -1321,10 +1345,11 @@ def generate_episode_voice_track(
         prior_shot_id = prior_meta.get("shot_id")
         current_shot = next((item for item in shots if item.id == prior_shot_id), None)
         current_dialogue = (current_shot.dialogue or "").strip() if current_shot else None
+        selected_voice = voice_for_shot(current_shot) if current_shot else data.voice
         matches = (
             prior.provider == data.provider
             and prior.model == data.model
-            and prior_meta.get("voice") == data.voice
+            and prior_meta.get("voice") == selected_voice
             and float(prior_meta.get("speed", 1.0)) == float(data.speed)
             and prior_meta.get("episode_id") == episode_id
             and prior_shot_id
@@ -1385,11 +1410,17 @@ def generate_episode_voice_track(
         if len(text_value) > 4096:
             failures.append({"shot_number": shot.shot_number, "error": "单镜头对白超过4096字符，请先拆分对白"})
             continue
+        selected_voice = voice_for_shot(shot)
+        if len(shot.character_ids or []) > 1:
+            warnings.append({
+                "shot_number": shot.shot_number,
+                "message": "该镜头包含多个角色，但对白没有拆分说话人；为避免错配，暂用默认音色。建议按说话人拆分对白镜头。",
+            })
         filename = f"episode_{episode_id}_shot_{shot.id}_{uuid.uuid4().hex[:8]}.mp3"
         destination = AUDIO_DIR / filename
         payload = {
             "model": data.model, "input": text_value,
-            "voice": data.voice, "response_format": "mp3",
+            "voice": selected_voice, "response_format": "mp3",
             "speed": data.speed,
         }
         request = urllib.request.Request(
@@ -1404,7 +1435,8 @@ def generate_episode_voice_track(
                 task_type="episode_speech", provider=data.provider, model=data.model,
                 status="pending", prompt=text_value,
                 request_data={"episode_id": episode_id, "shot_id": shot.id,
-                              "shot_number": shot.shot_number, "voice": data.voice,
+                              "shot_number": shot.shot_number, "voice": selected_voice,
+                              "character_ids": shot.character_ids or [],
                               "speed": data.speed, "confirm_paid": data.confirm_paid},
             )
             db.add(task)
@@ -1555,6 +1587,7 @@ def generate_episode_voice_track(
             status="completed", prompt=f"第{episode.episode_number}集对白配音",
             result_path=str(track_path),
             request_data={"episode_id": episode_id, "voice": data.voice,
+                          "voice_by_character_id": data.voice_by_character_id,
                           "shot_count": len(generated), "aligned_to_storyboard": True},
         )
         db.add(task)
@@ -1569,8 +1602,8 @@ def generate_episode_voice_track(
     return {
         "success": not failures, "episode_id": episode_id,
         "voice_track": str(track_path), "generated_shots": len(generated),
-        "failures": failures,
-        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，失败 {len(failures)} 个。",
+        "failures": failures, "warnings": warnings,
+        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，失败 {len(failures)} 个，提醒 {len(warnings)} 条。",
     }
 
 
@@ -2039,6 +2072,7 @@ class EpisodeSoundEffectInput(BaseModel):
 
 class EpisodeTimelineInput(BaseModel):
     shot_order: list[int]
+    character_voice_profiles: dict[str, str] = Field(default_factory=dict)
     transitions: list[TimelineTransitionInput] = Field(default_factory=list)
     intro_title: str = Field(default="", max_length=120)
     outro_title: str = Field(default="", max_length=120)
@@ -2081,17 +2115,30 @@ def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
             "music_fade_out_seconds": 2.0,
             "music_volume": 0.18,
         }
+    character_ids = {
+        int(character_id)
+        for shot in shots
+        for character_id in (shot.character_ids or [])
+        if str(character_id).isdigit()
+    }
+    characters = db.query(VisualAsset).filter(
+        VisualAsset.id.in_(character_ids),
+        VisualAsset.category.in_(("characters", "character")),
+        VisualAsset.confirmed == True,
+    ).all() if character_ids else []
     return {
         "episode_id": episode.id,
         "episode_title": episode.title,
         "version": record.version if record else 0,
         "timeline": data,
+        "characters": [{"id": item.id, "name": item.name} for item in characters],
         "shots": [{
             "id": shot.id, "shot_number": shot.shot_number,
             "duration_seconds": shot.duration_seconds,
             "scene_name": shot.scene_name,
             "visual_description": shot.visual_description,
             "dialogue": shot.dialogue,
+            "character_ids": shot.character_ids or [],
         } for shot in shots],
     }
 
@@ -2127,6 +2174,15 @@ def save_episode_edit_timeline(
             ) / 2
             if item.duration_seconds <= 0 or item.duration_seconds >= adjacent_limit:
                 raise HTTPException(422, "转场时长必须大于 0，且小于相邻较短镜头时长的一半")
+    episode_character_ids = {
+        str(character_id)
+        for shot in shots
+        for character_id in (shot.character_ids or [])
+    }
+    if set(data.character_voice_profiles) - episode_character_ids:
+        raise HTTPException(422, "角色音色配置引用了不属于本集分镜的角色")
+    if any(not str(value).strip() or len(str(value)) > 100 for value in data.character_voice_profiles.values()):
+        raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
     for selected_path, label in ((data.music_path, "背景音乐"), (data.voice_path, "对白配音")):
         if selected_path:
             audio_path = safe_storage_file(selected_path)

@@ -31,11 +31,14 @@ type EpisodeTimeline = {
   music_name?: string | null;
   voice_path?: string | null;
   voice_name?: string | null;
+  character_voice_profiles: Record<string, string>;
   voice_volume: number;
   original_volume: number;
   sound_effect_tracks: { path: string; name: string; start_seconds: number; volume: number }[];
   subtitle_cues?: { start: number; end: number; text: string }[] | null;
 };
+
+type EpisodeCharacter = { id: number; name: string };
 
 type Readiness = {
   episode_id: number;
@@ -68,6 +71,10 @@ export default function EpisodeReadinessPage() {
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [timelineBusy, setTimelineBusy] = useState(false);
+  const [episodeCharacters, setEpisodeCharacters] = useState<EpisodeCharacter[]>([]);
+  const [speechProvider, setSpeechProvider] = useState("");
+  const [speechModel, setSpeechModel] = useState("");
+  const [defaultSpeechVoice, setDefaultSpeechVoice] = useState("alloy");
 
   async function loadTimeline(id: number, readiness?: Readiness) {
     try {
@@ -75,6 +82,8 @@ export default function EpisodeReadinessPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "读取剪辑时间轴失败");
       const saved = data.timeline as EpisodeTimeline;
+      saved.character_voice_profiles = saved.character_voice_profiles || {};
+      setEpisodeCharacters(Array.isArray(data.characters) ? data.characters : []);
       if (saved.subtitle_cues === undefined || saved.subtitle_cues === null) {
         const shotById = new Map<number, { id: number; duration_seconds?: number; dialogue?: string }>(
           (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot] as const)
@@ -171,6 +180,51 @@ export default function EpisodeReadinessPage() {
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "音频上传失败");
+    } finally {
+      setTimelineBusy(false);
+    }
+  }
+
+  async function generateEpisodeDubbing() {
+    if (!report || !timeline) return;
+    if (!speechProvider.trim() || !speechModel.trim()) {
+      setMessage("请先填写已配置的语音服务商 ID 和模型名称。");
+      return;
+    }
+    const paidConsent = window.confirm(
+      "即将调用所选语音服务商，为本集逐镜头生成对白配音。该服务可能产生 API 费用或消耗额度。只有在你已核实价格、额度并明确同意时才继续。是否授权本次配音请求？"
+    );
+    if (!paidConsent) return;
+    setTimelineBusy(true);
+    setMessage("正在按角色音色配置生成分镜对白配音……");
+    try {
+      const response = await fetch(API + "/api/media/speech/episodes/" + report.episode_id + "/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: speechProvider.trim(),
+          model: speechModel.trim(),
+          voice: defaultSpeechVoice.trim() || "alloy",
+          voice_by_character_id: timeline.character_voice_profiles || {},
+          confirm_paid: true,
+          speed: 1,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "对白配音生成失败");
+      const voicePath = data.voice_track as string | undefined;
+      if (voicePath) {
+        const voiceName = voicePath.split(/[\\/]/).pop() || "分集对白配音";
+        setTimeline(current => current ? { ...current, voice_path: voicePath, voice_name: voiceName } : current);
+      }
+      const failureCount = Array.isArray(data.failures) ? data.failures.length : 0;
+      const warningCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+      const warningText = failureCount || warningCount
+        ? "；失败 " + failureCount + " 项，提醒 " + warningCount + " 条，请查看任务结果"
+        : "";
+      setMessage((data.message || "对白配音生成完成。") + warningText);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "对白配音生成失败");
     } finally {
       setTimelineBusy(false);
     }
@@ -355,6 +409,43 @@ export default function EpisodeReadinessPage() {
                   <h3 className="font-semibold">对白配音轨道</h3>
                   <p className="mt-1 text-xs text-white/45">可上传已有的整集配音音频；未指定时，合成会自动使用已生成的分集对白配音。这里仅导入本地音频，不会请求 AI 生成或产生 API 费用。</p>
                   {timeline.voice_name && <p className="mt-2 break-all text-sm text-emerald-200">当前配音：{timeline.voice_name}</p>}
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <label className="text-xs text-white/60">语音服务商 ID
+                      <input value={speechProvider} onChange={event => setSpeechProvider(event.target.value)} placeholder="填写已配置的服务商 ID" className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-3 py-2 text-white" />
+                    </label>
+                    <label className="text-xs text-white/60">语音模型名称
+                      <input value={speechModel} onChange={event => setSpeechModel(event.target.value)} placeholder="填写已配置的模型名称" className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-3 py-2 text-white" />
+                    </label>
+                  </div>
+                  <label className="mt-3 block text-xs text-white/60">默认音色（角色未单独设置时使用）
+                    <input value={defaultSpeechVoice} onChange={event => setDefaultSpeechVoice(event.target.value)} maxLength={100} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-3 py-2 text-white" />
+                  </label>
+                  {episodeCharacters.length > 0 && (
+                    <div className="mt-4 rounded-lg border border-white/10 p-3">
+                      <h4 className="text-sm font-semibold">角色专属音色</h4>
+                      <p className="mt-1 text-xs text-white/45">按角色素材 ID 配置语音服务商支持的 voice 名称。仅当镜头只关联一个角色时自动采用该角色音色；多角色镜头因对白说话人不明确，会使用默认音色并提示你拆分对白。</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {episodeCharacters.map(character => (
+                          <label key={character.id} className="text-xs text-white/65">{character.name}
+                            <input
+                              value={timeline.character_voice_profiles?.[String(character.id)] || ""}
+                              onChange={event => setTimeline({
+                                ...timeline,
+                                character_voice_profiles: {
+                                  ...(timeline.character_voice_profiles || {}),
+                                  [String(character.id)]: event.target.value,
+                                },
+                              })}
+                              maxLength={100}
+                              placeholder="留空则使用默认音色"
+                              className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-3 py-2 text-white"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <button type="button" disabled={timelineBusy || busy || !speechProvider.trim() || !speechModel.trim()} onClick={() => void generateEpisodeDubbing()} className="mt-3 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">生成本集对白配音（需逐次确认费用）</button>
                   <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadAudioTrack(event.target.files?.[0] || null, "voice")} className="mt-3 block w-full text-xs" />
                   {timeline.voice_path && <button type="button" onClick={() => setTimeline({ ...timeline, voice_path: null, voice_name: null })} className="mt-2 rounded border border-white/15 px-3 py-1 text-xs">移除自定义配音（恢复使用已生成配音）</button>}
                   <div className="mt-4 grid gap-3 md:grid-cols-2">

@@ -6,6 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline
+from app.models.visual import VisualAsset
 from app.routers.media import (
     EpisodeTimelineInput, get_episode_edit_timeline,
     save_episode_edit_timeline,
@@ -26,6 +27,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
                 EpisodePlan.__table__,
                 StoryboardShot.__table__,
                 EpisodeEditTimeline.__table__,
+                VisualAsset.__table__,
             ],
         )
         self.Session = sessionmaker(bind=engine)
@@ -45,6 +47,12 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
             project_id=1, episode_id=episode.id, shot_number=2,
             sort_order=2, duration_seconds=6,
         )
+        self.character = VisualAsset(
+            category="characters", name="主角", confirmed=True,
+        )
+        self.db.add(self.character)
+        self.db.flush()
+        self.shot_a.character_ids = [self.character.id]
         self.db.add_all([self.shot_a, self.shot_b])
         self.db.commit()
 
@@ -77,6 +85,32 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         self.assertEqual(reloaded["timeline"]["intro_title"], "序章")
         saved_again = save_episode_edit_timeline(self.episode_id, payload, self.db)
         self.assertEqual(saved_again["version"], 2)
+
+    def test_character_voice_profiles_are_saved_and_character_roster_is_returned(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            character_voice_profiles={str(self.character.id): "nova"},
+        )
+        save_episode_edit_timeline(self.episode_id, payload, self.db)
+        reloaded = get_episode_edit_timeline(self.episode_id, self.db)
+        self.assertEqual(
+            reloaded["timeline"]["character_voice_profiles"],
+            {str(self.character.id): "nova"},
+        )
+        self.assertEqual(
+            reloaded["characters"],
+            [{"id": self.character.id, "name": "主角"}],
+        )
+        self.assertEqual(reloaded["shots"][0]["character_ids"], [self.character.id])
+
+    def test_rejects_voice_profile_for_character_outside_episode(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            character_voice_profiles={"99999": "nova"},
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
 
     def test_rejects_missing_or_foreign_shots(self):
         payload = EpisodeTimelineInput(shot_order=[self.shot_a.id])
