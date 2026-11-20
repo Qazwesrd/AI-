@@ -1327,6 +1327,7 @@ def generate_episode_voice_track(
     generated = {}
     speech_durations = {}
     failures = []
+    warnings = []
     blocked_shots = set()
     pending_tasks = {}
     prior_tasks = db.query(MediaTask).filter(
@@ -1405,10 +1406,9 @@ def generate_episode_voice_track(
             continue
         selected_voice = voice_for_shot(shot)
         if len(shot.character_ids or []) > 1:
-            failures.append({
+            warnings.append({
                 "shot_number": shot.shot_number,
-                "status": "warning",
-                "error": "该镜头包含多个角色，但对白没有拆分说话人；为避免错配，暂用默认音色。建议按说话人拆分对白镜头。",
+                "message": "该镜头包含多个角色，但对白没有拆分说话人；为避免错配，暂用默认音色。建议按说话人拆分对白镜头。",
             })
         filename = f"episode_{episode_id}_shot_{shot.id}_{uuid.uuid4().hex[:8]}.mp3"
         destination = AUDIO_DIR / filename
@@ -1596,8 +1596,8 @@ def generate_episode_voice_track(
     return {
         "success": not failures, "episode_id": episode_id,
         "voice_track": str(track_path), "generated_shots": len(generated),
-        "failures": failures,
-        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，失败 {len(failures)} 个。",
+        "failures": failures, "warnings": warnings,
+        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，失败 {len(failures)} 个，提醒 {len(warnings)} 条。",
     }
 
 
