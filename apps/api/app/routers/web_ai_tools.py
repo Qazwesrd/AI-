@@ -246,11 +246,7 @@ def add_download_to_media_library(db: Session, task: WebAITask, result_file: Web
         name=result_file.original_name,
         category=category,
         file_path=str(path),
-        mime_type=(
-            result_file.content_type
-            if result_file.content_type and result_file.content_type != "application/octet-stream"
-            else fallback_mime
-        ),
+        mime_type=fallback_mime,
         file_size=result_file.file_size,
         metadata_json=metadata,
     )
