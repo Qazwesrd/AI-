@@ -285,6 +285,7 @@ def list_reference_suggestions(task_key: str, db: Session = Depends(get_db)):
         linked_files = db.query(WebAIResultFile).filter(
             WebAIResultFile.visual_asset_id.in_(linked_asset_ids),
             WebAIResultFile.classification_status == "confirmed",
+            WebAIResultFile.content_type.like("image/%"),
         ).all()
         for result_file in linked_files:
             files_by_asset.setdefault(result_file.visual_asset_id, []).append(result_file)
@@ -318,6 +319,7 @@ def list_reference_suggestions(task_key: str, db: Session = Depends(get_db)):
             WebAITask.chapter_id == task.chapter_id,
             WebAIResultFile.classification_status == "confirmed",
             WebAIResultFile.visual_asset_id.isnot(None),
+            WebAIResultFile.content_type.like("image/%"),
         ).order_by(WebAIResultFile.id.desc()).all()
         for result_file in fallback_files:
             suggestions[result_file.id] = {
