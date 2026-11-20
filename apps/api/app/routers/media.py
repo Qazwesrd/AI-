@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.routers.story import ensure_project_source_current
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink, EpisodeEditTimeline
 from app.models.visual import VisualAsset
@@ -262,7 +263,7 @@ def generate_episode_shot_videos(
     project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
     if not project:
         raise HTTPException(404, "剧本项目不存在")
-    ensure_episode_source_current(db, episode)
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
@@ -559,7 +560,10 @@ def get_episode_render_readiness(episode_id: int, db: Session = Depends(get_db))
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
-    ensure_episode_source_current(db, episode)
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
@@ -677,7 +681,10 @@ def render_episode_from_shots(
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
-    ensure_episode_source_current(db, episode)
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
@@ -1179,7 +1186,10 @@ def generate_episode_voice_track(
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
-    ensure_episode_source_current(db, episode)
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
