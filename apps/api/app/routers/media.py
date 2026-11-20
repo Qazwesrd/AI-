@@ -188,6 +188,39 @@ def resolve_episode_shot_voice(shot, voice_by_character_id, default_voice):
     return default_voice
 
 
+def ass_color_from_hex(value, alpha="00"):
+    raw = str(value or "#FFFFFF").lstrip("#")
+    if not re.fullmatch(r"[0-9A-Fa-f]{6}", raw):
+        raise ValueError("字幕颜色必须为 #RRGGBB 格式")
+    red, green, blue = raw[0:2], raw[2:4], raw[4:6]
+    return f"&H{alpha}{blue.upper()}{green.upper()}{red.upper()}"
+
+
+def build_subtitle_force_style(timeline):
+    font_name = str(timeline.get("subtitle_font_name") or "Microsoft YaHei")
+    if not re.fullmatch(r"[A-Za-z0-9 _-]{1,80}", font_name):
+        raise ValueError("字幕字体名称包含不支持的字符")
+    font_size = int(timeline.get("subtitle_font_size", 36))
+    outline_width = float(timeline.get("subtitle_outline_width", 2))
+    margin_v = int(timeline.get("subtitle_margin_v", 60))
+    alignment = int(timeline.get("subtitle_alignment", 2))
+    if not 16 <= font_size <= 72 or not 0 <= outline_width <= 8:
+        raise ValueError("字幕字号或描边宽度超出允许范围")
+    if not 0 <= margin_v <= 200 or alignment not in (2, 5, 8):
+        raise ValueError("字幕位置参数无效")
+    primary = ass_color_from_hex(timeline.get("subtitle_primary_color", "#FFFFFF"))
+    outline = ass_color_from_hex(timeline.get("subtitle_outline_color", "#000000"))
+    background = bool(timeline.get("subtitle_background", False))
+    border_style = 3 if background else 1
+    back_colour = "&H80000000" if background else "&H00000000"
+    return (
+        f"FontName={font_name},FontSize={font_size},PrimaryColour={primary},"
+        f"OutlineColour={outline},Outline={outline_width:g},Shadow=0,"
+        f"BorderStyle={border_style},BackColour={back_colour},"
+        f"Alignment={alignment},MarginV={margin_v},Bold=0"
+    )
+
+
 def speech_fingerprint(provider, model, text, voice, speed, response_format="mp3", instructions=None):
     return json.dumps({
         "provider": provider, "model": model, "text": text, "voice": voice,
@@ -990,6 +1023,33 @@ def render_episode_from_shots(
             subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
             subtitle_path = str(subtitle_file)
             db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+        subtitles_burned_in = False
+        if subtitle_path and bool(timeline.get("subtitle_burn_in", True)):
+            try:
+                force_style = build_subtitle_force_style(timeline)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, "字幕样式配置无效：" + str(exc)) from exc
+            subtitle_filter_path = (
+                subtitle_path.replace("\\", "/")
+                .replace(":", "\\:")
+                .replace("'", "\\'")
+            )
+            burn_output = output.with_name(output.stem + "_subtitle_burn.mp4")
+            run_ffmpeg([
+                "-i", str(output),
+                "-vf", f"subtitles='{subtitle_filter_path}':force_style='{force_style}'",
+                "-map", "0:v:0", "-map", "0:a?",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-c:a", "copy", "-movflags", "+faststart",
+                str(burn_output),
+            ])
+            validate_rendered_video(
+                burn_output, expected_duration=total_video_duration,
+                duration_tolerance=2.0, require_audio=True,
+            )
+            output.unlink(missing_ok=True)
+            os.replace(burn_output, output)
+            subtitles_burned_in = True
         quality_report = validate_rendered_video(
             output, expected_duration=total_video_duration,
             duration_tolerance=2.0, require_audio=True,
@@ -1009,6 +1069,7 @@ def render_episode_from_shots(
                 "size": output.stat().st_size,
                 "clip_count": len(clips), "duration_target": episode.duration_seconds,
                 "subtitle_count": subtitle_index - 1,
+                "subtitles_burned_in": subtitles_burned_in,
                 "applied_timeline_version": timeline_record.version if timeline_record else 0,
                 "applied_transitions": len(transition_items),
                 "quality_report": quality_report}
@@ -2073,6 +2134,15 @@ class EpisodeSoundEffectInput(BaseModel):
 class EpisodeTimelineInput(BaseModel):
     shot_order: list[int]
     character_voice_profiles: dict[str, str] = Field(default_factory=dict)
+    subtitle_burn_in: bool = True
+    subtitle_font_name: str = Field(default="Microsoft YaHei", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9 _-]+$")
+    subtitle_font_size: int = Field(default=36, ge=16, le=72)
+    subtitle_primary_color: str = Field(default="#FFFFFF", pattern=r"^#[0-9A-Fa-f]{6}$")
+    subtitle_outline_color: str = Field(default="#000000", pattern=r"^#[0-9A-Fa-f]{6}$")
+    subtitle_outline_width: float = Field(default=2, ge=0, le=8)
+    subtitle_background: bool = False
+    subtitle_alignment: Literal[2, 5, 8] = 2
+    subtitle_margin_v: int = Field(default=60, ge=0, le=200)
     transitions: list[TimelineTransitionInput] = Field(default_factory=list)
     intro_title: str = Field(default="", max_length=120)
     outro_title: str = Field(default="", max_length=120)
@@ -2209,6 +2279,10 @@ def save_episode_edit_timeline(
     for cue in data.subtitle_cues or []:
         if cue.end <= cue.start:
             raise HTTPException(422, "字幕结束时间必须大于开始时间")
+    try:
+        build_subtitle_force_style(data.model_dump())
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "字幕样式配置无效：" + str(exc)) from exc
     payload = data.model_dump()
     record = db.query(EpisodeEditTimeline).filter(
         EpisodeEditTimeline.episode_id == episode_id
