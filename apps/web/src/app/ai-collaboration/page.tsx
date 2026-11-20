@@ -41,6 +41,22 @@ const AI_WEB_PROVIDERS = {
 } as const;
 type AIWebProvider = keyof typeof AI_WEB_PROVIDERS;
 type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "对白整理";
+type VisualStyle = "国漫" | "仿真人" | "3D漫" | "2D漫";
+const VISUAL_STYLE_GUIDES: Record<VisualStyle, string> = {
+  国漫: "中国动画电影美术语言，东方审美，符合题材时代的服饰与建筑，精细线稿与层次丰富的色彩，电影级构图；避免日式动漫脸和现代元素错置。",
+  仿真人: "写实真人影视质感，真实人体比例、自然皮肤纹理、可信的服装材质与光影，电影摄影构图；角色外貌稳定，不要塑料皮肤或夸张卡通比例。",
+  "3D漫": "高品质3D动画电影风格，立体角色模型、精细材质、自然布料与头发模拟、电影级全局光照和景深；所有镜头保持同一角色模型设定。",
+  "2D漫": "高品质二维动画风格，清晰稳定的轮廓线、赛璐璐或细腻手绘上色、分层背景与动画电影构图；人物比例、线条和色彩体系保持统一。",
+};
+function visualPromptRequirements(style: VisualStyle, task: HandoffTaskType): string {
+  const imageTasks = task === "分镜设计" || task === "角色设定" || task === "场景设定";
+  return [
+    "【用户指定的统一视觉风格】" + style + "。" + VISUAL_STYLE_GUIDES[style],
+    "【视觉连续性硬性要求】同一角色跨镜头保持脸型、五官、年龄感、发型、体型和服装一致；同一场景保持建筑结构、时间、天气、主色调和空间布局一致；道具外观与持有者一致。若剧情明确发生变化，按章节先后呈现变化，不得提前或遗漏。",
+    imageTasks ? "【必须生成可直接用于图片模型的提示词】为每个主要角色分别输出角色定妆图提示词（正面、侧面、全身、表情与服装细节）；为每个重要场景输出环境概念图提示词；分镜中的每个镜头输出独立画面提示词。提示词必须包含主体、外观、动作、场景、构图、景别、光线、色彩、风格、画幅及负面提示词，并明确引用本次统一画风。" : "【图片提示词联动】剧本和剧情分析中标记需要制作角色设定图、场景图、道具图及关键剧情插图的位置，并给出可供后续图片提示词生成使用的具体视觉描述。",
+    "【输出要求】内容必须依据本章原文，不得擅自新增角色设定或剧情事实；缺失信息标记为待确认；图片提示词不得只写‘好看’‘电影感’，必须具体可执行。",
+  ].join("\\n\\n");
+}
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(API + path, {
@@ -73,7 +89,7 @@ export default function AICollaborationPage() {
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
   const [providerRoutes, setProviderRoutes] = useState<Record<HandoffTaskType, AIWebProvider>>({ "剧情分析": "chatgpt", "剧本改编": "deepseek", "分镜设计": "doubao", "角色设定": "chatgpt", "场景设定": "doubao", "对白整理": "deepseek" });
-  const [autoOpenAi, setAutoOpenAi] = useState(true);
+  const [autoOpenAi, setAutoOpenAi] = useState(true);\n  const [visualStyle, setVisualStyle] = useState<VisualStyle>("国漫");
   const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
   const selectedAi = AI_WEB_PROVIDERS[aiProvider];
 
@@ -361,7 +377,7 @@ export default function AICollaborationPage() {
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button type="button" onClick={() => void prepareFullWorkflow()} disabled={busy || selectedChapterNumbers.length === 0} className="rounded-lg bg-gradient-to-r from-cyan-700 to-blue-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">为选中的章节生成全流程任务</button>
-              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 6 项任务。网页支持时自动填入，但必须由你确认发送。</span>
+              <span className="text-xs text-slate-400">最多同时选择 5 章；每章 6 项任务，并按所选画风生成视觉提示词。网页支持时自动填入，但必须由你确认发送。</span>
             </div>
             {batchProgress && <p className="mt-2 text-xs text-cyan-200">{batchProgress}</p>}
           </div>
