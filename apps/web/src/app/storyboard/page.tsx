@@ -26,7 +26,7 @@ type ShotAssetLink = {
   current_state?: AssetStateSnapshot; newer_state_available?: boolean;
   asset: { id: number; name: string; category: string };
 };
-type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };\ntype RenderReadinessItem = { shot_id: number; shot_number: number; scene_name: string; status: "ready" | "missing" | "processing" | "broken"; latest_task_status?: string | null; selected_task_id?: number | null; video?: { duration_seconds: number; width?: number; height?: number; path: string } | null; warnings: { task_id: number; reason: string }[]; error?: string | null };\ntype RenderReadiness = { episode_id: number; episode_number: number; episode_title: string; ready: boolean; total_shots: number; ready_count: number; missing_count: number; processing_count: number; broken_count: number; items: RenderReadinessItem[]; message: string };
+type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };\ntype RenderReadinessItem = { shot_id: number; shot_number: number; scene_name: string; status: "ready" | "missing" | "processing" | "broken"; latest_task_status?: string | null; selected_task_id?: number | null; video?: { duration_seconds: number; width?: number; height?: number; path: string; preview_url?: string | null } | null; warnings: { task_id: number; reason: string }[]; error?: string | null };\ntype RenderReadiness = { episode_id: number; episode_number: number; episode_title: string; ready: boolean; total_shots: number; ready_count: number; missing_count: number; processing_count: number; broken_count: number; items: RenderReadinessItem[]; message: string };
 type ConsistencyIssue = { shot_id: number; shot_number: number; asset_id?: number; asset_name?: string; code: string; severity: "error" | "warning"; message: string };
 type ConsistencyReport = { episode_id: number; episode_number: number; shot_count: number; checked_link_count: number; error_count: number; warning_count: number; ready: boolean; issues: ConsistencyIssue[]; note: string };
 
@@ -702,6 +702,10 @@ export default function StoryboardPage() {
                           {item.status === "ready" ? `视频可用 · ${item.video?.duration_seconds ?? 0} 秒` : item.status === "processing" ? `生成中（${item.latest_task_status || "处理中"}）` : item.status === "broken" ? "视频文件损坏或不可读取" : "尚无可用视频"}
                         </div>
                         {item.warnings?.length > 0 && <div className="mt-1 text-amber-200">存在历史素材异常，当前使用可读取的旧版本</div>}
+                        {item.video?.preview_url && (
+                          <video className="mt-2 max-h-40 w-full rounded-lg bg-black" controls preload="metadata"
+                            src={API + item.video.preview_url} />
+                        )}
                         {item.error && <div className="mt-1 break-words text-red-300">{item.error}</div>}
                       </div>
                       <label className="cursor-pointer rounded-md border border-cyan-300/30 px-3 py-1.5 text-cyan-100 hover:bg-cyan-900/30">
