@@ -26,7 +26,8 @@ type ShotAssetLink = {
   current_state?: AssetStateSnapshot; newer_state_available?: boolean;
   asset: { id: number; name: string; category: string };
 };
-type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };\ntype RenderReadinessItem = { shot_id: number; shot_number: number; scene_name: string; status: "ready" | "missing" | "processing" | "broken"; latest_task_status?: string | null; selected_task_id?: number | null; video?: { duration_seconds: number; width?: number; height?: number; path: string; preview_url?: string | null } | null; warnings: { task_id: number; reason: string }[]; error?: string | null };\ntype RenderReadiness = { episode_id: number; episode_number: number; episode_title: string; ready: boolean; total_shots: number; ready_count: number; missing_count: number; processing_count: number; broken_count: number; items: RenderReadinessItem[]; message: string };
+type VideoTask = { id: number; shot_id: number; shot_number: number; provider: string; model: string; status: string; remote_task_id: string; result_path: string; error: string; created_at?: string; updated_at?: string };
+type RenderReadinessItem = { shot_id: number; shot_number: number; scene_name: string; status: "ready" | "missing" | "processing" | "broken"; latest_task_status?: string | null; selected_task_id?: number | null; video?: { duration_seconds: number; width?: number; height?: number; path: string; preview_url?: string | null } | null; warnings: { task_id: number; reason: string }[]; error?: string | null };\ntype RenderReadiness = { episode_id: number; episode_number: number; episode_title: string; ready: boolean; total_shots: number; ready_count: number; missing_count: number; processing_count: number; broken_count: number; items: RenderReadinessItem[]; message: string };
 type ConsistencyIssue = { shot_id: number; shot_number: number; asset_id?: number; asset_name?: string; code: string; severity: "error" | "warning"; message: string };
 type ConsistencyReport = { episode_id: number; episode_number: number; shot_count: number; checked_link_count: number; error_count: number; warning_count: number; ready: boolean; issues: ConsistencyIssue[]; note: string };
 
@@ -56,7 +57,8 @@ export default function StoryboardPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [shots, setShots] = useState<Shot[]>([]);
-  const [videoTasks, setVideoTasks] = useState<VideoTask[]>([]);\n  const [renderReadiness, setRenderReadiness] = useState<RenderReadiness | null>(null);
+  const [videoTasks, setVideoTasks] = useState<VideoTask[]>([]);
+  const [renderReadiness, setRenderReadiness] = useState<RenderReadiness | null>(null);
   const [assets, setAssets] = useState<VisualAsset[]>([]);
   const [shotAssetLinks, setShotAssetLinks] = useState<Record<number, ShotAssetLink[]>>({});
   const [assetChapterNumber, setAssetChapterNumber] = useState("");
@@ -361,7 +363,7 @@ export default function StoryboardPage() {
       if (!readiness.ready) {
         const blocked = readiness.items.filter(item => item.status !== "ready")
           .map(item => `镜头 ${item.shot_number}：${item.status === "processing" ? "视频生成中" : item.status === "broken" ? "视频文件损坏或不可读取" : "缺少视频"}`);
-        setMessage("成片合成已暂停，请先补齐或替换以下镜头：\\n" + blocked.join("；"));
+        setMessage("成片合成已暂停，请先补齐或替换以下镜头：\n" + blocked.join("；"));
         return;
       }
       const consistency = await request(`/api/story/episodes/${episode.id}/asset-consistency`) as ConsistencyReport;
