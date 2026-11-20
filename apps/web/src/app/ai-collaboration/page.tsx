@@ -2,6 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+declare global {
+  interface Window {
+    aiBrowserDesktop?: {
+      openTask: (taskId: string, url: string) => Promise<{ opened: boolean; taskId: string }>;
+      fillPrompt: (taskId: string, prompt: string) => Promise<{ filled: boolean; length: number; submitted: false }>;
+    };
+  }
+}
+
 type Novel = { id: number; title: string; genre?: string };
 type Chapter = { id: number; novel_id: number; chapter_number: number; title: string; word_count: number };
 type Handoff = {
@@ -152,7 +161,7 @@ export default function AICollaborationPage() {
     if (!window.confirm(`即将读取“${selectedNovel?.title || "所选小说"}”第 ${chapterNumber} 章，并将章节正文及已确认分析摘要展示在交接预览中。只会打开所选 AI 网站，不会自动发送章节内容。继续吗？`)) return;
     // Open a blank tab synchronously inside the click gesture so popup blockers
     // do not block the later navigation after the chapter request completes.
-    const aiTab = autoOpenAi ? window.open("about:blank", "_blank") : null;
+    const aiTab = autoOpenAi && !(window.aiBrowserDesktop?.openTask && window.aiBrowserDesktop?.fillPrompt) ? window.open("about:blank", "_blank") : null;
     if (aiTab) aiTab.opener = null;
     setBusy(true); setMessage("正在从本地数据库准备章节交接包……");
     try {
