@@ -501,6 +501,85 @@ ipcMain.handle("ai-browser:fill-prompt", async (_event, payload = {}) => {
   if (!result || !result.ok) throw new Error((result && result.reason) || "自动填入失败，请手动粘贴交接包");
   return { filled: true, length: result.length, submitted: false };
 });
+ipcMain.handle("ai-browser:list-open-tasks", async () => {
+  const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
+  return [...aiBrowserWindows.entries()].flatMap(([webContentsId, browser]) => {
+    if (!browser || browser.isDestroyed() || browser.webContents.isDestroyed()) return [];
+    try {
+      const currentUrl = new URL(browser.webContents.getURL());
+      const taskId = aiBrowserTasks.get(webContentsId);
+      if (!taskId || currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) return [];
+      return [{ taskId, host: currentUrl.hostname, title: browser.getTitle() || currentUrl.hostname }];
+    } catch { return []; }
+  });
+});
+
+ipcMain.handle("ai-browser:upload-reference-files", async (_event, payload = {}) => {
+  const taskId = String(payload.taskId || "");
+  const fileIds = Array.isArray(payload.fileIds) ? payload.fileIds : [];
+  if (!/^task-[a-zA-Z0-9-]{5,110}$/.test(taskId)) throw new Error("无效的目标 AI 任务编号");
+  if (!fileIds.length || fileIds.length > 10 || fileIds.some((id) => !Number.isInteger(id) || id < 1)) {
+    throw new Error("请选择 1 到 10 张已归档的参考图片");
+  }
+  if (new Set(fileIds).size !== fileIds.length) throw new Error("参考图片列表存在重复项目");
+  const entry = [...aiBrowserTasks.entries()].find(([, value]) => value === taskId);
+  if (!entry) throw new Error("目标 AI 网页未打开，请先打开对应的视频分镜提示词任务");
+  const browser = aiBrowserWindows.get(entry[0]);
+  if (!browser || browser.isDestroyed() || browser.webContents.isDestroyed()) throw new Error("目标 AI 网页已关闭，请重新打开");
+  const currentUrl = new URL(browser.webContents.getURL());
+  const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
+  if (currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) throw new Error("当前网页不在允许上传参考图的 AI 网站范围内");
+
+  const resultDir = path.resolve(app.getPath("userData"), "storage", "web_ai_results");
+  const uploadPaths = [];
+  let totalBytes = 0;
+  for (const fileId of fileIds) {
+    const response = await fetch("http://127.0.0.1:8000/api/web-ai/files/" + fileId + "/upload-info");
+    const info = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(info.detail || ("读取参考图片失败：" + response.status));
+    const storedName = String(info.storedName || "");
+    if (!/^[a-f0-9]{32}\.(png|jpg|jpeg|webp|gif)$/.test(storedName)) throw new Error("参考图片文件标识无效");
+    const targetPath = path.resolve(resultDir, storedName);
+    if (path.dirname(targetPath) !== resultDir || !fs.existsSync(targetPath)) throw new Error("参考图片文件不存在或路径无效");
+    const stat = fs.statSync(targetPath);
+    if (!stat.isFile() || stat.size !== info.size || stat.size > 100 * 1024 * 1024) throw new Error("参考图片大小校验失败");
+    totalBytes += stat.size;
+    uploadPaths.push(targetPath);
+  }
+  if (totalBytes > 200 * 1024 * 1024) throw new Error("本次参考图片总大小不能超过 200 MB");
+
+  const debuggerSession = browser.webContents.debugger;
+  const attachedHere = !debuggerSession.isAttached();
+  try {
+    if (attachedHere) debuggerSession.attach("1.3");
+    await debuggerSession.sendCommand("DOM.enable");
+    const document = await debuggerSession.sendCommand("DOM.getDocument", { depth: -1, pierce: true });
+    const result = await debuggerSession.sendCommand("DOM.querySelectorAll", {
+      nodeId: document.root.nodeId,
+      selector: 'input[type="file"]',
+    });
+    if (!result.nodeIds || !result.nodeIds.length) throw new Error("当前 AI 网页没有可用的文件上传入口，请先点击网页上的附件/上传按钮后重试");
+    let chosen = null;
+    for (const nodeId of result.nodeIds) {
+      const described = await debuggerSession.sendCommand("DOM.describeNode", { nodeId });
+      const attributes = described.node.attributes || [];
+      const values = {};
+      for (let i = 0; i + 1 < attributes.length; i += 2) values[attributes[i]] = attributes[i + 1];
+      const accept = String(values.accept || "").toLowerCase();
+      if (!accept || accept.includes("image") || accept.includes("*/*")) {
+        chosen = { nodeId, multiple: Object.prototype.hasOwnProperty.call(values, "multiple") };
+        break;
+      }
+    }
+    if (!chosen) throw new Error("没有找到接受图片的文件上传入口");
+    if (uploadPaths.length > 1 && !chosen.multiple) throw new Error("当前网页上传入口一次只接受一张图片，请减少选择数量后重试");
+    await debuggerSession.sendCommand("DOM.setFileInputFiles", { nodeId: chosen.nodeId, files: uploadPaths });
+    return { selected: uploadPaths.length, submitted: false, taskId };
+  } finally {
+    if (attachedHere && debuggerSession.isAttached()) debuggerSession.detach();
+  }
+});
+
 ipcMain.handle("ai-browser:open", async (_event, payload = {}) => {
   const taskId = String(payload.taskId || "");
   const rawUrl = String(payload.url || "");
