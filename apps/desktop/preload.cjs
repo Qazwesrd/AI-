@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("publishingDesktop", {
 
 contextBridge.exposeInMainWorld("aiBrowserDesktop", {
   openTask: (taskId, url) => ipcRenderer.invoke("ai-browser:open", { taskId, url }),
+  fillPrompt: (taskId, prompt) => ipcRenderer.invoke("ai-browser:fill-prompt", { taskId, prompt }),
   onDownloaded: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on("ai-browser:downloaded", listener);
