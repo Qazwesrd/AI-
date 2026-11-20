@@ -217,8 +217,10 @@ export default function EpisodeReadinessPage() {
         const voiceName = voicePath.split(/[\\/]/).pop() || "分集对白配音";
         setTimeline(current => current ? { ...current, voice_path: voicePath, voice_name: voiceName } : current);
       }
-      const warningText = Array.isArray(data.failures) && data.failures.length
-        ? "；另有 " + data.failures.length + " 条警告或失败，请查看任务结果"
+      const failureCount = Array.isArray(data.failures) ? data.failures.length : 0;
+      const warningCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+      const warningText = failureCount || warningCount
+        ? "；失败 " + failureCount + " 项，提醒 " + warningCount + " 条，请查看任务结果"
         : "";
       setMessage((data.message || "对白配音生成完成。") + warningText);
     } catch (error) {
