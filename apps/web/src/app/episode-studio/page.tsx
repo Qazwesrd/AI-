@@ -32,6 +32,7 @@ type EpisodeTimeline = {
   voice_path?: string | null;
   voice_name?: string | null;
   character_voice_profiles: Record<string, string>;
+  dialogue_segments_by_shot_id: Record<string, { speaker_character_id: number | null; text: string }[]>;
   voice_volume: number;
   original_volume: number;
   sound_effect_tracks: { path: string; name: string; start_seconds: number; volume: number }[];
@@ -39,6 +40,7 @@ type EpisodeTimeline = {
 };
 
 type EpisodeCharacter = { id: number; name: string };
+type EpisodeShot = { id: number; shot_number: number; dialogue?: string; character_ids: number[] };
 
 type Readiness = {
   episode_id: number;
@@ -72,6 +74,7 @@ export default function EpisodeReadinessPage() {
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [timelineBusy, setTimelineBusy] = useState(false);
   const [episodeCharacters, setEpisodeCharacters] = useState<EpisodeCharacter[]>([]);
+  const [episodeShots, setEpisodeShots] = useState<EpisodeShot[]>([]);
   const [speechProvider, setSpeechProvider] = useState("");
   const [speechModel, setSpeechModel] = useState("");
   const [defaultSpeechVoice, setDefaultSpeechVoice] = useState("alloy");
@@ -83,7 +86,9 @@ export default function EpisodeReadinessPage() {
       if (!response.ok) throw new Error(data.detail || "读取剪辑时间轴失败");
       const saved = data.timeline as EpisodeTimeline;
       saved.character_voice_profiles = saved.character_voice_profiles || {};
+      saved.dialogue_segments_by_shot_id = saved.dialogue_segments_by_shot_id || {};
       setEpisodeCharacters(Array.isArray(data.characters) ? data.characters : []);
+      setEpisodeShots(Array.isArray(data.shots) ? data.shots : []);
       if (saved.subtitle_cues === undefined || saved.subtitle_cues === null) {
         const shotById = new Map<number, { id: number; duration_seconds?: number; dialogue?: string }>(
           (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot] as const)
@@ -206,6 +211,7 @@ export default function EpisodeReadinessPage() {
           model: speechModel.trim(),
           voice: defaultSpeechVoice.trim() || "alloy",
           voice_by_character_id: timeline.character_voice_profiles || {},
+          dialogue_segments_by_shot_id: timeline.dialogue_segments_by_shot_id || {},
           confirm_paid: true,
           speed: 1,
         }),
@@ -445,6 +451,81 @@ export default function EpisodeReadinessPage() {
                       </div>
                     </div>
                   )}
+                  <div className="mt-4 rounded-lg border border-white/10 p-3">
+                    <h4 className="text-sm font-semibold">多角色对白拆分</h4>
+                    <p className="mt-1 text-xs text-white/45">将同一镜头的对白拆成多句，并为每句指定说话角色。每句会单独生成配音，再按顺序拼接；没有拆分的镜头仍沿用原对白生成逻辑。</p>
+                    <div className="mt-3 space-y-3">
+                      {episodeShots.filter(shot => (shot.character_ids || []).length > 1).map(shot => {
+                        const segments = timeline.dialogue_segments_by_shot_id?.[String(shot.id)] || [];
+                        const allowedCharacters = episodeCharacters.filter(character => shot.character_ids.includes(character.id));
+                        return (
+                          <div key={shot.id} className="rounded-lg border border-white/10 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="text-sm font-medium">镜头 {shot.shot_number} · 多角色</div>
+                              <button
+                                type="button"
+                                onClick={() => setTimeline({
+                                  ...timeline,
+                                  dialogue_segments_by_shot_id: {
+                                    ...(timeline.dialogue_segments_by_shot_id || {}),
+                                    [String(shot.id)]: segments.length ? [...segments, { speaker_character_id: allowedCharacters[0]?.id ?? null, text: "" }] : [{ speaker_character_id: null, text: shot.dialogue || "" }],
+                                  },
+                                })}
+                                className="rounded border border-cyan-300/30 px-2 py-1 text-xs text-cyan-100"
+                              >{segments.length ? "添加一句对白" : "拆分原对白"}</button>
+                            </div>
+                            {!segments.length && <p className="mt-2 text-xs text-white/40">当前未拆分，生成时会使用默认音色。点击“拆分原对白”开始编辑。</p>}
+                            {segments.map((segment, index) => (
+                              <div key={index} className="mt-2 grid gap-2 md:grid-cols-[180px_1fr_auto]">
+                                <label className="text-xs text-white/60">说话角色
+                                  <select
+                                    value={segment.speaker_character_id ?? ""}
+                                    onChange={event => setTimeline({
+                                      ...timeline,
+                                      dialogue_segments_by_shot_id: {
+                                        ...(timeline.dialogue_segments_by_shot_id || {}),
+                                        [String(shot.id)]: segments.map((item, i) => i === index ? { ...item, speaker_character_id: event.target.value ? Number(event.target.value) : null } : item),
+                                      },
+                                    })}
+                                    className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-2 py-2 text-white"
+                                  >
+                                    <option value="">选择角色</option>
+                                    {allowedCharacters.map(character => <option key={character.id} value={character.id}>{character.name}</option>)}
+                                  </select>
+                                </label>
+                                <label className="text-xs text-white/60">对白内容
+                                  <textarea
+                                    value={segment.text}
+                                    maxLength={2000}
+                                    rows={2}
+                                    onChange={event => setTimeline({
+                                      ...timeline,
+                                      dialogue_segments_by_shot_id: {
+                                        ...(timeline.dialogue_segments_by_shot_id || {}),
+                                        [String(shot.id)]: segments.map((item, i) => i === index ? { ...item, text: event.target.value } : item),
+                                      },
+                                    })}
+                                    className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-2 py-2 text-white"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => setTimeline({
+                                    ...timeline,
+                                    dialogue_segments_by_shot_id: {
+                                      ...(timeline.dialogue_segments_by_shot_id || {}),
+                                      [String(shot.id)]: segments.filter((_, i) => i !== index),
+                                    },
+                                  })}
+                                  className="self-end rounded border border-rose-300/30 px-3 py-2 text-xs text-rose-200"
+                                >删除</button>
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                   <button type="button" disabled={timelineBusy || busy || !speechProvider.trim() || !speechModel.trim()} onClick={() => void generateEpisodeDubbing()} className="mt-3 rounded-lg bg-violet-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">生成本集对白配音（需逐次确认费用）</button>
                   <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadAudioTrack(event.target.files?.[0] || null, "voice")} className="mt-3 block w-full text-xs" />
                   {timeline.voice_path && <button type="button" onClick={() => setTimeline({ ...timeline, voice_path: null, voice_name: null })} className="mt-2 rounded border border-white/15 px-3 py-1 text-xs">移除自定义配音（恢复使用已生成配音）</button>}
