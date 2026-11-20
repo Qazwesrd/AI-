@@ -848,11 +848,23 @@ def render_episode_from_shots(
             MediaTask.task_type == "episode_speech_track"
         ).order_by(MediaTask.id.desc()).all()
         speech_path = None
-        for speech_task in speech_tasks:
-            speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
-            if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
-                speech_path = safe_storage_file(speech_task.result_path)
-                break
+        selected_voice_path = timeline.get("voice_path")
+        if selected_voice_path:
+            speech_path = safe_storage_file(selected_voice_path)
+            voice_record = db.query(MediaFile).filter(
+                MediaFile.category == "audio",
+                MediaFile.file_path == str(speech_path),
+            ).first()
+            if not voice_record:
+                raise HTTPException(422, "对白配音必须来自本地音频素材库")
+        else:
+            for speech_task in speech_tasks:
+                speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
+                if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
+                    speech_path = safe_storage_file(speech_task.result_path)
+                    break
+        voice_volume = max(0.0, min(2.0, float(timeline.get("voice_volume", 1.0))))
+        original_volume = max(0.0, min(2.0, float(timeline.get("original_volume", 0.35))))
         selected_music_path = timeline.get("music_path") or music_path
         music = safe_storage_file(selected_music_path) if selected_music_path else None
         if music:
@@ -868,15 +880,33 @@ def render_episode_from_shots(
         music_volume = float(timeline.get("music_volume", music_volume))
         music_fade_in = max(0.0, min(30.0, float(timeline.get("music_fade_in_seconds", 1.0))))
         music_fade_out = max(0.0, min(30.0, float(timeline.get("music_fade_out_seconds", 2.0))))
-        if speech_path or music:
+        sound_effect_tracks = timeline.get("sound_effect_tracks") or []
+        validated_effects = []
+        for effect in sound_effect_tracks:
+            effect_path = safe_storage_file(effect.get("path", ""))
+            effect_record = db.query(MediaFile).filter(
+                MediaFile.category == "audio",
+                MediaFile.file_path == str(effect_path),
+            ).first()
+            if not effect_record:
+                raise HTTPException(422, "音效必须来自本地音频素材库")
+            effect_info = probe_media(effect_path)
+            if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
+                raise HTTPException(422, "音效文件不包含可用音轨")
+            start_seconds = float(effect.get("start_seconds", 0))
+            effect_volume = float(effect.get("volume", 1.0))
+            if start_seconds < 0 or start_seconds >= total_video_duration or not 0 <= effect_volume <= 2:
+                raise HTTPException(422, "音效起始时间或音量超出允许范围")
+            validated_effects.append((effect_path, start_seconds, effect_volume))
+        if speech_path or music or validated_effects:
             mixed_output = output.with_name(output.stem + "_mixed.mp4")
             mix_args = ["-i", str(output)]
-            mix_filters = ["[0:a]volume=0.35[original]"]
+            mix_filters = [f"[0:a]volume={original_volume:.3f}[original]"]
             mix_labels = ["[original]"]
             mix_index = 1
             if speech_path:
                 mix_args += ["-i", str(speech_path)]
-                mix_filters.append(f"[{mix_index}:a]volume=1.0[voice]")
+                mix_filters.append(f"[{mix_index}:a]volume={voice_volume:.3f}[voice]")
                 mix_labels.append("[voice]")
                 mix_index += 1
             if music:
@@ -890,6 +920,16 @@ def render_episode_from_shots(
                     f"{fade_in_filter}{fade_out_filter}[music]"
                 )
                 mix_labels.append("[music]")
+                mix_index += 1
+            for effect_index, (effect_path, start_seconds, effect_volume) in enumerate(validated_effects):
+                mix_args += ["-i", str(effect_path)]
+                delay_ms = int(round(start_seconds * 1000))
+                label = f"sfx{effect_index}"
+                mix_filters.append(
+                    f"[{mix_index}:a]volume={effect_volume:.3f},adelay={delay_ms}|{delay_ms}[{label}]"
+                )
+                mix_labels.append(f"[{label}]")
+                mix_index += 1
             mix_filters.append(
                 "".join(mix_labels)
                 + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2,"
@@ -1990,6 +2030,13 @@ class EpisodeSubtitleCueInput(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+class EpisodeSoundEffectInput(BaseModel):
+    path: str = Field(min_length=1, max_length=2000)
+    name: str = Field(default="", max_length=300)
+    start_seconds: float = Field(default=0, ge=0, le=900)
+    volume: float = Field(default=1.0, ge=0, le=2)
+
+
 class EpisodeTimelineInput(BaseModel):
     shot_order: list[int]
     transitions: list[TimelineTransitionInput] = Field(default_factory=list)
@@ -2000,6 +2047,11 @@ class EpisodeTimelineInput(BaseModel):
     music_volume: float = Field(default=0.18, ge=0, le=1)
     music_path: Optional[str] = Field(default=None, max_length=2000)
     music_name: Optional[str] = Field(default=None, max_length=300)
+    voice_path: Optional[str] = Field(default=None, max_length=2000)
+    voice_name: Optional[str] = Field(default=None, max_length=300)
+    voice_volume: float = Field(default=1.0, ge=0, le=2)
+    original_volume: float = Field(default=0.35, ge=0, le=2)
+    sound_effect_tracks: list[EpisodeSoundEffectInput] = Field(default_factory=list)
     subtitle_cues: Optional[list[EpisodeSubtitleCueInput]] = None
 
 
@@ -2075,14 +2127,29 @@ def save_episode_edit_timeline(
             ) / 2
             if item.duration_seconds <= 0 or item.duration_seconds >= adjacent_limit:
                 raise HTTPException(422, "转场时长必须大于 0，且小于相邻较短镜头时长的一半")
-    if data.music_path:
-        music_path = safe_storage_file(data.music_path)
-        music_record = db.query(MediaFile).filter(
+    for selected_path, label in ((data.music_path, "背景音乐"), (data.voice_path, "对白配音")):
+        if selected_path:
+            audio_path = safe_storage_file(selected_path)
+            audio_record = db.query(MediaFile).filter(
+                MediaFile.category == "audio",
+                MediaFile.file_path == str(audio_path),
+            ).first()
+            if not audio_record:
+                raise HTTPException(422, f"{label}必须来自本地音频素材库")
+            audio_info = probe_media(audio_path)
+            if not any(stream.get("codec_type") == "audio" for stream in audio_info.get("streams", [])):
+                raise HTTPException(422, f"{label}文件不包含可用音轨")
+    for effect in data.sound_effect_tracks:
+        effect_path = safe_storage_file(effect.path)
+        effect_record = db.query(MediaFile).filter(
             MediaFile.category == "audio",
-            MediaFile.file_path == str(music_path),
+            MediaFile.file_path == str(effect_path),
         ).first()
-        if not music_record:
-            raise HTTPException(422, "背景音乐必须来自本地音频素材库")
+        if not effect_record:
+            raise HTTPException(422, "音效必须来自本地音频素材库")
+        effect_info = probe_media(effect_path)
+        if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
+            raise HTTPException(422, "音效文件不包含可用音轨")
     for cue in data.subtitle_cues or []:
         if cue.end <= cue.start:
             raise HTTPException(422, "字幕结束时间必须大于开始时间")
