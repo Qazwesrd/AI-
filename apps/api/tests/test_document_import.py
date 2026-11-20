@@ -42,6 +42,16 @@ class DocumentImportTests(unittest.TestCase):
             archive.writestr("word/document.xml", document_xml)
         self.assertIn("测试文档正文", docx_text(buffer.getvalue()))
 
+    def test_docx_extraction_from_seekable_stream(self):
+        buffer = BytesIO()
+        document_xml = (
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:t>流式 DOCX 正文</w:t></w:r></w:p></w:body></w:document>'
+        )
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("word/document.xml", document_xml)
+        self.assertIn("流式 DOCX 正文", docx_text(BytesIO(buffer.getvalue())))
+
     def test_epub_extraction(self):
         buffer = BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
@@ -121,6 +131,25 @@ class DocumentImportTests(unittest.TestCase):
         archive.open.return_value = BytesIO(b"valid output")
         with self.assertRaisesRegex(ValueError, "大小与声明不一致"):
             _verify_compressed_archive(archive)
+
+
+    def test_text_import_accepts_seekable_stream(self):
+        source = BytesIO("第一章\n正文内容".encode("utf-8"))
+        self.assertEqual(
+            extract_document_text("novel.txt", source),
+            "第一章\n正文内容",
+        )
+
+    def test_stream_text_import_supports_gb18030(self):
+        expected = "第一章\n中文正文"
+        source = BytesIO(expected.encode("gb18030"))
+        self.assertEqual(extract_document_text("novel.txt", source), expected)
+
+    def test_stream_import_rejects_oversized_upload(self):
+        source = BytesIO(b"123456")
+        with patch("app.document_import.MAX_UPLOAD_BYTES", 5):
+            with self.assertRaisesRegex(ValueError, "不能超过 1 GB"):
+                extract_document_text("novel.txt", source)
 
     def test_txt_document_import(self):
         self.assertEqual(extract_document_text("novel.txt", "正文内容".encode("utf-8")), "正文内容")
