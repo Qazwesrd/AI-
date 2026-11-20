@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.routers.story import ensure_project_source_current
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink, EpisodeEditTimeline
 from app.models.visual import VisualAsset
@@ -262,7 +263,7 @@ def generate_episode_shot_videos(
     project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
     if not project:
         raise HTTPException(404, "剧本项目不存在")
-    ensure_episode_source_current(db, episode)
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
@@ -553,6 +554,126 @@ def refresh_episode_video_tasks(episode_id: int, db: Session = Depends(get_db)):
     return {"episode_id": episode_id, "checked": len(outcomes), "tasks": outcomes}
 
 
+@router.get("/video/episodes/{episode_id}/render-readiness")
+def get_episode_render_readiness(episode_id: int, db: Session = Depends(get_db)):
+    """Inspect every shot before rendering; this endpoint never calls an AI provider."""
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+    if not shots:
+        return {
+            "episode_id": episode_id, "ready": False, "total_shots": 0,
+            "ready_count": 0, "missing_count": 0, "processing_count": 0,
+            "broken_count": 0, "items": [],
+            "message": "本集尚无分镜，无法合成。",
+        }
+
+    shot_ids = {shot.id for shot in shots}
+    tasks = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).order_by(MediaTask.id.desc()).all()
+    tasks_by_shot = {}
+    for task in tasks:
+        metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        shot_id = metadata.get("shot_id")
+        if metadata.get("episode_id") == episode_id and shot_id in shot_ids:
+            tasks_by_shot.setdefault(shot_id, []).append(task)
+
+    items = []
+    ready_count = missing_count = processing_count = broken_count = 0
+    for shot in shots:
+        history = tasks_by_shot.get(shot.id, [])
+        latest = history[0] if history else None
+        selected = None
+        selected_info = None
+        rejected = []
+        for task in history:
+            if task.status != "completed" or not task.result_path:
+                continue
+            try:
+                clip_path = safe_storage_file(task.result_path)
+                info = probe_media(clip_path)
+                streams = info.get("streams") or []
+                video_stream = next(
+                    (stream for stream in streams if stream.get("codec_type") == "video"),
+                    None,
+                )
+                duration = float((info.get("format") or {}).get("duration") or 0)
+                if not video_stream or duration <= 0 or duration > 600:
+                    raise ValueError("视频流缺失、时长无效或超过 10 分钟")
+                selected = task
+                registered_media = db.query(MediaFile).filter(
+                    MediaFile.file_path == str(clip_path)
+                ).order_by(MediaFile.id.desc()).first()
+                selected_info = {
+                    "duration_seconds": round(duration, 3),
+                    "width": video_stream.get("width"),
+                    "height": video_stream.get("height"),
+                    "path": str(clip_path),
+                    "preview_url": f"/api/media/files/{registered_media.id}/download" if registered_media else None,
+                }
+                break
+            except Exception as exc:
+                rejected.append({"task_id": task.id, "reason": str(exc)[:300]})
+
+        if selected:
+            status = "ready"
+            ready_count += 1
+        elif latest and latest.status in {
+            "pending", "queued", "submitting", "submitted", "processing",
+            "running", "submission_unknown", "awaiting_video_url",
+        }:
+            status = "processing"
+            processing_count += 1
+        elif history and (rejected or (latest and latest.status == "completed" and not latest.result_path)):
+            status = "broken"
+            broken_count += 1
+        else:
+            status = "missing"
+            missing_count += 1
+
+        items.append({
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "scene_name": shot.scene_name or "",
+            "visual_description": shot.visual_description or "",
+            "planned_duration_seconds": float(shot.duration_seconds or 0),
+            "status": status,
+            "latest_task_id": latest.id if latest else None,
+            "latest_task_status": latest.status if latest else None,
+            "selected_task_id": selected.id if selected else None,
+            "video": selected_info,
+            "warnings": rejected,
+            "error": latest.error if latest and latest.status in {"failed", "cancelled"} else None,
+        })
+
+    ready = ready_count == len(shots)
+    return {
+        "episode_id": episode_id,
+        "episode_number": episode.episode_number,
+        "episode_title": episode.title,
+        "ready": ready,
+        "total_shots": len(shots),
+        "ready_count": ready_count,
+        "missing_count": missing_count,
+        "processing_count": processing_count,
+        "broken_count": broken_count,
+        "items": items,
+        "message": (
+            "全部镜头均有可用视频，可以开始合成。"
+            if ready else
+            "请先处理缺失、生成中或损坏的镜头视频，再进行成片合成。"
+        ),
+    }
+
+
 @router.post("/video/episodes/{episode_id}/render")
 def render_episode_from_shots(
     episode_id: int, output_name: str = "episode.mp4",
@@ -564,7 +685,10 @@ def render_episode_from_shots(
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
-    ensure_episode_source_current(db, episode)
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
@@ -585,22 +709,35 @@ def render_episode_from_shots(
     by_shot = {}
     for task in tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        shot_id = metadata.get("shot_id")
         if (
-            metadata.get("episode_id") == episode_id
-            and metadata.get("shot_id")
-            and task.status == "completed"
-            and task.result_path
-            and Path(task.result_path).is_file()
+            metadata.get("episode_id") != episode_id
+            or not shot_id
+            or shot_id in by_shot
+            or task.status != "completed"
+            or not task.result_path
         ):
-            by_shot.setdefault(metadata["shot_id"], task)
+            continue
+        try:
+            candidate = safe_storage_file(task.result_path)
+            info = probe_media(candidate)
+            streams = info.get("streams") or []
+            has_video = any(stream.get("codec_type") == "video" for stream in streams)
+            duration = float((info.get("format") or {}).get("duration") or 0)
+            if not has_video or duration <= 0 or duration > 600:
+                continue
+            by_shot[shot_id] = candidate
+        except Exception:
+            # A newer corrupt/missing clip must not hide an older valid version.
+            continue
     clips = []
     missing = []
     for shot in shots:
-        task = by_shot.get(shot.id)
-        if not task or not task.result_path or not Path(task.result_path).is_file():
+        clip = by_shot.get(shot.id)
+        if not clip:
             missing.append(shot.shot_number)
         else:
-            clips.append(safe_storage_file(task.result_path))
+            clips.append(clip)
     if missing:
         raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
     output_name = re.sub(r"[^a-zA-Z0-9_-]", "_", output_name)
@@ -1066,7 +1203,10 @@ def generate_episode_voice_track(
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
-    ensure_episode_source_current(db, episode)
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
     shots = db.query(StoryboardShot).filter(
         StoryboardShot.episode_id == episode_id
     ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
