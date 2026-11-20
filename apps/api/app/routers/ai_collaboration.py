@@ -453,7 +453,7 @@ class HandoffPackageRequest(BaseModel):
     # caller so the user can review it before copying it to a third-party AI site.
     confirm_selected_chapter: bool = False
     include_confirmed_analysis: bool = True
-    task_type: Literal["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "道具设定", "对白整理"] = "剧情分析"
+    task_type: Literal["剧情分析", "剧本改编", "分镜设计", "角色设定", "场景设定", "道具设定", "视频分镜提示词", "对白整理"] = "剧情分析"
     max_context_chars: int = Field(default=120000, ge=1000, le=150000)
 
 
@@ -571,6 +571,17 @@ def build_chapter_handoff_package(
                 "chapter_number": {"type": "integer"}, "dialogues": {"type": "array"},
             },
         },
+        "视频分镜提示词": {
+            "type": "object",
+            "required": ["chapter_number", "video_shots"],
+            "properties": {
+                "chapter_number": {"type": "integer"},
+                "video_shots": {
+                    "type": "array",
+                    "items": {"type": "object", "required": ["shot_number", "duration_seconds", "aspect_ratio", "visual_prompt", "motion_prompt", "camera_prompt", "audio_prompt", "subtitle_text", "negative_prompt", "continuity_notes", "source_evidence"]},
+                },
+            },
+        },
     }
     if payload.task_type in task_schemas:
         output_schema = task_schemas[payload.task_type]
@@ -582,6 +593,7 @@ def build_chapter_handoff_package(
         "场景设定": "提取本章场景，整理空间结构、环境、氛围、时间、光线及原文证据，并为每个重要场景输出独立环境概念图提示词。",
         "道具设定": "提取本章出现的重要道具、武器、服装和特殊物品，整理名称、持有人、外观、材质、尺寸、用途、剧情状态及原文证据；为每件道具输出独立、可直接用于图片模型的设定图提示词和负面提示词。",
         "对白整理": "按角色整理本章对白，保留原意，标注情绪和场景，并提供原文证据。",
+        "视频分镜提示词": "把本章转化为可直接提交给 AI 网页视频生成器的分镜级提示词。每个镜头拆成独立短视频片段，建议 4-8 秒；输出镜头编号、时长、画幅（默认 16:9，可按竖屏漫剧改为 9:16）、画面主体与构图、角色动作和动作节奏、镜头运动、环境变化、光线与风格、对白/音效/配乐建议、字幕文本、负面提示词、与前后镜头的连续性要求以及逐字原文证据。不要把多个镜头混成一个提示词；不要要求视频模型直接生成可读字幕，字幕文本单独输出供后期叠加。动作必须可执行且符合物理逻辑，角色外观、服装、道具和场景必须与本章设定一致。",
     }
     instruction = (
         f"你是专业的小说漫剧改编与制作助手。本次任务类型：{payload.task_type}。"
