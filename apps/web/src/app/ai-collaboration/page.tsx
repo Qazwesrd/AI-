@@ -435,7 +435,7 @@ export default function AICollaborationPage() {
           </div>
           <div className="mt-4 rounded-xl border border-cyan-300/15 bg-slate-950/60 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定和对白整理任务。</p></div>
+              <div><h3 className="text-sm font-semibold text-cyan-100">全流程章节任务</h3><p className="mt-1 text-xs text-slate-400">选择多个章节，一次准备剧情分析、剧本改编、分镜设计、角色设定、场景设定、道具设定和对白整理任务。</p></div>
               <div className="flex gap-2 text-xs"><button type="button" onClick={() => setSelectedChapterNumbers(chapters.map((item) => String(item.chapter_number)))} className="rounded border border-white/15 px-2 py-1">全选</button><button type="button" onClick={() => setSelectedChapterNumbers([])} className="rounded border border-white/15 px-2 py-1">清空</button></div>
             </div>
             <div className="mt-3 grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3">
@@ -446,7 +446,7 @@ export default function AICollaborationPage() {
                 <select value={visualStyle} onChange={(event) => setVisualStyle(event.target.value as VisualStyle)} className="mt-1 w-full rounded-lg border border-cyan-300/30 bg-slate-950 px-3 py-2 text-white">
                   <option value="国漫">国漫</option><option value="仿真人">仿真人</option><option value="3D漫">3D漫</option><option value="2D漫">2D漫</option>
                 </select>
-                <span className="mt-1 block text-[11px] text-slate-500">自动写入剧本、分镜、角色图、场景图和道具图相关提示词。</span>
+                <span className="mt-1 block text-[11px] text-slate-500">自动写入剧本、分镜、角色图、场景图、道具图相关提示词。</span>
               </label>
               {FULL_WORKFLOW_TASKS.map((task) => <label key={task} className="text-xs text-slate-300">{task}分配给
                 <select value={providerRoutes[task]} onChange={(event) => setProviderRoutes((current) => ({ ...current, [task]: event.target.value as AIWebProvider }))} className="mt-1 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-white">
@@ -463,7 +463,7 @@ export default function AICollaborationPage() {
           <div className="mt-4 grid gap-3 md:grid-cols-3 md:items-end">
             <label className="text-sm text-slate-300">本次交接任务类型
               <select value={taskType} onChange={(event) => { setTaskType(event.target.value as HandoffTaskType); setHandoff(null); }} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
-                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="对白整理">对白整理</option>
+                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="道具设定">道具设定</option><option value="对白整理">对白整理</option>
               </select>
             </label>
             <label className="text-sm text-slate-300">读取章节后打开哪个 AI 网页？
