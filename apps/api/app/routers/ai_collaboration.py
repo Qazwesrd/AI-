@@ -587,14 +587,6 @@ def build_chapter_handoff_package(
     )
     context = {
         "novel": {"id": novel.id, "title": novel.title, "genre": novel.genre},
-        "严格区分原文事实、推断和未知；不得把推断当作事实。"
-        "每一项人物/场景/道具/事件及剧情变化都必须附带本章原文中的逐字证据。"
-        "没有证据的变化不得提交；置信度使用0到1。"
-        "只返回符合给定JSON Schema的JSON，不要使用Markdown代码围栏。"
-        "proposals仅用于提交待审核的变化提议，不代表正式素材已经更新。"
-    )
-    context = {
-        "novel": {"id": novel.id, "title": novel.title, "genre": novel.genre},
         "chapter": {
             "id": chapter.id,
             "number": chapter.chapter_number,
