@@ -31,6 +31,7 @@ const AI_WEB_PROVIDERS = {
   grok: { label: "Grok", url: "https://grok.com/" },
 } as const;
 type AIWebProvider = keyof typeof AI_WEB_PROVIDERS;
+type HandoffTaskType = "剧情分析" | "剧本改编" | "分镜设计" | "角色设定" | "场景设定" | "对白整理";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(API + path, {
@@ -61,6 +62,7 @@ export default function AICollaborationPage() {
   const [filter, setFilter] = useState("pending_review");
   const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
   const [autoOpenAi, setAutoOpenAi] = useState(true);
+  const [taskType, setTaskType] = useState<HandoffTaskType>("剧情分析");
   const selectedAi = AI_WEB_PROVIDERS[aiProvider];
 
   const selectedNovel = useMemo(() => novels.find((item) => String(item.id) === novelId), [novels, novelId]);
@@ -155,7 +157,7 @@ export default function AICollaborationPage() {
     setBusy(true); setMessage("正在从本地数据库准备章节交接包……");
     try {
       const data = await request<Handoff>(`/api/ai-collaboration/novels/${novelId}/chapters/${chapterNumber}/handoff-package`, {
-        method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true }),
+        method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true, task_type: taskType }),
       });
       setHandoff(data);
       if (aiTab && !aiTab.closed) aiTab.location.assign(selectedAi.url);
@@ -290,7 +292,12 @@ export default function AICollaborationPage() {
               </select>
             </label>
           </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+          <div className="mt-4 grid gap-3 md:grid-cols-3 md:items-end">
+            <label className="text-sm text-slate-300">本次交接任务类型
+              <select value={taskType} onChange={(event) => { setTaskType(event.target.value as HandoffTaskType); setHandoff(null); }} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
+                <option value="剧情分析">剧情分析</option><option value="剧本改编">剧本改编</option><option value="分镜设计">分镜设计</option><option value="角色设定">角色设定</option><option value="场景设定">场景设定</option><option value="对白整理">对白整理</option>
+              </select>
+            </label>
             <label className="text-sm text-slate-300">读取章节后打开哪个 AI 网页？
               <select value={aiProvider} onChange={(event) => setAiProvider(event.target.value as AIWebProvider)} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
                 {Object.entries(AI_WEB_PROVIDERS).map(([key, provider]) => <option key={key} value={key}>{provider.label}</option>)}
