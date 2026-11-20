@@ -110,6 +110,9 @@ export default function MediaStudioPage() {
           <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
             查看统一任务中心（含配音任务）
           </a>
+          <a href="/episode-studio" className="ml-2 mt-3 inline-flex rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-200 hover:bg-cyan-950/40">
+            分集成片检查与镜头替换
+          </a>
         </header>
 
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
