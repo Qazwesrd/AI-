@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 from pydantic import ValidationError
 
-from app.routers.media import SpeechInput, speech_fingerprint, speech_task_is_in_flight
+from app.routers.media import (
+    SpeechInput, speech_fingerprint, speech_task_is_in_flight,
+    resolve_episode_shot_voice,
+)
 
 
 class SpeechSubmissionSafetyTests(unittest.TestCase):
@@ -28,6 +31,24 @@ class SpeechSubmissionSafetyTests(unittest.TestCase):
         baseline = speech_fingerprint("openai", "tts-1", "你好", "alloy", 1.0)
         self.assertNotEqual(baseline, speech_fingerprint("openai", "tts-1", "你好", "nova", 1.0))
         self.assertNotEqual(baseline, speech_fingerprint("openai", "tts-1", "你好呀", "alloy", 1.0))
+
+    def test_episode_voice_resolution_uses_character_profile_for_single_character_shot(self):
+        shot = SimpleNamespace(character_ids=[42])
+        self.assertEqual(
+            resolve_episode_shot_voice(shot, {"42": "nova"}, "alloy"),
+            "nova",
+        )
+        self.assertEqual(
+            resolve_episode_shot_voice(shot, {}, "alloy"),
+            "alloy",
+        )
+
+    def test_episode_voice_resolution_falls_back_for_multi_character_shot(self):
+        shot = SimpleNamespace(character_ids=[42, 43])
+        self.assertEqual(
+            resolve_episode_shot_voice(shot, {"42": "nova", "43": "echo"}, "alloy"),
+            "alloy",
+        )
 
     def test_output_format_cannot_inject_a_file_path(self):
         with self.assertRaises(ValidationError):
