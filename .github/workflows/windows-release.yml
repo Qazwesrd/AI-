@@ -259,6 +259,6 @@ jobs:
             }
           }
 
-          gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" -F draft=false -F make_latest=true
+          gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" -F draft=false -f make_latest=true
           if ($LASTEXITCODE -ne 0) { throw "Release 资产核对通过，但发布草稿失败。" }
           Write-Host "Release $tag published with $($files.Count) verified assets."
