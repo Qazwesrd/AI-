@@ -1266,6 +1266,19 @@ class EpisodeDialogueSegmentInput(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
 
 
+def validate_dialogue_segments_for_shot(shot, segments):
+    if not segments or len(segments) > 20:
+        raise HTTPException(422, "每个镜头必须配置 1 至 20 条对白")
+    allowed_speakers = {
+        int(value) for value in (shot.character_ids or []) if str(value).isdigit()
+    }
+    for segment in segments:
+        if segment.speaker_character_id is not None and segment.speaker_character_id not in allowed_speakers:
+            raise HTTPException(422, f"镜头 {shot.shot_number} 的对白说话人不属于该镜头角色")
+        if len(allowed_speakers) > 1 and segment.speaker_character_id is None:
+            raise HTTPException(422, f"镜头 {shot.shot_number} 有多个角色，请为每句对白指定说话人")
+
+
 class EpisodeSpeechInput(BaseModel):
     provider: str
     model: str
@@ -1306,14 +1319,7 @@ def generate_episode_voice_track(
         raise HTTPException(422, "对白拆分引用了不属于本集的镜头")
     for shot_key, segments in data.dialogue_segments_by_shot_id.items():
         shot = shot_by_id[shot_key]
-        if not segments or len(segments) > 20:
-            raise HTTPException(422, "每个镜头必须配置 1 至 20 条对白")
-        allowed_speakers = {int(value) for value in (shot.character_ids or []) if str(value).isdigit()}
-        for segment in segments:
-            if segment.speaker_character_id is not None and segment.speaker_character_id not in allowed_speakers:
-                raise HTTPException(422, f"镜头 {shot.shot_number} 的对白说话人不属于该镜头角色")
-            if len(allowed_speakers) > 1 and segment.speaker_character_id is None:
-                raise HTTPException(422, f"镜头 {shot.shot_number} 有多个角色，请为每句对白指定说话人")
+        validate_dialogue_segments_for_shot(shot, segments)
     if any(not str(value).strip() or len(str(value)) > 100 for value in data.voice_by_character_id.values()):
         raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
 
@@ -2396,14 +2402,7 @@ def save_episode_edit_timeline(
         raise HTTPException(422, "对白拆分引用了不属于本集的镜头")
     for shot_key, segments in data.dialogue_segments_by_shot_id.items():
         shot = next(item for item in shots if str(item.id) == shot_key)
-        if not segments or len(segments) > 20:
-            raise HTTPException(422, "每个镜头必须配置 1 至 20 条对白")
-        allowed_speakers = {int(value) for value in (shot.character_ids or []) if str(value).isdigit()}
-        for segment in segments:
-            if segment.speaker_character_id is not None and segment.speaker_character_id not in allowed_speakers:
-                raise HTTPException(422, f"镜头 {shot.shot_number} 的对白说话人不属于该镜头角色")
-            if len(allowed_speakers) > 1 and segment.speaker_character_id is None:
-                raise HTTPException(422, f"镜头 {shot.shot_number} 有多个角色，请为每句对白指定说话人")
+        validate_dialogue_segments_for_shot(shot, segments)
     if any(not str(value).strip() or len(str(value)) > 100 for value in data.character_voice_profiles.values()):
         raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
     for selected_path, label in ((data.music_path, "背景音乐"), (data.voice_path, "对白配音")):
