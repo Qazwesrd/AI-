@@ -1548,3 +1548,116 @@ def scan_media_output_quality(path: str):
         return scan_media_quality(file_path)
     except Exception as exc:
         raise HTTPException(422, "媒体质量扫描失败：" + str(exc)[:1200]) from exc
+
+
+# Episode editing timeline: local-only, explicit save; no AI/provider calls.
+from app.models.story import EpisodeEditTimeline
+
+
+class TimelineTransitionInput(BaseModel):
+    after_shot_id: int
+    transition: Literal["cut", "fade", "dissolve"] = "cut"
+    duration_seconds: float = Field(default=0.5, ge=0, le=2)
+
+
+class EpisodeTimelineInput(BaseModel):
+    shot_order: list[int]
+    transitions: list[TimelineTransitionInput] = Field(default_factory=list)
+    intro_title: str = Field(default="", max_length=120)
+    outro_title: str = Field(default="", max_length=120)
+    music_fade_in_seconds: float = Field(default=1.0, ge=0, le=30)
+    music_fade_out_seconds: float = Field(default=2.0, ge=0, le=30)
+    music_volume: float = Field(default=0.18, ge=0, le=1)
+
+
+def _timeline_episode_shots(db, episode_id):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    return episode, db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+
+
+@router.get("/video/episodes/{episode_id}/timeline")
+def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
+    episode, shots = _timeline_episode_shots(db, episode_id)
+    record = db.query(EpisodeEditTimeline).filter(
+        EpisodeEditTimeline.episode_id == episode_id
+    ).first()
+    data = record.edit_data if record and isinstance(record.edit_data, dict) else {}
+    if not data:
+        data = {
+            "shot_order": [shot.id for shot in shots],
+            "transitions": [],
+            "intro_title": "",
+            "outro_title": "",
+            "music_fade_in_seconds": 1.0,
+            "music_fade_out_seconds": 2.0,
+            "music_volume": 0.18,
+        }
+    return {
+        "episode_id": episode.id,
+        "episode_title": episode.title,
+        "version": record.version if record else 0,
+        "timeline": data,
+        "shots": [{
+            "id": shot.id, "shot_number": shot.shot_number,
+            "duration_seconds": shot.duration_seconds,
+            "scene_name": shot.scene_name,
+            "visual_description": shot.visual_description,
+            "dialogue": shot.dialogue,
+        } for shot in shots],
+    }
+
+
+@router.put("/video/episodes/{episode_id}/timeline")
+def save_episode_edit_timeline(
+    episode_id: int, data: EpisodeTimelineInput, db: Session = Depends(get_db)
+):
+    episode, shots = _timeline_episode_shots(db, episode_id)
+    valid_ids = {shot.id for shot in shots}
+    if len(data.shot_order) != len(set(data.shot_order)):
+        raise HTTPException(422, "镜头顺序中存在重复镜头")
+    if set(data.shot_order) != valid_ids:
+        raise HTTPException(422, "镜头顺序必须完整包含本集全部镜头，不能遗漏或加入其他分集镜头")
+    transition_ids = [item.after_shot_id for item in data.transitions]
+    if len(transition_ids) != len(set(transition_ids)):
+        raise HTTPException(422, "同一镜头后不能重复设置转场")
+    if any(shot_id not in valid_ids for shot_id in transition_ids):
+        raise HTTPException(422, "转场引用了不属于本集的镜头")
+    order_positions = {shot_id: index for index, shot_id in enumerate(data.shot_order)}
+    shot_by_id = {shot.id: shot for shot in shots}
+    for item in data.transitions:
+        position = order_positions[item.after_shot_id]
+        if position >= len(data.shot_order) - 1:
+            raise HTTPException(422, "最后一个镜头后不能设置转场")
+        if item.transition == "cut" and item.duration_seconds != 0:
+            raise HTTPException(422, "直接切镜（cut）的转场时长必须为 0")
+        if item.transition != "cut":
+            next_shot = shot_by_id[data.shot_order[position + 1]]
+            adjacent_limit = min(
+                float(shot_by_id[item.after_shot_id].duration_seconds or 0),
+                float(next_shot.duration_seconds or 0),
+            ) / 2
+            if item.duration_seconds <= 0 or item.duration_seconds >= adjacent_limit:
+                raise HTTPException(422, "转场时长必须大于 0，且小于相邻较短镜头时长的一半")
+    payload = data.model_dump()
+    record = db.query(EpisodeEditTimeline).filter(
+        EpisodeEditTimeline.episode_id == episode_id
+    ).first()
+    if record:
+        record.edit_data = payload
+        record.version = int(record.version or 0) + 1
+    else:
+        record = EpisodeEditTimeline(
+            episode_id=episode_id, edit_data=payload, version=1
+        )
+        db.add(record)
+    db.commit()
+    db.refresh(record)
+    return {
+        "success": True, "episode_id": episode_id,
+        "version": record.version, "timeline": record.edit_data,
+        "message": "剪辑时间轴已保存到本地项目数据库；不会调用 AI 服务或覆盖原始镜头。",
+    }
