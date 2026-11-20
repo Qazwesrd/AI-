@@ -19,6 +19,16 @@ type ShotItem = {
   error?: string | null;
 };
 
+type EpisodeTimeline = {
+  shot_order: number[];
+  transitions: { after_shot_id: number; transition: "cut" | "fade" | "dissolve"; duration_seconds: number }[];
+  intro_title: string;
+  outro_title: string;
+  music_fade_in_seconds: number;
+  music_fade_out_seconds: number;
+  music_volume: number;
+};
+
 type Readiness = {
   episode_id: number;
   episode_number?: number;
@@ -47,6 +57,61 @@ export default function EpisodeReadinessPage() {
   const [message, setMessage] = useState("");
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
+  const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
+  const [timelineVersion, setTimelineVersion] = useState(0);
+  const [timelineBusy, setTimelineBusy] = useState(false);
+
+  async function loadTimeline(id: number) {
+    try {
+      const response = await fetch(API + "/api/media/video/episodes/" + id + "/timeline");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取剪辑时间轴失败");
+      setTimeline(data.timeline);
+      setTimelineVersion(data.version || 0);
+    } catch (error) {
+      setTimeline(null);
+      setMessage(error instanceof Error ? error.message : "读取剪辑时间轴失败");
+    }
+  }
+
+  function moveShot(shotId: number, direction: -1 | 1) {
+    if (!timeline) return;
+    const order = [...timeline.shot_order];
+    const index = order.indexOf(shotId);
+    const next = index + direction;
+    if (index < 0 || next < 0 || next >= order.length) return;
+    [order[index], order[next]] = [order[next], order[index]];
+    setTimeline({ ...timeline, shot_order: order });
+  }
+
+  function setTransition(shotId: number, transition: "cut" | "fade" | "dissolve") {
+    if (!timeline) return;
+    const index = timeline.shot_order.indexOf(shotId);
+    if (index < 0 || index >= timeline.shot_order.length - 1) return;
+    const existing = timeline.transitions.filter(item => item.after_shot_id !== shotId);
+    if (transition !== "cut") existing.push({ after_shot_id: shotId, transition, duration_seconds: 0.5 });
+    setTimeline({ ...timeline, transitions: existing });
+  }
+
+  async function saveTimeline() {
+    if (!timeline || !report) return;
+    setTimelineBusy(true);
+    try {
+      const response = await fetch(API + "/api/media/video/episodes/" + report.episode_id + "/timeline", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(timeline),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "保存剪辑时间轴失败");
+      setTimelineVersion(data.version || timelineVersion + 1);
+      setMessage(data.message || "剪辑时间轴已保存。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "保存剪辑时间轴失败");
+    } finally {
+      setTimelineBusy(false);
+    }
+  }
 
   async function checkReadiness(clearPreviousRender = true) {
     const id = Number(episodeId);
@@ -63,6 +128,7 @@ export default function EpisodeReadinessPage() {
       if (!response.ok) throw new Error(data.detail || "检查失败");
       setReport(data);
       setMessage(data.message);
+      await loadTimeline(id);
     } catch (error) {
       setReport(null);
       setMessage(error instanceof Error ? error.message : "检查失败");
@@ -163,6 +229,62 @@ export default function EpisodeReadinessPage() {
               </div>
               {!report.ready && <p className="mt-4 text-sm text-amber-200">请先处理下方未通过检查的镜头。已有历史有效视频会保留，并优先选择可正常读取的版本。</p>}
             </section>
+
+            {timeline && (
+              <section className={panel}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-semibold">分集剪辑时间轴</h2>
+                    <p className="mt-1 text-xs text-white/50">本地保存 · 版本 {timelineVersion} · 不调用 AI 服务</p>
+                  </div>
+                  <button disabled={timelineBusy || busy} onClick={() => void saveTimeline()} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">{timelineBusy ? "保存中…" : "保存时间轴"}</button>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="text-sm text-white/65">片头文字
+                    <input value={timeline.intro_title} maxLength={120} onChange={event => setTimeline({ ...timeline, intro_title: event.target.value })} className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" placeholder="例如：第一集 · 初遇" />
+                  </label>
+                  <label className="text-sm text-white/65">片尾文字
+                    <input value={timeline.outro_title} maxLength={120} onChange={event => setTimeline({ ...timeline, outro_title: event.target.value })} className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" placeholder="例如：未完待续" />
+                  </label>
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <label className="text-sm text-white/65">背景音乐音量：{timeline.music_volume.toFixed(2)}
+                    <input type="range" min="0" max="1" step="0.01" value={timeline.music_volume} onChange={event => setTimeline({ ...timeline, music_volume: Number(event.target.value) })} className="mt-2 w-full" />
+                  </label>
+                  <label className="text-sm text-white/65">音乐淡入（秒）
+                    <input type="number" min="0" max="30" step="0.5" value={timeline.music_fade_in_seconds} onChange={event => setTimeline({ ...timeline, music_fade_in_seconds: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" />
+                  </label>
+                  <label className="text-sm text-white/65">音乐淡出（秒）
+                    <input type="number" min="0" max="30" step="0.5" value={timeline.music_fade_out_seconds} onChange={event => setTimeline({ ...timeline, music_fade_out_seconds: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" />
+                  </label>
+                </div>
+                <h3 className="mt-5 font-semibold">镜头顺序与转场</h3>
+                <div className="mt-3 space-y-2">
+                  {timeline.shot_order.map((shotId, index) => {
+                    const shot = report.items.find(item => item.shot_id === shotId);
+                    const transition = timeline.transitions.find(item => item.after_shot_id === shotId);
+                    return (
+                      <div key={shotId} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium">顺序 {index + 1} · 镜头 {shot?.shot_number ?? shotId}</div>
+                          <div className="truncate text-xs text-white/50">{shot?.scene_name || "未命名场景"}</div>
+                        </div>
+                        <button disabled={index === 0} onClick={() => moveShot(shotId, -1)} className="rounded border border-white/15 px-2 py-1 text-sm disabled:opacity-30" aria-label="上移镜头">↑</button>
+                        <button disabled={index === timeline.shot_order.length - 1} onClick={() => moveShot(shotId, 1)} className="rounded border border-white/15 px-2 py-1 text-sm disabled:opacity-30" aria-label="下移镜头">↓</button>
+                        {index < timeline.shot_order.length - 1 && (
+                          <select value={transition?.transition || "cut"} onChange={event => setTransition(shotId, event.target.value as "cut" | "fade" | "dissolve")} className="rounded border border-white/15 bg-slate-900 px-2 py-2 text-sm">
+                            <option value="cut">直接切镜</option>
+                            <option value="fade">淡入淡出</option>
+                            <option value="dissolve">叠化</option>
+                          </select>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-xs text-white/45">保存后，下一次合成才会应用。音乐参数仅作用于已配置的背景音乐轨道。</p>
+              </section>
+            )}
 
             <section className="space-y-3">
               {report.items.map(item => (
