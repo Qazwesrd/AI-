@@ -24,6 +24,14 @@ type ResultAttachment = {
 };
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+const AI_WEB_PROVIDERS = {
+  chatgpt: { label: "ChatGPT", url: "https://chatgpt.com/" },
+  deepseek: { label: "DeepSeek", url: "https://chat.deepseek.com/" },
+  doubao: { label: "豆包", url: "https://www.doubao.com/chat/" },
+  grok: { label: "Grok", url: "https://grok.com/" },
+} as const;
+type AIWebProvider = keyof typeof AI_WEB_PROVIDERS;
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(API + path, {
     ...init,
@@ -49,6 +57,9 @@ export default function AICollaborationPage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState("pending_review");
+  const [aiProvider, setAiProvider] = useState<AIWebProvider>("chatgpt");
+  const [autoOpenAi, setAutoOpenAi] = useState(true);
+  const selectedAi = AI_WEB_PROVIDERS[aiProvider];
 
   const selectedNovel = useMemo(() => novels.find((item) => String(item.id) === novelId), [novels, novelId]);
   const selectedChapter = useMemo(() => chapters.find((item) => String(item.chapter_number) === chapterNumber), [chapters, chapterNumber]);
@@ -124,18 +135,36 @@ export default function AICollaborationPage() {
     finally { setBusy(false); }
   }
 
+  function openSelectedAiWebsite(existingTab?: Window | null) {
+    if (existingTab && !existingTab.closed) {
+      existingTab.location.assign(selectedAi.url);
+      return;
+    }
+    window.open(selectedAi.url, "_blank", "noopener,noreferrer");
+  }
+
   async function prepareHandoff() {
     if (!novelId || !chapterNumber) { setMessage("请先选择小说和章节。"); return; }
-    if (!window.confirm(`即将读取“${selectedNovel?.title || "所选小说"}”第 ${chapterNumber} 章，并将章节正文及已确认分析摘要展示在交接预览中。内容不会自动发送给第三方网站。继续吗？`)) return;
+    if (!window.confirm(`即将读取“${selectedNovel?.title || "所选小说"}”第 ${chapterNumber} 章，并将章节正文及已确认分析摘要展示在交接预览中。只会打开所选 AI 网站，不会自动发送章节内容。继续吗？`)) return;
+    // Open a blank tab synchronously inside the click gesture so popup blockers
+    // do not block the later navigation after the chapter request completes.
+    const aiTab = autoOpenAi ? window.open("about:blank", "_blank") : null;
+    if (aiTab) aiTab.opener = null;
     setBusy(true); setMessage("正在从本地数据库准备章节交接包……");
     try {
       const data = await request<Handoff>(`/api/ai-collaboration/novels/${novelId}/chapters/${chapterNumber}/handoff-package`, {
         method: "POST", body: JSON.stringify({ confirm_selected_chapter: true, include_confirmed_analysis: true }),
       });
       setHandoff(data);
-      setMessage(data.truncated ? "交接包已准备，但章节正文已按长度上限截断，请先确认。" : "交接包已准备。请检查内容后再复制到 AI 网页。");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "交接包准备失败"); }
-    finally { setBusy(false); }
+      if (aiTab && !aiTab.closed) aiTab.location.assign(selectedAi.url);
+      const openNotice = autoOpenAi
+        ? (aiTab ? `已在独立浏览器标签页打开${selectedAi.label}，请手动复制交接包并提交。` : `浏览器拦截了自动打开，请点击“打开${selectedAi.label}网页”。`)
+        : "自动打开已关闭，可稍后手动打开 AI 网页。";
+      setMessage(`${data.truncated ? "交接包已准备，但章节正文已按长度上限截断，请先确认。" : "交接包已准备。"}${openNotice}`);
+    } catch (error) {
+      if (aiTab && !aiTab.closed) aiTab.close();
+      setMessage(error instanceof Error ? error.message : "交接包准备失败");
+    } finally { setBusy(false); }
   }
 
   const handoffText = handoff ? [
@@ -149,7 +178,7 @@ export default function AICollaborationPage() {
 
   async function copyHandoff() {
     if (!handoffText) return;
-    try { await navigator.clipboard.writeText(handoffText); setMessage("交接内容已复制。请自行打开所选 AI 网页并提交；软件不会代替你点击生成。"); }
+    try { await navigator.clipboard.writeText(handoffText); setMessage(`交接内容已复制。请切换到${selectedAi.label}网页手动粘贴并提交；不会自动上传或点击生成。`); }
     catch { setMessage("浏览器不允许自动复制，请选中预览内容手动复制。"); }
   }
 
@@ -215,9 +244,20 @@ export default function AICollaborationPage() {
               </select>
             </label>
           </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+            <label className="text-sm text-slate-300">读取章节后打开哪个 AI 网页？
+              <select value={aiProvider} onChange={(event) => setAiProvider(event.target.value as AIWebProvider)} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-3 text-white">
+                {Object.entries(AI_WEB_PROVIDERS).map(([key, provider]) => <option key={key} value={key}>{provider.label}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950 px-4 py-3 text-sm text-slate-200">
+              <input type="checkbox" checked={autoOpenAi} onChange={(event) => setAutoOpenAi(event.target.checked)} className="h-4 w-4 accent-cyan-500" />
+              读取完成后自动打开 AI 网页
+            </label>
+          </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
-            <button onClick={() => void prepareHandoff()} disabled={busy || !novelId || !chapterNumber} className="rounded-lg bg-gradient-to-r from-violet-600 to-cyan-700 px-5 py-3 text-sm font-semibold disabled:opacity-40">{busy ? "处理中…" : "确认章节并准备交接包"}</button>
-            <span className="text-xs text-slate-400">只交接所选章节和已确认分析摘要，不会自动上传整本小说。</span>
+            <button onClick={() => void prepareHandoff()} disabled={busy || !novelId || !chapterNumber} className="rounded-lg bg-gradient-to-r from-violet-600 to-cyan-700 px-5 py-3 text-sm font-semibold disabled:opacity-40">{busy ? "处理中…" : "读取章节并打开 AI 网页"}</button>
+            <span className="text-xs text-slate-400">只读取所选章节和已确认分析摘要；AI 网页在独立浏览器标签页打开，不会接管或关闭 AI 漫剧大师。</span>
           </div>
           {handoff && <div className="mt-5 space-y-3">
             <div className="flex flex-wrap gap-3 text-xs text-slate-300">
@@ -227,7 +267,11 @@ export default function AICollaborationPage() {
             </div>
             <div className="rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs text-amber-100">{handoff.notice}</div>
             <textarea readOnly value={handoffText} rows={14} className="w-full rounded-xl border border-white/10 bg-slate-950 p-3 text-xs leading-5 text-slate-200" />
-            <button onClick={() => void copyHandoff()} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100">复制完整交接包</button>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => void copyHandoff()} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100">复制完整交接包</button>
+              <button onClick={() => openSelectedAiWebsite()} className="rounded-lg border border-purple-300/30 px-4 py-2 text-sm text-purple-100">打开{selectedAi.label}网页</button>
+            </div>
+            <p className="text-xs leading-5 text-slate-400">软件与 AI 网站相互独立：关闭 AI 网页不会关闭、退出或中断 AI 漫剧大师。章节内容不会自动发送，需你手动复制、粘贴并提交。</p>
           </div>}
         </section>
 
