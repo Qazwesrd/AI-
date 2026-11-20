@@ -29,6 +29,11 @@ type EpisodeTimeline = {
   music_volume: number;
   music_path?: string | null;
   music_name?: string | null;
+  voice_path?: string | null;
+  voice_name?: string | null;
+  voice_volume: number;
+  original_volume: number;
+  sound_effect_tracks: { path: string; name: string; start_seconds: number; volume: number }[];
   subtitle_cues?: { start: number; end: number; text: string }[] | null;
 };
 
@@ -133,6 +138,39 @@ export default function EpisodeReadinessPage() {
       setMessage(data.message || "剪辑时间轴已保存。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存剪辑时间轴失败");
+    } finally {
+      setTimelineBusy(false);
+    }
+  }
+
+  async function uploadAudioTrack(file: File | null, kind: "voice" | "effect") {
+    if (!file || !timeline) return;
+    if (!file.type.startsWith("audio/") && !/\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(file.name)) {
+      setMessage("请选择有效的音频文件。");
+      return;
+    }
+    setTimelineBusy(true);
+    setMessage(kind === "voice" ? "正在保存对白配音轨……" : "正在保存音效素材……");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(API + "/api/media/files/upload?category=audio", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "音频上传失败");
+      if (kind === "voice") {
+        setTimeline({ ...timeline, voice_path: data.path, voice_name: data.name });
+        setMessage("对白配音已保存。合成时将优先使用此配音轨；没有选择时会沿用已生成的分集配音。");
+      } else {
+        setTimeline({
+          ...timeline,
+          sound_effect_tracks: [...(timeline.sound_effect_tracks || []), {
+            path: data.path, name: data.name, start_seconds: 0, volume: 1,
+          }],
+        });
+        setMessage("音效已添加到独立音效轨道。可调整起始时间和音量。");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "音频上传失败");
     } finally {
       setTimelineBusy(false);
     }
@@ -312,6 +350,48 @@ export default function EpisodeReadinessPage() {
                   <label className="text-sm text-white/65">音乐淡出（秒）
                     <input type="number" min="0" max="30" step="0.5" value={timeline.music_fade_out_seconds} onChange={event => setTimeline({ ...timeline, music_fade_out_seconds: Number(event.target.value) })} className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-white" />
                   </label>
+                </div>
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <h3 className="font-semibold">对白配音轨道</h3>
+                  <p className="mt-1 text-xs text-white/45">可上传已有的整集配音音频；未指定时，合成会自动使用已生成的分集对白配音。这里仅导入本地音频，不会请求 AI 生成或产生 API 费用。</p>
+                  {timeline.voice_name && <p className="mt-2 break-all text-sm text-emerald-200">当前配音：{timeline.voice_name}</p>}
+                  <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadAudioTrack(event.target.files?.[0] || null, "voice")} className="mt-3 block w-full text-xs" />
+                  {timeline.voice_path && <button type="button" onClick={() => setTimeline({ ...timeline, voice_path: null, voice_name: null })} className="mt-2 rounded border border-white/15 px-3 py-1 text-xs">移除自定义配音（恢复使用已生成配音）</button>}
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="text-sm text-white/65">对白配音音量：{(timeline.voice_volume ?? 1).toFixed(2)}
+                      <input type="range" min="0" max="2" step="0.01" value={timeline.voice_volume ?? 1} onChange={event => setTimeline({ ...timeline, voice_volume: Number(event.target.value) })} className="mt-2 w-full" />
+                    </label>
+                    <label className="text-sm text-white/65">镜头原声音量：{(timeline.original_volume ?? 0.35).toFixed(2)}
+                      <input type="range" min="0" max="2" step="0.01" value={timeline.original_volume ?? 0.35} onChange={event => setTimeline({ ...timeline, original_volume: Number(event.target.value) })} className="mt-2 w-full" />
+                    </label>
+                  </div>
+                </div>
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-semibold">独立音效轨道</h3>
+                      <p className="mt-1 text-xs text-white/45">可添加多个音效文件，并分别设置在成片中的起始秒数和音量。</p>
+                    </div>
+                    <label className="cursor-pointer rounded-lg border border-amber-300/30 px-3 py-2 text-xs text-amber-100">
+                      添加音效
+                      <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadAudioTrack(event.target.files?.[0] || null, "effect")} className="hidden" />
+                    </label>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {(timeline.sound_effect_tracks || []).map((effect, index) => (
+                      <div key={effect.path + "-" + index} className="grid gap-2 rounded-lg border border-white/10 p-3 md:grid-cols-[1fr_120px_1fr_auto]">
+                        <div className="min-w-0 break-all text-sm">{effect.name || ("音效 " + (index + 1))}</div>
+                        <label className="text-xs text-white/55">起始时间（秒）
+                          <input type="number" min="0" max="900" step="0.05" value={effect.start_seconds} onChange={event => setTimeline({ ...timeline, sound_effect_tracks: timeline.sound_effect_tracks.map((item, i) => i === index ? { ...item, start_seconds: Number(event.target.value) } : item) })} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-2 py-2 text-white" />
+                        </label>
+                        <label className="text-xs text-white/55">音量：{effect.volume.toFixed(2)}
+                          <input type="range" min="0" max="2" step="0.01" value={effect.volume} onChange={event => setTimeline({ ...timeline, sound_effect_tracks: timeline.sound_effect_tracks.map((item, i) => i === index ? { ...item, volume: Number(event.target.value) } : item) })} className="mt-2 w-full" />
+                        </label>
+                        <button type="button" onClick={() => setTimeline({ ...timeline, sound_effect_tracks: timeline.sound_effect_tracks.filter((_, i) => i !== index) })} className="self-end rounded border border-rose-300/30 px-3 py-2 text-xs text-rose-200">删除</button>
+                      </div>
+                    ))}
+                    {!(timeline.sound_effect_tracks || []).length && <p className="text-xs text-white/45">尚未添加音效文件。</p>}
+                  </div>
                 </div>
                 <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
                   <h3 className="font-semibold">背景音乐轨道</h3>
