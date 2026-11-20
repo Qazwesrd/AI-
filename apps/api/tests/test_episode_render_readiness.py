@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models.media import MediaTask
+from app.models.media import MediaFile, MediaTask
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot
 from app.routers import media
 
@@ -25,7 +25,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
             self.engine,
             tables=[
                 StoryProject.__table__, EpisodePlan.__table__,
-                StoryboardShot.__table__, MediaTask.__table__,
+                StoryboardShot.__table__, MediaTask.__table__, MediaFile.__table__,
             ],
         )
         self.Session = sessionmaker(bind=self.engine)
@@ -91,12 +91,17 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         b.write_bytes(b"video")
         self.add_task(self.shot_a, path=a)
         self.add_task(self.shot_b, path=b)
+        self.db.add(MediaFile(
+            name="a.mp4", category="video", file_path=str(a),
+            mime_type="video/mp4", file_size=a.stat().st_size,
+        ))
+        self.db.commit()
         with patch.object(media, "safe_storage_file", side_effect=self.safe_existing_path), \
              patch.object(media, "probe_media", side_effect=self.probe_ok):
             result = self.call_readiness()
         self.assertTrue(result["ready"])
         self.assertEqual(result["ready_count"], 2)
-        self.assertEqual([item["status"] for item in result["items"]], ["ready", "ready"])
+        self.assertEqual([item["status"] for item in result["items"]], ["ready", "ready"])\n        self.assertEqual(result["items"][0]["video"]["preview_url"], f"/api/media/files/1/download")
 
     def test_missing_shot_is_reported(self):
         a = self.storage / "a.mp4"
