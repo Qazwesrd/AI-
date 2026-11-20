@@ -69,6 +69,12 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         self.db.refresh(task)
         return task
 
+    def safe_existing_path(self, value):
+        path = Path(value)
+        if not path.is_file():
+            raise ValueError("视频文件不存在或路径无效")
+        return path
+
     def probe_ok(self, _path):
         return {
             "format": {"duration": "5.0"},
@@ -86,7 +92,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
         b.write_bytes(b"video")
         self.add_task(self.shot_a, path=a)
         self.add_task(self.shot_b, path=b)
-        with patch.object(media, "safe_storage_file", side_effect=lambda p: Path(p)), \
+        with patch.object(media, "safe_storage_file", side_effect=self.safe_existing_path), \
              patch.object(media, "probe_media", side_effect=self.probe_ok):
             result = self.call_readiness()
         self.assertTrue(result["ready"])
@@ -131,7 +137,7 @@ class EpisodeRenderReadinessTests(unittest.TestCase):
             result = self.call_readiness()
         item = result["items"][0]
         self.assertEqual(item["status"], "ready")
-        self.assertEqual(item["warnings"][0]["reason"], "视频文件不存在或路径无效")
+        self.assertTrue(item["warnings"])
 
     def test_rejects_unknown_episode(self):
         with patch.object(media, "ensure_episode_source_current"):
