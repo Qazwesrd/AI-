@@ -74,3 +74,15 @@ class StoryAssetLink(Base):
     chapter_number = Column(Integer, nullable=True, index=True)
     state_snapshot = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+
+class EpisodeEditTimeline(Base):
+    __tablename__ = "episode_edit_timelines"
+
+    id = Column(Integer, primary_key=True, index=True)
+    episode_id = Column(Integer, nullable=False, unique=True, index=True)
+    edit_data = Column(JSON, nullable=False, default=dict)
+    version = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

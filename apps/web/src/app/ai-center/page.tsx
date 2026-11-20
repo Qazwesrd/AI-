@@ -20,9 +20,9 @@ const presets = [
   { id: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com", model: "deepseek-chat", paid: true, purpose: "text" },
   { id: "doubao", name: "豆包", url: "https://ark.cn-beijing.volces.com/api/v3", model: "", paid: true, purpose: "image" },
   { id: "openai", name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", paid: true, purpose: "text" },
-  { id: "grok", name: "Grok", url: "https://api.x.ai/v1", model: "grok-3-mini", paid: true, purpose: "text" },
+  { id: "xai", name: "Grok（xAI）", url: "https://api.x.ai/v1", model: "", paid: true, purpose: "text" },
   { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
-  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: false, purpose: "text" },
+  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: true, purpose: "text" },
   { id: "custom_video", name: "自定义视频生成服务商", url: "", model: "", paid: true, purpose: "video" },
   { id: "tripo3d", name: "Tripo AI 三维模型", url: "https://openapi.tripo3d.ai/v3", model: "v3.1-20260211", paid: true, purpose: "3d" },
 ];
@@ -75,6 +75,17 @@ export default function AICenterPage() {
   }
 
   async function save() {
+    const existing = providers.find((item) => item.provider === selected.id);
+    if (enabled && (!baseUrl.trim() || !model.trim() || (!apiKey.trim() && !existing?.has_api_key))) {
+      setMessage("启用服务商前，请填写 API 地址、模型名称，并配置 API 密钥。");
+      return;
+    }
+    if (baseUrl.trim()) {
+      try { new URL(baseUrl.trim()); } catch {
+        setMessage("API 地址格式不正确，请填写完整的 http:// 或 https:// 地址。");
+        return;
+      }
+    }
     try {
       await api("/api/ai/providers", {
         method: "POST",
@@ -136,6 +147,7 @@ export default function AICenterPage() {
           <a href="/" className="text-sm text-purple-300">← 返回首页</a>
           <h1 className="mt-3 text-3xl font-black">⚙️ AI 模型管理中心</h1>
           <p className="mt-2 text-sm text-purple-200">配置 AI 服务、控制网络权限、管理调用记录</p>
+          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">费用安全提示：本页面不会读取服务商实时余额、套餐价格或免费额度。所有服务默认按付费服务保护；只有你已向服务商核实当前额度确实免费且不会自动转为付费时，才可自行调整计费标记。</p>
         </header>
 
         {message && <div className="mb-5 rounded-xl border border-purple-400/30 bg-purple-950/70 p-3 text-sm">{message}</div>}
@@ -216,7 +228,7 @@ export default function AICenterPage() {
                 {logs.map((log) => (
                   <div key={log.id} className="flex flex-wrap justify-between gap-2 rounded-lg bg-black/20 p-3 text-xs">
                     <span>{log.provider} · {log.model} · {log.task}</span>
-                    <span className={log.status === "success" ? "text-emerald-300" : "text-red-300"}>{log.status}</span>
+                    <span className={log.status === "success" ? "text-emerald-300" : log.status === "submission_unknown" ? "text-amber-200" : "text-red-300"}>{log.status === "submission_unknown" ? "提交结果待核实" : log.status === "success" ? "成功" : "失败"}</span>
                   </div>
                 ))}
                 {logs.length === 0 && <p className="text-sm text-purple-300">暂无调用记录。</p>}

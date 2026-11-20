@@ -932,6 +932,137 @@ def link_asset(shot_id: int, payload: AssetLinkInput, db: Session = Depends(get_
     return {"success": True, "link_id": link.id, "state_snapshot": snapshot}
 
 
+def build_episode_asset_consistency_report(shot_rows):
+    expected_categories = {
+        "character": {"characters"},
+        "scene": {"scenes"},
+        "prop": {"props", "special_items"},
+        "weapon": {"weapons"},
+        "costume": {"costumes"},
+        "building": {"buildings"},
+        "special_item": {"special_items"},
+        "visual": {"characters", "scenes", "props", "weapons", "costumes", "buildings", "special_items"},
+    }
+    issues = []
+    checked_links = 0
+    for shot in shot_rows:
+        shot_id = shot["id"]
+        shot_number = shot["shot_number"]
+        links = shot.get("links") or []
+        roles = {link.get("role") for link in links}
+        categories = {
+            (link.get("asset") or {}).get("category")
+            for link in links if isinstance(link.get("asset"), dict)
+        }
+        if not links:
+            issues.append({
+                "shot_id": shot_id, "shot_number": shot_number,
+                "code": "no_visual_assets", "severity": "warning",
+                "message": "该镜头尚未关联任何视觉素材。",
+            })
+        if (shot.get("scene_name") or "").strip() and "scene" not in roles and "scenes" not in categories:
+            issues.append({
+                "shot_id": shot_id, "shot_number": shot_number,
+                "code": "missing_scene_asset", "severity": "warning",
+                "message": "镜头填写了场景名称，但尚未关联场景素材。",
+            })
+        for link in links:
+            checked_links += 1
+            asset = link.get("asset") or {}
+            asset_id = link.get("asset_id")
+            role = link.get("role") or "visual"
+            category = asset.get("category")
+            base = {
+                "shot_id": shot_id, "shot_number": shot_number,
+                "asset_id": asset_id, "asset_name": asset.get("name") or "未知素材",
+            }
+            if not asset:
+                issues.append({**base, "code": "missing_asset", "severity": "error",
+                               "message": "关联的视觉素材记录不存在。"})
+                continue
+            allowed = expected_categories.get(role, expected_categories["visual"])
+            if category not in allowed:
+                issues.append({**base, "code": "role_category_mismatch", "severity": "error",
+                               "message": f"关联角色“{role}”与素材分类“{category}”不匹配。"})
+            if not asset.get("confirmed"):
+                issues.append({**base, "code": "asset_not_confirmed", "severity": "warning",
+                               "message": "该素材尚未审核确认，正式生成前请先检查并确认。"})
+            owner = (asset.get("data") or {}).get("source_novel_id") if isinstance(asset.get("data"), dict) else None
+            if owner not in (None, "") and str(owner) != str(shot.get("novel_id")):
+                issues.append({**base, "code": "foreign_novel_asset", "severity": "error",
+                               "message": "该素材来源于其他小说，不能用于当前改编项目。"})
+            if not link.get("state_snapshot"):
+                issues.append({**base, "code": "missing_state_snapshot", "severity": "warning",
+                               "message": "该关联缺少剧情状态快照，建议重新确认素材关联。"})
+            if link.get("newer_state_available"):
+                issues.append({**base, "code": "newer_state_available", "severity": "warning",
+                               "message": "素材在后续章节发生变化；本镜头仍锁定旧状态，请核对是否符合当前剧情。"})
+    errors = sum(1 for issue in issues if issue["severity"] == "error")
+    warnings = sum(1 for issue in issues if issue["severity"] == "warning")
+    return {
+        "success": True,
+        "shot_count": len(shot_rows),
+        "checked_link_count": checked_links,
+        "error_count": errors,
+        "warning_count": warnings,
+        "ready": errors == 0 and warnings == 0,
+        "issues": issues,
+        "note": "这是本地规则检查，不调用 AI 或第三方服务；警告需要人工判断，不会自动替换或修改素材。",
+    }
+
+
+@router.get("/episodes/{episode_id}/asset-consistency")
+def check_episode_asset_consistency(episode_id: int, db: Session = Depends(get_db)):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if episode is None:
+        raise HTTPException(404, "分集不存在")
+    project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
+    if project is None:
+        raise HTTPException(404, "分集所属改编项目不存在")
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.episode_id == episode_id,
+        StoryboardShot.project_id == episode.project_id,
+    ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+    report_rows = []
+    for shot in shots:
+        links = db.query(StoryAssetLink).filter(
+            StoryAssetLink.shot_id == shot.id,
+            StoryAssetLink.project_id == project.id,
+        ).all()
+        serialized_links = []
+        for link in links:
+            asset = db.query(VisualAsset).filter(VisualAsset.id == link.asset_id).first()
+            if asset is None:
+                serialized_links.append({"asset_id": link.asset_id, "role": link.role})
+                continue
+            locked = link.state_snapshot or snapshot_asset_state(asset, link.chapter_number)
+            latest = snapshot_asset_state(asset, None)
+            locked_chapter = link.chapter_number
+            latest_chapter = latest.get("chapter_number")
+            serialized_links.append({
+                "asset_id": asset.id,
+                "role": link.role,
+                "state_snapshot": locked,
+                "newer_state_available": bool(
+                    locked_chapter is not None and latest_chapter is not None
+                    and int(latest_chapter) > int(locked_chapter)
+                ),
+                "asset": {
+                    "name": asset.name, "category": asset.category,
+                    "confirmed": bool(asset.confirmed), "data": asset.data or {},
+                },
+            })
+        report_rows.append({
+            "id": shot.id, "shot_number": shot.shot_number,
+            "scene_name": shot.scene_name, "novel_id": project.novel_id,
+            "links": serialized_links,
+        })
+    report = build_episode_asset_consistency_report(report_rows)
+    report.update({"episode_id": episode.id, "episode_number": episode.episode_number,
+                   "project_id": project.id})
+    return report
+
+
 @router.get("/shots/{shot_id}/assets")
 def get_shot_assets(shot_id: int, db: Session = Depends(get_db)):
     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()

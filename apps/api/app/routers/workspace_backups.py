@@ -23,6 +23,33 @@ MAX_ARCHIVE_UNPACKED_BYTES = 200 * 1024 * 1024 * 1024
 MAX_ARCHIVE_FILES = 200000
 
 
+def _verify_archive_stream_limits(archive, infos=None):
+    """Read every member in bounded chunks and enforce limits on actual output bytes."""
+    entries = infos if infos is not None else archive.infolist()
+    actual_total = 0
+    for info in entries:
+        if info.is_dir():
+            continue
+        actual_member = 0
+        try:
+            with archive.open(info, "r") as source:
+                while True:
+                    chunk = source.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    actual_member += len(chunk)
+                    actual_total += len(chunk)
+                    if actual_member > MAX_ARCHIVE_UNPACKED_BYTES:
+                        raise ValueError("归档单个文件实际解压后超过 200 GB 安全限制")
+                    if actual_total > MAX_ARCHIVE_UNPACKED_BYTES:
+                        raise ValueError("归档实际解压总量超过 200 GB 安全限制")
+        except (zipfile.BadZipFile, RuntimeError, EOFError, OSError) as exc:
+            raise ValueError("归档成员损坏或无法安全解压：" + info.filename) from exc
+        if actual_member != info.file_size:
+            raise ValueError("归档成员实际解压大小与声明不一致：" + info.filename)
+    return actual_total
+
+
 def _is_inside(path: Path, parent: Path) -> bool:
     try:
         path.resolve().relative_to(parent.resolve())
@@ -69,9 +96,7 @@ def _create_workspace_archive(prefix="workspace"):
             }
             archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         with zipfile.ZipFile(destination, "r") as archive:
-            bad_file = archive.testzip()
-            if bad_file:
-                raise RuntimeError("归档完整性检查失败：" + bad_file)
+            _verify_archive_stream_limits(archive)
         return destination, manifest
     except Exception:
         destination.unlink(missing_ok=True)
@@ -106,12 +131,10 @@ def _validate_workspace_archive(path: Path):
                 raise ValueError("归档缺少数据库快照")
             if "manifest.json" not in names:
                 raise ValueError("归档缺少清单文件")
-            bad_file = archive.testzip()
-            if bad_file:
-                raise ValueError("归档文件损坏：" + bad_file)
-            return {"file_count": len(infos), "unpacked_bytes": total}
-    except zipfile.BadZipFile as exc:
-        raise ValueError("文件不是有效的 ZIP 工作空间归档") from exc
+            actual_total = _verify_archive_stream_limits(archive, infos)
+            return {"file_count": len(infos), "unpacked_bytes": actual_total}
+    except (zipfile.BadZipFile, OSError, EOFError) as exc:
+        raise ValueError("文件不是有效或完整的 ZIP 工作空间归档") from exc
 
 
 def _extract_workspace_archive(archive_path: Path, destination: Path):

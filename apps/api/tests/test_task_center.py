@@ -3,7 +3,7 @@ from unittest.mock import patch, Mock
 
 from fastapi import HTTPException
 
-from app.routers.tasks import _status_group, control_unified_task, is_known_remote_3d_task
+from app.routers.tasks import _counts_from_task_items, _status_group, control_unified_task, is_known_remote_3d_task
 
 
 class UnifiedTaskStatusTests(unittest.TestCase):
@@ -39,6 +39,29 @@ class UnifiedTaskStatusTests(unittest.TestCase):
     def test_unknown_status_is_preserved_as_other(self):
         self.assertEqual(_status_group("provider_custom_state"), "other")
         self.assertEqual(_status_group(None), "other")
+
+    def test_project_task_counts_are_scoped_and_keep_all_sources(self):
+        items = [
+            {"source": "media", "status_group": "completed"},
+            {"source": "media", "status_group": "attention"},
+            {"source": "image", "status_group": "failed"},
+            {"source": "analysis", "status_group": "active"},
+        ]
+        counts, by_source = _counts_from_task_items(items)
+        self.assertEqual(counts["total"], 4)
+        self.assertEqual(counts["completed"], 1)
+        self.assertEqual(counts["attention"], 1)
+        self.assertEqual(counts["failed"], 1)
+        self.assertEqual(counts["active"], 1)
+        self.assertEqual(by_source["media"]["total"], 2)
+        self.assertEqual(by_source["image"]["failed"], 1)
+        self.assertEqual(by_source["analysis"]["active"], 1)
+
+    def test_project_task_counts_handle_empty_projects(self):
+        counts, by_source = _counts_from_task_items([])
+        self.assertEqual(counts["total"], 0)
+        self.assertEqual(counts["attention"], 0)
+        self.assertEqual(by_source, {})
 
     def test_unified_image_pause_delegates_to_existing_safe_handler(self):
         with patch("app.routers.tasks.pause_image_task", return_value={"success": True}) as handler:

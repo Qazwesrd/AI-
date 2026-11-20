@@ -162,9 +162,8 @@ async def import_txt(
         raise HTTPException(404, "小说不存在")
 
     filename = file.filename or "novel.txt"
-    raw = await file.read()
     try:
-        text = extract_document_text(filename, raw)
+        text = extract_document_text(filename, file.file)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     parts = split_chapters(text)

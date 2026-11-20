@@ -184,6 +184,9 @@ export default function Home() {
               <span className="status-dot" />
               <span>本地工作空间</span>
             </div>
+            <a href="/workspace" className="rounded-full border border-fuchsia-300/30 bg-purple-950/60 px-4 py-2 text-sm text-fuchsia-100 transition hover:bg-purple-800/60">
+              🧭 打开项目工作台
+            </a>
           </header>
 
           {/* 欢迎区域 */}

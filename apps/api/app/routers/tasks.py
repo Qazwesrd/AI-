@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaTask
 from app.models.novel import Novel, NovelAnalysisJob
+from app.models.story import StoryProject, EpisodePlan, StoryAssetLink
 from app.models.studio import AIUsageLog
 from app.models.visual import ImageTask, VisualAsset
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
@@ -78,6 +79,23 @@ def _group_counts(db: Session, model, status_column):
         result[group] += int(count)
         result["total"] += int(count)
     return result
+
+def _counts_from_task_items(items):
+    keys = ("total", "active", "completed", "failed", "cancelled", "paused", "partial", "attention", "other")
+    counts = {key: 0 for key in keys}
+    by_source = {}
+    for item in items:
+        source = item.get("source") or "other"
+        if source not in by_source:
+            by_source[source] = {key: 0 for key in keys}
+        group = item.get("status_group") or "other"
+        if group not in counts or group == "total":
+            group = "other"
+        counts["total"] += 1
+        counts[group] += 1
+        by_source[source]["total"] += 1
+        by_source[source][group] += 1
+    return counts, by_source
 
 
 
@@ -248,6 +266,7 @@ def list_unified_tasks(
     task_type: Optional[str] = Query(default=None, max_length=60),
     status: Optional[str] = Query(default=None, max_length=40),
     q: Optional[str] = Query(default=None, max_length=120),
+    project_id: Optional[int] = Query(default=None, ge=1),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -263,10 +282,37 @@ def list_unified_tasks(
         .all()
     )
 
+    projects = db.query(StoryProject).all()
+    project_by_id = {project.id: project for project in projects}
+    selected_project = project_by_id.get(project_id) if project_id else None
+    selected_novel_id = selected_project.novel_id if selected_project else None
+    episode_project_ids = {
+        episode.id: episode.project_id
+        for episode in db.query(EpisodePlan).all()
+    }
+    asset_project_ids = {}
+    for link in db.query(StoryAssetLink).all():
+        asset_project_ids.setdefault(link.asset_id, set()).add(link.project_id)
+    novel_project_ids = {}
+    for project in projects:
+        novel_project_ids.setdefault(project.novel_id, []).append(project.id)
+
     items = []
     for task in media_rows:
         meta = task.request_data if isinstance(task.request_data, dict) else {}
         kind = task.task_type or "media"
+        raw_episode_id = meta.get("episode_id")
+        try:
+            episode_project_id = episode_project_ids.get(int(raw_episode_id)) if raw_episode_id else None
+        except (TypeError, ValueError):
+            episode_project_id = None
+        task_project_id = meta.get("project_id") or episode_project_id
+        try:
+            task_project_id = int(task_project_id) if task_project_id is not None else None
+        except (TypeError, ValueError):
+            task_project_id = None
+        if project_id and task_project_id != project_id:
+            continue
         title_map = {
             "storyboard_video": "分镜视频生成",
             "video": "独立视频生成",
@@ -275,6 +321,7 @@ def list_unified_tasks(
         }
         items.append({
             "id": f"media:{task.id}", "source": "media", "source_id": task.id,
+            "project_id": task_project_id,
             "type": kind, "title": title_map.get(kind, "媒体任务"),
             "status": task.status or "unknown", "status_group": _status_group(task.status),
             "provider": task.provider or "", "model": task.model or "",
@@ -288,8 +335,13 @@ def list_unified_tasks(
         })
 
     for task in image_rows:
+        linked_projects = asset_project_ids.get(task.asset_id, set()) if task.asset_id else set()
+        if project_id and project_id not in linked_projects:
+            continue
+        task_project_id = next(iter(linked_projects)) if len(linked_projects) == 1 else None
         items.append({
             "id": f"image:{task.id}", "source": "image", "source_id": task.id,
+            "project_id": task_project_id,
             "type": task.task_type or "image", "title": "视觉素材生成",
             "status": task.status or "unknown", "status_group": _status_group(task.status),
             "provider": task.provider or "", "model": task.model or "",
@@ -301,6 +353,10 @@ def list_unified_tasks(
         })
 
     for job, novel_title in analysis_rows:
+        job_project_ids = novel_project_ids.get(job.novel_id, [])
+        if project_id and selected_novel_id != job.novel_id:
+            continue
+        job_project_id = job_project_ids[0] if len(job_project_ids) == 1 else (project_id if project_id and selected_novel_id == job.novel_id else None)
         # The job row intentionally stores a concise safety state. The usage log
         # retains the provider/network exception so the user can diagnose an
         # uncertain submission without exposing credentials or retrying it.
@@ -318,6 +374,7 @@ def list_unified_tasks(
                 diagnostic_error = (diagnostic_error + "\\n服务商/网络错误详情：" + provider_detail)[:2400]
         items.append({
             "id": f"analysis:{job.id}", "source": "analysis", "source_id": job.id,
+            "project_id": job_project_id, "novel_id": job.novel_id,
             "type": "novel_analysis", "title": "小说深度解析",
             "status": job.status or "unknown", "status_group": _status_group(job.status),
             "provider": job.provider or "", "model": job.model or "",
@@ -330,6 +387,7 @@ def list_unified_tasks(
             "can_open": True,
         })
 
+    project_scoped_items = list(items) if project_id else []
     if task_type:
         items = [item for item in items if item["type"] == task_type or item["source"] == task_type]
     if status:
@@ -343,10 +401,16 @@ def list_unified_tasks(
     total_filtered = len(items)
     page = items[offset:offset + limit]
 
-    media_counts = _group_counts(db, MediaTask, MediaTask.status)
-    image_counts = _group_counts(db, ImageTask, ImageTask.status)
-    analysis_counts = _group_counts(db, NovelAnalysisJob, NovelAnalysisJob.status)
-    totals = {key: media_counts[key] + image_counts[key] + analysis_counts[key] for key in media_counts}
+    if project_id:
+        totals, scoped_by_source = _counts_from_task_items(project_scoped_items)
+        media_counts = scoped_by_source.get("media", _counts_from_task_items([])[0])
+        image_counts = scoped_by_source.get("image", _counts_from_task_items([])[0])
+        analysis_counts = scoped_by_source.get("analysis", _counts_from_task_items([])[0])
+    else:
+        media_counts = _group_counts(db, MediaTask, MediaTask.status)
+        image_counts = _group_counts(db, ImageTask, ImageTask.status)
+        analysis_counts = _group_counts(db, NovelAnalysisJob, NovelAnalysisJob.status)
+        totals = {key: media_counts[key] + image_counts[key] + analysis_counts[key] for key in media_counts}
 
     return {
         "items": page,
@@ -361,7 +425,7 @@ def list_unified_tasks(
             "analysis": analysis_counts,
         },
         "generated_at": datetime.utcnow().isoformat(),
-        "note": "任务中心为跨模块只读汇总；各模块原有的暂停、恢复、重试、轮询和付费确认规则保持不变。",
+        "note": "任务中心为跨模块只读汇总；支持按改编项目筛选，未关联到该项目的任务不会显示。各模块原有的暂停、恢复、重试、轮询和付费确认规则保持不变。",
     }
 
 

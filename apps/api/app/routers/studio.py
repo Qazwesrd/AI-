@@ -41,6 +41,23 @@ def decrypt_key(value):
     except InvalidToken:
         raise HTTPException(500, "API密钥解密失败，请检查本地密钥文件")
 
+def record_ai_submission_unknown(db, provider, model, task, error):
+    detail = (
+        "请求发送阶段发生异常，无法确认服务商是否已接收或计费；"
+        "请先核对服务商控制台的请求记录和用量，不要直接重复提交。 "
+        + str(error)[:1600]
+    )
+    db.add(AIUsageLog(
+        provider=provider,
+        model=model,
+        task=task,
+        status="submission_unknown",
+        detail=detail[:2000],
+    ))
+    db.commit()
+    return detail[:2000]
+
+
 def runtime(db):
     row = db.query(AIRuntimeSetting).first()
     if not row:
@@ -268,15 +285,14 @@ def ai_chat(payload: ChatInput, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(exc.code, f"模型服务返回错误：{detail}")
     except Exception as exc:
-        db.add(AIUsageLog(
-            provider=config.provider,
-            model=config.model,
-            task=payload.task,
-            status="failed",
-            detail=str(exc)[:2000],
-        ))
-        db.commit()
-        raise HTTPException(502, f"模型请求失败：{str(exc)}")
+        detail = record_ai_submission_unknown(
+            db, config.provider, config.model, payload.task, exc
+        )
+        raise HTTPException(
+            502,
+            "模型请求提交结果无法确认。请先核对服务商控制台的请求记录和用量；"
+            "确认未受理后再决定是否重试。详情：" + detail,
+        )
 
 RESOURCE_CATEGORIES = {
     "characters", "relationships", "scenes", "props", "world",

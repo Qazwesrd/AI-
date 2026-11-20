@@ -1,13 +1,92 @@
-﻿from pathlib import Path
+﻿import codecs
+from pathlib import Path
 import posixpath
 from urllib.parse import unquote
 from io import BytesIO
 import zipfile
+import zlib
 import xml.etree.ElementTree as ET
 
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
+MAX_ARCHIVE_EXPANDED_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 256 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 50000
+ARCHIVE_READ_CHUNK_BYTES = 1024 * 1024
+
+
+def _as_binary_stream(raw):
+    if hasattr(raw, "read") and hasattr(raw, "seek"):
+        raw.seek(0)
+        return raw
+    return BytesIO(raw)
+
+
+def _verify_compressed_archive(archive):
+    """Enforce ZIP limits using actual streamed output, not only central-directory metadata."""
+    entries = archive.infolist()
+    if len(entries) > MAX_ARCHIVE_ENTRIES:
+        raise ValueError("文档压缩包内文件数量过多，已拒绝解析")
+
+    declared_total = 0
+    for entry in entries:
+        if entry.file_size < 0 or entry.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+            raise ValueError("文档压缩包包含超出单文件解压限制的内容")
+        declared_total += entry.file_size
+        if declared_total > MAX_ARCHIVE_EXPANDED_BYTES:
+            raise ValueError("文档解压后超过 512 MB 安全限制，已拒绝解析")
+
+    actual_total = 0
+    try:
+        for entry in entries:
+            if entry.is_dir():
+                continue
+            actual_member = 0
+            with archive.open(entry, "r") as source:
+                while True:
+                    chunk = source.read(ARCHIVE_READ_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    actual_member += len(chunk)
+                    actual_total += len(chunk)
+                    if actual_member > MAX_ARCHIVE_MEMBER_BYTES:
+                        raise ValueError("文档压缩包单个文件实际解压后超过 256 MB 安全限制")
+                    if actual_total > MAX_ARCHIVE_EXPANDED_BYTES:
+                        raise ValueError("文档压缩包实际解压总量超过 512 MB 安全限制")
+            if actual_member != entry.file_size:
+                raise ValueError("文档压缩包成员实际解压大小与声明不一致")
+    except (zipfile.BadZipFile, RuntimeError, EOFError, OSError, zlib.error, NotImplementedError) as exc:
+        raise ValueError("DOCX/EPUB 压缩包损坏或无法安全解压") from exc
+    return actual_total
+
+
+def validate_compressed_document(raw):
+    """Reject ZIP-based documents whose declared and actual expansion exceeds safe limits."""
+    try:
+        with zipfile.ZipFile(_as_binary_stream(raw)) as archive:
+            _verify_compressed_archive(archive)
+    except zipfile.BadZipFile as exc:
+        raise ValueError("DOCX/EPUB 文件不是有效的 ZIP 文档") from exc
+
 
 def decode_text(raw):
+    if hasattr(raw, "read") and hasattr(raw, "seek"):
+        last_error = None
+        for encoding in ("utf-8-sig", "utf-8", "gb18030", "big5"):
+            raw.seek(0)
+            decoder = codecs.getincrementaldecoder(encoding)()
+            parts = []
+            try:
+                while True:
+                    chunk = raw.read(ARCHIVE_READ_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    parts.append(decoder.decode(chunk))
+                parts.append(decoder.decode(b"", final=True))
+                return "".join(parts)
+            except UnicodeDecodeError as exc:
+                last_error = exc
+        raise ValueError("无法识别文本编码，请转换为 UTF-8") from last_error
+
     for encoding in ("utf-8-sig", "utf-8", "gb18030", "big5"):
         try:
             return raw.decode(encoding)
@@ -16,9 +95,15 @@ def decode_text(raw):
     raise ValueError("无法识别文本编码，请转换为 UTF-8")
 
 def docx_text(raw):
-    with zipfile.ZipFile(BytesIO(raw)) as z:
-        xml = z.read("word/document.xml")
-    root = ET.fromstring(xml)
+    validate_compressed_document(raw)
+    try:
+        with zipfile.ZipFile(_as_binary_stream(raw)) as z:
+            xml = z.read("word/document.xml")
+        root = ET.fromstring(xml)
+    except KeyError as exc:
+        raise ValueError("DOCX 文件缺少正文文档，无法导入") from exc
+    except ET.ParseError as exc:
+        raise ValueError("DOCX 正文 XML 损坏，无法导入") from exc
     ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
     result = []
     for p in root.findall(".//w:p", ns):
@@ -28,7 +113,8 @@ def docx_text(raw):
     return "\n".join(result)
 
 def epub_text(raw):
-    with zipfile.ZipFile(BytesIO(raw)) as z:
+    validate_compressed_document(raw)
+    with zipfile.ZipFile(_as_binary_stream(raw)) as z:
         archive_names = set(z.namelist())
         names = []
 
@@ -91,8 +177,11 @@ def pdf_text(raw):
         from pypdf import PdfReader
     except ImportError as exc:
         raise ValueError("PDF 解析依赖未安装") from exc
-    reader = PdfReader(BytesIO(raw))
-    text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
+    try:
+        reader = PdfReader(_as_binary_stream(raw))
+        text = "\n\n".join(p.extract_text() or "" for p in reader.pages).strip()
+    except Exception as exc:
+        raise ValueError("PDF 文件损坏或无法读取") from exc
     if not text:
         raise ValueError("PDF 没有可提取文字，可能是扫描图片版，当前未配置 OCR")
     return text
@@ -105,9 +194,18 @@ def rtf_text(raw):
     return rtf_to_text(decode_text(raw))
 
 def extract_document_text(filename, raw):
-    if len(raw) > MAX_UPLOAD_BYTES:
+    if hasattr(raw, "read") and hasattr(raw, "seek"):
+        try:
+            raw.seek(0, 2)
+            upload_size = raw.tell()
+            raw.seek(0)
+        except (OSError, AttributeError) as exc:
+            raise ValueError("上传文件必须支持安全的大小检查和随机读取") from exc
+    else:
+        upload_size = len(raw)
+    if upload_size > MAX_UPLOAD_BYTES:
         raise ValueError("文件不能超过 1 GB")
-    if not raw:
+    if upload_size == 0:
         raise ValueError("文件内容为空")
     ext = Path(filename or "").suffix.lower()
     if ext in (".txt", ".md", ".markdown", ".csv", ".log"):

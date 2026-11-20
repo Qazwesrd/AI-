@@ -3,8 +3,8 @@ name: Project quality checks
 on:
   push:
     branches: [master]
+  # Run quality checks for stacked feature PRs as well as PRs targeting master.
   pull_request:
-    branches: [master]
   workflow_dispatch:
 
 jobs:

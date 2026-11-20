@@ -119,6 +119,14 @@ export default function VisualStudioPage() {
   useEffect(() => { loadNovels(); }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedCategory = params.get("category");
+    const requestedNovelId = params.get("novelId");
+    if (requestedCategory && categories.some((item) => item.key === requestedCategory)) setCategory(requestedCategory);
+    if (requestedNovelId) setSourceNovelId(requestedNovelId);
+  }, []);
+
+  useEffect(() => {
     loadTasks();
   }, []);
 
@@ -347,16 +355,29 @@ export default function VisualStudioPage() {
     const changeType = window.prompt("变化类型（状态变化/损坏/升级/易主/外观变化）：", "状态变化") || "状态变化";
     const appearanceAfter = window.prompt("变化后的外观（可留空）：", "") || "";
     const clothingAfter = window.prompt("变化后的服装/装备（可留空）：", "") || "";
+    const ageAfter = window.prompt("变化后的年龄阶段（可留空）：", "") || "";
+    const hairstyleAfter = window.prompt("变化后的发型（可留空）：", "") || "";
+    const injuryAfter = window.prompt("变化后的伤势/疤痕（可留空）：", "") || "";
+    const equipmentAfter = window.prompt("变化后的装备/武器（可留空）：", "") || "";
+    const conditionAfter = window.prompt("道具状态（损坏、修复、升级等，可留空）：", "") || "";
     const holder = window.prompt("变化后的持有人（可留空）：", "") || "";
+    const evidence = window.prompt("原文依据或备注（可留空）：", "") || "";
+    const confirmed = window.confirm("是否确认以上剧情变化真实发生，并将其用于后续分镜和生成提示词？选择“取消”会保存为待确认记录，不影响当前有效状态。");
     setBusy(true);
     try {
       const response = await fetch(API + "/api/visual/assets/" + asset.id + "/evolution", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chapter_number: Number(chapter), event, change_type: changeType, appearance_after: appearanceAfter, clothing_after: clothingAfter, holder }),
+        body: JSON.stringify({
+          chapter_number: Number(chapter), event, change_type: changeType,
+          appearance_after: appearanceAfter, clothing_after: clothingAfter,
+          age_after: ageAfter, hairstyle_after: hairstyleAfter, injury_after: injuryAfter,
+          equipment_after: equipmentAfter, condition_after: conditionAfter,
+          holder, evidence, confirmed, source: "manual",
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "记录变化失败");
-      setMessage("已记录第 " + chapter + " 章变化，共 " + result.history_count + " 条。");
+      setMessage("已记录第 " + chapter + " 章变化，共 " + result.history_count + " 条。" + (confirmed ? "该变化已确认并会用于后续分镜。" : "该变化处于待确认状态，不会改变当前有效外观。"));
       await loadAssets();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "记录变化失败");
@@ -505,7 +526,7 @@ export default function VisualStudioPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold">当前素材库</h2>
           <div className="flex flex-wrap gap-2">
-            <select className="max-w-xs rounded-xl border border-purple-300/20 bg-slate-900 px-3 py-2 text-sm text-white" value={sourceNovelId} onChange={(e) => setSourceNovelId(e.target.value)}>
+            <select className="max-w-xs rounded-xl border border-purple-300/20 bg-slate-900 px-3 py-2 text-sm text-white" value={sourceNovelId} onChange={(e) => { setSourceNovelId(e.target.value); const url = new URL(window.location.href); if (e.target.value) url.searchParams.set("novelId", e.target.value); else url.searchParams.delete("novelId"); window.history.replaceState({}, "", url.toString()); }}>
               <option value="">选择小说，同步 AI 分析资产</option>
               {novels.map((novel) => <option key={novel.id} value={novel.id}>{novel.title || novel.name || `小说 #${novel.id}`}</option>)}
             </select>

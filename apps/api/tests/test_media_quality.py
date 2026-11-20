@@ -86,15 +86,43 @@ class AdvancedMediaQualityScanTests(unittest.TestCase):
             ]}
             run.side_effect = [
                 SimpleNamespace(returncode=0, stderr="black_start:1.000 black_end:2.250 black_duration:1.250", stdout=""),
+                SimpleNamespace(returncode=0, stderr="mean_volume: -24.0 dB\nmax_volume: -1.0 dB", stdout=""),
                 SimpleNamespace(returncode=0, stderr="silence_start:3.000\nsilence_end:5.500 | silence_duration:2.500", stdout=""),
             ]
             report = scan_media_quality(path)
             self.assertTrue(report["scan_complete"])
+            self.assertEqual(report["audio_levels"]["mean_volume_db"], -24.0)
+            self.assertEqual(report["audio_levels"]["max_volume_db"], -1.0)
             self.assertEqual(len(report["black_segments"]), 1)
             self.assertEqual(report["black_segments"][0]["duration_seconds"], 1.25)
             self.assertEqual(len(report["silence_segments"]), 1)
             self.assertEqual(report["silence_segments"][0]["duration_seconds"], 2.5)
             self.assertEqual(len(report["warnings"]), 2)
+
+    @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
+    @patch("app.services.media_service.subprocess.run")
+    @patch("app.services.media_service.probe_media")
+    def test_warns_for_quiet_or_clipping_audio(self, probe, run, _ffmpeg):
+        from types import SimpleNamespace
+        from app.services.media_service import scan_media_quality
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "levels.mp4"
+            path.write_bytes(b"x" * 2048)
+            probe.return_value = {"streams": [
+                {"codec_type": "video", "codec_name": "h264"},
+                {"codec_type": "audio", "codec_name": "aac"},
+            ]}
+            run.side_effect = [
+                SimpleNamespace(returncode=0, stderr="", stdout=""),
+                SimpleNamespace(returncode=0, stderr="mean_volume: -42.0 dB\nmax_volume: 0.2 dB", stdout=""),
+                SimpleNamespace(returncode=0, stderr="", stdout=""),
+            ]
+            report = scan_media_quality(path)
+            self.assertEqual(report["audio_levels"]["mean_volume_db"], -42.0)
+            self.assertEqual(report["audio_levels"]["max_volume_db"], 0.2)
+            self.assertTrue(any("平均音量偏低" in item for item in report["warnings"]))
+            self.assertTrue(any("削波风险" in item for item in report["warnings"]))
 
     @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
     @patch("app.services.media_service.subprocess.run")
