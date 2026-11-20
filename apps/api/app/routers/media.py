@@ -1275,6 +1275,8 @@ def validate_dialogue_segments_for_shot(shot, segments):
         int(value) for value in (shot.character_ids or []) if str(value).isdigit()
     }
     for segment in segments:
+        if not segment.text.strip():
+            raise HTTPException(422, "对白内容不能为空或仅包含空格")
         if segment.speaker_character_id is not None and segment.speaker_character_id not in allowed_speakers:
             raise HTTPException(422, f"镜头 {shot.shot_number} 的对白说话人不属于该镜头角色")
         if len(allowed_speakers) > 1 and segment.speaker_character_id is None:
@@ -1472,6 +1474,8 @@ def generate_episode_voice_track(
                     raise RuntimeError("语音服务返回的音频文件为空或无效")
                 segment_info = probe_media(destination)
                 segment_duration = float((segment_info.get("format") or {}).get("duration") or 0)
+                if segment_duration <= 0:
+                    raise RuntimeError("语音服务返回的音频时长无效")
                 task.status = "completed"
                 task.result_path = str(destination)
                 task.error = None
