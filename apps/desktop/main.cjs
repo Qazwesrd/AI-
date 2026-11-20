@@ -503,13 +503,18 @@ ipcMain.handle("ai-browser:fill-prompt", async (_event, payload = {}) => {
 });
 ipcMain.handle("ai-browser:list-open-tasks", async () => {
   const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
+  const response = await fetch("http://127.0.0.1:8000/api/web-ai/tasks?limit=500");
+  if (!response.ok) throw new Error("读取 AI 任务清单失败：" + response.status);
+  const data = await response.json();
+  const taskMap = new Map((data.items || []).map((task) => [task.id, task]));
   return [...aiBrowserWindows.entries()].flatMap(([webContentsId, browser]) => {
     if (!browser || browser.isDestroyed() || browser.webContents.isDestroyed()) return [];
     try {
       const currentUrl = new URL(browser.webContents.getURL());
       const taskId = aiBrowserTasks.get(webContentsId);
-      if (!taskId || currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) return [];
-      return [{ taskId, host: currentUrl.hostname, title: browser.getTitle() || currentUrl.hostname }];
+      const task = taskMap.get(taskId);
+      if (!taskId || !task || task.category !== "video" || currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) return [];
+      return [{ taskId, host: currentUrl.hostname, title: task.title || browser.getTitle() || currentUrl.hostname, category: task.category, novelId: task.novelId }];
     } catch { return []; }
   });
 });
@@ -529,6 +534,11 @@ ipcMain.handle("ai-browser:upload-reference-files", async (_event, payload = {})
   const currentUrl = new URL(browser.webContents.getURL());
   const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
   if (currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) throw new Error("当前网页不在允许上传参考图的 AI 网站范围内");
+  const tasksResponse = await fetch("http://127.0.0.1:8000/api/web-ai/tasks?limit=500");
+  if (!tasksResponse.ok) throw new Error("无法核实目标 AI 任务信息");
+  const tasksData = await tasksResponse.json();
+  const targetTask = (tasksData.items || []).find((task) => task.id === taskId);
+  if (!targetTask || targetTask.category !== "video" || !targetTask.novelId) throw new Error("参考图片只能上传到已登记小说的视频分镜任务");
 
   const resultDir = path.resolve(app.getPath("userData"), "storage", "web_ai_results");
   const uploadPaths = [];
@@ -537,6 +547,7 @@ ipcMain.handle("ai-browser:upload-reference-files", async (_event, payload = {})
     const response = await fetch("http://127.0.0.1:8000/api/web-ai/files/" + fileId + "/upload-info");
     const info = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(info.detail || ("读取参考图片失败：" + response.status));
+    if (!info.novelId || info.novelId !== targetTask.novelId) throw new Error("参考图片必须来自同一部小说，不能跨小说上传");
     const storedName = String(info.storedName || "");
     if (!/^[a-f0-9]{32}\.(png|jpg|jpeg|webp|gif)$/.test(storedName)) throw new Error("参考图片文件标识无效");
     const targetPath = path.resolve(resultDir, storedName);
