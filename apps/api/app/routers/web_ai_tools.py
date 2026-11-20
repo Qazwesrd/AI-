@@ -241,6 +241,51 @@ def list_task_result_files(task_key: str, db: Session = Depends(get_db)):
     return {"items": [result_file_dict(item) for item in items]}
 
 
+@router.get("/files")
+def list_all_result_files(
+    novel_id: int | None = None,
+    chapter_id: int | None = None,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+):
+    if limit < 1 or limit > 500:
+        raise HTTPException(400, "limit 必须在 1 到 500 之间")
+    query = db.query(WebAIResultFile, WebAITask).join(
+        WebAITask, WebAITask.task_key == WebAIResultFile.task_key
+    )
+    if novel_id is not None:
+        query = query.filter(WebAITask.novel_id == novel_id)
+    if chapter_id is not None:
+        query = query.filter(WebAITask.chapter_id == chapter_id)
+    rows = query.order_by(WebAIResultFile.id.desc()).limit(limit).all()
+    items = []
+    for result_file, task in rows:
+        item = result_file_dict(result_file)
+        item.update({
+            "taskTitle": task.title,
+            "taskCategory": task.category,
+            "toolId": task.tool_key,
+            "novelId": task.novel_id,
+            "chapterId": task.chapter_id,
+        })
+        items.append(item)
+    return {"items": items}
+
+
+@router.get("/files/{file_id}/preview")
+def preview_task_result_file(file_id: int, db: Session = Depends(get_db)):
+    item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if item is None:
+        raise HTTPException(404, "结果文件不存在")
+    if not (item.content_type or "").lower().startswith("image/"):
+        raise HTTPException(415, "目前仅支持图片在线预览")
+    path = (STORAGE_DIR / "web_ai_results" / item.stored_name).resolve()
+    root = (STORAGE_DIR / "web_ai_results").resolve()
+    if path.parent != root or not path.is_file():
+        raise HTTPException(410, "结果文件已不存在")
+    return FileResponse(path, media_type=item.content_type, filename=item.original_name, content_disposition_type="inline")
+
+
 @router.get("/files/{file_id}")
 def download_task_result_file(file_id: int, db: Session = Depends(get_db)):
     item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
