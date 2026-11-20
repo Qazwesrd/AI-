@@ -249,7 +249,7 @@ jobs:
               draft = $true
               prerelease = $false
             } | ConvertTo-Json -Depth 5
-            $release = gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases" --input - <<< $payload | ConvertFrom-Json
+            $release = $payload | gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases" --input - | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or !$release.id) { throw "创建 GitHub Release 失败。" }
           }
           if (!$release.id) { throw "Release 信息缺少 ID，无法安全上传资产。" }
