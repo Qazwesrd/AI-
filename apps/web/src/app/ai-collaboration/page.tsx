@@ -7,6 +7,8 @@ declare global {
     aiBrowserDesktop?: {
       openTask: (taskId: string, url: string) => Promise<{ opened: boolean; taskId: string }>;
       fillPrompt: (taskId: string, prompt: string) => Promise<{ filled: boolean; length: number; submitted: false }>;
+      listOpenTasks: () => Promise<Array<{ taskId: string; host: string; title: string }>>;
+      uploadReferenceFiles: (taskId: string, fileIds: number[]) => Promise<{ selected: number; submitted: false; taskId: string }>;
     };
   }
 }
@@ -90,6 +92,9 @@ export default function AICollaborationPage() {
   const [webAiClassifications, setWebAiClassifications] = useState<Record<number, string>>({});
   const [webAiAssetNames, setWebAiAssetNames] = useState<Record<number, string>>({});
   const [selectedWebAiFileIds, setSelectedWebAiFileIds] = useState<number[]>([]);
+  const [selectedReferenceFileIds, setSelectedReferenceFileIds] = useState<number[]>([]);
+  const [openAiBrowserTasks, setOpenAiBrowserTasks] = useState<Array<{ taskId: string; host: string; title: string }>>([]);
+  const [referenceTargetTaskId, setReferenceTargetTaskId] = useState("");
   const [compareIds, setCompareIds] = useState<number[]>([]);
   const [comparison, setComparison] = useState<{ left: string; right: string } | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -141,6 +146,45 @@ export default function AICollaborationPage() {
       const data = await request<{ items: ResultAttachment[] }>(`/api/ai-collaboration/results/attachments?novel_id=${id}&status=all`);
       setAttachments(data.items || []);
     } catch (error) { setMessage(error instanceof Error ? error.message : "读取 AI 结果文件失败"); }
+  }
+
+  async function refreshOpenAiBrowserTasks() {
+    if (!window.aiBrowserDesktop) {
+      setMessage("自动上传参考图需要使用电脑版 AI 漫剧制作大师。");
+      return;
+    }
+    try {
+      const items = await window.aiBrowserDesktop.listOpenTasks();
+      setOpenAiBrowserTasks(items);
+      setReferenceTargetTaskId((current) => items.some((item) => item.taskId === current) ? current : (items[0]?.taskId || ""));
+      setMessage(items.length ? "已发现 " + items.length + " 个已打开的 AI 网页任务。" : "暂未发现已打开的 AI 网页，请先打开视频分镜提示词任务。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取已打开的 AI 网页失败");
+    }
+  }
+
+  async function uploadSelectedReferenceFiles() {
+    if (!window.aiBrowserDesktop) { setMessage("自动上传参考图需要使用电脑版 AI 漫剧制作大师。"); return; }
+    if (!referenceTargetTaskId) { setMessage("请先选择一个已打开的 AI 网页任务。"); return; }
+    const selected = webAiFiles.filter((item) =>
+      selectedReferenceFileIds.includes(item.id)
+      && item.classificationStatus === "confirmed"
+      && Boolean(item.visualAssetId)
+      && (item.contentType || "").startsWith("image/")
+    );
+    if (!selected.length) { setMessage("请先选择已确认归档的人物、场景或道具图片。"); return; }
+    const target = openAiBrowserTasks.find((item) => item.taskId === referenceTargetTaskId);
+    if (!window.confirm("确认将 " + selected.length + " 张已归档参考图放入 " + (target?.title || referenceTargetTaskId) + " 的网页上传入口？网页可能在选择文件后立即开始上传，但软件不会点击发送或生成。")) return;
+    setBusy(true);
+    try {
+      const result = await window.aiBrowserDesktop.uploadReferenceFiles(referenceTargetTaskId, selected.map((item) => item.id));
+      setSelectedReferenceFileIds([]);
+      setMessage("已将 " + result.selected + " 张参考图放入目标网页的文件选择框。请检查网页是否完成上传；软件没有点击发送或生成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "上传参考图失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadWebAiFiles(id = novelId) {
@@ -604,7 +648,13 @@ export default function AICollaborationPage() {
             <div><h2 className="text-lg font-semibold">④ 内嵌 AI 网页下载结果 · 图片预览与素材归档</h2><p className="mt-1 text-xs leading-5 text-slate-400">桌面端 AI 网页下载的文件会自动出现在这里。图片可直接预览；分类由你确认后才会进入视觉素材库，并关联任务所属章节。</p></div>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setSelectedWebAiFileIds(webAiFiles.filter((item) => item.classificationStatus !== "confirmed").map((item) => item.id))} className="rounded-lg border border-white/15 px-3 py-2 text-xs">全选待归档</button>
+              <button onClick={() => void refreshOpenAiBrowserTasks()} className="rounded-lg border border-sky-300/30 px-3 py-2 text-xs text-sky-200">刷新已打开 AI 网页</button>
               <button disabled={busy || selectedWebAiFileIds.length === 0} onClick={() => void confirmSelectedWebAiFiles()} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">批量归档（{selectedWebAiFileIds.length}）</button>
+              <select value={referenceTargetTaskId} onChange={(event) => setReferenceTargetTaskId(event.target.value)} className="max-w-56 rounded-lg border border-white/15 bg-slate-950 px-2 py-2 text-xs text-white" disabled={!openAiBrowserTasks.length}>
+                <option value="">选择参考图目标 AI 网页</option>
+                {openAiBrowserTasks.map((task) => <option key={task.taskId} value={task.taskId}>{task.title} · {task.host}</option>)}
+              </select>
+              <button disabled={busy || !referenceTargetTaskId || selectedReferenceFileIds.length === 0} onClick={() => void uploadSelectedReferenceFiles()} className="rounded-lg bg-sky-700 px-3 py-2 text-xs font-semibold disabled:opacity-40">上传参考图（{selectedReferenceFileIds.length}）</button>
               <button onClick={() => void loadWebAiFiles()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">刷新下载结果</button>
             </div>
           </div>
@@ -617,6 +667,7 @@ export default function AICollaborationPage() {
                 {isImage ? <img src={API + "/api/web-ai/files/" + item.id + "/preview"} alt={item.filename} className="h-48 w-full bg-black/40 object-contain" loading="lazy" /> : <div className="flex h-28 items-center justify-center bg-slate-950 text-4xl">{item.contentType.startsWith("video/") ? "🎬" : item.contentType.startsWith("audio/") ? "🎵" : "📄"}</div>}
                 <div className="space-y-2 p-3">
                   {item.classificationStatus !== "confirmed" && <label className="flex items-center gap-2 text-xs text-cyan-200"><input type="checkbox" checked={selectedWebAiFileIds.includes(item.id)} onChange={(event) => setSelectedWebAiFileIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="accent-cyan-500" />加入批量归档</label>}
+                  {isImage && item.classificationStatus === "confirmed" && item.visualAssetId && <label className="flex items-center gap-2 text-xs text-sky-200"><input type="checkbox" checked={selectedReferenceFileIds.includes(item.id)} onChange={(event) => setSelectedReferenceFileIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} className="accent-sky-500" />选作 AI 视频参考图</label>}
                   <p className="break-all text-sm font-semibold">{item.filename}</p>
                   <p className="text-[11px] text-slate-400">{item.taskTitle} · {item.toolId} · {(item.size / 1024 / 1024).toFixed(1)} MB</p>
                   <p className="text-[11px] text-slate-500">{item.classificationReason}</p>
