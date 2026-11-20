@@ -15,7 +15,7 @@ from app.models.web_ai_tool import WebAITool, WebAITask, WebAIResultFile
 from app.models.visual import VisualAsset
 from app.models.novel import Novel, Chapter
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
-from app.models.media import MediaFile, SubtitleTrack
+from app.models.media import MediaFile, MediaTask, SubtitleTrack
 
 router = APIRouter(prefix="/api/web-ai", tags=["AI网页工具协同中心"])
 
@@ -581,6 +581,230 @@ class ConfirmResultClassification(BaseModel):
     description: str = Field(default="", max_length=4000)
     novelId: int | None = Field(default=None, ge=1)
     chapterId: int | None = Field(default=None, ge=1)
+
+def _downloaded_video_shot_context(file_id: int, db: Session):
+    result_file = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if result_file is None:
+        raise HTTPException(404, "AI 网页结果文件不存在")
+    if Path(result_file.stored_name).suffix.lower() not in {".mp4", ".mov", ".webm", ".mkv"}:
+        raise HTTPException(415, "只有视频文件可以关联到分镜")
+    source_task = db.query(WebAITask).filter(
+        WebAITask.task_key == result_file.task_key
+    ).first()
+    if source_task is None:
+        raise HTTPException(410, "视频所属的 AI 网页任务不存在")
+    if source_task.category != "video":
+        raise HTTPException(409, "只有视频类 AI 网页任务的结果可以关联分镜")
+    if not source_task.novel_id or not source_task.chapter_id:
+        raise HTTPException(409, "原始 AI 任务没有关联小说章节")
+    chapter = db.query(Chapter).filter(
+        Chapter.id == source_task.chapter_id,
+        Chapter.novel_id == source_task.novel_id,
+    ).first()
+    if chapter is None:
+        raise HTTPException(404, "原始任务关联的章节不存在或已变更")
+    projects_query = db.query(StoryProject).filter(
+        StoryProject.novel_id == source_task.novel_id
+    )
+    if source_task.project_id is not None:
+        projects_query = projects_query.filter(StoryProject.id == source_task.project_id)
+    projects = projects_query.order_by(StoryProject.updated_at.desc()).all()
+    if not projects:
+        raise HTTPException(404, "没有找到该小说对应的漫剧项目")
+    project_ids = [project.id for project in projects]
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id.in_(project_ids)
+    ).order_by(EpisodePlan.episode_number, EpisodePlan.sort_order).all()
+    eligible_episodes = [
+        episode for episode in episodes
+        if chapter.id in (episode.source_chapter_ids or [])
+    ]
+    return result_file, source_task, chapter, eligible_episodes
+
+
+@router.get("/files/{file_id}/shot-options")
+def list_downloaded_video_shot_options(file_id: int, db: Session = Depends(get_db)):
+    result_file, source_task, chapter, episodes = _downloaded_video_shot_context(file_id, db)
+    items = []
+    for episode in episodes:
+        shots = db.query(StoryboardShot).filter(
+            StoryboardShot.episode_id == episode.id
+        ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+        for shot in shots:
+            items.append({
+                "shotId": shot.id,
+                "shotNumber": shot.shot_number,
+                "episodeId": episode.id,
+                "episodeNumber": episode.episode_number,
+                "episodeTitle": episode.title,
+                "sceneName": shot.scene_name,
+                "shotType": shot.shot_type,
+                "visualDescription": shot.visual_description,
+                "durationSeconds": shot.duration_seconds,
+                "status": shot.status,
+            })
+    return {
+        "fileId": result_file.id,
+        "taskId": source_task.task_key,
+        "chapterId": source_task.chapter_id,
+        "chapterNumber": chapter.chapter_number,
+        "items": items,
+    }
+
+
+class AttachDownloadedVideoInput(BaseModel):
+    shotId: int = Field(ge=1)
+
+
+@router.post("/files/{file_id}/attach-shot")
+def attach_downloaded_video_to_shot(
+    file_id: int,
+    payload: AttachDownloadedVideoInput,
+    db: Session = Depends(get_db),
+):
+    """Attach a downloaded browser-generated video to an explicitly selected storyboard shot."""
+    result_file = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if result_file is None:
+        raise HTTPException(404, "AI 网页结果文件不存在")
+    extension = Path(result_file.stored_name).suffix.lower()
+    if extension not in {".mp4", ".mov", ".webm", ".mkv"}:
+        raise HTTPException(415, "只有 MP4、MOV、WebM 或 MKV 视频可以关联到分镜")
+    source_task = db.query(WebAITask).filter(
+        WebAITask.task_key == result_file.task_key
+    ).first()
+    if source_task is None:
+        raise HTTPException(410, "视频所属的 AI 网页任务不存在")
+    if source_task.category != "video":
+        raise HTTPException(409, "只有视频类 AI 网页任务的结果可以关联分镜")
+    if not source_task.novel_id or not source_task.chapter_id:
+        raise HTTPException(409, "原始 AI 任务没有关联小说章节，无法安全确定分集范围")
+
+    chapter = db.query(Chapter).filter(
+        Chapter.id == source_task.chapter_id,
+        Chapter.novel_id == source_task.novel_id,
+    ).first()
+    if chapter is None:
+        raise HTTPException(404, "原始任务关联的章节不存在或已变更")
+
+    project_query = db.query(StoryProject).filter(
+        StoryProject.novel_id == source_task.novel_id
+    )
+    if source_task.project_id is not None:
+        project_query = project_query.filter(StoryProject.id == source_task.project_id)
+    projects = project_query.order_by(StoryProject.updated_at.desc()).all()
+    if not projects:
+        raise HTTPException(404, "没有找到该小说对应的漫剧项目")
+    project_ids = {project.id for project in projects}
+
+    shot = db.query(StoryboardShot).filter(
+        StoryboardShot.id == payload.shotId
+    ).first()
+    if shot is None:
+        raise HTTPException(404, "指定分镜不存在")
+    episode = db.query(EpisodePlan).filter(
+        EpisodePlan.id == shot.episode_id,
+        EpisodePlan.project_id == shot.project_id,
+    ).first()
+    if episode is None or episode.project_id not in project_ids:
+        raise HTTPException(409, "指定分镜不属于该 AI 任务对应的漫剧项目")
+    if source_task.chapter_id not in (episode.source_chapter_ids or []):
+        raise HTTPException(409, "指定分镜所属分集没有包含该 AI 任务的原始章节")
+
+    result_dir = (STORAGE_DIR / "web_ai_results").resolve()
+    source_path = (result_dir / result_file.stored_name).resolve()
+    if source_path.parent != result_dir or not source_path.is_file():
+        raise HTTPException(410, "下载的视频文件已不存在")
+    if not validate_downloaded_media_signature(source_path, extension):
+        raise HTTPException(415, "视频文件签名校验失败，不能关联到分镜")
+
+    media_file = db.query(MediaFile).filter(
+        MediaFile.file_path == str(source_path),
+        MediaFile.category == "video",
+    ).first()
+    if media_file is None:
+        raise HTTPException(409, "视频尚未登记到本地视频素材库，请重新下载或刷新素材库")
+
+    for existing_task in db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).all():
+        metadata = existing_task.request_data if isinstance(existing_task.request_data, dict) else {}
+        if metadata.get("web_ai_result_file_id") == result_file.id:
+            if metadata.get("shot_id") != shot.id or metadata.get("episode_id") != episode.id:
+                raise HTTPException(409, "该视频已经关联到其他分镜；请先在素材管理中处理原关联")
+            return {
+                "success": True,
+                "reused": True,
+                "task_id": existing_task.id,
+                "episode_id": episode.id,
+                "shot_id": shot.id,
+                "message": "该视频已经关联到此分镜，无需重复登记。",
+            }
+
+    try:
+        from app.services.media_service import probe_media
+        info = probe_media(source_path)
+        streams = info.get("streams") or []
+        video_stream = next(
+            (stream for stream in streams if stream.get("codec_type") == "video"),
+            None,
+        )
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if video_stream is None or duration <= 0 or duration > 600:
+            raise HTTPException(422, "视频流无效或单镜头视频超过 10 分钟")
+        media_file.duration = duration
+        metadata = dict(media_file.metadata_json or {})
+        metadata.update({
+            "episode_id": episode.id,
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "web_ai_task_key": source_task.task_key,
+            "web_ai_result_file_id": result_file.id,
+            "novel_id": source_task.novel_id,
+            "chapter_id": source_task.chapter_id,
+            "project_id": episode.project_id,
+            "attached_by_user": True,
+        })
+        media_file.metadata_json = metadata
+        media_task = MediaTask(
+            task_type="storyboard_video",
+            provider="web_ai",
+            model="web-browser-import",
+            status="completed",
+            prompt=source_task.title,
+            request_data={
+                "episode_id": episode.id,
+                "shot_id": shot.id,
+                "shot_number": shot.shot_number,
+                "web_ai_task_key": source_task.task_key,
+                "web_ai_result_file_id": result_file.id,
+                "novel_id": source_task.novel_id,
+                "chapter_id": source_task.chapter_id,
+                "project_id": episode.project_id,
+                "local_import": True,
+            },
+            result_path=str(source_path),
+        )
+        db.add(media_task)
+        shot.status = "video_ready"
+        db.commit()
+        db.refresh(media_task)
+        return {
+            "success": True,
+            "reused": False,
+            "task_id": media_task.id,
+            "episode_id": episode.id,
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "duration_seconds": round(duration, 3),
+            "message": "视频已关联到指定分镜，可进入分集时间轴并参与 FFmpeg 合成。",
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(422, "视频关联失败：" + str(exc)[:1000]) from exc
+
 
 @router.patch("/files/{file_id}/classification")
 def confirm_result_classification(file_id: int, payload: ConfirmResultClassification, db: Session = Depends(get_db)):
