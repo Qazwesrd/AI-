@@ -277,13 +277,23 @@ def preview_task_result_file(file_id: int, db: Session = Depends(get_db)):
     item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
     if item is None:
         raise HTTPException(404, "结果文件不存在")
-    if not (item.content_type or "").lower().startswith("image/"):
-        raise HTTPException(415, "目前仅支持图片在线预览")
+    preview_types = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif",
+    }
+    extension = Path(item.stored_name).suffix.lower()
+    media_type = preview_types.get(extension)
+    if media_type is None:
+        raise HTTPException(415, "目前仅支持 PNG、JPG、WebP 和 GIF 图片在线预览")
     path = (STORAGE_DIR / "web_ai_results" / item.stored_name).resolve()
     root = (STORAGE_DIR / "web_ai_results").resolve()
     if path.parent != root or not path.is_file():
         raise HTTPException(410, "结果文件已不存在")
-    return FileResponse(path, media_type=item.content_type, filename=item.original_name, content_disposition_type="inline")
+    return FileResponse(
+        path, media_type=media_type, filename=item.original_name,
+        content_disposition_type="inline",
+        headers={"X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/files/{file_id}")
