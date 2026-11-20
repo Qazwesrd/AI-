@@ -709,22 +709,35 @@ def render_episode_from_shots(
     by_shot = {}
     for task in tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        shot_id = metadata.get("shot_id")
         if (
-            metadata.get("episode_id") == episode_id
-            and metadata.get("shot_id")
-            and task.status == "completed"
-            and task.result_path
-            and Path(task.result_path).is_file()
+            metadata.get("episode_id") != episode_id
+            or not shot_id
+            or shot_id in by_shot
+            or task.status != "completed"
+            or not task.result_path
         ):
-            by_shot.setdefault(metadata["shot_id"], task)
+            continue
+        try:
+            candidate = safe_storage_file(task.result_path)
+            info = probe_media(candidate)
+            streams = info.get("streams") or []
+            has_video = any(stream.get("codec_type") == "video" for stream in streams)
+            duration = float((info.get("format") or {}).get("duration") or 0)
+            if not has_video or duration <= 0 or duration > 600:
+                continue
+            by_shot[shot_id] = candidate
+        except Exception:
+            # A newer corrupt/missing clip must not hide an older valid version.
+            continue
     clips = []
     missing = []
     for shot in shots:
-        task = by_shot.get(shot.id)
-        if not task or not task.result_path or not Path(task.result_path).is_file():
+        clip = by_shot.get(shot.id)
+        if not clip:
             missing.append(shot.shot_number)
         else:
-            clips.append(safe_storage_file(task.result_path))
+            clips.append(clip)
     if missing:
         raise HTTPException(409, "以下镜头视频尚未全部完成或下载：" + "、".join(map(str, missing)))
     output_name = re.sub(r"[^a-zA-Z0-9_-]", "_", output_name)
