@@ -272,6 +272,37 @@ def list_all_result_files(
     return {"items": items}
 
 
+@router.get("/files/{file_id}/upload-info")
+def get_reference_upload_info(file_id: int, db: Session = Depends(get_db)):
+    item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
+    if item is None:
+        raise HTTPException(404, "结果文件不存在")
+    if item.classification_status != "confirmed" or item.visual_asset_id is None:
+        raise HTTPException(409, "请先确认图片分类并归档到视觉素材库")
+    allowed_types = {
+        ".png": "image/png", ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+    }
+    extension = Path(item.stored_name).suffix.lower()
+    expected_type = allowed_types.get(extension)
+    if expected_type is None or not (item.content_type or "").lower().startswith("image/"):
+        raise HTTPException(415, "仅允许上传已归档的 PNG、JPG、WebP 或 GIF 图片")
+    result_dir = (STORAGE_DIR / "web_ai_results").resolve()
+    path = (result_dir / item.stored_name).resolve()
+    if path.parent != result_dir or not path.is_file():
+        raise HTTPException(410, "参考图片文件已不存在")
+    actual_size = path.stat().st_size
+    if actual_size > 100 * 1024 * 1024:
+        raise HTTPException(413, "单张参考图片不能超过 100 MB")
+    return {
+        "id": item.id,
+        "storedName": item.stored_name,
+        "filename": item.original_name,
+        "contentType": expected_type,
+        "size": actual_size,
+    }
+
+
 @router.get("/files/{file_id}/preview")
 def preview_task_result_file(file_id: int, db: Session = Depends(get_db)):
     item = db.query(WebAIResultFile).filter(WebAIResultFile.id == file_id).first()
