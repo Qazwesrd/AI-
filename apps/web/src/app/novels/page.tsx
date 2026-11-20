@@ -63,7 +63,11 @@ export default function NovelsPage() {
   async function loadNovels() {
     try {
       const data = await request("/api/novels");
-      setNovels(data.items || []);
+      const items = data.items || [];
+      setNovels(items);
+      const requestedId = new URLSearchParams(window.location.search).get("novelId");
+      const preferred = items.find((item: Novel) => String(item.id) === requestedId) || null;
+      if (preferred) await openNovel(preferred);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "无法连接后端");
     }
@@ -71,6 +75,9 @@ export default function NovelsPage() {
 
   async function openNovel(novel: Novel) {
     setSelected(novel);
+    const url = new URL(window.location.href);
+    url.searchParams.set("novelId", String(novel.id));
+    window.history.replaceState({}, "", url.toString());
     setCurrentChapter(null);
     try {
       const [chapterData, analysisData, progressData] = await Promise.all([

@@ -119,6 +119,14 @@ export default function VisualStudioPage() {
   useEffect(() => { loadNovels(); }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedCategory = params.get("category");
+    const requestedNovelId = params.get("novelId");
+    if (requestedCategory && categories.some((item) => item.key === requestedCategory)) setCategory(requestedCategory);
+    if (requestedNovelId) setSourceNovelId(requestedNovelId);
+  }, []);
+
+  useEffect(() => {
     loadTasks();
   }, []);
 
@@ -505,7 +513,7 @@ export default function VisualStudioPage() {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-xl font-semibold">当前素材库</h2>
           <div className="flex flex-wrap gap-2">
-            <select className="max-w-xs rounded-xl border border-purple-300/20 bg-slate-900 px-3 py-2 text-sm text-white" value={sourceNovelId} onChange={(e) => setSourceNovelId(e.target.value)}>
+            <select className="max-w-xs rounded-xl border border-purple-300/20 bg-slate-900 px-3 py-2 text-sm text-white" value={sourceNovelId} onChange={(e) => { setSourceNovelId(e.target.value); const url = new URL(window.location.href); if (e.target.value) url.searchParams.set("novelId", e.target.value); else url.searchParams.delete("novelId"); window.history.replaceState({}, "", url.toString()); }}>
               <option value="">选择小说，同步 AI 分析资产</option>
               {novels.map((novel) => <option key={novel.id} value={novel.id}>{novel.title || novel.name || `小说 #${novel.id}`}</option>)}
             </select>
