@@ -7,14 +7,14 @@ on:
     paths:
       - "apps/**"
       - "packages/**"
-      - "scripts/*.ps1"
+      - "scripts/**"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
   pull_request:
     paths:
       - "apps/**"
       - "packages/**"
-      - "scripts/*.ps1"
+      - "scripts/**"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
 
