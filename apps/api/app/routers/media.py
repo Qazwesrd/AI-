@@ -1179,7 +1179,9 @@ _EPISODE_RENDER_CONTEXT = threading.local()
 
 
 def _update_episode_render_job(task_id, *, status=None, progress=None, result_data=None, error=None, result_path=None):
-    db = SessionLocal()
+    context_db = getattr(_EPISODE_RENDER_CONTEXT, "db", None)
+    owns_session = context_db is None
+    db = SessionLocal() if owns_session else context_db
     try:
         task = db.query(MediaTask).filter(
             MediaTask.id == task_id, MediaTask.task_type == "episode_render"
@@ -1201,7 +1203,8 @@ def _update_episode_render_job(task_id, *, status=None, progress=None, result_da
         task.updated_at = datetime.utcnow()
         db.commit()
     finally:
-        db.close()
+        if owns_session:
+            db.close()
 
 
 def _run_episode_render_ffmpeg(args):
@@ -1274,6 +1277,7 @@ def _run_episode_render_job(task_id, episode_id, output_name, music_path, music_
         task.result_data = {"progress": {"percent": 5, "stage": "preparing"}}
         db.commit()
         _EPISODE_RENDER_CONTEXT.task_id = task_id
+        _EPISODE_RENDER_CONTEXT.db = db
         result = render_episode_from_shots(
             episode_id, output_name=output_name,
             music_path=music_path, music_volume=music_volume, db=db,
@@ -1304,6 +1308,8 @@ def _run_episode_render_job(task_id, episode_id, output_name, music_path, music_
     finally:
         if hasattr(_EPISODE_RENDER_CONTEXT, "task_id"):
             del _EPISODE_RENDER_CONTEXT.task_id
+        if hasattr(_EPISODE_RENDER_CONTEXT, "db"):
+            del _EPISODE_RENDER_CONTEXT.db
         db.close()
         with _EPISODE_RENDER_LOCK:
             _EPISODE_RENDER_RUNTIME.pop(task_id, None)
