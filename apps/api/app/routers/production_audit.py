@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.media import MediaFile, MediaTask
+from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
@@ -331,7 +331,15 @@ def build_production_readiness_report(project_id: int, db: Session):
         subtitle_cues = data.get("subtitle_cues") if isinstance(data.get("subtitle_cues"), list) else []
         if not subtitle_cues and speech_task and isinstance(speech_task.request_data, dict):
             subtitle_cues = speech_task.request_data.get("subtitle_cues") or []
-        subtitle_file_state = _local_file_state(data.get("subtitle_path"))
+        subtitle_track = None
+        try:
+            subtitle_track_id = int(data.get("subtitle_track_id") or data.get("subtitle_id") or 0)
+        except (TypeError, ValueError):
+            subtitle_track_id = 0
+        if subtitle_track_id > 0:
+            subtitle_track = db.query(SubtitleTrack).filter(SubtitleTrack.id == subtitle_track_id).first()
+        subtitle_path = data.get("subtitle_path") or (subtitle_track.file_path if subtitle_track else None)
+        subtitle_file_state = _local_file_state(subtitle_path)
         subtitles_available = bool(subtitle_cues) or subtitle_file_state["exists"]
         if episode_has_dialogue and not voice_state["exists"]:
             add_issue("warning", "episode_voice_track_missing", f"第 {episode.episode_number} 集有对白，但没有可读取的独立配音轨", episode.id)
