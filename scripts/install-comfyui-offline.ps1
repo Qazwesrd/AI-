@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
     [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-ComfyUI-install.log"),
-    [object[]]$DetectedAdapters
+    [object[]]$DetectedAdapters,
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -334,6 +335,12 @@ if ((Get-Sha256 $archivePath) -ne ([string]$asset.sha256).ToLowerInvariant()) {
 }
 
 $archiveInfo = Get-ArchiveEntries $sevenZip $archivePath
+if ($ValidateOnly) {
+    $testOutput = @(& $sevenZip t -y -- $archivePath 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "ComfyUI 运行包完整性测试失败，预检未通过。" }
+    Write-Host "ComfyUI 离线载荷预检通过：清单、许可证门禁、SHA-256、归档路径和压缩数据均已验证。"
+    return
+}
 $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
 if (Test-Path -LiteralPath $installFullPath) {
     $existingMain = Join-Path $installFullPath "ComfyUI\main.py"
