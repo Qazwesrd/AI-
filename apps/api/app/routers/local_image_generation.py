@@ -204,11 +204,11 @@ def get_local_image_task(prompt_id: str):
                     "subfolder": subfolder if isinstance(subfolder, str) and len(subfolder) <= 240 else "",
                     "type": image.get("type", "output"),
                 })
-    completed = bool(status_info.get("completed")) or bool(images)
+    completed = status_info.get("completed") is True
     return {
         "prompt_id": prompt_id,
         "status": "completed" if completed else "running",
-        "images": images[:20],
+        "images": images[:20] if completed else [],
         "local_only": True,
         "network_used": False,
         "cloud_fallback": False,
