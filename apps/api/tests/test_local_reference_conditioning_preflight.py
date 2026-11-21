@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.routers import local_image_generation as local_images
+from app.routers.local_image_generation import LocalImageGenerateInput
 
 
 class ReferenceMediaFileValidationTests(unittest.TestCase):
@@ -84,6 +85,64 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
         self.assertIn(b"png-payload", captured["body"])
         self.assertIn(b"\r\n", captured["body"])
         self.assertEqual(result["name"], "reference.png")
+
+
+class ReferenceConditionedWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.payload = LocalImageGenerateInput(
+            checkpoint="comic-model.safetensors",
+            prompt="A character standing in a city street",
+            negative_prompt="blurry",
+            style="国漫",
+            confirm_local_generation=True,
+        )
+        self.object_infos = {
+            "LoadImage": {"input": {"required": {"image": ["STRING", {"image_upload": True}]}}},
+            "IPAdapterUnifiedLoader": {
+                "input": {"required": {
+                    "model": ["MODEL"],
+                    "preset": [["STANDARD (medium strength)", "VIT-G"]],
+                }}
+            },
+            "IPAdapterAdvanced": {
+                "input": {"required": {
+                    "model": ["MODEL"],
+                    "ipadapter": ["IPADAPTER"],
+                    "image": ["IMAGE"],
+                    "weight": ["FLOAT", {"default": 0.65}],
+                    "weight_type": [["linear", "ease in-out"]],
+                    "combine_embeds": [["concat", "add"]],
+                    "start_at": ["FLOAT", {"default": 0.0}],
+                    "end_at": ["FLOAT", {"default": 1.0}],
+                    "embeds_scaling": [["V only", "K+V"]],
+                }}
+            },
+        }
+
+    def test_builds_graph_from_unified_loader_schema(self):
+        workflow = local_images.build_reference_conditioned_workflow(
+            self.payload, 123, self.object_infos,
+            [{"name": "ref.png", "subfolder": "ai_comic_references/p1", "type": "input"}],
+        )
+        self.assertEqual(workflow["10"]["class_type"], "IPAdapterUnifiedLoader")
+        self.assertEqual(workflow["10"]["inputs"]["preset"], "STANDARD (medium strength)")
+        self.assertEqual(workflow["12"]["class_type"], "LoadImage")
+        self.assertEqual(workflow["13"]["class_type"], "IPAdapterAdvanced")
+        self.assertEqual(workflow["13"]["inputs"]["model"], ["10", 0])
+        self.assertEqual(workflow["13"]["inputs"]["ipadapter"], ["10", 1])
+        self.assertEqual(workflow["3"]["inputs"]["model"], ["13", 0])
+
+    def test_rejects_reference_path_traversal(self):
+        with self.assertRaises(ValueError):
+            local_images.build_reference_conditioned_workflow(
+                self.payload, 123, self.object_infos,
+                [{"name": "ref.png", "subfolder": "../outside", "type": "input"}],
+            )
+
+    def test_rejects_more_than_ten_references(self):
+        refs = [{"name": f"ref-{i}.png", "subfolder": "refs", "type": "input"} for i in range(11)]
+        with self.assertRaises(ValueError):
+            local_images.build_reference_conditioned_workflow(self.payload, 123, self.object_infos, refs)
 
 
 if __name__ == "__main__":
