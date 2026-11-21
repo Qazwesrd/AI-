@@ -52,14 +52,14 @@ apps\desktop\release\AI漫剧制作大师-完整离线安装套件.zip.sha256
 1. 将完整 ZIP 复制到目标 Windows x64 电脑。
 2. 解压整个 ZIP，不要只提取或移动 \`Setup.exe\`。
 3. 双击根目录的 \`Setup.exe\`。
-4. 安装器检测 GPU，只解压并部署匹配的官方 ComfyUI 运行包。
+4. 安装器检测 GPU，只解压并部署匹配的官方 ComfyUI 运行包；对未确认支持 GPU 加速的集成显卡，使用官方便携包的 CPU 模式，并生成独立的 CPU 启动脚本。
 5. 图片生成模型是独立资源，后续必须显示下载来源、大小和磁盘空间，并由用户明确确认。
 
-自动适配规则：NVIDIA GTX 10 系列及更旧型号选择 cu126 运行包，其余 NVIDIA 型号选择标准运行包；AMD 仅对已核实的 RX 6000/7000/9000、Ryzen AI Max、Radeon AI PRO R9700 系列自动选择；Intel 仅对 Arc 自动选择。未识别的 AMD/Intel 型号或其他未知显卡会停止自动安装，不会猜测，也不会联网回退。
+自动适配规则：NVIDIA GTX 10 系列及更旧型号选择 cu126 运行包，其余 NVIDIA 型号选择标准运行包；AMD 已核实的 RX 6000/7000/9000、Ryzen AI Max、Radeon AI PRO R9700 系列使用 GPU 模式；其他 AMD 型号（包括 Ryzen 7 4800U 的 Radeon Vega 集成显卡）选择官方 AMD 便携包，但明确以 CPU 模式运行，不会冒充 GPU 加速；Intel Arc 使用 GPU 模式，其他 Intel 集成显卡使用 CPU 模式。CPU 模式使用官方命令参数 `--cpu`，生成速度会明显较慢。
 
 ## 重要发布限制
 
 - 该 ZIP 体积约 7.3 GiB，不能作为单个 GitHub Release 附件上传（GitHub 单附件有大小限制）。请使用获批的可分发渠道；不要将 7GB 文件上传到有额外计费或公开风险的云盘。
 - ComfyUI 为 GPL-3.0。当前 ZIP 包含 ComfyUI 与 7-Zip 的许可证/源代码资料，但这不等于所有 Portable 依赖的完整许可证审查已完成。公开正式分发前必须审计所有随包二进制依赖及其许可证义务。
-- 当前 GPU 自动选择范围采取保守策略。未识别的型号会停止，不代表该显卡一定不能通过其他方式运行 ComfyUI。
+- GPU 加速自动选择范围采取保守策略。未确认支持的 AMD/Intel 集成显卡会降级为 CPU 模式；未知厂商或无法识别的设备仍会停止自动安装。
 - 必须在真实 NVIDIA、AMD、Intel 目标设备上完成安装、启动、停止、健康检查及图片生成验收后，才能宣称正式版全面支持这些硬件。
