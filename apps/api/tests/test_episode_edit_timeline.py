@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline
 from app.models.visual import VisualAsset
+from app.models.media import MediaTask
 from app.routers.media import (
     EpisodeTimelineInput, get_episode_edit_timeline,
     save_episode_edit_timeline,
@@ -28,6 +29,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
                 StoryboardShot.__table__,
                 EpisodeEditTimeline.__table__,
                 VisualAsset.__table__,
+                MediaTask.__table__,
             ],
         )
         self.Session = sessionmaker(bind=engine)

@@ -8,7 +8,8 @@ from fastapi import HTTPException
 from app.database import Base
 from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline
 from app.models.visual import VisualAsset
-from app.routers.media import EpisodeTimelineInput, get_episode_edit_timeline, save_episode_edit_timeline
+from app.models.media import MediaTask
+from app.routers.media import EpisodeTimelineInput, build_dialogue_subtitle_cues, get_episode_edit_timeline, save_episode_edit_timeline
 
 
 class EpisodeDialogueSegmentTimelineTests(unittest.TestCase):
@@ -20,7 +21,7 @@ class EpisodeDialogueSegmentTimelineTests(unittest.TestCase):
         )
         Base.metadata.create_all(engine, tables=[
             EpisodePlan.__table__, StoryboardShot.__table__,
-            EpisodeEditTimeline.__table__, VisualAsset.__table__,
+            EpisodeEditTimeline.__table__, VisualAsset.__table__, MediaTask.__table__,
         ])
         self.Session = sessionmaker(bind=engine)
         self.db = self.Session()
@@ -47,6 +48,30 @@ class EpisodeDialogueSegmentTimelineTests(unittest.TestCase):
 
     def tearDown(self):
         self.db.close()
+
+
+    def test_builds_line_level_cues_from_actual_audio_durations_and_transition_offsets(self):
+        self.other.dialogue = "你终于来了。"
+        cues = build_dialogue_subtitle_cues(
+            shots=[self.shot, self.other],
+            shot_order=[self.shot.id, self.other.id],
+            clip_durations={self.shot.id: 8.0, self.other.id: 5.0},
+            speech_durations={self.shot.id: 6.0, self.other.id: 2.0},
+            dialogue_line_timings={
+                self.shot.id: [
+                    {"text": "你终于来了。", "speaker_character_id": self.hero.id, "duration_seconds": 2.5},
+                    {"text": "我等你很久了。", "speaker_character_id": self.rival.id, "duration_seconds": 3.5},
+                ],
+            },
+            transitions=[{"after_shot_id": self.shot.id, "transition": "dissolve", "duration_seconds": 0.5}],
+        )
+        self.assertEqual([cue["text"] for cue in cues], ["你终于来了。", "我等你很久了。", "你终于来了。"])
+        self.assertAlmostEqual(cues[0]["start"], 0.0)
+        self.assertAlmostEqual(cues[0]["end"], 2.5)
+        self.assertAlmostEqual(cues[1]["start"], 2.5)
+        self.assertAlmostEqual(cues[1]["end"], 6.0)
+        self.assertAlmostEqual(cues[2]["start"], 7.5)
+        self.assertAlmostEqual(cues[2]["end"], 9.5)
 
     def test_save_and_reload_multiple_speaker_lines(self):
         payload = EpisodeTimelineInput(
