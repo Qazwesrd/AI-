@@ -41,13 +41,21 @@ MAX_PROJECT_EXPORT_FILES = 20_000
 EXPORT_DISK_SAFETY_MARGIN = 512 * 1024**2
 
 
-def _json_value(value: Any):
+_SENSITIVE_KEY_PARTS = ("api_key", "secret", "password", "credential", "access_token", "refresh_token")
+
+
+def _json_value(value: Any, key: str = ""):
+    normalized_key = key.lower()
+    if any(part in normalized_key for part in _SENSITIVE_KEY_PARTS):
+        return None
+    if normalized_key == "result_url":
+        return None
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
+        return {str(child_key): _json_value(item, str(child_key)) for child_key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_value(item) for item in value]
+        return [_json_value(item, key) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return str(value)
@@ -55,7 +63,7 @@ def _json_value(value: Any):
 
 def _row_dict(row):
     return {
-        column.key: _json_value(getattr(row, column.key))
+        column.key: _json_value(getattr(row, column.key), column.key)
         for column in row.__mapper__.column_attrs
     }
 
@@ -181,7 +189,6 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         raise LookupError("剧本项目不存在")
 
     records = _collect_project_records(db, project)
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     target_dir = Path(export_dir) if export_dir else EXPORT_DIR
     target_dir.mkdir(parents=True, exist_ok=True)
 
