@@ -10,9 +10,19 @@ from app.routers.image_model_catalog import (
 
 
 class FakeResponse:
-    def __init__(self, headers, status=200):
+    def __init__(self, headers, status=200, body=b""):
         self.headers = headers
         self.status = status
+        self.code = status
+        self.body = body
+        self.read_sizes = []
+
+    def read(self, size=-1):
+        self.read_sizes.append(size)
+        if size < 0:
+            size = len(self.body)
+        result, self.body = self.body[:size], self.body[size:]
+        return result
 
     def __enter__(self):
         return self
@@ -22,15 +32,17 @@ class FakeResponse:
 
 
 class FakeOpener:
-    def __init__(self, response):
-        self.response = response
-        self.request = None
-        self.timeout = None
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.requests = []
+        self.timeouts = []
 
     def open(self, request, timeout):
-        self.request = request
-        self.timeout = timeout
-        return self.response
+        self.requests.append(request)
+        self.timeouts.append(timeout)
+        if not self.responses:
+            raise AssertionError("No fake response configured")
+        return self.responses.pop(0)
 
 
 class ImageModelCatalogTests(unittest.TestCase):
