@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+type LocalImageRuntimeLogs = { log_path: string; content: string; available: boolean; truncated?: boolean };
+
 type LocalImageRuntime = {
   status: string;
   installed?: boolean;
@@ -564,6 +566,9 @@ export default function LocalImageStudioPage() {
   const [runtime, setRuntime] = useState<LocalImageRuntime | null>(null);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeError, setRuntimeError] = useState("");
+  const [runtimeLogs, setRuntimeLogs] = useState<LocalImageRuntimeLogs | null>(null);
+  const [logsBusy, setLogsBusy] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [checkpoint, setCheckpoint] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("低质量、模糊、畸形肢体、多余手指、文字、水印");
@@ -606,6 +611,22 @@ export default function LocalImageStudioPage() {
       setRuntimeError(err instanceof Error ? err.message : "读取本地引擎状态失败");
     }
   }, []);
+
+  async function loadRuntimeLogs() {
+    setLogsBusy(true);
+    setRuntimeError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime/logs`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取引擎日志失败");
+      setRuntimeLogs(data as LocalImageRuntimeLogs);
+      setLogsOpen(true);
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "读取引擎日志失败");
+    } finally {
+      setLogsBusy(false);
+    }
+  }
 
   async function controlRuntime(action: "start" | "stop") {
     setRuntimeBusy(true);
@@ -852,6 +873,18 @@ export default function LocalImageStudioPage() {
         {runtime?.status === "not_installed" && <p className="mt-2 text-xs text-amber-200">当前没有发现引擎文件。请使用包含 ComfyUI-Payload 的完整离线安装套件重新安装；单独运行 Setup.exe 不包含引擎数据。</p>}
         {runtime?.runtime_mode === "cpu" && <p className="mt-2 text-xs text-amber-200">当前使用 CPU 模式，生成速度会明显慢于受支持的独立 GPU。不会假称集显获得 GPU 加速。</p>}
         {runtime?.install_directory && <p className="mt-2 break-all text-xs text-white/40">安装位置：{runtime.install_directory}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => void loadRuntimeLogs()} disabled={logsBusy} className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/70 disabled:opacity-40">{logsBusy ? "读取中…" : "查看运行日志"}</button>
+          {runtimeLogs?.available && <span className="text-xs text-white/40">日志可用{runtimeLogs.truncated ? "（仅显示末尾部分）" : ""}</span>}
+        </div>
+        {logsOpen && runtimeLogs && <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-black/30 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-white/55">本机运行日志 · 最多读取末尾 128 KiB</p>
+            <button type="button" onClick={() => setLogsOpen(false)} className="text-xs text-white/50">收起</button>
+          </div>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-white/70">{runtimeLogs.available ? runtimeLogs.content || "日志文件目前为空。" : "尚未生成运行日志。请先启动本地引擎。"} </pre>
+          <p className="break-all text-[11px] text-white/35">{runtimeLogs.log_path}</p>
+        </div>}
         {runtimeError && <p role="alert" className="mt-3 text-sm text-rose-200">{runtimeError}</p>}
       </section>
 
