@@ -512,6 +512,52 @@ ipcMain.handle("ai-browser:fill-prompt", async (_event, payload = {}) => {
   if (!result || !result.ok) throw new Error((result && result.reason) || "自动填入失败，请手动粘贴交接包");
   return { filled: true, length: result.length, submitted: false };
 });
+ipcMain.handle("ai-browser:capture-text-result", async (_event, payload = {}) => {
+  const taskId = String(payload.taskId || "");
+  if (!/^task-[a-zA-Z0-9-]{5,110}$/.test(taskId)) throw new Error("无效的任务编号");
+  const entry = [...aiBrowserTasks.entries()].find(([, value]) => value === taskId);
+  if (!entry) throw new Error("找不到该任务对应的 AI 网页，请先打开任务网页");
+  const browser = aiBrowserWindows.get(entry[0]);
+  if (!browser || browser.isDestroyed() || browser.webContents.isDestroyed()) throw new Error("AI 网页已关闭，请重新打开");
+  const currentUrl = new URL(browser.webContents.getURL());
+  const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
+  if (currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) {
+    throw new Error("当前网页不在允许读取结果的 AI 网站范围内");
+  }
+  const script = "(" + function (host) {
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const selectors = host.includes("chatgpt") || host.includes("openai")
+      ? ['[data-message-author-role="assistant"]']
+      : host.includes("deepseek")
+        ? [".ds-markdown", '[data-message-author-role="assistant"]']
+        : host.includes("doubao")
+          ? ['[data-testid*="message-content"]', '[class*="message-content"]', '[data-message-author-role="assistant"]']
+          : ['[data-message-author-role="assistant"]', '[data-testid*="message"]', 'main [class*="message"]'];
+    const candidates = [];
+    for (const selector of selectors) {
+      for (const element of document.querySelectorAll(selector)) {
+        if (!visible(element)) continue;
+        const role = (element.getAttribute("data-message-author-role") || element.getAttribute("data-role") || "").toLowerCase();
+        if (role && role !== "assistant" && !host.includes("doubao")) continue;
+        const text = (element.innerText || element.textContent || "").trim();
+        if (text.length >= 8 && !candidates.includes(text)) candidates.push(text);
+      }
+      if (candidates.length) break;
+    }
+    const text = candidates[candidates.length - 1] || "";
+    if (!text) return { ok: false, reason: "没有找到可读取的最新 AI 回复；请等待生成完成，或手动复制网页结果。" };
+    if (text.length > 50000) return { ok: false, reason: "网页回复超过 50000 字，请手动分段复制保存。" };
+    return { ok: true, text, length: text.length };
+  }.toString() + ")(" + JSON.stringify(currentUrl.hostname) + ")";
+  const result = await browser.webContents.executeJavaScript(script);
+  if (!result || !result.ok) throw new Error((result && result.reason) || "读取网页回复失败，请手动复制");
+  return { captured: true, text: result.text, length: result.length, saved: false };
+});
+
 ipcMain.handle("ai-browser:list-open-tasks", async () => {
   const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
   const response = await fetch("http://127.0.0.1:8000/api/web-ai/tasks?limit=500");
