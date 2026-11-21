@@ -177,7 +177,7 @@ export default function LocalModelsPage() {
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">
               管理已经放入本机模型目录的文件，查看粗略硬件适配建议，并记录你自己核对过的许可证信息。
             </p>
-            <a href="/system-diagnostics" className="mt-3 inline-flex rounded-lg border border-purple-300/30 px-3 py-2 text-sm">返回系统诊断中心</a>
+            <div className="mt-3 flex flex-wrap gap-2"><a href="/system-diagnostics" className="inline-flex rounded-lg border border-purple-300/30 px-3 py-2 text-sm">返回系统诊断中心</a><a href="/local-creator" className="inline-flex rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100">打开本地创作工作台</a></div>
           </div>
           <button disabled={busy} onClick={() => void refresh()} className="rounded-xl bg-purple-600 px-4 py-3 text-sm font-semibold disabled:opacity-40">
             {busy ? "处理中…" : "刷新模型库"}
