@@ -25,6 +25,26 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-ZipExpandedSize([string]$Path) {
+    Add-Type -AssemblyName System.IO.Compression
+    $stream = [System.IO.File]::OpenRead($Path)
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Read, $false)
+        if ($archive.Entries.Count -gt 100000) {
+            throw "Ollama 运行包条目数超过安全上限。"
+        }
+        [long]$expanded = ($archive.Entries | Measure-Object -Property Length -Sum).Sum
+        if ($expanded -le 0 -or $expanded -gt 8GB) {
+            throw "Ollama 运行包解压体积无效或超过 8 GiB 安全上限。"
+        }
+        return $expanded
+    } finally {
+        if ($archive) { $archive.Dispose() }
+        $stream.Dispose()
+    }
+}
+
 function Resolve-SafeRelativePath([string]$Root, [string]$RelativePath) {
     if ([string]::IsNullOrWhiteSpace($RelativePath) -or
         [System.IO.Path]::IsPathRooted($RelativePath) -or
@@ -151,7 +171,8 @@ if (Test-Path -LiteralPath $installFullPath) {
 
         $upgradeParent = Split-Path -Parent $installFullPath
         $upgradeDrive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($installFullPath))
-        $upgradeRequired = [long]$manifest.ollama.size_bytes + 1GB
+        $runtimeExpandedBytes = Get-ZipExpandedSize $runtimeZip
+        $upgradeRequired = $runtimeExpandedBytes + 1GB
         if ($upgradeDrive.AvailableFreeSpace -lt $upgradeRequired) {
             throw ("升级 Ollama 运行环境至少需要 {0:N2} GiB 可用空间。" -f ($upgradeRequired / 1GB))
         }
@@ -213,7 +234,8 @@ $installParent = Split-Path -Parent $installFullPath
 New-Item -ItemType Directory -Path $installParent -Force | Out-Null
 $driveRoot = [System.IO.Path]::GetPathRoot($installFullPath)
 $drive = [System.IO.DriveInfo]::new($driveRoot)
-$requiredBytes = [long]$manifest.ollama.size_bytes + $modelBytes + 1GB
+$runtimeExpandedBytes = Get-ZipExpandedSize $runtimeZip
+$requiredBytes = $runtimeExpandedBytes + $modelBytes + 1GB
 if ($drive.AvailableFreeSpace -lt $requiredBytes) {
     throw ("本地 AI 安装空间不足。至少需要 {0:N2} GiB，可用 {1:N2} GiB。" -f ($requiredBytes / 1GB), ($drive.AvailableFreeSpace / 1GB))
 }
