@@ -265,6 +265,134 @@ def inspect_local_reference_capabilities():
 
 
 
+def _node_input_names(node_info: dict) -> set[str]:
+    inputs = node_info.get("input") if isinstance(node_info, dict) else None
+    if not isinstance(inputs, dict):
+        return set()
+    names = set()
+    for section in ("required", "optional"):
+        values = inputs.get(section)
+        if isinstance(values, dict):
+            names.update(values.keys())
+    return names
+
+
+def _first_node_choice(node_info: dict, input_name: str) -> str | None:
+    choices = _node_input_choices(node_info, input_name)
+    return choices[0] if choices else None
+
+
+def build_reference_conditioned_workflow(
+    payload: LocalImageGenerateInput,
+    seed: int,
+    object_infos: dict,
+    reference_images: list[dict],
+) -> dict:
+    """Build an IP-Adapter graph from live ComfyUI schemas and confirmed local uploads."""
+    if not reference_images or len(reference_images) > 10:
+        raise ValueError("参考图数量必须为 1 到 10 张")
+    load_info = object_infos.get("LoadImage")
+    if not isinstance(load_info, dict) or not _node_input_names(load_info):
+        raise ValueError("本机 ComfyUI 缺少可用的 LoadImage 节点")
+    apply_type = next(
+        (name for name in ("IPAdapterAdvanced", "IPAdapter") if isinstance(object_infos.get(name), dict)),
+        None,
+    )
+    apply_info = object_infos.get(apply_type) if apply_type else None
+    if not apply_type or not _node_input_names(apply_info):
+        raise ValueError("本机 ComfyUI 缺少可用的 IP-Adapter 应用节点")
+
+    unified_info = object_infos.get("IPAdapterUnifiedLoader")
+    model_loader_info = object_infos.get("IPAdapterModelLoader")
+    use_unified = isinstance(unified_info, dict) and "model" in _node_input_names(unified_info) and bool(_first_node_choice(unified_info, "preset"))
+    if use_unified:
+        adapter_info = unified_info
+        adapter_type = "IPAdapterUnifiedLoader"
+        adapter_inputs = {"model": ["4", 0], "preset": _first_node_choice(unified_info, "preset")}
+    else:
+        if not isinstance(model_loader_info, dict):
+            raise ValueError("缺少 IPAdapterUnifiedLoader 和 IPAdapterModelLoader")
+        adapter_model = _first_node_choice(model_loader_info, "ipadapter_file")
+        if not adapter_model:
+            raise ValueError("本机没有可用的 IP-Adapter 模型文件")
+        adapter_info = model_loader_info
+        adapter_type = "IPAdapterModelLoader"
+        adapter_inputs = {"ipadapter_file": adapter_model}
+
+    apply_names = _node_input_names(apply_info)
+    required_names = set((apply_info.get("input") or {}).get("required", {}).keys())
+    supported = {"model", "ipadapter", "image", "weight", "weight_type", "combine_embeds", "start_at", "end_at", "embeds_scaling", "clip_vision"}
+    if not {"model", "ipadapter", "image", "weight"}.issubset(apply_names):
+        raise ValueError("当前 IP-Adapter 节点输入结构不兼容，缺少必要接口")
+    if not {"model", "ipadapter", "image", "weight"}.issubset(supported):
+        raise ValueError("IP-Adapter 节点不支持必要输入")
+
+    workflow = build_txt2img_workflow(payload, seed)
+    workflow["10"] = {"class_type": adapter_type, "inputs": adapter_inputs}
+    next_model = ["10", 0]
+    next_node_id = 11
+
+    clip_info = object_infos.get("CLIPVisionLoader")
+    clip_vision_link = None
+    if "clip_vision" in apply_names and isinstance(clip_info, dict):
+        clip_name = _first_node_choice(clip_info, "clip_name")
+        if clip_name:
+            clip_node_id = str(next_node_id)
+            next_node_id += 1
+            workflow[clip_node_id] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": clip_name}}
+            clip_vision_link = [clip_node_id, 0]
+
+    for reference in reference_images:
+        name = reference.get("name")
+        subfolder = reference.get("subfolder", "")
+        image_type = reference.get("type", "input")
+        if (
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9 _.-]{1,240}", name)
+            or ".." in name or "/" in name or "\\\\" in name
+            or not isinstance(subfolder, str) or len(subfolder) > 240
+            or (subfolder and (
+                subfolder.startswith("/") or "\\\\" in subfolder or ":" in subfolder
+                or "//" in subfolder or any(part in ("", ".", "..") for part in subfolder.split("/"))
+                or not re.fullmatch(r"[A-Za-z0-9 _./-]+", subfolder)
+            ))
+            or image_type != "input"
+        ):
+            raise ValueError("ComfyUI 参考图文件名或输入目录不安全")
+        image_node_id = str(next_node_id)
+        apply_node_id = str(next_node_id + 1)
+        next_node_id += 2
+        workflow[image_node_id] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": f"{subfolder}/{name}" if subfolder else name},
+        }
+        apply_inputs = {
+            "model": next_model,
+            "ipadapter": ["10", 1] if use_unified else ["10", 0],
+            "image": [image_node_id, 0],
+            "weight": 0.65,
+        }
+        if "weight_type" in apply_names:
+            apply_inputs["weight_type"] = _first_node_choice(apply_info, "weight_type") or "linear"
+        if "combine_embeds" in apply_names:
+            apply_inputs["combine_embeds"] = _first_node_choice(apply_info, "combine_embeds") or "concat"
+        if "start_at" in apply_names:
+            apply_inputs["start_at"] = 0.0
+        if "end_at" in apply_names:
+            apply_inputs["end_at"] = 1.0
+        if "embeds_scaling" in apply_names:
+            apply_inputs["embeds_scaling"] = _first_node_choice(apply_info, "embeds_scaling") or "V only"
+        if "clip_vision" in apply_names:
+            if clip_vision_link is None and "clip_vision" in required_names:
+                raise ValueError("当前 IP-Adapter 节点要求 CLIP Vision 模型，但本机未检测到可用模型")
+            if clip_vision_link is not None:
+                apply_inputs["clip_vision"] = clip_vision_link
+        workflow[apply_node_id] = {"class_type": apply_type, "inputs": apply_inputs}
+        next_model = [apply_node_id, 0]
+
+    workflow["3"]["inputs"]["model"] = next_model
+    return workflow
+
+
 
 def _prepare_batch_shots(data: LocalImageBatchInput, db: Session):
     shots = db.query(StoryboardShot).filter(
