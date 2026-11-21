@@ -163,6 +163,16 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | Convert
 if ($manifest.target_architecture -ne "windows-x64" -or $manifest.bundle_type -ne "complete-offline-comfyui-engine") {
     throw "离线引擎数据包版本或系统架构不匹配。"
 }
+$expectedAssetNames = @(
+    "ComfyUI_windows_portable_nvidia.7z",
+    "ComfyUI_windows_portable_nvidia_cu126.7z",
+    "ComfyUI_windows_portable_amd.7z",
+    "ComfyUI_windows_portable_intel.7z"
+)
+$manifestAssetNames = @($manifest.assets | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+if ($manifestAssetNames.Count -ne 4 -or (Compare-Object $expectedAssetNames $manifestAssetNames).Count -gt 0) {
+    throw "离线数据包缺少官方显卡运行包或包含未知文件。"
+}
 $cpuArchitecture = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture | Select-Object -Unique)
 if ([Environment]::Is64BitOperatingSystem -ne $true -or $cpuArchitecture.Count -ne 1 -or $cpuArchitecture[0] -ne 9) {
     throw "当前系统不是受支持的 Windows x64 环境。"
@@ -177,6 +187,8 @@ $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop
 $selection = Select-ComfyAsset $adapters
 $asset = $manifest.assets | Where-Object { $_.name -eq $selection.name } | Select-Object -First 1
 if (!$asset -or $asset.verified -ne $true) { throw "离线数据包缺少所需显卡运行包：$($selection.name)" }
+$expectedAssetUrl = "https://github.com/Comfy-Org/ComfyUI/releases/download/$($manifest.comfyui_version)/$($selection.name)"
+if ($asset.source -ne $expectedAssetUrl) { throw "ComfyUI 运行包来源与官方版本清单不匹配。" }
 
 $archivePath = Join-Path $payload $selection.name
 if (!(Test-Path -LiteralPath $archivePath -PathType Leaf)) { throw "缺少已选择的显卡运行包：$($selection.name)" }
