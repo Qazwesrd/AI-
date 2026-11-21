@@ -38,9 +38,13 @@ def _as_int_ids(values):
     if not isinstance(values, list):
         return result
     for value in values:
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, str) and value.strip().isdigit():
+            parsed = int(value.strip())
+        else:
             continue
         if parsed > 0:
             result.add(parsed)
