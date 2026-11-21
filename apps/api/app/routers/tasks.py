@@ -330,6 +330,7 @@ def list_unified_tasks(
             "video": "独立视频生成",
             "speech": "独立配音",
             "episode_speech": "分镜对白配音",
+            "local_render": "本地视频合成",
         }
         items.append({
             "id": f"media:{task.id}", "source": "media", "source_id": task.id,
@@ -341,7 +342,8 @@ def list_unified_tasks(
             "context": f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
                 f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
             ),
-            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path) or bool(result_data.get("images")),
+            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path) and task.status == "completed" or bool(result_data.get("images")),
+            "progress": (result_data.get("progress") or {}).get("percent") if isinstance(result_data.get("progress"), dict) else None,
             "created_at": _iso(task.created_at), "updated_at": _iso(task.updated_at),
             "can_open": True,
         })
@@ -607,6 +609,19 @@ def control_unified_task(
             return {
                 "success": True, "task_id": task_id, "status": task.status,
                 "message": "已完成配音任务人工核实并解除重试保护；请返回配音页面重新发起，系统不会自动调用 AI。",
+            }
+        if task.task_type == "local_render":
+            progress = (task.result_data or {}).get("progress", {}) if isinstance(task.result_data, dict) else {}
+            return {
+                "task_id": task_id,
+                "status": task.status,
+                "progress": progress.get("percent", 0),
+                "stage": progress.get("stage", "unknown"),
+                "result_available": task.status == "completed" and bool(task.result_path),
+                "result_path": task.result_path if task.status == "completed" else None,
+                "error": task.error,
+                "polling_skipped": False,
+                "message": "本地渲染状态已读取；不会调用 AI 服务商，也不会自动重新渲染。",
             }
         if task.task_type in ("local_image_batch", "local_image_reference"):
             metadata = task.request_data if isinstance(task.request_data, dict) else {}
