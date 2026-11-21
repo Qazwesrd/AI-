@@ -1231,7 +1231,21 @@ def archive_local_image_task_output(
     """Archive one explicitly selected completed ComfyUI output into the local media library."""
     if not PROMPT_ID_RE.fullmatch(prompt_id):
         raise HTTPException(400, "任务编号格式无效")
-    selected_filename, selected_subfolder, _ = _safe_output_image(data.model_dump(exclude={"shot_id"}))
+    selected_filename, selected_subfolder, _ = _safe_output_image(data.model_dump(exclude={"shot_id", "asset_id"}))
+    target_asset = None
+    if data.asset_id is not None:
+        target_asset = db.query(VisualAsset).filter(VisualAsset.id == data.asset_id).first()
+        if target_asset is None:
+            raise HTTPException(404, "所选视觉素材不存在")
+        if not target_asset.confirmed:
+            raise HTTPException(409, "视觉素材设定尚未确认，不能关联生成图片")
+        asset_task = db.query(MediaTask).filter(
+            MediaTask.task_type == "local_visual_asset_image",
+            MediaTask.remote_task_id == prompt_id,
+        ).first()
+        task_data = asset_task.request_data if asset_task and isinstance(asset_task.request_data, dict) else {}
+        if not asset_task or int(task_data.get("asset_id") or 0) != target_asset.id:
+            raise HTTPException(409, "该 ComfyUI 任务不是为所选素材创建的本地生图任务")
     if data.shot_id is not None:
         target_shot = db.query(StoryboardShot).filter(StoryboardShot.id == data.shot_id).first()
         if target_shot is None:
@@ -1273,12 +1287,20 @@ def archive_local_image_task_output(
         ):
             if data.shot_id is not None:
                 _attach_media_to_shot(db, media, data.shot_id)
+            if target_asset is not None:
+                target_asset.image_path = media.file_path
+                asset_data = dict(target_asset.data) if isinstance(target_asset.data, dict) else {}
+                asset_data["local_image_media_file_id"] = media.id
+                asset_data["local_image_prompt_id"] = prompt_id
+                target_asset.data = asset_data
+            if data.shot_id is not None or target_asset is not None:
                 db.commit()
             return {
                 "success": True, "already_archived": True, "media_file_id": media.id,
                 "name": media.name, "path": media.file_path,
                 "linked_to_shot": data.shot_id is not None, "shot_id": data.shot_id,
-                "message": "图片已存在于素材库" + ("，并已关联到所选分镜。" if data.shot_id is not None else "，没有重复保存。"),
+                "linked_to_asset": target_asset is not None, "asset_id": target_asset.id if target_asset else None,
+                "message": "图片已存在于素材库" + ("，并已关联到所选素材。" if target_asset is not None else "") + ("，并已关联到所选分镜。" if data.shot_id is not None else "，没有重复保存。"),
             }
     raw, mime_type, suffix = _download_comfyui_output(selected_filename, selected_subfolder)
     folder = STORAGE / "images"
@@ -1302,12 +1324,19 @@ def archive_local_image_task_output(
                 "comfyui_filename": selected_filename,
                 "comfyui_subfolder": selected_subfolder,
                 "stored_name": stored_name,
+                "visual_asset_id": target_asset.id if target_asset is not None else None,
             },
         )
         db.add(media)
         db.flush()
         if data.shot_id is not None:
             _attach_media_to_shot(db, media, data.shot_id)
+        if target_asset is not None:
+            target_asset.image_path = str(destination)
+            asset_data = dict(target_asset.data) if isinstance(target_asset.data, dict) else {}
+            asset_data["local_image_media_file_id"] = media.id
+            asset_data["local_image_prompt_id"] = prompt_id
+            target_asset.data = asset_data
         db.commit()
         db.refresh(media)
         return {
@@ -1316,7 +1345,8 @@ def archive_local_image_task_output(
             "size": media.file_size, "path": media.file_path,
             "url": f"/api/media/files/{media.id}/download",
             "linked_to_shot": data.shot_id is not None, "shot_id": data.shot_id,
-            "message": "图片已保存到本地素材库" + ("，并已关联到所选分镜。" if data.shot_id is not None else "。"),
+            "linked_to_asset": target_asset is not None, "asset_id": target_asset.id if target_asset else None,
+            "message": "图片已保存到本地素材库" + ("，并已关联到所选素材。" if target_asset is not None else "") + ("，并已关联到所选分镜。" if data.shot_id is not None else "。"),
         }
     except Exception:
         db.rollback()
