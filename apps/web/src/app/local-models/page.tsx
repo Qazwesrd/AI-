@@ -397,6 +397,14 @@ export default function LocalModelsPage() {
                   {installingRuntime ? "正在安装本地 AI 环境…" : "一键安装运行环境和 Qwen3 4B 模型"}
                 </button>
               )}
+              {runtimeInstallProgress && ["downloading", "verifying", "installing", "checking"].includes(runtimeInstallProgress.status) && (
+                <div className="rounded-xl border border-emerald-300/20 p-3 text-sm">
+                  <div className="flex justify-between gap-3"><span>{runtimeInstallProgress.stage}</span><span>{runtimeInstallProgress.percent ?? 0}%</span></div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${runtimeInstallProgress.percent ?? 0}%` }} /></div>
+                  <p className="mt-1 text-xs text-white/50">{runtimeInstallProgress.message}</p>
+                  {runtimeInstallProgress.status === "downloading" && <button type="button" onClick={() => void cancelOllamaDownload()} className="mt-2 rounded-lg border border-rose-300/30 px-3 py-2 text-xs text-rose-100">取消运行环境下载</button>}
+                </div>
+              )}
               <button type="button" disabled={installerInfo.engine_status !== "ready" || !installerInfo.enough_space || installerInfo.installed === true || ["downloading", "verifying"].includes(installerInfo.job.status) || installingBaseModel} onClick={() => void startBaseModelInstall()} className="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
                 {installerInfo.installed ? "模型已安装" : installingBaseModel ? "正在准备…" : "确认并下载 Qwen3 4B"}
               </button>
