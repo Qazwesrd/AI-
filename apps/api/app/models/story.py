@@ -100,3 +100,17 @@ class StoryboardMediaLink(Base):
     shot_id = Column(Integer, nullable=False, index=True)
     media_file_id = Column(Integer, nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class StoryboardMediaRevision(Base):
+    __tablename__ = "storyboard_media_revisions"
+    __table_args__ = (
+        UniqueConstraint("link_id", "version_number", name="uq_storyboard_media_revision_version"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    shot_id = Column(Integer, nullable=False, index=True)
+    link_id = Column(Integer, nullable=False, index=True)
+    media_file_id = Column(Integer, nullable=False, index=True)
+    version_number = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
