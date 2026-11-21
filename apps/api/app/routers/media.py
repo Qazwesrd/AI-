@@ -938,7 +938,7 @@ def render_episode_from_shots(
             final_video_label = "vtitled"
         else:
             final_video_label = "vout"
-        run_ffmpeg(ffmpeg_args + [
+        _run_episode_render_ffmpeg(ffmpeg_args + [
             "-filter_complex", ";".join(filters),
             "-map", f"[{final_video_label}]", "-map", "[aout]",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
@@ -1037,7 +1037,7 @@ def render_episode_from_shots(
                 + f"amix=inputs={len(mix_labels)}:duration=first:dropout_transition=2,"
                 "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.95[mix]"
             )
-            run_ffmpeg(mix_args + [
+            _run_episode_render_ffmpeg(mix_args + [
                 "-filter_complex", ";".join(mix_filters),
                 "-map", "0:v:0", "-map", "[mix]",
                 "-c:v", "copy", "-c:a", "aac", "-shortest", str(mixed_output),
@@ -1097,7 +1097,7 @@ def render_episode_from_shots(
                 .replace("'", "\\'")
             )
             burn_output = output.with_name(output.stem + "_subtitle_burn.mp4")
-            run_ffmpeg([
+            _run_episode_render_ffmpeg([
                 "-i", str(output),
                 "-vf", f"subtitles='{subtitle_filter_path}':force_style='{force_style}'",
                 "-map", "0:v:0", "-map", "0:a?",
@@ -1141,6 +1141,11 @@ def render_episode_from_shots(
                 "applied_timeline_version": timeline_record.version if timeline_record else 0,
                 "applied_transitions": len(transition_items),
                 "quality_report": quality_report}
+    except FFmpegCancelledError:
+        output.unlink(missing_ok=True)
+        for title_file in locals().get("title_files", []):
+            title_file.unlink(missing_ok=True)
+        raise
     except HTTPException:
         output.unlink(missing_ok=True)
         for title_file in locals().get("title_files", []):
@@ -1152,6 +1157,256 @@ def render_episode_from_shots(
             title_file.unlink(missing_ok=True)
         raise HTTPException(500, "分集视频合成失败：" + str(exc))
 
+
+
+
+
+# Episode assembly jobs reuse MediaTask and remain local-only. The worker handle
+# is intentionally process-local; after restart a missing handle means review,
+# never an automatic second render.
+_EPISODE_RENDER_RUNTIME = {}
+_EPISODE_RENDER_LOCK = threading.Lock()
+_EPISODE_RENDER_CONTEXT = threading.local()
+
+
+def _update_episode_render_job(task_id, *, status=None, progress=None, result_data=None, error=None):
+    db = SessionLocal()
+    try:
+        task = db.query(MediaTask).filter(
+            MediaTask.id == task_id, MediaTask.task_type == "episode_render"
+        ).first()
+        if not task:
+            return
+        if status is not None:
+            task.status = status
+        if progress is not None:
+            current = dict(task.result_data) if isinstance(task.result_data, dict) else {}
+            current["progress"] = progress
+            task.result_data = current
+        if result_data is not None:
+            task.result_data = result_data
+        if error is not None:
+            task.error = str(error)[:4000]
+        task.updated_at = datetime.utcnow()
+        db.commit()
+    finally:
+        db.close()
+
+
+def _run_episode_render_ffmpeg(args):
+    task_id = getattr(_EPISODE_RENDER_CONTEXT, "task_id", None)
+    if task_id is None:
+        return run_ffmpeg(args)
+    with _EPISODE_RENDER_LOCK:
+        runtime = _EPISODE_RENDER_RUNTIME.get(task_id)
+    if not runtime:
+        raise FFmpegCancelledError("分集合成任务执行上下文已丢失")
+    if runtime["cancel"].is_set():
+        raise FFmpegCancelledError("用户请求停止分集视频合成")
+    phase = runtime["phase"]
+    phase_index = phase["index"]
+    phase["index"] += 1
+    stages = [
+        ("normalizing", 10, 35),
+        ("mixing_audio", 35, 65),
+        ("burning_subtitles", 65, 88),
+    ]
+    stage, lower, upper = stages[min(phase_index, len(stages) - 1)]
+    _update_episode_render_job(task_id, progress={
+        "percent": lower, "stage": stage, "phase": phase_index + 1,
+        "phase_count": 3,
+    })
+
+    def report(progress):
+        if runtime["cancel"].is_set():
+            return
+        elapsed = float(progress.get("out_time_seconds") or 0)
+        duration = float(progress.get("duration_seconds") or 0)
+        fraction = min(0.98, elapsed / duration) if duration > 0 else 0.0
+        percent = round(lower + (upper - lower) * fraction, 1)
+        _update_episode_render_job(task_id, progress={
+            "percent": percent, "stage": stage,
+            "phase": phase_index + 1, "phase_count": 3,
+            "out_time_seconds": elapsed,
+        })
+
+    run_ffmpeg_with_progress(
+        args, progress_callback=report,
+        cancel_event=runtime["cancel"],
+    )
+    if runtime["cancel"].is_set():
+        raise FFmpegCancelledError("用户请求停止分集视频合成")
+
+
+def _run_episode_render_job(task_id, episode_id, output_name, music_path, music_volume):
+    db = SessionLocal()
+    try:
+        task = db.query(MediaTask).filter(
+            MediaTask.id == task_id, MediaTask.task_type == "episode_render"
+        ).first()
+        if not task or task.status != "queued":
+            return
+        with _EPISODE_RENDER_LOCK:
+            runtime = _EPISODE_RENDER_RUNTIME.get(task_id)
+            if runtime is None:
+                runtime = {"cancel": threading.Event(), "phase": {"index": 0}}
+                _EPISODE_RENDER_RUNTIME[task_id] = runtime
+        if runtime["cancel"].is_set():
+            task.status = "cancelled"
+            task.error = "任务启动前已收到停止请求；未启动 FFmpeg"
+            db.commit()
+            return
+        task.status = "processing"
+        task.error = None
+        task.result_data = {"progress": {"percent": 5, "stage": "preparing"}}
+        db.commit()
+        _EPISODE_RENDER_CONTEXT.task_id = task_id
+        result = render_episode_from_shots(
+            episode_id, output_name=output_name,
+            music_path=music_path, music_volume=music_volume, db=db,
+        )
+        if runtime["cancel"].is_set():
+            raise FFmpegCancelledError("用户请求停止分集视频合成")
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        task.status = "completed"
+        task.result_path = result.get("output")
+        task.result_data = {
+            "progress": {"percent": 100, "stage": "completed"},
+            "result": result,
+        }
+        task.error = None
+        db.commit()
+    except FFmpegCancelledError as exc:
+        _update_episode_render_job(
+            task_id, status="cancelled",
+            progress={"percent": 0, "stage": "cancelled"},
+            error=str(exc),
+        )
+    except Exception as exc:
+        _update_episode_render_job(
+            task_id, status="failed",
+            progress={"percent": 0, "stage": "failed"},
+            error=str(exc),
+        )
+    finally:
+        if hasattr(_EPISODE_RENDER_CONTEXT, "task_id"):
+            del _EPISODE_RENDER_CONTEXT.task_id
+        db.close()
+        with _EPISODE_RENDER_LOCK:
+            _EPISODE_RENDER_RUNTIME.pop(task_id, None)
+
+
+@router.post("/video/episodes/{episode_id}/render/jobs", status_code=202)
+def create_episode_render_job(
+    episode_id: int,
+    background_tasks: BackgroundTasks,
+    output_name: str = "episode.mp4",
+    music_path: Optional[str] = None,
+    music_volume: float = 0.18,
+    db: Session = Depends(get_db),
+):
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+    if not episode:
+        raise HTTPException(404, "分集不存在")
+    if not db.query(StoryProject).filter(StoryProject.id == episode.project_id).first():
+        raise HTTPException(404, "剧本项目不存在")
+    active = db.query(MediaTask).filter(
+        MediaTask.task_type == "episode_render",
+        MediaTask.status.in_(("queued", "processing")),
+    ).all()
+    if any(
+        (item.request_data or {}).get("episode_id") == episode_id
+        for item in active if isinstance(item.request_data, dict)
+    ):
+        raise HTTPException(409, "本集已有正在等待或执行的合成任务，请先查询任务状态")
+    if not 0 <= float(music_volume) <= 2:
+        raise HTTPException(422, "背景音乐音量必须在 0 到 2 之间")
+    task = MediaTask(
+        task_type="episode_render", provider="local_ffmpeg",
+        model="libx264", status="queued", prompt="本地分集合成",
+        request_data={
+            "episode_id": episode_id, "output_name": output_name,
+            "music_path": music_path, "music_volume": music_volume,
+        },
+        result_data={"progress": {"percent": 0, "stage": "queued"}},
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    with _EPISODE_RENDER_LOCK:
+        _EPISODE_RENDER_RUNTIME[task.id] = {
+            "cancel": threading.Event(), "phase": {"index": 0},
+        }
+    background_tasks.add_task(
+        _run_episode_render_job, task.id, episode_id,
+        output_name, music_path, music_volume,
+    )
+    return {
+        "task_id": task.id, "status": "queued",
+        "status_url": f"/api/media/video/episodes/render/jobs/{task.id}",
+        "cancel_url": f"/api/media/video/episodes/render/jobs/{task.id}/cancel",
+        "message": "分集视频合成已进入本地后台队列；不会调用云端 AI 服务。",
+    }
+
+
+@router.get("/video/episodes/render/jobs/{task_id}")
+def get_episode_render_job(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(MediaTask).filter(
+        MediaTask.id == task_id, MediaTask.task_type == "episode_render"
+    ).first()
+    if not task:
+        raise HTTPException(404, "分集合成任务不存在")
+    if task.status in ("queued", "processing"):
+        with _EPISODE_RENDER_LOCK:
+            running_here = task_id in _EPISODE_RENDER_RUNTIME
+        if not running_here:
+            task.status = "interrupted_unknown"
+            task.error = "应用重启或执行进程丢失；已保留任务记录，未自动重新合成。请检查输出后手动重新创建任务。"
+            task.updated_at = datetime.utcnow()
+            db.commit()
+    data = task.result_data if isinstance(task.result_data, dict) else {}
+    return {
+        "task_id": task.id, "episode_id": (task.request_data or {}).get("episode_id"),
+        "status": task.status, "progress": data.get("progress", {}),
+        "output": task.result_path if task.status == "completed" else None,
+        "result": data.get("result") if task.status == "completed" else None,
+        "error": task.error,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    }
+
+
+@router.post("/video/episodes/render/jobs/{task_id}/cancel")
+def cancel_episode_render_job(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(MediaTask).filter(
+        MediaTask.id == task_id, MediaTask.task_type == "episode_render"
+    ).first()
+    if not task:
+        raise HTTPException(404, "分集合成任务不存在")
+    if task.status == "queued":
+        with _EPISODE_RENDER_LOCK:
+            runtime = _EPISODE_RENDER_RUNTIME.get(task_id)
+            if runtime:
+                runtime["cancel"].set()
+        task.status = "cancelled"
+        task.error = "用户在合成开始前取消任务"
+        task.updated_at = datetime.utcnow()
+        db.commit()
+        return {"task_id": task_id, "status": "cancelled"}
+    if task.status != "processing":
+        raise HTTPException(409, f"当前任务状态为 {task.status}，不能停止")
+    with _EPISODE_RENDER_LOCK:
+        runtime = _EPISODE_RENDER_RUNTIME.get(task_id)
+        if not runtime:
+            task.status = "interrupted_unknown"
+            task.error = "找不到本机 FFmpeg 执行上下文；未自动重启任务。"
+            db.commit()
+            return {"task_id": task_id, "status": task.status, "message": task.error}
+        runtime["cancel"].set()
+    return {
+        "task_id": task_id, "status": "cancellation_requested",
+        "message": "已向本地 FFmpeg 发送停止请求，请稍后查询最终状态。",
+    }
 
 
 @router.post("/video/episodes/{episode_id}/shots/{shot_id}/replace")
