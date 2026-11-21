@@ -1,6 +1,8 @@
 import unittest
 
-from app.routers.system import _health_status
+from unittest.mock import patch
+
+from app.routers.system import _check_local_ai_tools, _health_status
 
 
 class SystemDiagnosticsTests(unittest.TestCase):
@@ -18,6 +20,24 @@ class SystemDiagnosticsTests(unittest.TestCase):
         self.assertEqual(_health_status([
             {"status": "warning"}, {"status": "error"}
         ]), "error")
+
+    @patch("app.routers.system.shutil.which", return_value=None)
+    def test_local_ai_detection_is_offline_and_does_not_auto_download(self, _which):
+        result = _check_local_ai_tools()
+        self.assertEqual(result["mode"], "local_only_detection")
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["auto_downloaded"])
+        self.assertEqual(len(result["tools"]), 3)
+        self.assertTrue(all(item["status"] == "not_detected" for item in result["tools"]))
+        _which.assert_called()
+
+    @patch("app.routers.system.shutil.which", side_effect=lambda name: "/usr/bin/ollama" if name == "ollama" else None)
+    def test_local_ai_detection_reports_available_executable(self, _which):
+        result = _check_local_ai_tools()
+        ollama = next(item for item in result["tools"] if item["id"] == "ollama")
+        self.assertEqual(ollama["status"], "installed")
+        self.assertEqual(ollama["executable"], "/usr/bin/ollama")
+        self.assertFalse(ollama["network_used"])
 
 
 if __name__ == "__main__":
