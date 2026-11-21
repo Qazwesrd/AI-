@@ -5,6 +5,7 @@ records. Files are copied only from the managed local storage root; secrets,
 provider credentials and workspace-level database files are never included.
 """
 import hashlib
+import os
 import json
 import re
 import shutil
@@ -98,6 +99,52 @@ def _safe_local_file(raw_path: str):
     if path.is_symlink() or not path.is_file():
         return None
     return path
+
+
+def _safe_comfyui_output_file(filename: str, subfolder: str = ""):
+    """Resolve one task-linked ComfyUI output under the fixed local output folder."""
+    if (
+        not isinstance(filename, str)
+        or not re.fullmatch(r"[A-Za-z0-9 _.-]{1,240}", filename)
+        or filename in {".", ".."}
+        or ".." in filename
+        or "/" in filename
+        or "\\" in filename
+        or ":" in filename
+    ):
+        return None
+    if (
+        not isinstance(subfolder, str)
+        or len(subfolder) > 240
+        or subfolder.startswith("/")
+        or "\\" in subfolder
+        or ":" in subfolder
+        or "//" in subfolder
+        or any(part in {"", ".", ".."} for part in subfolder.split("/")) if subfolder else False
+    ):
+        return None
+    if subfolder and not re.fullmatch(r"[A-Za-z0-9 _./-]+", subfolder):
+        return None
+    try:
+        from app.routers.local_image_runtime import _install_root
+
+        output_root = _install_root() / "ComfyUI" / "output"
+        if output_root.is_symlink():
+            return None
+        candidate = output_root
+        for part in ([*subfolder.split("/")] if subfolder else []) + [filename]:
+            candidate = candidate / part
+            if candidate.is_symlink():
+                return None
+        root_resolved = output_root.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)
+        if os.path.commonpath((str(root_resolved), str(resolved))) != str(root_resolved):
+            return None
+        if not resolved.is_file():
+            return None
+        return resolved
+    except (OSError, ValueError, RuntimeError):
+        return None
 
 
 def _sha256_file(path: Path) -> str:
@@ -279,6 +326,52 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
             "sha256": digest,
         })
 
+    generated_local_images = []
+    known_source_paths = {str(Path(item["source_path"]).resolve()) for item in file_entries}
+    for task in records["media_tasks"]:
+        result_data = task.result_data if isinstance(task.result_data, dict) else {}
+        images = result_data.get("images") if isinstance(result_data.get("images"), list) else []
+        request_data = task.request_data if isinstance(task.request_data, dict) else {}
+        for image in images:
+            if not isinstance(image, dict) or image.get("type", "output") != "output":
+                continue
+            image_name = image.get("filename")
+            image_subfolder = image.get("subfolder", "")
+            image_path = _safe_comfyui_output_file(image_name, image_subfolder)
+            if image_path is None:
+                missing_files.append({
+                    "name": _safe_archive_name(str(image_name or "ComfyUI output image")),
+                    "reason": "ComfyUI 输出图片不存在或路径不安全",
+                })
+                continue
+            source_key = str(image_path)
+            if source_key in known_source_paths:
+                archive_path = next(item["archive_path"] for item in file_entries if str(Path(item["source_path"]).resolve()) == source_key)
+            else:
+                size = image_path.stat().st_size
+                total_bytes += size
+                if total_bytes > MAX_PROJECT_EXPORT_BYTES:
+                    raise ValueError("项目关联素材总量超过 50 GiB 安全上限")
+                if len(file_entries) >= MAX_PROJECT_EXPORT_FILES:
+                    raise ValueError("项目关联文件数量超过安全上限，无法创建归档")
+                archive_path = f"files/{len(file_entries) + 1:05d}-{_safe_archive_name(image_path.name)}"
+                file_entries.append({
+                    "source_path": str(image_path),
+                    "archive_path": archive_path,
+                    "size_bytes": size,
+                    "sha256": _sha256_file(image_path),
+                })
+                known_source_paths.add(source_key)
+            generated_local_images.append({
+                "task_id": task.id,
+                "project_id": request_data.get("project_id"),
+                "episode_id": request_data.get("episode_id"),
+                "shot_id": request_data.get("shot_id"),
+                "filename": image_name,
+                "subfolder": image_subfolder,
+                "archive_path": archive_path,
+            })
+
     usage = shutil.disk_usage(target_dir)
     required = total_bytes + EXPORT_DISK_SAFETY_MARGIN
     if usage.free < required:
@@ -291,6 +384,7 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         "format_version": 1,
         "exported_at": datetime.utcnow().isoformat() + "Z",
         "project": _rewrite_paths(_row_dict(project), path_map),
+        "generated_local_images": generated_local_images,
         "records": {},
     }
     if records["novel"]:
