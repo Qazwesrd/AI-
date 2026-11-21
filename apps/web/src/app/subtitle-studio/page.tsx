@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type LocalVoice = { name: string; culture: string; gender: string; age: string };
+type LocalModel = { name: string; size_bytes?: number | null };
 
 export default function SubtitleStudioPage() {
   const [subtitlePath, setSubtitlePath] = useState("");
@@ -22,6 +23,48 @@ export default function SubtitleStudioPage() {
   const [localRate, setLocalRate] = useState(0);
   const [loadingLocalVoices, setLoadingLocalVoices] = useState(false);
   const [localVoiceResult, setLocalVoiceResult] = useState<{ download_url: string; name: string; duration_seconds: number; cue_count: number } | null>(null);
+  const [localModels, setLocalModels] = useState<LocalModel[]>([]);
+  const [translationModel, setTranslationModel] = useState("");
+  const [localTranslationResult, setLocalTranslationResult] = useState<{ download_url: string; name: string; cue_count: number } | null>(null);
+
+  async function loadLocalModels() {
+    try {
+      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取本机模型失败");
+      const models = Array.isArray(data.models) ? data.models : [];
+      setLocalModels(models);
+      setTranslationModel((current) => current || models.find((item: LocalModel) => item.name.toLowerCase().startsWith("qwen3"))?.name || models[0]?.name || "");
+    } catch (error) {
+      setLocalModels([]);
+      setMessage(error instanceof Error ? error.message : "读取本机模型失败");
+    }
+  }
+
+  async function translateLocally() {
+    if (!subtitlePath || !translationModel) {
+      setMessage("请先选择 SRT 字幕和已安装的本机文本模型。");
+      return;
+    }
+    if (!window.confirm(`确认使用本机模型“${translationModel}”翻译字幕？将按批次处理，可能占用 CPU 数分钟；不会联网、不会调用云端 API，也不会自动下载模型。`)) return;
+    setBusy(true);
+    setLocalTranslationResult(null);
+    setMessage("本机模型正在翻译字幕，请稍候……");
+    try {
+      const response = await fetch(`${API}/api/subtitle-tools/translate-local`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtitle_path: subtitlePath, model: translationModel, target_language: language, confirm_local_generation: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本机字幕翻译失败");
+      setLocalTranslationResult(data);
+      setMessage(data.message || "本机字幕翻译完成。");
+      await loadFiles();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "本机字幕翻译失败");
+    } finally { setBusy(false); }
+  }
 
   async function loadLocalVoices() {
     setLoadingLocalVoices(true);
@@ -72,7 +115,7 @@ export default function SubtitleStudioPage() {
     if (vids.ok) setVideos(await vids.json());
   }
 
-  useEffect(() => { void loadFiles(); void loadLocalVoices(); }, []);
+  useEffect(() => { void loadFiles(); void loadLocalVoices(); void loadLocalModels(); }, []);
 
   async function upload(file: File, category: "other" | "video") {
     const form = new FormData();
@@ -130,8 +173,18 @@ export default function SubtitleStudioPage() {
           <select value={language} onChange={e => setLanguage(e.target.value)} className="mt-2 w-full max-w-md rounded-lg border border-white/15 bg-black/30 p-3">
             <option value="zh">翻译为简体中文</option><option value="en">Translate to English</option><option value="zh-en">中英双语（每条两行）</option>
           </select>
-          <a href="/ai-tools" className="mt-4 inline-flex rounded-xl border border-purple-300/30 bg-purple-950/40 px-5 py-3 font-semibold text-purple-100">前往网页 AI 工具准备字幕翻译</a>
-          <p className="mt-2 text-xs text-white/45">原字幕不会被覆盖；系统会校验翻译条数和编号，保持原开始/结束时间及顺序。</p>
+          <label className="mt-3 block text-sm">本机文本模型
+            <select value={translationModel} onChange={e => setTranslationModel(e.target.value)} disabled={localModels.length === 0} className="mt-2 w-full max-w-md rounded-lg border border-white/15 bg-black/30 p-3">
+              <option value="">请选择已安装的本机模型</option>
+              {localModels.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
+            </select>
+          </label>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="button" disabled={busy || !subtitlePath || !translationModel} onClick={() => void translateLocally()} className="rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-40">{busy ? "本机模型处理中…" : "使用本机模型翻译并保存新字幕"}</button>
+            <a href="/ai-tools" className="inline-flex rounded-xl border border-purple-300/30 bg-purple-950/40 px-5 py-3 font-semibold text-purple-100">手动使用网页 AI 工具</a>
+          </div>
+          {localTranslationResult && <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-950/20 p-3 text-sm"><p className="font-semibold text-emerald-200">本机翻译已保存：{localTranslationResult.name}</p><p className="mt-1 text-xs text-white/55">字幕 {localTranslationResult.cue_count} 条 · 原字幕时间码和顺序保持不变 · 未联网</p><a className="mt-2 inline-flex underline" href={API + localTranslationResult.download_url} target="_blank" rel="noreferrer">打开 / 下载新字幕</a></div>}
+          <p className="mt-2 text-xs text-white/45">原字幕不会被覆盖；系统按每批 20 条处理，并校验翻译条数、编号和顺序，保持原开始/结束时间。模型必须已安装在本机。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">多语言逐句配音</h2>
