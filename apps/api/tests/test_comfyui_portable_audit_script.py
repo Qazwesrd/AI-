@@ -1,10 +1,12 @@
 import unittest
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 class ComfyUIPortableAuditScriptTests(unittest.TestCase):
     def test_inventory_tool_keeps_distribution_blocked(self):
-        source = Path("scripts/audit-comfyui-portable-dependencies.ps1").read_text(encoding="utf-8")
+        source = REPO_ROOT / "scripts/audit-comfyui-portable-dependencies.ps1".read_text(encoding="utf-8")
         for marker in (
             "Get-ArchiveEntries", "Get-ExtractedEvidence", "Get-FileHash",
             "MaximumEntries", "MaximumEvidenceFiles", "MaximumMetadataBytes",
