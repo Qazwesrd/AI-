@@ -1318,6 +1318,19 @@ class ReferenceImageUploadInput(BaseModel):
     confirm_local_upload: bool = False
 
 
+class ReferenceConditionedGenerateInput(BaseModel):
+    shot_id: int = Field(ge=1)
+    checkpoint: str = Field(min_length=1, max_length=240)
+    negative_prompt: str = Field(default="", max_length=6000)
+    style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
+    width: int = Field(default=768, ge=512, le=1536)
+    height: int = Field(default=768, ge=512, le=1536)
+    steps: int = Field(default=24, ge=1, le=40)
+    cfg: float = Field(default=7.0, ge=1.0, le=12.0)
+    seed: int | None = Field(default=None, ge=0, le=4294967295)
+    confirm_local_generation: bool = False
+
+
 class ReferenceConditioningPreflightInput(BaseModel):
     shot_ids: list[int] = Field(default_factory=list, max_length=200)
 
@@ -1474,6 +1487,129 @@ def upload_project_reference_image(
         "user_confirmed": True,
         "generation_started": False,
         "message": "参考图已由你确认上传到本机 ComfyUI 输入目录；尚未启动图片生成。",
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-generate")
+def generate_reference_conditioned_shot(
+    project_id: int,
+    data: ReferenceConditionedGenerateInput,
+    db: Session = Depends(get_db),
+):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "参考图条件生图会占用本机 CPU/GPU；请明确确认后再提交。")
+    if data.width % 64 or data.height % 64:
+        raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    shot = db.query(StoryboardShot).filter(
+        StoryboardShot.id == data.shot_id,
+        StoryboardShot.project_id == project.id,
+    ).first()
+    if shot is None:
+        raise HTTPException(404, "分镜不存在或不属于当前项目")
+    prompt_text = (shot.image_prompt or "").strip()
+    if len(prompt_text) < 3:
+        raise HTTPException(400, "该分镜尚未填写图片提示词")
+
+    profile = _get_visual_consistency(project)
+    groups = (
+        ("character_reference_images", "characters", shot.character_ids if isinstance(shot.character_ids, list) else []),
+        ("scene_reference_images", "scenes", [shot.scene_asset_id] if shot.scene_asset_id else []),
+        ("prop_reference_images", "props", shot.prop_ids if isinstance(shot.prop_ids, list) else []),
+    )
+    linked_ids = {
+        row.asset_id for row in db.query(StoryAssetLink).filter(
+            StoryAssetLink.project_id == project.id
+        ).all()
+    }
+    uploaded_refs = project.settings.get("comfyui_reference_uploads", {}) if isinstance(project.settings, dict) else {}
+    if not isinstance(uploaded_refs, dict):
+        uploaded_refs = {}
+    references = []
+    missing = []
+    for field_name, category, asset_ids in groups:
+        bindings = profile.get(field_name, {})
+        if not isinstance(bindings, dict):
+            bindings = {}
+        for asset_id in dict.fromkeys(asset_ids):
+            if asset_id not in linked_ids:
+                raise HTTPException(400, f"素材 #{asset_id} 不属于当前项目")
+            media_id = bindings.get(str(asset_id))
+            if not media_id:
+                missing.append(f"{category} 素材 #{asset_id} 尚未绑定参考图")
+                continue
+            upload_key = f"{category}:{asset_id}:{media_id}"
+            uploaded = uploaded_refs.get(upload_key)
+            if not isinstance(uploaded, dict):
+                missing.append(f"{category} 素材 #{asset_id} 尚未确认上传到本机 ComfyUI")
+                continue
+            references.append({
+                "name": uploaded.get("name"),
+                "subfolder": uploaded.get("subfolder", ""),
+                "type": uploaded.get("type", "input"),
+            })
+    if missing:
+        raise HTTPException(409, {"message": "参考图尚未准备完成", "missing": missing})
+    if not references:
+        raise HTTPException(400, "当前分镜没有绑定角色、场景或道具参考图")
+    if len(references) > 10:
+        raise HTTPException(400, "单个分镜最多使用 10 张参考图，请先减少绑定数量")
+
+    capability = inspect_local_reference_capabilities()
+    if not capability.get("reference_conditioning_ready"):
+        raise HTTPException(409, {
+            "message": "本机 ComfyUI 尚不具备完整的参考图条件生图能力",
+            "missing_nodes": capability.get("missing_node_types", []),
+            "missing_models": capability.get("missing_model_files", []),
+        })
+    checkpoint_info = _local_request("/object_info/CheckpointLoaderSimple")
+    if data.checkpoint not in _checkpoint_names(checkpoint_info):
+        raise HTTPException(404, "所选图片模型未安装在本机 ComfyUI 中；本程序不会自动下载模型。")
+    object_infos = {}
+    for node_type in REFERENCE_NODE_TYPES:
+        try:
+            object_infos[node_type] = _local_request("/object_info/" + node_type)
+        except HTTPException as exc:
+            if exc.status_code != 502:
+                raise
+    payload = LocalImageGenerateInput(
+        checkpoint=data.checkpoint,
+        prompt=prompt_text[:6000],
+        negative_prompt=data.negative_prompt,
+        style=data.style,
+        width=data.width,
+        height=data.height,
+        steps=data.steps,
+        cfg=data.cfg,
+        seed=data.seed,
+        confirm_local_generation=True,
+    )
+    seed = data.seed if data.seed is not None else uuid.uuid4().int % (2 ** 32)
+    try:
+        workflow = build_reference_conditioned_workflow(payload, seed, object_infos, references)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    result = _local_request("/prompt", {"prompt": workflow, "client_id": str(uuid.uuid4())}, timeout=15.0)
+    prompt_id = result.get("prompt_id")
+    if not isinstance(prompt_id, str) or not PROMPT_ID_RE.fullmatch(prompt_id):
+        raise HTTPException(502, "ComfyUI 未返回有效任务编号，无法确认任务已进入队列。")
+    return {
+        "success": True,
+        "engine": "ComfyUI",
+        "prompt_id": prompt_id,
+        "seed": seed,
+        "checkpoint": data.checkpoint,
+        "shot_id": shot.id,
+        "reference_count": len(references),
+        "status": "queued",
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "paid_api_used": False,
+        "cloud_fallback": False,
+        "message": "参考图条件生图任务已提交到本机 ComfyUI 队列。",
     }
 
 
