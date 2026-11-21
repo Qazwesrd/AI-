@@ -57,6 +57,16 @@ apps\desktop\release\AI漫剧制作大师-完整离线安装套件.zip.sha256
 
 自动适配规则：NVIDIA GTX 10 系列及更旧型号选择 cu126 运行包，其余 NVIDIA 型号选择标准运行包；AMD 已核实的 RX 6000/7000/9000、Ryzen AI Max、Radeon AI PRO R9700 系列使用 GPU 模式；其他 AMD 型号（包括 Ryzen 7 4800U 的 Radeon Vega 集成显卡）选择官方 AMD 便携包，但明确以 CPU 模式运行，不会冒充 GPU 加速；Intel Arc 使用 GPU 模式，其他 Intel 集成显卡使用 CPU 模式。CPU 模式使用官方命令参数 `--cpu`，生成速度会明显较慢。
 
+## 第三方依赖审查与分发门禁
+
+仓库中的 `docs/compliance/comfyui-portable-dependency-audit.json` 是随版本维护的审查登记表。当前状态为 `pending`，四种官方 Portable 变体的逐项清点均未完成，`distribution_approved` 必须保持 `false`。
+
+离线 ZIP 构建脚本会验证登记表存在且状态符合当前内部构建策略，并将其原样放入 `THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json`。生成的 manifest 明确标记 `distribution_approved: false` 和 `blocked-pending-third-party-dependency-audit`。这只是内部安装/兼容性验证包，不是可对外分发的正式安装包。
+
+审查时必须以实际下载的 Release tag 和每个官方资产 SHA-256 为基准，逐个清点 NVIDIA、NVIDIA cu126、AMD、Intel 包中的文件。重点包括嵌入式 Python 发行版、Python `*.dist-info/METADATA` 与许可证文件、PyTorch/torchvision/torchaudio、CUDA/ROCm/XPU 运行库、原生 DLL，以及 ComfyUI 本身。不同 GPU 变体的依赖可能不同，不能用一个变体的清单代替其他变体。对每个组件记录名称、版本、来源、许可证、版权/NOTICE、源代码提供义务、再分发限制和审核证据；未知或缺失信息保持 pending，不得猜测许可证。
+
+只有四个变体都完成逐项清点、所有义务有对应材料、并经过人工复核后，才可以更新审查登记表的状态。仅修改 JSON 的状态字段不构成法律审核或自动批准；发布负责人仍须逐项核验并明确签署。模型权重许可另行审查，不能由软件依赖审查代替。
+
 ## 重要发布限制
 
 - 该 ZIP 体积约 7.3 GiB，不能作为单个 GitHub Release 附件上传（GitHub 单附件有大小限制）。请使用获批的可分发渠道；不要将 7GB 文件上传到有额外计费或公开风险的云盘。
