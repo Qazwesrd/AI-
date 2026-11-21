@@ -251,16 +251,18 @@ def inspect_local_reference_capabilities():
     model_ready = (has_unified_adapter or has_model_loader) and (not needs_clip_vision or (has_clip_vision and bool(clip_models)))
     return {
         "engine": "ComfyUI",
-        "status": "ready",
+        "status": "ready" if structural_ready and model_ready else "needs_setup",
         "reference_nodes": nodes,
         "reference_conditioning_nodes_ready": structural_ready,
         "reference_conditioning_models_ready": model_ready,
         "reference_conditioning_ready": structural_ready and model_ready,
-        "missing_node_types": [name for name, present in (
-            ("LoadImage", has_load_image), ("CLIPVisionLoader", has_clip_vision),
-            ("IPAdapterUnifiedLoader or IPAdapterModelLoader with available models", has_adapter),
-            ("IPAdapter or IPAdapterAdvanced", bool(apply_schema)),
-        ) if not present],
+        "missing_node_types": [
+            name for name, present in (
+                ("LoadImage", has_load_image),
+                ("IPAdapterUnifiedLoader or IPAdapterModelLoader with available models", has_adapter),
+                ("IPAdapter or IPAdapterAdvanced", bool(apply_schema)),
+            ) if not present
+        ] + (["CLIPVisionLoader"] if needs_clip_vision and not has_clip_vision else []),
         "missing_model_files": [name for name, present in (
             ("IP-Adapter preset/model", bool(unified_presets or adapter_models)),
             *([( "CLIP Vision model", bool(clip_models))] if needs_clip_vision else []),
