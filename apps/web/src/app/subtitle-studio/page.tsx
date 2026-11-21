@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+type LocalVoice = { name: string; culture: string; gender: string; age: string };
+
 export default function SubtitleStudioPage() {
   const [subtitlePath, setSubtitlePath] = useState("");
   const [videoPath, setVideoPath] = useState("");
@@ -20,6 +22,51 @@ export default function SubtitleStudioPage() {
   const [videos, setVideos] = useState<any[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [localVoices, setLocalVoices] = useState<LocalVoice[]>([]);
+  const [localVoice, setLocalVoice] = useState("");
+  const [localRate, setLocalRate] = useState(0);
+  const [loadingLocalVoices, setLoadingLocalVoices] = useState(false);
+  const [localVoiceResult, setLocalVoiceResult] = useState<{ download_url: string; name: string; duration_seconds: number; cue_count: number } | null>(null);
+
+  async function loadLocalVoices() {
+    setLoadingLocalVoices(true);
+    try {
+      const response = await fetch(`${API}/api/subtitle-tools/local-voices`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取本机离线语音失败");
+      const voices = Array.isArray(data.voices) ? data.voices : [];
+      setLocalVoices(voices);
+      setLocalVoice((current) => current || voices.find((item: LocalVoice) => item.culture.toLowerCase().startsWith("zh"))?.name || voices[0]?.name || "");
+      setMessage(voices.length ? `检测到 ${voices.length} 个本机离线语音。` : "当前 Windows 未检测到可用的系统语音；可在 Windows 设置中安装中文语音包后重新检测。");
+    } catch (error) {
+      setLocalVoices([]);
+      setMessage(error instanceof Error ? error.message : "读取本机离线语音失败");
+    } finally { setLoadingLocalVoices(false); }
+  }
+
+  async function generateLocalVoice() {
+    if (!subtitlePath || !localVoice) {
+      setMessage("请先选择 SRT 字幕和本机离线语音。");
+      return;
+    }
+    if (!window.confirm(`确认使用本机语音“${localVoice}”逐句生成配音？只使用 Windows 已安装语音和本机 CPU，不联网、不调用云端 API，也不会产生 API 费用。`)) return;
+    setBusy(true);
+    setLocalVoiceResult(null);
+    setMessage("正在使用 Windows 本机离线语音生成配音，请保持软件运行……");
+    try {
+      const response = await fetch(`${API}/api/subtitle-tools/voice-local`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subtitle_path: subtitlePath, voice: localVoice, rate: localRate, confirm_local_generation: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本机离线配音失败");
+      setLocalVoiceResult(data);
+      setMessage(data.message || "本机离线配音完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "本机离线配音失败");
+    } finally { setBusy(false); }
+  }
 
   async function loadFiles() {
     const [subs, vids] = await Promise.all([
@@ -30,7 +77,7 @@ export default function SubtitleStudioPage() {
     if (vids.ok) setVideos(await vids.json());
   }
 
-  useEffect(() => { void loadFiles(); }, []);
+  useEffect(() => { void loadFiles(); void loadLocalVoices(); }, []);
 
   async function upload(file: File, category: "other" | "video") {
     const form = new FormData();
@@ -71,7 +118,7 @@ export default function SubtitleStudioPage() {
             <a className="rounded-lg border border-purple-300/30 px-3 py-2" href="/video-editor">返回 AI 视频剪辑中心</a>
             <button onClick={() => void loadFiles()} className="rounded-lg border border-purple-300/30 px-3 py-2">刷新素材库</button>
           </div>
-        <p className="mt-3 text-xs text-white/55">严格零费用模式：云端字幕翻译与 TTS API 已拦截。可通过网页 AI 工具手动准备翻译内容，再导入字幕；本页的本地字幕格式处理与 FFmpeg 烧录仍可使用。</p>
+        <p className="mt-3 text-xs text-white/55">严格零费用模式：云端字幕翻译与 TTS API 已拦截。字幕翻译可通过网页 AI 工具手动准备；本页已接入 Windows 本机离线配音与 FFmpeg 字幕烧录。</p>
       </header>
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
         <section className={panel}>
@@ -111,7 +158,7 @@ export default function SubtitleStudioPage() {
               <input type="file" accept="video/*" className="hidden" onChange={async e => { const f=e.target.files?.[0]; if(f){try{setVideoPath(await upload(f,"video"));setMessage("视频已上传。");await loadFiles();}catch(err){setMessage(err instanceof Error?err.message:"上传失败");}} }} />
             </label>
           </div>
-          <p className="mt-3 text-xs text-amber-200/70">当前翻译、逐句配音和样式烧录支持 SRT；ASS/SSA/VTT 请先转换为 SRT。翻译和配音需要已配置且启用的 AI 服务商，付费服务仍遵循全局授权和本次确认。</p>
+          <p className="mt-3 text-xs text-amber-200/70">当前翻译、逐句配音和样式烧录支持 SRT；ASS/SSA/VTT 请先转换为 SRT。云端翻译/API 配音已禁用；本机离线配音只使用 Windows 已安装语音。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">AI 字幕翻译</h2>
@@ -124,8 +171,23 @@ export default function SubtitleStudioPage() {
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">多语言逐句配音</h2>
-          <button type="button" disabled title="严格零费用模式已拦截云端 TTS；本地离线 TTS 尚待接入。" className="rounded-xl border border-indigo-300/20 bg-indigo-950/30 px-5 py-3 font-semibold text-indigo-100/60 cursor-not-allowed">本地离线配音引擎待接入</button>
-          <p className="mt-2 text-xs text-white/45">每条字幕单独生成语音，并按字幕起止时间定位；若台词过长、需要超过 2 倍语速才能放入时间窗，系统会停止而不是直接截断台词。重复任务会优先复用已有结果，避免重复调用。</p>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="text-sm">Windows 本机离线语音
+              <select value={localVoice} onChange={e => setLocalVoice(e.target.value)} disabled={loadingLocalVoices || localVoices.length === 0} className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 p-3">
+                <option value="">{loadingLocalVoices ? "正在检测系统语音…" : "请选择已安装的语音"}</option>
+                {localVoices.map(item => <option key={item.name} value={item.name}>{item.name}（{item.culture} · {item.gender}）</option>)}
+              </select>
+            </label>
+            <label className="text-sm">语速：{localRate}
+              <input type="range" min={-5} max={5} step={1} value={localRate} onChange={e => setLocalRate(Number(e.target.value))} className="mt-4 w-full" />
+            </label>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button type="button" disabled={busy || loadingLocalVoices} onClick={() => void loadLocalVoices()} className="rounded-xl border border-indigo-300/30 px-4 py-3 text-sm">重新检测本机语音</button>
+            <button type="button" disabled={busy || !subtitlePath || !localVoice} onClick={() => void generateLocalVoice()} className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold disabled:opacity-40">{busy ? "正在本机配音…" : "生成本机离线配音"}</button>
+          </div>
+          {localVoiceResult && <div className="mt-3 rounded-xl border border-emerald-300/20 bg-emerald-950/20 p-3 text-sm"><p className="font-semibold text-emerald-200">离线配音已生成：{localVoiceResult.name}</p><p className="mt-1 text-xs text-white/55">字幕 {localVoiceResult.cue_count} 条 · 时长 {localVoiceResult.duration_seconds.toFixed(1)} 秒 · 本机处理、未联网</p><a className="mt-2 inline-flex underline" href={API + localVoiceResult.download_url} target="_blank" rel="noreferrer">播放 / 下载配音文件</a></div>}
+          <p className="mt-2 text-xs text-white/45">使用 Windows 已安装的 System.Speech 语音，无需下载模型。可用语音取决于 Windows 已安装的语言包；没有中文语音时，请先在 Windows 设置中添加中文语音后重新检测。系统按字幕时间轴合成音频，过长台词不会被直接截断。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">字幕样式与视频烧录</h2>
