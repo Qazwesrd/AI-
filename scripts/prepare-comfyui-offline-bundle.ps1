@@ -88,7 +88,7 @@ function Add-VerifiedRemoteEntry(
 
         $entry = $Archive.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::NoCompression)
         $output = $entry.Open()
-        $input = $response.Content.ReadAsStream()
+        $input = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
         $buffer = [byte[]]::new($ChunkBytes)
         [long]$received = 0
@@ -102,7 +102,7 @@ function Add-VerifiedRemoteEntry(
                     Write-Host ("{0}: {1:N1}% ({2:N2} GiB)" -f $EntryName, ($received * 100.0 / $ExpectedSize), ($received / 1GB))
                 }
             }
-            $actualHash = [Convert]::ToHexString($hasher.GetHashAndReset()).ToLowerInvariant()
+            $actualHash = [BitConverter]::ToString($hasher.GetHashAndReset()).Replace("-", "").ToLowerInvariant()
         } finally {
             $hasher.Dispose()
             $input.Dispose()
