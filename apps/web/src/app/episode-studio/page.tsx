@@ -400,30 +400,16 @@ export default function EpisodeReadinessPage() {
     }
     if (!window.confirm("将导出该项目的小说正文、分集、剧本、分镜、角色/场景/道具资料，以及已关联的本地图片、视频和音频文件。归档仅在本机生成，不会上传。确认导出？")) return;
     setArchiveBusy(true);
-    setMessage("正在整理项目资料、校验关联素材并生成项目归档……");
+    setMessage("正在请求项目归档。浏览器将直接下载 ZIP，不会把整个大文件载入页面内存……");
     try {
-      const response = await fetch(`${API}/api/story/projects/${id}/export`);
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.detail || "项目归档导出失败");
-      }
-      const blob = await response.blob();
-      const disposition = response.headers.get("Content-Disposition") || "";
-      const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
-      const filename = match
-        ? decodeURIComponent(match[1] || match[2])
-        : `AI漫剧制作大师-项目${id}-归档.zip`;
-      const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
+      anchor.href = `${API}/api/story/projects/${id}/export`;
+      anchor.download = `AI漫剧制作大师-项目${id}-归档.zip`;
+      anchor.rel = "noopener";
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 30000);
-      const included = response.headers.get("X-Project-Archive-Files") || "0";
-      const missing = response.headers.get("X-Project-Archive-Missing") || "0";
-      setMessage(`项目归档已生成并开始保存：包含 ${included} 个素材文件；缺失引用 ${missing} 个（详情见归档清单）。`);
+      setMessage("已发起项目归档下载。请等待浏览器完成下载；归档内 manifest.json 会列出素材校验值及无法找到的文件。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "项目归档导出失败");
     } finally {
