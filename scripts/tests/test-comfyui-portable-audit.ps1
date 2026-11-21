@@ -9,6 +9,15 @@ if (!(Test-Path -LiteralPath $auditScript -PathType Leaf) -or
     throw "找不到 ComfyUI 依赖清点或离线安装脚本。"
 }
 
+# Regression guard: the installer must remove only the destination created by
+# its current deployment attempt when a post-move step fails. Existing installs
+# are checked and returned before this ownership flag is ever set.
+$installerSource = Get-Content -LiteralPath $installScript -Raw -Encoding UTF8
+if ($installerSource -notmatch '\$deploymentOwned\s*=\s*\$true' -or
+    $installerSource -notmatch '(?s}catch\s*\{.*?\$deploymentOwned\s*-and\s*\(Test-Path\s+-LiteralPath\s+\$installFullPath\).*?Remove-Item\s+-LiteralPath\s+\$installFullPath\s+-Recurse\s+-Force') {
+    throw "ComfyUI 安装器缺少仅针对本次新建目录的失败回滚保护。"
+}
+
 function Write-Utf8([string]$Path, [string]$Value) {
     $parent = Split-Path -Parent $Path
     if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
