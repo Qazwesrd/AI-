@@ -44,8 +44,8 @@ function Get-ArchiveEntries {
                 $entries.Add([pscustomobject]@{
                     Path = [string]$record["Path"]
                     Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
-                    IsFolder = ($record["Folder"] -eq "+")
-                    Attributes = [string]$record["Attributes"]
+                    IsFolder = ($record.ContainsKey("Folder") -and $record["Folder"] -eq "+")
+                    Attributes = if ($record.ContainsKey("Attributes")) { [string]$record["Attributes"] } else { "" }
                 })
                 if ($entries.Count -gt $EntryLimit) {
                     throw "归档条目超过安全上限 $EntryLimit：$Archive"
@@ -66,8 +66,8 @@ function Get-ArchiveEntries {
         $entries.Add([pscustomobject]@{
             Path = [string]$record["Path"]
             Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
-            IsFolder = ($record["Folder"] -eq "+")
-            Attributes = [string]$record["Attributes"]
+            IsFolder = ($record.ContainsKey("Folder") -and $record["Folder"] -eq "+")
+            Attributes = if ($record.ContainsKey("Attributes")) { [string]$record["Attributes"] } else { "" }
         })
     }
     if ($entries.Count -gt $EntryLimit) {
