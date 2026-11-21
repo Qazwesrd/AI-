@@ -30,7 +30,8 @@ if ($installer -match $destructiveUserPath -or $installer -match '(?im)^\s*!macr
 if ($package.build.nsis.include -ne "build-resources/installer.nsh") {
     throw "NSIS 安装器未使用经过审计的数据保护脚本。"
 }
-if ($package.build.nsis.deleteAppDataOnUninstall -eq $true) {
+$deleteAppDataSetting = $package.build.nsis.PSObject.Properties["deleteAppDataOnUninstall"]
+if ($null -ne $deleteAppDataSetting -and $deleteAppDataSetting.Value -eq $true) {
     throw "禁止启用 deleteAppDataOnUninstall；用户数据必须默认保留。"
 }
 
