@@ -71,6 +71,7 @@ try {
             license_review_status = "pending"
             manifest_path = $modelManifestRelative
             manifest_sha256 = $modelManifestHash
+            layers = @(@{ digest = "sha256:$blobHash"; size_bytes = (Get-Item $blobPath).Length; file_name = $blobName })
             files = $modelFiles
         }
         notices = @($notice1, $notice2)
