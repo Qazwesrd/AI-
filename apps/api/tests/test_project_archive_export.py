@@ -112,7 +112,18 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     file_size=music.stat().st_size,
                     metadata_json={"access_token": "must-not-export"},
                 )
-                db.add_all([shot, media])
+                rendered_video = MediaFile(
+                    name="episode_1_final.mp4",
+                    category="video",
+                    file_path=str(video),
+                    file_size=video.stat().st_size,
+                    metadata_json={
+                        "project_id": project.id,
+                        "episode_id": episode.id,
+                        "rendered_output": True,
+                    },
+                )
+                db.add_all([shot, media, rendered_video])
                 db.flush()
                 db.add_all([
                     StoryAssetLink(project_id=project.id, asset_id=asset.id, role="character"),
@@ -179,6 +190,10 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     self.assertIsNone(payload["records"]["media_files"][0]["metadata_json"]["access_token"])
                     self.assertEqual(len(payload["records"]["media_tasks"]), 1)
                     self.assertTrue(payload["records"]["media_tasks"][0]["result_path"].startswith("files/"))
+                    self.assertTrue(any(
+                        item["metadata_json"].get("rendered_output") is True
+                        for item in payload["records"]["media_files"]
+                    ))
                     self.assertTrue(
                         payload["records"]["visual_assets"][0]["image_path"].startswith("files/")
                     )
