@@ -25,16 +25,16 @@ _CATALOG = [
         "name": "Stable Diffusion 1.5 FP16（基础模型）",
         "publisher": "Comfy-Org",
         "repository": "Comfy-Org/stable-diffusion-1.5",
-        "revision": "4fddeb7",
+        "revision": "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f",
         "filename": "v1-5-pruned-emaonly-fp16.safetensors",
         "format": "safetensors",
         "size_bytes": None,
         "size_label": "约 2.13 GB（上游页面显示值，非精确字节数）",
         "sha256": "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916",
-        "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/blob/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors",
-        "download_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors",
+        "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/blob/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
+        "download_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
         "license": "CreativeML OpenRAIL-M",
-        "license_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/blob/4fddeb7/LICENSE",
+        "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
         "license_status": "review_required",
         "license_note": "OpenRAIL-M 含使用限制；不能据此直接承诺所有商业用途均获许可，发布作品前需阅读许可证及模型卡。",
         "hardware_status": "cpu_not_recommended",
@@ -91,7 +91,7 @@ def _parse_positive_int(value):
 def _head_pinned_file_metadata(url, opener=None):
     # The catalog is static and pinned; never accept a URL from the request.
     if not isinstance(url, str) or not url.startswith(
-        "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/"
+        "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/"
     ):
         raise ValueError("模型来源地址不在固定白名单中")
     client = opener or build_opener(_NoRedirectHandler())
