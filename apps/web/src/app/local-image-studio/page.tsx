@@ -194,7 +194,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     </label>
     <div className="grid gap-3 md:grid-cols-3">
       <label className="block text-sm text-white/70">角色外观档案
-        <textarea value={characters} onChange={(event) => setCharacters(event.target.value)} rows={5} placeholder={"每行一条：素材编号：固定外观描述\n例如：12：银色长发，蓝色眼睛，白金圣衣"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+        <textarea value={characters} onChange={(event) => setCharacters(event.target.value)} rows={5} placeholder={"每行一条：素材编号：固定外观描述\n例如：12：银色长发，蓝色眼睛，红色战斗服"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
       <label className="block text-sm text-white/70">场景外观档案
         <textarea value={scenes} onChange={(event) => setScenes(event.target.value)} rows={5} placeholder={"每行一条：场景素材编号：固定场景描述"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
@@ -204,11 +204,11 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
       </label>
     </div>
     <div className="grid gap-3 md:grid-cols-2">
-      <label className="block text-sm text-white/70">圣衣/服装版本档案
-        <textarea value={costumes} onChange={(event) => setCostumes(event.target.value)} rows={5} placeholder={"每行：角色编号|版本编号|外观描述\n例如：12|gold_cloth|金色黄金圣衣，胸甲与肩甲细节固定"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+      <label className="block text-sm text-white/70">角色服装版本档案
+        <textarea value={costumes} onChange={(event) => setCostumes(event.target.value)} rows={5} placeholder={"每行：角色编号|版本编号|外观描述\n例如：12|battle_suit|红色战斗服，胸甲与肩甲细节固定"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
       <label className="block text-sm text-white/70">分镜指定服装版本
-        <textarea value={shotCostumes} onChange={(event) => setShotCostumes(event.target.value)} rows={5} placeholder={"每行：分镜编号|角色编号|版本编号\n例如：205|12|gold_cloth"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+        <textarea value={shotCostumes} onChange={(event) => setShotCostumes(event.target.value)} rows={5} placeholder={"每行：分镜编号|角色编号|版本编号\n例如：205|12|battle_suit"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
     </div>
     <div className="grid gap-3 md:grid-cols-3">
@@ -222,7 +222,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
         <textarea value={propRefs} onChange={(event) => setPropRefs(event.target.value)} rows={3} placeholder={"道具素材编号|素材库图片编号"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
     </div>
-    <p className="text-xs text-white/45">编号格式：圣衣档案为“角色编号|版本编号|描述”；分镜指定为“分镜编号|角色编号|版本编号”；参考图绑定为“素材编号|素材库图片编号”。图片编号可在本地素材库图片列表中查看。保存不会自动修改分镜。</p>
+    <p className="text-xs text-white/45">编号格式：服装档案为“角色编号|版本编号|描述”；分镜指定为“分镜编号|角色编号|版本编号”；参考图绑定为“素材编号|素材库图片编号”。图片编号可在本地素材库图片列表中查看。保存不会自动修改分镜。</p>
     <div className="flex flex-wrap gap-2">
       <button type="button" onClick={() => void saveProfile()} disabled={busy} className="rounded-lg border border-violet-300/30 px-4 py-2 text-sm text-violet-100 disabled:opacity-40">{busy ? "处理中…" : "保存统一外观档案"}</button>
       <button type="button" onClick={() => void runPreflight(false)} disabled={busy} className="rounded-lg border border-white/20 px-4 py-2 text-sm disabled:opacity-40">批量检查一致性</button>
