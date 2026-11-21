@@ -1,5 +1,7 @@
 import hashlib
 import json
+import shutil
+import uuid
 import re
 import uuid
 import urllib.request
@@ -14,6 +16,7 @@ from app.database import get_db
 from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.models.studio import AIUsageLog
 from app.routers.media import get_provider
+from app.services.local_tts import LocalTtsUnavailable, list_local_sapi_voices, synthesize_local_sapi_cues
 from app.services.media_service import (
     AUDIO_DIR, SUBTITLE_DIR, VIDEO_DIR, probe_media, run_ffmpeg, safe_storage_file,
     validate_rendered_video,
@@ -142,6 +145,13 @@ class VoiceInput(BaseModel):
     voice: str = Field(default="alloy", min_length=1, max_length=120)
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
     confirm_paid: bool = False
+
+
+class LocalVoiceInput(BaseModel):
+    subtitle_path: str
+    voice: str = Field(min_length=1, max_length=160)
+    rate: int = Field(default=0, ge=-5, le=5)
+    confirm_local_generation: bool = False
 
 
 class StyledRenderInput(BaseModel):
@@ -304,6 +314,143 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
     except Exception as exc:
         db.rollback()
         raise HTTPException(502, "字幕配音失败：" + str(exc)[:1500]) from exc
+
+
+@router.get("/local-voices")
+def list_local_subtitle_voices():
+    try:
+        voices = list_local_sapi_voices()
+    except LocalTtsUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {
+        "engine": "windows-sapi",
+        "voices": voices,
+        "voice_count": len(voices),
+        "network_used": False,
+        "paid_api_used": False,
+        "message": "已读取本机 Windows 离线语音列表；不会访问网络或下载语音包。",
+    }
+
+
+@router.post("/voice-local")
+def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get_db)):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "本机离线配音会占用 CPU；请明确确认后再开始。")
+    job_dir = None
+    destination = None
+    try:
+        source = safe_storage_file(data.subtitle_path)
+        if source.suffix.lower() != ".srt":
+            raise HTTPException(400, "本机离线配音当前仅支持 SRT 字幕。")
+        cues = parse_srt(_read_text(source))
+        job_dir, segment_paths = synthesize_local_sapi_cues(cues, data.voice, data.rate, AUDIO_DIR)
+        generated = []
+        filters = []
+        labels = []
+        max_end = max(cue["end"] for cue in cues)
+        for index, (cue, path) in enumerate(zip(cues, segment_paths)):
+            info = probe_media(path)
+            duration = float((info.get("format") or {}).get("duration") or 0)
+            slot = cue["end"] - cue["start"]
+            ratio = duration / slot if slot > 0 else 1.0
+            if duration <= 0 or ratio > 2.0:
+                raise HTTPException(422, f"第 {index + 1} 条本机语音无法在字幕时间窗内自然播放；请缩短字幕或延长时间轴。")
+            tempo = f"atempo={max(1.0, ratio):.4f}," if ratio > 1.02 else ""
+            delay = int(round(cue["start"] * 1000))
+            filters.append(
+                f"[{index}:a:0]aresample=48000,{tempo}apad,atrim=duration={slot:.3f},"
+                f"adelay={delay}|{delay}[v{index}]"
+            )
+            generated.append(path)
+            labels.append(f"[v{index}]")
+        filters.append(
+            "".join(labels)
+            + f"amix=inputs={len(labels)}:duration=longest:normalize=0,atrim=duration={max_end:.3f}[voice]"
+        )
+        args = []
+        for path in generated:
+            args += ["-i", str(path)]
+        filename = f"subtitle_local_voice_{uuid.uuid4().hex[:12]}.mp3"
+        destination = AUDIO_DIR / filename
+        run_ffmpeg(args + [
+            "-filter_complex", ";".join(filters), "-map", "[voice]",
+            "-t", f"{max_end:.3f}", "-c:a", "libmp3lame", "-q:a", "3", str(destination),
+        ])
+        info = probe_media(destination)
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if duration <= 0:
+            raise RuntimeError("本机配音合成结果时长无效")
+        task = MediaTask(
+            task_type="subtitle_dubbing_local",
+            provider="windows-sapi",
+            model=data.voice,
+            status="completed",
+            prompt=f"本机离线字幕配音：{source.name}",
+            request_data={
+                "subtitle_source": str(source),
+                "voice": data.voice,
+                "rate": data.rate,
+                "cue_count": len(cues),
+                "subtitle_cues": [
+                    {"start": cue["start"], "end": cue["end"], "text": cue["text"]}
+                    for cue in cues
+                ],
+                "network_used": False,
+                "paid_api_used": False,
+            },
+            result_path=str(destination),
+        )
+        db.add(task)
+        db.add(MediaFile(
+            name=filename,
+            category="audio",
+            file_path=str(destination),
+            mime_type="audio/mpeg",
+            file_size=destination.stat().st_size,
+            duration=duration,
+            metadata_json={
+                "subtitle_source": str(source),
+                "voice": data.voice,
+                "local_tts": True,
+                "network_used": False,
+            },
+        ))
+        db.add(AIUsageLog(
+            provider="windows-sapi",
+            model=data.voice,
+            task="subtitle_dubbing_local",
+            status="completed",
+            detail=f"字幕条数：{len(cues)}；本机离线合成；语速：{data.rate}",
+        ))
+        db.commit()
+        return {
+            "success": True,
+            "task_id": task.id,
+            "path": str(destination),
+            "name": filename,
+            "cue_count": len(cues),
+            "duration_seconds": duration,
+            "timeline_aligned": True,
+            "network_used": False,
+            "paid_api_used": False,
+            "message": "已使用 Windows 本机离线语音生成配音，并按原字幕时间轴合成；没有调用云端 TTS。",
+        }
+    except HTTPException:
+        if destination:
+            destination.unlink(missing_ok=True)
+        raise
+    except LocalTtsUnavailable as exc:
+        if destination:
+            destination.unlink(missing_ok=True)
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        if destination:
+            destination.unlink(missing_ok=True)
+        raise HTTPException(500, "本机离线配音失败：" + str(exc)[:1200]) from exc
+    finally:
+        if job_dir:
+            shutil.rmtree(job_dir, ignore_errors=True)
 
 
 @router.post("/render")
