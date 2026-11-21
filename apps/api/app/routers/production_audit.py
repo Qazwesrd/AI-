@@ -1,6 +1,7 @@
 """Read-only end-to-end production readiness audit for one story project."""
 from pathlib import Path
 import json
+import re
 import shutil
 import subprocess
 
@@ -431,7 +432,7 @@ def _probe_final_video(path: Path):
         }
     command = [
         ffprobe, "-v", "error", "-show_entries",
-        "format=duration,size,format_name:stream=codec_type,codec_name,width,height,r_frame_rate,sample_rate,channels",
+        "format=duration,size,format_name:stream=codec_type,codec_name,width,height,r_frame_rate,sample_rate,channels,start_time,duration",
         "-of", "json", str(path),
     ]
     try:
@@ -470,6 +471,32 @@ def _probe_final_video(path: Path):
     if not audio_streams:
         issues.append({"code": "audio_stream_missing", "severity": "warning", "message": "文件中没有音频流；请确认是否为无声作品。"})
     fmt = info.get("format") if isinstance(info.get("format"), dict) else {}
+    if video_streams and audio_streams:
+        try:
+            video_start = float(video_streams[0].get("start_time") or 0)
+            audio_start = float(audio_streams[0].get("start_time") or 0)
+            av_start_delta = abs(video_start - audio_start)
+            if av_start_delta > 0.25:
+                issues.append({
+                    "code": "audio_video_start_offset",
+                    "severity": "warning",
+                    "message": f"音视频起始时间相差 {av_start_delta:.3f} 秒，建议人工复核同步。",
+                })
+        except (TypeError, ValueError):
+            pass
+        try:
+            video_duration = float(video_streams[0].get("duration") or 0)
+            audio_duration = float(audio_streams[0].get("duration") or 0)
+            if video_duration > 0 and audio_duration > 0:
+                av_duration_delta = abs(video_duration - audio_duration)
+                if av_duration_delta > 0.5:
+                    issues.append({
+                        "code": "audio_video_duration_mismatch",
+                        "severity": "warning",
+                        "message": f"音视频流时长相差 {av_duration_delta:.3f} 秒，建议检查尾部音画同步。",
+                    })
+        except (TypeError, ValueError):
+            pass
     try:
         duration = float(fmt.get("duration") or 0)
     except (TypeError, ValueError):
@@ -479,16 +506,39 @@ def _probe_final_video(path: Path):
     decode_check = "not_run"
     if ffmpeg and video_streams and duration > 0:
         try:
+            scan_command = [
+                ffmpeg, "-hide_banner", "-nostats", "-loglevel", "info",
+                "-i", str(path),
+                "-vf", "blackdetect=d=0.5:pix_th=0.10",
+            ]
+            if audio_streams:
+                scan_command.extend(["-af", "silencedetect=n=-50dB:d=1.0"])
+            scan_command.extend(["-f", "null", "-"])
             decoded = subprocess.run(
-                [ffmpeg, "-v", "error", "-i", str(path), "-f", "null", "-"],
-                capture_output=True, text=True, timeout=180, check=False,
+                scan_command,
+                capture_output=True, text=True, timeout=240, check=False,
             )
             decode_check = "passed" if decoded.returncode == 0 else "failed"
+            scan_log = decoded.stderr or ""
             if decoded.returncode != 0:
                 issues.append({
                     "code": "decode_errors",
                     "severity": "blocker",
-                    "message": (decoded.stderr or "FFmpeg 解码检查失败。")[-1600:],
+                    "message": scan_log[-1600:] or "FFmpeg 解码检查失败。",
+                })
+            black_events = re.findall(r"black_start:([0-9.]+)\s+black_end:([0-9.]+)\s+black_duration:([0-9.]+)", scan_log)
+            silence_events = re.findall(r"silence_start:([0-9.]+)", scan_log)
+            if black_events:
+                issues.append({
+                    "code": "black_frames_detected",
+                    "severity": "warning",
+                    "message": f"检测到 {len(black_events)} 段持续至少 0.5 秒的黑场，请确认是否为有意转场。",
+                })
+            if silence_events:
+                issues.append({
+                    "code": "silence_detected",
+                    "severity": "warning",
+                    "message": f"检测到 {len(silence_events)} 段持续至少 1 秒、低于 -50 dB 的静音，请确认是否为有意留白。",
                 })
         except subprocess.TimeoutExpired:
             decode_check = "timeout"
@@ -506,6 +556,13 @@ def _probe_final_video(path: Path):
             "audio_streams": audio_streams,
         },
         "decode_check": decode_check,
+        "content_checks": {
+            "black_frame_segments": len(black_events) if ffmpeg and video_streams and duration > 0 and decode_check != "not_run" else None,
+            "silence_segments": len(silence_events) if ffmpeg and audio_streams and duration > 0 and decode_check != "not_run" else None,
+            "black_threshold_seconds": 0.5,
+            "silence_threshold_seconds": 1.0,
+            "silence_level_db": -50,
+        },
     }
 
 
@@ -571,5 +628,5 @@ def audit_episode_video_quality(project_id: int, episode_id: int, db: Session = 
         "read_only": True,
         "network_used": False,
         "source_files_modified": False,
-        "notice": "本检查仅验证容器、音视频流、时长和完整解码；黑帧、静音、画面质量、口型同步与内容正确性仍需进一步检测或人工复核。",
+        "notice": "本检查包含容器、音视频流、时长、完整解码、黑场和静音区间的自动筛查；黑场/静音可能是有意设计，最终画面质量、口型同步与剧情内容仍需人工复核。",
     }
