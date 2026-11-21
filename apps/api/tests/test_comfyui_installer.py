@@ -57,7 +57,8 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
     def test_recommends_asset_for_detected_gpu_and_architecture(self):
         self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GeForce GTX 1080 Ti", "AMD64"), "ComfyUI_windows_portable_nvidia_cu126.7z")
         self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GeForce RTX 4080", "AMD64"), "ComfyUI_windows_portable_nvidia.7z")
-        self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GPU", "ARM64"), "ComfyUI_windows_portable_nvidia_arm64.7z")
+        self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GeForce GTX 1650", "AMD64"), "ComfyUI_windows_portable_nvidia.7z")
+        self.assertIsNone(recommend_official_asset("NVIDIA", "NVIDIA GPU", "ARM64"))
         self.assertEqual(recommend_official_asset("AMD", "AMD Radeon RX 7900", "AMD64"), "ComfyUI_windows_portable_amd.7z")
         self.assertEqual(recommend_official_asset("Intel", "Intel Arc", "AMD64"), "ComfyUI_windows_portable_intel.7z")
         self.assertIsNone(recommend_official_asset("unknown", "Unknown GPU", "AMD64"))
