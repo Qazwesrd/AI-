@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -22,7 +22,12 @@ from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(prefix="/api/local-ai/images", tags=["本地图片生成"])
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
-OPENER = build_opener(ProxyHandler({}))
+class _BlockRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+OPENER = build_opener(ProxyHandler({}), _BlockRedirects())
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 PROMPT_ID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
