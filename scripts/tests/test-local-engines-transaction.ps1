@@ -78,11 +78,14 @@ New-Item -ItemType Directory -Path (Join-Path $InstallRoot "runtime") -Force | O
     $existingRoot = Join-Path $temp "scenario-existing"
     $existingComfy = Join-Path $existingRoot "ComfyUI"
     $existingLocal = Join-Path $existingRoot "Ollama"
-    New-Item -ItemType Directory -Path (Join-Path $existingComfy "ComfyUI"), (Join-Path $existingComfy "python_embeded") -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $existingComfy "ComfyUI"), (Join-Path $existingComfy "python_embeded"), (Join-Path $existingLocal "runtime") -Force | Out-Null
     Write-Utf8 (Join-Path $existingComfy "ComfyUI\main.py") "existing-main"
     Write-Utf8 (Join-Path $existingComfy "python_embeded\python.exe") "existing-python"
     Write-Utf8 (Join-Path $existingComfy "runtime-manifest.json") '{"schema_version":1,"distribution_approved":false}'
     Write-Utf8 (Join-Path $existingComfy "user-models-sentinel.txt") "preserve-user-data"
+    Write-Utf8 (Join-Path $existingLocal "runtime\ollama.exe") "existing-runtime"
+    Write-Utf8 (Join-Path $existingLocal "install-manifest.json") '{"schema_version":1,"cloud_features_disabled":true,"distribution_approved":false,"model":"qwen3:4b"}'
+    Write-Utf8 (Join-Path $existingLocal "user-model-sentinel.txt") "preserve-local-ai-data"
     Write-Utf8 (Join-Path $localPayload "fail-install") "fail"
     $failed = $false
     try {
@@ -90,8 +93,9 @@ New-Item -ItemType Directory -Path (Join-Path $InstallRoot "runtime") -Force | O
     } catch {
         if ($_.Exception.Message -match "Injected local AI install failure") { $failed = $true } else { throw }
     }
-    if (!$failed -or (Get-Content -LiteralPath (Join-Path $existingComfy "user-models-sentinel.txt") -Raw) -ne "preserve-user-data") {
-        throw "事务回滚测试失败：回滚触碰了安装前已存在的 ComfyUI 用户数据。"
+    if (!$failed -or (Get-Content -LiteralPath (Join-Path $existingComfy "user-models-sentinel.txt") -Raw) -ne "preserve-user-data" -or
+        (Get-Content -LiteralPath (Join-Path $existingLocal "user-model-sentinel.txt") -Raw) -ne "preserve-local-ai-data") {
+        throw "事务回滚测试失败：回滚触碰了安装前已存在的 ComfyUI 或 Ollama 用户数据。"
     }
 
     # Scenario 3: the second payload fails preflight. No engine may be installed.
