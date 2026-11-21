@@ -204,7 +204,7 @@ try {
 
     $toolResult = Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
-    Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest | Out-Null
+    $sevenZipSourceResult = Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest
 
     $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
     $licenseUri = Assert-OfficialUri $licenseUrl @("raw.githubusercontent.com")
@@ -259,6 +259,8 @@ try {
             executable = "ComfyUI-Payload/7zr.exe"
             source_archive = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"
             source_url = "https://github.com/ip7z/7zip/tree/$($sevenZipRelease.tag_name)"
+            source_sha256 = $sevenZipSourceResult.sha256
+            source_size_bytes = $sevenZipSourceResult.size_bytes
             license_file = "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt"
         }
     }
