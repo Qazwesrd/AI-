@@ -145,6 +145,20 @@ def _runtime_mode():
     return "cpu", "未能确认受支持的 GPU，安全使用 CPU 模式"
 
 
+def _reap_exited_managed_process():
+    """Release resources for a managed process that has already exited."""
+    global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT, _COMFYUI_LAST_EXIT_CODE
+    process = _COMFYUI_PROCESS
+    if process is None or process.poll() is None:
+        return False
+    _COMFYUI_LAST_EXIT_CODE = process.returncode
+    _COMFYUI_PROCESS = None
+    _COMFYUI_RUNTIME_MODE = None
+    _COMFYUI_STARTED_AT = None
+    _close_log_handle()
+    return True
+
+
 def _managed_process_state():
     process = _COMFYUI_PROCESS
     if process is None:
@@ -236,12 +250,7 @@ def _status_payload():
 def local_image_runtime():
     """Discover local ComfyUI status and already-installed checkpoints."""
     global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT, _COMFYUI_LAST_EXIT_CODE
-    if _COMFYUI_PROCESS is not None and _COMFYUI_PROCESS.poll() is not None:
-        _COMFYUI_LAST_EXIT_CODE = _COMFYUI_PROCESS.returncode
-        _COMFYUI_PROCESS = None
-        _COMFYUI_RUNTIME_MODE = None
-        _COMFYUI_STARTED_AT = None
-        _close_log_handle()
+    _reap_exited_managed_process()
     return _status_payload()
 
 
@@ -252,17 +261,11 @@ def start_local_image_runtime():
     if os.name != "nt":
         raise HTTPException(status_code=400, detail="当前启动管理仅支持 Windows 桌面版。")
     with _PROCESS_LOCK:
-        if _COMFYUI_PROCESS is not None:
-            if _COMFYUI_PROCESS.poll() is None:
-                return _status_payload()
-            # Reap a previously exited managed process before replacing its
-            # handle. Preserve its exit code and close its log descriptor so
-            # repeated starts cannot leak handles or hide the prior failure.
-            _COMFYUI_LAST_EXIT_CODE = _COMFYUI_PROCESS.returncode
-            _COMFYUI_PROCESS = None
-            _COMFYUI_RUNTIME_MODE = None
-            _COMFYUI_STARTED_AT = None
-            _close_log_handle()
+        if _COMFYUI_PROCESS is not None and _COMFYUI_PROCESS.poll() is None:
+            return _status_payload()
+        # Preserve the previous exit code and close its log descriptor before
+        # replacing an exited process handle.
+        _reap_exited_managed_process()
         # If another process already owns the port, do not adopt or terminate it.
         current = _local_json("/system_stats")
         if current and not current.get("_error"):
