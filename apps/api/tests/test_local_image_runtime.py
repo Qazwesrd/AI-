@@ -1,18 +1,25 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
+import app.routers.local_image_runtime as runtime
 from app.routers.local_image_runtime import (
-    GIB, _checkpoint_names, _local_json, assess_image_hardware,
+    GIB, _build_runtime_command, _checkpoint_names, _local_json, assess_image_hardware,
 )
 
 
 class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
+
     def __enter__(self):
         return self
+
     def __exit__(self, *args):
         return False
+
     def read(self, limit):
         return self.payload
 
@@ -21,9 +28,31 @@ class FakeOpener:
     def __init__(self, payload):
         self.payload = payload
         self.url = None
+
     def open(self, request, timeout):
         self.url = request.full_url
         return FakeResponse(self.payload)
+
+
+class FakeProcess:
+    pid = 4321
+
+    def __init__(self):
+        self.terminated = False
+        self.killed = False
+
+    def poll(self):
+        return None if not self.terminated else 0
+
+    def terminate(self):
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.killed = True
+        self.terminated = True
 
 
 class LocalImageRuntimeTests(unittest.TestCase):
@@ -57,6 +86,59 @@ class LocalImageRuntimeTests(unittest.TestCase):
         result = assess_image_hardware({"memory": {}, "gpu": {}})
         self.assertEqual(result["gpu_level"], "unknown")
         self.assertTrue(any("不能据此判断没有 GPU" in item for item in result["reasons"]))
+
+    def test_cpu_launch_command_explicitly_disables_gpu(self):
+        command = _build_runtime_command(Path("python.exe"), Path("ComfyUI/main.py"), "cpu")
+        self.assertEqual(command, ["python.exe", "-s", "ComfyUI/main.py", "--cpu", "--windows-standalone-build"])
+
+    def test_gpu_launch_command_does_not_add_cpu_flag(self):
+        command = _build_runtime_command(Path("python.exe"), Path("ComfyUI/main.py"), "gpu")
+        self.assertEqual(command, ["python.exe", "-s", "ComfyUI/main.py", "--windows-standalone-build"])
+        self.assertNotIn("--cpu", command)
+
+    def test_ryzen_4800u_integrated_radeon_uses_cpu_mode(self):
+        with patch("app.routers.local_image_runtime.detect_windows_video_adapters", return_value={
+            "status": "detected",
+            "adapters": [{"name": "AMD Radeon(TM) Graphics", "vendor": "AMD"}],
+            "network_used": False,
+        }):
+            self.assertEqual(runtime._runtime_mode(), ("cpu", "AMD Radeon(TM) Graphics"))
+
+    def test_unknown_adapter_falls_back_to_cpu(self):
+        with patch("app.routers.local_image_runtime.detect_windows_video_adapters", return_value={
+            "status": "unavailable", "adapters": [], "network_used": False,
+        }):
+            self.assertEqual(runtime._runtime_mode(), ("cpu", "未能确认受支持的 GPU，安全使用 CPU 模式"))
+
+    def test_stop_only_terminates_the_process_handle_owned_by_application(self):
+        fake = FakeProcess()
+        old_process = runtime._COMFYUI_PROCESS
+        old_mode = runtime._COMFYUI_RUNTIME_MODE
+        old_started = runtime._COMFYUI_STARTED_AT
+        try:
+            runtime._COMFYUI_PROCESS = fake
+            runtime._COMFYUI_RUNTIME_MODE = "cpu"
+            runtime._COMFYUI_STARTED_AT = 123
+            with patch("app.routers.local_image_runtime._close_log_handle"):
+                result = runtime.stop_local_image_runtime()
+            self.assertTrue(fake.terminated)
+            self.assertFalse(fake.killed)
+            self.assertEqual(result["status"], "stopped")
+            self.assertIsNone(runtime._COMFYUI_PROCESS)
+        finally:
+            runtime._COMFYUI_PROCESS = old_process
+            runtime._COMFYUI_RUNTIME_MODE = old_mode
+            runtime._COMFYUI_STARTED_AT = old_started
+
+    def test_stop_refuses_to_touch_unmanaged_processes(self):
+        old_process = runtime._COMFYUI_PROCESS
+        try:
+            runtime._COMFYUI_PROCESS = None
+            with self.assertRaises(HTTPException) as caught:
+                runtime.stop_local_image_runtime()
+            self.assertEqual(caught.exception.status_code, 409)
+        finally:
+            runtime._COMFYUI_PROCESS = old_process
 
 
 if __name__ == "__main__":
