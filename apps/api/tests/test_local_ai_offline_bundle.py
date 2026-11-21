@@ -72,7 +72,12 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
                 self.assertIn(marker, packer)
         self.assertIn("prepare-local-ai-offline-payload.ps1", wrapper)
         self.assertIn("-LocalAIPayloadRoot $localAIPayloadRoot", wrapper)
-        self.assertIn("LocalAI-Payload\\install-local-ai-offline.ps1", nsis)
+        self.assertIn("ComfyUI-Payload/install-local-engines-transaction.ps1", packer)
+        self.assertIn("install-local-engines-transaction.ps1", nsis)
+        self.assertIn("LocalAI-Payload", nsis)
+        transaction = (ROOT / "scripts" / "install-local-engines-transaction.ps1").read_text(encoding="utf-8")
+        self.assertIn("-ValidateOnly", transaction)
+        self.assertIn("Remove-TransactionOwnedInstall", transaction)
 
     def test_desktop_uses_the_bundled_runtime_without_changing_dev_default(self):
         main = (ROOT / "apps" / "desktop" / "main.cjs").read_text(encoding="utf-8")
