@@ -1455,8 +1455,8 @@ def upload_project_reference_image(
         StoryAssetLink.asset_id == data.asset_id,
     ).first()
     asset = db.query(VisualAsset).filter(VisualAsset.id == data.asset_id).first()
-    if linked is None or asset is None:
-        raise HTTPException(404, "指定素材不属于当前漫剧项目")
+    if linked is None or asset is None or asset.category != data.category:
+        raise HTTPException(404, "指定素材不属于当前漫剧项目或素材分类不匹配")
     media = db.query(MediaFile).filter(
         MediaFile.id == data.media_file_id,
         MediaFile.category == "image",
@@ -1533,18 +1533,37 @@ def generate_reference_conditioned_shot(
         bindings = profile.get(field_name, {})
         if not isinstance(bindings, dict):
             bindings = {}
-        for asset_id in dict.fromkeys(asset_ids):
+        for raw_asset_id in dict.fromkeys(asset_ids):
+            try:
+                asset_id = int(raw_asset_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "分镜包含无效的视觉素材编号")
             if asset_id not in linked_ids:
                 raise HTTPException(400, f"素材 #{asset_id} 不属于当前项目")
+            asset = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+            if asset is None or asset.category != category:
+                raise HTTPException(400, f"素材 #{asset_id} 的分类与参考图类型不匹配")
             media_id = bindings.get(str(asset_id))
             if not media_id:
                 missing.append(f"{category} 素材 #{asset_id} 尚未绑定参考图")
+                continue
+            try:
+                media_id = int(media_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"素材 #{asset_id} 的参考图编号无效")
+            media = db.query(MediaFile).filter(
+                MediaFile.id == media_id, MediaFile.category == "image"
+            ).first()
+            if media is None:
+                missing.append(f"{category} 素材 #{asset_id} 绑定的图片已不存在")
                 continue
             upload_key = f"{category}:{asset_id}:{media_id}"
             uploaded = uploaded_refs.get(upload_key)
             if not isinstance(uploaded, dict):
                 missing.append(f"{category} 素材 #{asset_id} 尚未确认上传到本机 ComfyUI")
                 continue
+            if uploaded.get("subfolder") != f"ai_comic_references/p{project.id}" or uploaded.get("type") != "input":
+                raise HTTPException(400, f"素材 #{asset_id} 的本机参考图上传记录不安全")
             references.append({
                 "name": uploaded.get("name"),
                 "subfolder": uploaded.get("subfolder", ""),
@@ -1683,8 +1702,8 @@ def preflight_reference_conditioning(
         asset = visual_assets.get(item["asset_id"])
         media = media_rows.get(item["media_file_id"])
         reason = None
-        if item["asset_id"] not in linked_asset_ids or asset is None:
-            reason = "该角色、场景或道具不属于当前项目"
+        if item["asset_id"] not in linked_asset_ids or asset is None or asset.category != item["category"]:
+            reason = "该角色、场景或道具不属于当前项目或素材分类不匹配"
         elif media is None:
             reason = "绑定的参考图不存在或不是图片素材"
         else:
