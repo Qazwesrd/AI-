@@ -967,7 +967,7 @@ def render_episode_from_shots(
             if not voice_record:
                 raise HTTPException(422, "对白配音必须来自本地音频素材库")
             if not _media_file_belongs_to_project(voice_record, episode.project_id, episode.id):
-                raise HTTPException(422, "对白配音属于其他项目，不能跨项目引用")
+                raise HTTPException(422, "对白配音不属于当前项目或分集，不能跨项目或分集引用")
         else:
             for speech_task in speech_tasks:
                 speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
@@ -999,7 +999,7 @@ def render_episode_from_shots(
             if not music_record:
                 raise HTTPException(422, "背景音乐必须先上传并登记到本地音频素材库")
             if not _media_file_belongs_to_project(music_record, episode.project_id, episode.id):
-                raise HTTPException(422, "背景音乐属于其他项目，不能跨项目引用")
+                raise HTTPException(422, "背景音乐不属于当前项目或分集，不能跨项目或分集引用")
             music_info = probe_media(music)
             if not any(stream.get("codec_type") == "audio" for stream in music_info.get("streams", [])):
                 raise HTTPException(422, "所选背景音乐文件不包含可用音轨")
@@ -3463,7 +3463,7 @@ def save_episode_edit_timeline(
         if not effect_record:
             raise HTTPException(422, "音效必须来自本地音频素材库")
         if not _media_file_belongs_to_project(effect_record, episode.project_id, episode.id):
-            raise HTTPException(422, "音效属于其他项目，不能跨项目引用")
+            raise HTTPException(422, "音效不属于当前项目或分集，不能跨项目或分集引用")
         effect_info = probe_media(effect_path)
         if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
             raise HTTPException(422, "音效文件不包含可用音轨")
