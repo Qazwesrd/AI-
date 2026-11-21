@@ -175,6 +175,9 @@ if ((Get-Sha256 $archivePath) -ne ([string]$asset.sha256).ToLowerInvariant()) {
 
 $archiveInfo = Get-ArchiveEntries $sevenZip $archivePath
 $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
+if (Test-Path -LiteralPath $installFullPath) {
+    throw "检测到已有 ComfyUI 目录。为防止覆盖你现有的模型、插件或配置，安装已停止；请先完整备份并将旧目录移到其他位置后再运行安装程序。"
+}
 $installDrive = [System.IO.Path]::GetPathRoot($installFullPath)
 $driveInfo = [System.IO.DriveInfo]::new($installDrive)
 $requiredFree = [Math]::Max(8GB, [long]$archiveInfo.ExpandedBytes + 1GB)
@@ -213,16 +216,9 @@ try {
         throw "ComfyUI 运行包目录结构不符合预期，已停止部署。"
     }
 
-    if (Test-Path -LiteralPath $installFullPath) {
-        Move-Item -LiteralPath $installFullPath -Destination $backup
-    }
-    try {
-        Move-Item -LiteralPath $portableRoot -Destination $installFullPath
-    } catch {
-        if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $installFullPath }
-        throw
-    }
-    if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+    # The target was checked before extraction. Never replace or delete an existing
+    # ComfyUI folder because it may contain user models, custom nodes, or settings.
+    Move-Item -LiteralPath $portableRoot -Destination $installFullPath
     Write-Host "ComfyUI 引擎已部署到：$installFullPath"
     Write-Host "图片生成模型未包含在安装包内，也没有下载任何模型。"
 } finally {
