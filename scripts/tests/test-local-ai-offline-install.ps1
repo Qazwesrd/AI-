@@ -129,6 +129,24 @@ try {
     $bundleManifest.local_ai.runtime_sha256 = $runtimeHashV2
     Write-Utf8 (Join-Path $bundleComfyui "manifest.json") ($bundleManifest | ConvertTo-Json -Depth 6)
 
+    # Force failure after runtime replacement: the old runtime and state must be restored.
+    $stateWriteBlocker = Join-Path $installRoot "install-manifest.json.new"
+    New-Item -ItemType Directory -Path $stateWriteBlocker -Force | Out-Null
+    $upgradeRejected = $false
+    try {
+        & $installer -PayloadRoot $payload -InstallRoot $installRoot -LogPath $log
+    } catch {
+        $upgradeRejected = $true
+    }
+    $rolledBackState = Get-Content -LiteralPath (Join-Path $installRoot "install-manifest.json") -Raw | ConvertFrom-Json
+    if (!$upgradeRejected -or
+        $rolledBackState.ollama_version -ne "v0.1.0" -or
+        (Get-Content -LiteralPath (Join-Path $installRoot "runtime\ollama.exe") -Raw) -ne "mock ollama executable" -or
+        (Test-Path -LiteralPath (Join-Path $installRoot ".ollama-upgrade-transaction.json"))) {
+        throw "离线升级回滚测试失败：安装清单写入故障未恢复旧运行环境。"
+    }
+    Remove-Item -LiteralPath $stateWriteBlocker -Recurse -Force
+
     & $installer -PayloadRoot $payload -InstallRoot $installRoot -LogPath $log
     $installedState = Get-Content -LiteralPath (Join-Path $installRoot "install-manifest.json") -Raw | ConvertFrom-Json
     if ($installedState.ollama_version -ne "v0.2.0" -or
