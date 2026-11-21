@@ -332,7 +332,12 @@ def execute_edit_plan(
             args += ["-vf", f"subtitles='{escaped}'"]
 
         if audio and audio_mode == "replace":
-            args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+            # External narration/music may be shorter than the assembled video.
+            # Pad the audio stream rather than letting -shortest truncate the picture.
+            args += [
+                "-map", "0:v:0", "-map", "1:a:0",
+                "-af", "apad", "-t", str(total_duration),
+            ]
         elif audio and audio_mode == "mix":
             streams = probe_media(clips[0]).get("streams", [])
             has_original_audio = any(x.get("codec_type") == "audio" for x in streams)
@@ -342,12 +347,15 @@ def execute_edit_plan(
                     "[0:a:0]volume=1.0[original];"
                     "[1:a:0]volume=0.25[music];"
                     "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]",
-                    "-map", "0:v:0", "-map", "[mix]", "-shortest"
+                    "-map", "0:v:0", "-map", "[mix]", "-t", str(total_duration)
                 ]
             else:
-                args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+                args += [
+                    "-map", "0:v:0", "-map", "1:a:0",
+                    "-af", "apad", "-t", str(total_duration),
+                ]
         else:
-            args += ["-map", "0:v:0", "-map", "0:a?"]
+            args += ["-map", "0:v:0", "-map", "0:a?", "-t", str(total_duration)]
 
         args += [
             "-c:v", "libx264",
@@ -380,6 +388,8 @@ def execute_edit_plan(
         report({"percent": 99.9, "stage": "validating"})
         validate_rendered_video(
             temporary_output,
+            expected_duration=total_duration,
+            duration_tolerance=2.0,
             require_audio=bool(audio),
         )
         os.replace(temporary_output, output)
