@@ -50,7 +50,7 @@ class ImageModelCatalogTests(unittest.TestCase):
         result = list_image_model_catalog()
         self.assertEqual(result["count"], 1)
         item = result["models"][0]
-        self.assertEqual(item["revision"], "4fddeb7")
+        self.assertEqual(item["revision"], "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f")
         self.assertEqual(item["filename"], "v1-5-pruned-emaonly-fp16.safetensors")
         self.assertRegex(item["sha256"], r"^[0-9a-f]{64}$")
         self.assertFalse(item["sha256_verified"])
@@ -59,6 +59,7 @@ class ImageModelCatalogTests(unittest.TestCase):
         self.assertEqual(len(item["eligibility_blockers"]), 3)
         self.assertIsNone(item["size_bytes"])
         self.assertEqual(item["license_status"], "review_required")
+        self.assertEqual(item["license_url"], "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE")
         self.assertEqual(item["hardware_status"], "cpu_not_recommended")
         self.assertFalse(result["network_used"])
         self.assertFalse(result["download_started"])
@@ -77,7 +78,7 @@ class ImageModelCatalogTests(unittest.TestCase):
             "X-Linked-Size": "2280000000",
             "X-Linked-Etag": "sha256:upstream-etag",
         }, status=302))
-        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors"
+        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors"
         result = _head_pinned_file_metadata(url, opener=opener)
         self.assertEqual(result["size_bytes"], 2280000000)
         self.assertTrue(result["etag_present"])
@@ -86,7 +87,7 @@ class ImageModelCatalogTests(unittest.TestCase):
 
     def test_metadata_head_fails_closed_without_exact_size(self):
         opener = FakeOpener(FakeResponse({"ETag": "opaque"}), FakeResponse({"Content-Range": "bytes 0-0/*"}, status=206, body=b"x"))
-        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors"
+        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors"
         with self.assertRaisesRegex(ValueError, "精确文件大小"):
             _head_pinned_file_metadata(url, opener=opener)
 
@@ -95,7 +96,7 @@ class ImageModelCatalogTests(unittest.TestCase):
             FakeResponse({"ETag": "opaque"}, status=200),
             FakeResponse({"Content-Range": "bytes 0-0/2280000000"}, status=206, body=b"x"),
         )
-        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors"
+        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors"
         result = _head_pinned_file_metadata(url, opener=opener)
         self.assertEqual(result["size_bytes"], 2280000000)
         self.assertEqual(opener.requests[0].get_method(), "HEAD")
@@ -107,7 +108,7 @@ class ImageModelCatalogTests(unittest.TestCase):
             FakeResponse({"ETag": "opaque"}, status=200),
             FakeResponse({"Content-Length": "100"}, status=200, body=b"too much"),
         )
-        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors"
+        url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors"
         with self.assertRaisesRegex(ValueError, "未遵守单字节范围请求"):
             _head_pinned_file_metadata(url, opener=opener)
 
