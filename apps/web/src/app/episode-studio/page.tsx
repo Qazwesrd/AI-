@@ -47,8 +47,13 @@ type EpisodeTimeline = {
   original_volume: number;
   sound_effect_tracks: { path: string; name: string; start_seconds: number; volume: number }[];
   subtitle_cues?: { start: number; end: number; text: string }[] | null;
+  subtitle_track_id?: number | null;
 };
 
+type SubtitleTrackOption = {
+  id: number; name: string; path: string; format: string;
+  language?: string | null; project_id?: number | null; episode_id?: number | null;
+};
 type EpisodeCharacter = { id: number; name: string };
 type EpisodeShot = { id: number; shot_number: number; dialogue?: string; character_ids: number[] };
 
@@ -118,6 +123,7 @@ export default function EpisodeReadinessPage() {
     note?: string;
   } | null>(null);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
+  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrackOption[]>([]);
   const [generatedSubtitleCues, setGeneratedSubtitleCues] = useState<{ start: number; end: number; text: string }[]>([]);
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [timelineBusy, setTimelineBusy] = useState(false);
@@ -196,6 +202,17 @@ export default function EpisodeReadinessPage() {
       }
       setTimeline(saved);
       setTimelineVersion(data.version || 0);
+      const projectScope = projectId ? "&project_id=" + encodeURIComponent(projectId) : "";
+      const subtitleResponse = await fetch(
+        API + "/api/media/subtitles?episode_id=" + encodeURIComponent(String(id)) + projectScope
+      );
+      if (subtitleResponse.ok) {
+        const subtitleData = await subtitleResponse.json();
+        setSubtitleTracks(Array.isArray(subtitleData) ? subtitleData : []);
+      } else {
+        setSubtitleTracks([]);
+      }
+      if (data.subtitle_track_warning) setMessage(data.subtitle_track_warning);
     } catch (error) {
       setTimeline(null);
       setMessage(error instanceof Error ? error.message : "读取剪辑时间轴失败");
@@ -938,6 +955,28 @@ export default function EpisodeReadinessPage() {
                   {timeline.music_name && <p className="mt-2 break-all text-sm text-emerald-200">当前音乐：{timeline.music_name}</p>}
                   <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadBackgroundMusic(event.target.files?.[0] || null)} className="mt-3 block w-full text-xs" />
                   {timeline.music_path && <button type="button" onClick={() => setTimeline({ ...timeline, music_path: null, music_name: null })} className="mt-2 rounded border border-white/15 px-3 py-1 text-xs">移除背景音乐</button>}
+                </div>
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <h3 className="font-semibold">字幕素材轨道</h3>
+                  <p className="mt-1 text-xs text-white/45">可选择本项目或本分集的 SRT 字幕素材。选择后，最终合成优先使用该字幕文件；清空选择则使用下方手动字幕时间轴。</p>
+                  <select
+                    value={timeline.subtitle_track_id ?? ""}
+                    onChange={event => setTimeline({
+                      ...timeline,
+                      subtitle_track_id: event.target.value ? Number(event.target.value) : null,
+                    })}
+                    className="mt-3 w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-white"
+                  >
+                    <option value="">不指定字幕素材（使用下方字幕时间轴）</option>
+                    {subtitleTracks.filter(track => track.format.toLowerCase() === "srt").map(track => (
+                      <option key={track.id} value={track.id}>
+                        {track.name}{track.episode_id === report?.episode_id ? " · 本集" : track.project_id ? " · 本项目" : " · 共享素材"}
+                      </option>
+                    ))}
+                  </select>
+                  {timeline.subtitle_track_id && !subtitleTracks.some(track => track.id === timeline.subtitle_track_id) && (
+                    <p className="mt-2 text-xs text-amber-200">当前选中的字幕素材不在可用列表中，请重新选择或清空。</p>
+                  )}
                 </div>
                 <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
