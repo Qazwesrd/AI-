@@ -55,6 +55,11 @@ type ComfyUIReadiness = {
   recommended_total_reserve_bytes: number; blockers: string[]; warnings: string[];
   install_target: string; note: string;
 };
+type ComfyUIReleaseCatalog = {
+  version: string; published_at: string; source: string;
+  assets: { name: string; download_url: string; size_bytes: number; sha256: string | null; digest_available: boolean }[];
+  download_started: boolean; installation_started: boolean; note: string;
+};
 declare global {
   interface Window {
     localAIInstallerDesktop?: {
@@ -118,6 +123,8 @@ export default function LocalModelsPage() {
   const [checkingImageRuntime, setCheckingImageRuntime] = useState(false);
   const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
+  const [comfyReleaseCatalog, setComfyReleaseCatalog] = useState<ComfyUIReleaseCatalog | null>(null);
+  const [loadingComfyReleaseCatalog, setLoadingComfyReleaseCatalog] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -174,6 +181,22 @@ export default function LocalModelsPage() {
       setError(err instanceof Error ? err.message : "ComfyUI 安装前检测失败");
     } finally {
       setCheckingComfyReadiness(false);
+    }
+  }, []);
+
+  const loadComfyReleaseCatalog = useCallback(async () => {
+    if (!window.confirm("将连接 Comfy-Org 官方 GitHub，只读取最新 ComfyUI Windows 安装包的版本、文件大小和校验摘要，不会下载或安装文件。此操作会使用网络流量。是否继续？")) return;
+    setLoadingComfyReleaseCatalog(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/release-catalog`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取官方 ComfyUI 版本信息失败");
+      setComfyReleaseCatalog(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取官方 ComfyUI 版本信息失败");
+    } finally {
+      setLoadingComfyReleaseCatalog(false);
     }
   }, []);
 
@@ -466,7 +489,25 @@ export default function LocalModelsPage() {
             </div>
             <p className="mt-2 text-xs leading-5 text-white/45">{comfyReadiness.note}</p>
           </> : <p className="mt-3 text-sm text-white/55">正在评估 ComfyUI 安装条件…</p>}
-          <p className="mt-3 text-xs text-white/45">当前阶段不会联网、下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
+<div className="mt-4 border-t border-white/10 pt-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><div className="font-semibold">官方安装包版本与下载量</div><p className="mt-1 text-xs text-white/45">需要你手动确认后才会查询官方版本信息；查询不会下载文件。</p></div>
+              <button type="button" disabled={loadingComfyReleaseCatalog} onClick={() => void loadComfyReleaseCatalog()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-40">{loadingComfyReleaseCatalog ? "正在读取官方信息…" : "查询官方版本和大小"}</button>
+            </div>
+            {comfyReleaseCatalog && <>
+              <p className="mt-3 text-sm">最新官方版本：<strong>{comfyReleaseCatalog.version}</strong></p>
+              <div className="mt-2 space-y-2">
+                {comfyReleaseCatalog.assets.map(asset => <div key={asset.name} className="rounded-lg bg-white/[0.04] p-3 text-sm">
+                  <div className="break-all font-medium">{asset.name}</div>
+                  <div className="mt-1 text-white/60">下载大小：{size(asset.size_bytes)} · SHA-256：{asset.digest_available ? "官方元数据已提供" : "官方未提供"}</div>
+                  {asset.sha256 && <div className="mt-1 break-all font-mono text-[11px] text-white/40">{asset.sha256}</div>}
+                </div>)}
+                {comfyReleaseCatalog.assets.length === 0 && <p className="text-sm text-amber-100/75">官方最新版本暂未提供可识别的 Windows 安装包资源。</p>}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-white/45">{comfyReleaseCatalog.note}</p>
+            </>}
+          </div>
+                    <p className="mt-3 text-xs text-white/45">当前阶段不会联网、下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
         </section>
 
         >Qwen3 4B 硬件适配检测</h2>
