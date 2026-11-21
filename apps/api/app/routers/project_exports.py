@@ -71,7 +71,12 @@ def _row_dict(row):
 
 def _looks_like_path_key(key: str) -> bool:
     normalized = key.lower()
-    return normalized == "path" or normalized.endswith("_path") or normalized.endswith("filepath")
+    return (
+        normalized in {"path", "paths"}
+        or normalized.endswith("_path")
+        or normalized.endswith("_paths")
+        or normalized.endswith("filepath")
+    )
 
 
 def _walk_path_values(value, key=""):
