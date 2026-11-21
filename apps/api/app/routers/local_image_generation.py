@@ -1193,9 +1193,9 @@ def _inspect_reference_media_file(media: MediaFile):
     except (OSError, ValueError):
         return {"ready": False, "reason": "本地参考图文件不存在或无法安全读取"}
 
-    if header.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
         mime = "image/png"
-    elif header.startswith(b"\\xff\\xd8\\xff"):
+    elif header.startswith(b"\xff\xd8\xff"):
         mime = "image/jpeg"
     elif len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
         mime = "image/webp"
