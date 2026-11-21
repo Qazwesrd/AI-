@@ -137,10 +137,20 @@ function Expand-ValidatedArchive {
         }
         if (!$entry.IsFolder) {
             $totalExpandedBytes += [long]$entry.Size
-            if ($totalExpandedBytes -gt 2GB) {
-                throw "ComfyUI 归档解压总大小超过 2 GiB 安全上限：$Archive"
+            if ($totalExpandedBytes -gt 10GB) {
+                throw "ComfyUI 归档解压总大小超过 10 GiB 安全上限：$Archive"
             }
         }
+    }
+
+    # Check the destination volume before extraction. Keep 1 GiB free for
+    # filesystem overhead and audit reports; fail early rather than filling
+    # the hosted runner disk partway through a multi-gigabyte portable archive.
+    $destinationRoot = [System.IO.Path]::GetPathRoot([System.IO.Path]::GetFullPath($Destination))
+    $destinationDrive = [System.IO.DriveInfo]::new($destinationRoot)
+    $requiredFreeBytes = $totalExpandedBytes + 1GB
+    if ($destinationDrive.AvailableFreeSpace -lt $requiredFreeBytes) {
+        throw ("ComfyUI 归档需要 {0:N2} GiB 解压空间（含 1 GiB 余量），目标磁盘仅剩 {1:N2} GiB：{2}" -f ($requiredFreeBytes / 1GB), ($destinationDrive.AvailableFreeSpace / 1GB), $Archive)
     }
 
     $null = New-Item -ItemType Directory -Path $Destination -Force
