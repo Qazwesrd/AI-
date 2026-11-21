@@ -126,11 +126,11 @@ class ReferenceConditionedWorkflowTests(unittest.TestCase):
         )
         self.assertEqual(workflow["10"]["class_type"], "IPAdapterUnifiedLoader")
         self.assertEqual(workflow["10"]["inputs"]["preset"], "STANDARD (medium strength)")
-        self.assertEqual(workflow["12"]["class_type"], "LoadImage")
-        self.assertEqual(workflow["13"]["class_type"], "IPAdapterAdvanced")
-        self.assertEqual(workflow["13"]["inputs"]["model"], ["10", 0])
-        self.assertEqual(workflow["13"]["inputs"]["ipadapter"], ["10", 1])
-        self.assertEqual(workflow["3"]["inputs"]["model"], ["13", 0])
+        self.assertEqual(workflow["11"]["class_type"], "LoadImage")
+        self.assertEqual(workflow["12"]["class_type"], "IPAdapterAdvanced")
+        self.assertEqual(workflow["12"]["inputs"]["model"], ["10", 0])
+        self.assertEqual(workflow["12"]["inputs"]["ipadapter"], ["10", 1])
+        self.assertEqual(workflow["3"]["inputs"]["model"], ["12", 0])
 
     def test_rejects_reference_path_traversal(self):
         with self.assertRaises(ValueError):
