@@ -196,11 +196,12 @@ def build_production_readiness_report(project_id: int, db: Session):
         linked_image = any(
             _local_file_state(path)["exists"]
             for asset_id in referenced_asset_ids
+            if asset_id in assets_by_id
             for path in (
                 assets_by_id[asset_id].image_path,
                 assets_by_id[asset_id].reference_path,
             )
-            if asset_id in assets_by_id and path
+            if path
         )
         if not linked_image:
             linked_image = any(
