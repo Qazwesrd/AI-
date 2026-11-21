@@ -17,6 +17,7 @@ ROUTER_MODULES = [
     "app.routers.studio",
     "app.routers.visual",
     "app.routers.story",
+    "app.routers.project_exports",
     "app.routers.media",
     "app.routers.video_editor",
     "app.routers.subtitle_tools",
