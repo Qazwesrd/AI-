@@ -397,9 +397,9 @@ export default function LocalModelsPage() {
               )}
               {installerInfo.job.status === "failed" && <p className="text-sm text-rose-200">{installerInfo.job.error || "下载失败，可重试。"}</p>}
               {installerInfo.job.status === "success" && <p className="text-sm text-emerald-200">模型下载并通过本机模型清单核验。可前往本地创作工作台测试。</p>}
-              {installerInfo.engine_status !== "ready" && hasDesktopInstaller && (
-                <button type="button" disabled={installingRuntime} onClick={() => void installOllamaRuntime()} className="rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
-                  {installingRuntime ? "正在安装本地 AI 环境…" : "一键安装运行环境和 Qwen3 4B 模型"}
+              {hasDesktopInstaller && installerInfo.installed !== true && (
+                <button type="button" disabled={installingRuntime || installingBaseModel} onClick={() => void installOllamaRuntime()} className="rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
+                  {installingRuntime || installingBaseModel ? "正在准备本地 AI…" : installerInfo.engine_status === "ready" ? "一键安装 Qwen3 4B 创作模型" : "一键安装运行环境和 Qwen3 4B 模型"}
                 </button>
               )}
               {runtimeInstallProgress && ["downloading", "verifying", "installing", "checking"].includes(runtimeInstallProgress.status) && (
