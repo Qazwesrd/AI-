@@ -125,7 +125,11 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         )
         db = Mock()
         db.query.return_value.filter.return_value.first.return_value = task
-        result = control_unified_task("media", 91, "refresh", db=db)
+        with patch.dict(
+            "app.routers.media._LOCAL_RENDER_RUNTIME",
+            {91: {"cancel": object(), "process": object()}},
+        ):
+            result = control_unified_task("media", 91, "refresh", db=db)
         self.assertEqual(result["status"], "processing")
         self.assertEqual(result["progress"], 54.5)
         self.assertEqual(result["stage"], "rendering")
