@@ -2,18 +2,12 @@ name: Windows desktop installer
 
 on:
   workflow_dispatch:
-    inputs:
-      build_comfyui_offline_bundle:
-        description: "在 CI 中构建并校验完整离线 ZIP（约 7.3 GiB）；不会上传到有容量/计费风险的 Actions Artifact"
-        required: false
-        type: boolean
-        default: false
   push:
     branches: [master]
     paths:
       - "apps/**"
       - "packages/**"
-      - "scripts/build-windows.ps1"
+      - "scripts/*.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
   pull_request:
@@ -206,19 +200,6 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-windows.ps1
-
-      - name: Build complete offline ComfyUI bundle
-        if: github.event_name == 'workflow_dispatch' && inputs.build_comfyui_offline_bundle == true
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $release = Join-Path $PWD "apps/desktop/release"
-          $installers = @(Get-ChildItem $release -File -Filter "*Setup*.exe")
-          if ($installers.Count -ne 1) { throw "Expected exactly one Setup.exe; found $($installers.Count)." }
-          $output = Join-Path $release "AI漫剧制作大师-完整离线安装套件.zip"
-          ./scripts/prepare-comfyui-offline-bundle.ps1 -SetupExe $installers[0].FullName -OutputZip $output
-          if (!(Test-Path $output) -or (Get-Item $output).Length -lt 6GB) { throw "Full offline bundle is missing or unexpectedly small." }
-          Write-Host "The complete offline bundle was created and SHA-256 verified."
 
       - name: Verify installer and write SHA-256 checksum
         shell: pwsh
