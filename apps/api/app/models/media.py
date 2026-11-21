@@ -44,4 +44,6 @@ class SubtitleTrack(Base):
     file_path = Column(Text, nullable=False)
     format = Column(String(20), default="srt")
     language = Column(String(30), default="zh-CN")
+    project_id = Column(Integer, nullable=True)
+    episode_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
