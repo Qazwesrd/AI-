@@ -60,6 +60,8 @@ class ImageModelCatalogTests(unittest.TestCase):
         self.assertIsNone(item["size_bytes"])
         self.assertEqual(item["license_status"], "review_required")
         self.assertEqual(item["license_url"], "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE")
+        self.assertIn("附件 A", item["license_note"])
+        self.assertIn("完整许可证", item["license_note"])
         self.assertEqual(item["hardware_status"], "cpu_not_recommended")
         self.assertFalse(result["network_used"])
         self.assertFalse(result["download_started"])
