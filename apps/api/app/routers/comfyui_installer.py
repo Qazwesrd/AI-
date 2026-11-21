@@ -35,7 +35,7 @@ def recommend_official_asset(vendor: str, gpu_name: str | None = None, architect
         gtx = re.search(r"gtx\s*([0-9]{3,4})", label)
         if gtx and int(gtx.group(1)) <= 1099:
             return "ComfyUI_windows_portable_nvidia_cu126.7z"
-        rtx = re.search(r"rtx\s*(?:a)?\\s*([0-9]{4})", label)
+        rtx = re.search(r"rtx\s*(?:a)?\s*([0-9]{4})", label)
         if rtx and int(rtx.group(1)) >= 2000:
             return "ComfyUI_windows_portable_nvidia.7z"
         return None
