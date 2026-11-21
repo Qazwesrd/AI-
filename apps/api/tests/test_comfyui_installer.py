@@ -181,5 +181,35 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_archive_entries([entry])
 
+
+    def test_install_plan_requires_space_and_verified_official_asset(self):
+        from app.routers.comfyui_installer import build_comfyui_install_plan, ENGINE_RESERVE_BYTES
+        asset = {
+            "name": "ComfyUI_windows_portable_nvidia.7z",
+            "download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v1/ComfyUI_windows_portable_nvidia.7z",
+            "size_bytes": 1024,
+            "sha256": "c" * 64,
+        }
+        plan = build_comfyui_install_plan(asset, "v1", ENGINE_RESERVE_BYTES + 1024, "C:/AIComicStudio/ComfyUI")
+        self.assertEqual(plan["status"], "plan_ready")
+        self.assertFalse(plan["download_started"])
+        self.assertFalse(plan["installation_started"])
+        self.assertEqual(plan["required_free_bytes"], ENGINE_RESERVE_BYTES + 1024)
+        with self.assertRaises(ValueError):
+            build_comfyui_install_plan(asset, "v1", ENGINE_RESERVE_BYTES + 1023, "C:/AIComicStudio/ComfyUI")
+        with self.assertRaises(ValueError):
+            build_comfyui_install_plan({**asset, "sha256": None}, "v1", 100 * GIB, "C:/AIComicStudio/ComfyUI")
+
+    def test_install_plan_rejects_wrong_version_and_unknown_asset(self):
+        from app.routers.comfyui_installer import build_comfyui_install_plan
+        asset = {
+            "name": "ComfyUI_windows_portable_nvidia.7z",
+            "download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v2/ComfyUI_windows_portable_nvidia.7z",
+            "size_bytes": 1024,
+            "sha256": "d" * 64,
+        }
+        with self.assertRaises(ValueError):
+            build_comfyui_install_plan(asset, "v1", 100 * GIB, "C:/ComfyUI")
+
 if __name__ == "__main__":
     unittest.main()
