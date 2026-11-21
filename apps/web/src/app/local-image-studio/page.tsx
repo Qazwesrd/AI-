@@ -22,6 +22,8 @@ export default function LocalImageStudioPage() {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [archiving, setArchiving] = useState<string | null>(null);
+  const [archived, setArchived] = useState<Record<string, { id: number; name: string }>>({});
 
   const refreshModels = useCallback(async () => {
     setChecking(true); setError("");
@@ -62,6 +64,26 @@ export default function LocalImageStudioPage() {
       setConfirmed(false);
     } catch (err) { setError(err instanceof Error ? err.message : "本地图片生成失败；没有切换到云端。"); }
     finally { setLoading(false); }
+  }
+
+
+  async function archiveImage(image: { filename: string; subfolder: string; type: string }) {
+    if (!task?.prompt_id) return;
+    const key = image.filename + "|" + image.subfolder;
+    setArchiving(key); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/tasks/${encodeURIComponent(task.prompt_id)}/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: image.filename, subfolder: image.subfolder, type: image.type || "output" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "图片归档失败");
+      setArchived((current) => ({ ...current, [key]: { id: data.media_file_id, name: data.name } }));
+      setMessage(data.message || `已归档到素材库，素材编号：${data.media_file_id}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片归档失败；原始图片仍保留在 ComfyUI 输出目录。");
+    } finally { setArchiving(null); }
   }
 
   async function refreshTask() {
@@ -125,9 +147,18 @@ export default function LocalImageStudioPage() {
       {task && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">本地生成任务</h2><p className="mt-1 break-all text-xs text-white/50">任务编号：{task.prompt_id}</p></div><button type="button" onClick={() => void refreshTask()} disabled={checking} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40">{checking ? "查询中…" : "刷新任务状态"}</button></div>
         <p className="mt-3 text-sm">状态：{task.status === "completed" ? "已完成" : task.status === "running" ? "生成中" : "排队中"}</p>
-        {task.images?.length ? <div className="mt-3 space-y-1 text-sm text-white/70">{task.images.map((image) => <p key={image.filename}>• {image.filename}（ComfyUI 输出目录）</p>)}</div> : null}
+        {task.images?.length ? <div className="mt-4 space-y-3">{task.images.map((image) => {
+          const key = image.filename + "|" + image.subfolder;
+          const saved = archived[key];
+          return <div key={key} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-900/70 p-3">
+            <div className="min-w-0"><p className="break-all text-sm text-white/80">{image.filename}</p><p className="mt-1 text-xs text-white/40">ComfyUI 输出目录 · {image.type || "output"}</p>
+              {saved && <p className="mt-1 text-xs text-emerald-200">已归档 · 素材编号 #{saved.id}</p>}
+            </div>
+            <button type="button" onClick={() => void archiveImage(image)} disabled={Boolean(archiving) || Boolean(saved)} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-sm text-emerald-100 disabled:opacity-40">{archiving === key ? "正在归档…" : saved ? "已归档" : "归档到素材库"}</button>
+          </div>;
+        })}</div> : null}
       </section>}
-      <p className="text-xs leading-5 text-white/40">当前版本采用 ComfyUI 标准 checkpoint 文生图工作流。ControlNet、LoRA、参考图、批量镜头生成和自动归档将在后续阶段增加。若模型架构与标准 checkpoint 工作流不兼容，ComfyUI 会返回错误，不会尝试云端替代。</p>
+      <p className="text-xs leading-5 text-white/40">当前版本采用 ComfyUI 标准 checkpoint 文生图工作流。图片归档需要逐张点击确认；归档后会登记到本地素材库。ControlNet、LoRA、参考图和批量镜头生成将在后续阶段增加。若模型架构与标准 checkpoint 工作流不兼容，ComfyUI 会返回错误，不会尝试云端替代。</p>
     </main>
   );
 }
