@@ -12,7 +12,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Literal
+from typing import Literal
+
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/local-ai/model-installer", tags=["本地模型安装"])
 OLLAMA_URL = "http://127.0.0.1:11434"
