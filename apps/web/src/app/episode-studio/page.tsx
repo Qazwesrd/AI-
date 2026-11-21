@@ -100,6 +100,12 @@ export default function EpisodeReadinessPage() {
   const [message, setMessage] = useState("");
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
+  const [episodeRenderJob, setEpisodeRenderJob] = useState<{
+    task_id: number; status: string;
+    progress?: { percent?: number; stage?: string; phase?: number; phase_count?: number };
+    result?: { output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } };
+    error?: string;
+  } | null>(null);
   const [syncReport, setSyncReport] = useState<{ status?: string; metadata_only?: boolean; audio_video_start_offset_seconds?: number | null; audio_video_duration_delta_seconds?: number | null; warnings?: string[]; note?: string } | null>(null);
   const [finalQualityReport, setFinalQualityReport] = useState<{
     status?: string; duration_seconds?: number;
@@ -119,6 +125,31 @@ export default function EpisodeReadinessPage() {
   const [speechProvider, setSpeechProvider] = useState("");
   const [speechModel, setSpeechModel] = useState("");
   const [defaultSpeechVoice, setDefaultSpeechVoice] = useState("alloy");
+
+  useEffect(() => {
+    const jobId = episodeRenderJob?.task_id;
+    if (!jobId || !["queued", "processing", "cancellation_requested"].includes(episodeRenderJob?.status || "")) return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(`${API}/api/media/video/episodes/render/jobs/${jobId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取分集合成进度失败");
+        if (!active) return;
+        setEpisodeRenderJob(data);
+        if (data.status === "completed" && data.result) {
+          setRenderResult(data.result);
+          setMessage("分集成片已生成，并完成基础音视频质量检查。");
+          await checkReadiness(false);
+        } else if (["failed", "cancelled", "interrupted_unknown"].includes(data.status)) {
+          setMessage(data.error || (data.status === "cancelled" ? "分集合成已停止。" : "分集合成未完成，请检查任务详情。"));
+        }
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : "读取分集合成进度失败");
+      }
+    }, 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [episodeRenderJob?.task_id, episodeRenderJob?.status]);
 
   async function loadTimeline(id: number, readiness?: Readiness) {
     try {
@@ -456,20 +487,33 @@ export default function EpisodeReadinessPage() {
       setMessage("仍有缺失、生成中或损坏的镜头，不能开始合成。");
       return;
     }
-    if (!window.confirm(`确认合成第 ${report.episode_number ?? ""} 集？将使用当前检查通过的镜头视频，并在本地执行 FFmpeg 合成。`)) return;
+    if (!window.confirm(`确认合成第 ${report.episode_number ?? ""} 集？任务将在本机后台执行，不会调用云端 AI。`)) return;
     setBusy(true);
-    setMessage("正在合成分集视频，请保持软件运行……");
+    setMessage("正在创建本地后台合成任务……");
     try {
-      const response = await fetch(`${API}/api/media/video/episodes/${report.episode_id}/render`, { method: "POST" });
+      const response = await fetch(`${API}/api/media/video/episodes/${report.episode_id}/render/jobs`, { method: "POST" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "合成失败");
-      setRenderResult(data);
-      setMessage("分集成片已生成，并完成基础音视频质量检查。");
-      await checkReadiness(false);
+      if (!response.ok) throw new Error(data.detail || "创建合成任务失败");
+      setEpisodeRenderJob({ task_id: data.task_id, status: data.status, progress: { percent: 0, stage: "queued" } });
+      setRenderResult(null);
+      setMessage("本地合成任务已创建；可在此查看进度，软件重启后不会自动重复合成。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "合成失败");
+      setMessage(error instanceof Error ? error.message : "创建合成任务失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function cancelEpisodeRender() {
+    if (!episodeRenderJob?.task_id) return;
+    try {
+      const response = await fetch(`${API}/api/media/video/episodes/render/jobs/${episodeRenderJob.task_id}/cancel`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "停止合成失败");
+      setEpisodeRenderJob(current => current ? { ...current, status: data.status } : current);
+      setMessage(data.message || "已发送停止请求，正在等待 FFmpeg 安全退出。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "停止合成失败");
     }
   }
 
@@ -626,8 +670,24 @@ export default function EpisodeReadinessPage() {
                   <h2 className="text-xl font-semibold">{report.episode_title || `分集 #${report.episode_id}`}</h2>
                   <p className="mt-1 text-sm text-white/55">共 {report.total_shots} 个镜头 · 逐个验证视频文件与可解码视频流</p>
                 </div>
-                <button disabled={busy || !report.ready} onClick={() => void renderEpisode()} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">合成分集 MP4</button>
+                {episodeRenderJob && ["queued", "processing", "cancellation_requested"].includes(episodeRenderJob.status) ? (
+                  <button disabled={episodeRenderJob.status === "cancellation_requested"} onClick={() => void cancelEpisodeRender()} className="rounded-xl bg-rose-700 px-5 py-3 font-semibold disabled:opacity-40">停止合成</button>
+                ) : (
+                  <button disabled={busy || !report.ready} onClick={() => void renderEpisode()} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">合成分集 MP4</button>
+                )}
               </div>
+              {episodeRenderJob && (
+                <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span>后台合成任务 #{episodeRenderJob.task_id} · {episodeRenderJob.progress?.stage || episodeRenderJob.status}</span>
+                    <span>{Math.round(episodeRenderJob.progress?.percent || 0)}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+                    <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${Math.max(0, Math.min(100, episodeRenderJob.progress?.percent || 0))}%` }} />
+                  </div>
+                  {episodeRenderJob.error && <p className="mt-2 break-words text-xs text-rose-200">{episodeRenderJob.error}</p>}
+                </div>
+              )}
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
                 {counts.map(([label, value, color]) => <div key={label} className="rounded-xl bg-black/25 p-4"><div className={`text-2xl font-bold ${color}`}>{value}</div><div className="mt-1 text-sm text-white/55">{label}</div></div>)}
               </div>
