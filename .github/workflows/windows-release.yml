@@ -274,7 +274,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
           foreach ($file in $files) {
-            $existingAsset = $assets | Where-Object { $_.name -eq $file.Name } | Select-Object -First 1
+            # GitHub normalizes non-ASCII release asset names to a dot in the API response.
+            # Compare the normalized name so retries replace the correct existing asset.
+            $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
+            $existingAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
             if ($existingAsset) {
               gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($existingAsset.id)"
               if ($LASTEXITCODE -ne 0) { throw "无法替换旧发布资产：$($file.Name)" }
@@ -292,8 +295,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法核对 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
           foreach ($file in $files) {
-            if (!($assets | Where-Object { $_.name -eq $file.Name })) {
-              throw "Release 缺少资产：$($file.Name)"
+            $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
+            $verifiedAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
+            if (!$verifiedAsset -or $verifiedAsset.state -ne "uploaded" -or $verifiedAsset.size -ne $file.Length) {
+              throw "Release 资产校验失败：$($file.Name)；API 名称：$expectedAssetName"
             }
           }
 
