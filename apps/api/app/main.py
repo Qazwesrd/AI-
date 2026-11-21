@@ -96,6 +96,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "X-Project-Archive-Files", "X-Project-Archive-Missing"],
 )
 
 register_routers(app)
