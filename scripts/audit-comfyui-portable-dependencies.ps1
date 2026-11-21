@@ -39,7 +39,7 @@ function Get-ArchiveEntries {
     foreach ($lineObject in $listing) {
         $line = [string]$lineObject
         if ([string]::IsNullOrWhiteSpace($line)) {
-            if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive) {
+            if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive -and !$record.ContainsKey("Type")) {
                 $entries.Add([pscustomobject]@{
                     Path = [string]$record["Path"]
                     Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
@@ -71,6 +71,9 @@ function Get-ArchiveEntries {
     }
     if ($entries.Count -gt $EntryLimit) {
         throw "归档条目超过安全上限 $EntryLimit：$Archive"
+    }
+    if ($entries.Count -eq 0) {
+        throw "7-Zip 未返回任何归档文件条目，拒绝生成空清点报告：$Archive"
     }
     return @($entries)
 }
