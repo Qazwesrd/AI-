@@ -3,16 +3,32 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $auditScript = Join-Path $repoRoot "scripts\audit-comfyui-portable-dependencies.ps1"
-if (!(Test-Path -LiteralPath $auditScript -PathType Leaf)) {
-    throw "找不到 ComfyUI 依赖清点脚本：$auditScript"
+$installScript = Join-Path $repoRoot "scripts\install-comfyui-offline.ps1"
+if (!(Test-Path -LiteralPath $auditScript -PathType Leaf) -or
+    !(Test-Path -LiteralPath $installScript -PathType Leaf)) {
+    throw "找不到 ComfyUI 依赖清点或离线安装脚本。"
+}
+
+function Write-Utf8([string]$Path, [string]$Value) {
+    $parent = Split-Path -Parent $Path
+    if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+    [System.IO.File]::WriteAllText($Path, $Value, [System.Text.UTF8Encoding]::new($false))
+}
+function Get-Sha256([string]$Path) {
+    (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-comfyui-audit-test-" + [Guid]::NewGuid().ToString("N"))
 $sevenZip = Join-Path $temp "7zr.exe"
 $fixtureRoot = Join-Path $temp "fixture"
 $comfyRoot = Join-Path $fixtureRoot "ComfyUI"
-$archive = Join-Path $temp "ComfyUI_windows_portable_nvidia.7z"
+$archive = Join-Path $temp "ComfyUI_windows_portable_amd.7z"
 $reportPath = Join-Path $temp "audit-report.json"
+$bundleRoot = Join-Path $temp "installer-bundle"
+$payloadRoot = Join-Path $bundleRoot "ComfyUI-Payload"
+$noticesRoot = Join-Path $bundleRoot "THIRD_PARTY_NOTICES"
+$installRoot = Join-Path $temp "installed\ComfyUI"
+$installLog = Join-Path $temp "comfyui-install.log"
 
 try {
     New-Item -ItemType Directory -Path $temp, $comfyRoot -Force | Out-Null
@@ -35,14 +51,16 @@ try {
     }
     Invoke-WebRequest -Uri $assetUri.AbsoluteUri -OutFile $sevenZip -TimeoutSec 120
     if ((Get-Item -LiteralPath $sevenZip).Length -ne [long]$asset.size -or
-        (Get-FileHash -LiteralPath $sevenZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+        (Get-Sha256 $sevenZip) -ne $expectedHash) {
         throw "7zr.exe 大小或 SHA-256 校验失败。"
     }
 
     $sitePackages = Join-Path $comfyRoot "python_embeded\Lib\site-packages"
     $metadataDir = Join-Path $sitePackages "audit_fixture-1.0.dist-info"
     $torchLib = Join-Path $sitePackages "torch\lib"
-    New-Item -ItemType Directory -Path $metadataDir, $torchLib -Force | Out-Null
+    $pythonRoot = Join-Path $comfyRoot "python_embeded"
+    $comfyAppRoot = Join-Path $comfyRoot "ComfyUI"
+    New-Item -ItemType Directory -Path $metadataDir, $torchLib, $pythonRoot, $comfyAppRoot -Force | Out-Null
     @(
         "Metadata-Version: 2.1",
         "Name: audit-fixture-package",
@@ -53,6 +71,8 @@ try {
     ) | Set-Content -LiteralPath (Join-Path $metadataDir "METADATA") -Encoding UTF8
     "MIT License - audit fixture only." | Set-Content -LiteralPath (Join-Path $comfyRoot "LICENSE.txt") -Encoding UTF8
     "fixture runtime marker" | Set-Content -LiteralPath (Join-Path $torchLib "cudart64_130.dll") -Encoding ASCII
+    "mock embedded python executable" | Set-Content -LiteralPath (Join-Path $pythonRoot "python.exe") -Encoding ASCII
+    "print('ComfyUI integration fixture')" | Set-Content -LiteralPath (Join-Path $comfyAppRoot "main.py") -Encoding UTF8
 
     Push-Location $fixtureRoot
     try {
@@ -65,7 +85,7 @@ try {
     }
 
     try {
-        & $auditScript -SevenZipPath $sevenZip -ArchivePaths @($archive) -ReleaseTag $release.tag_name -OutputPath $reportPath
+        & $auditScript -SevenZipPath $sevenZip -ArchivePaths @($archive) -ReleaseTag "fixture-v1.0.0" -OutputPath $reportPath
     } catch {
         Write-Host "ComfyUI audit diagnostic:"
         Write-Host ($_ | Format-List * -Force | Out-String)
@@ -76,11 +96,12 @@ try {
         throw "依赖清点脚本没有生成报告。"
     }
     $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($report.audit_status -ne "pending" -or $report.distribution_approved -ne $false) {
-        throw "依赖清点脚本错误地批准了未审核组件。"
+    if ($report.audit_status -ne "pending" -or $report.distribution_approved -ne $false -or
+        $report.release_tag -ne "fixture-v1.0.0") {
+        throw "依赖清点脚本错误地批准了未审核组件或记录了错误版本。"
     }
     if ($report.portable_variants.Count -ne 1 -or
-        $report.portable_variants[0].asset -ne "ComfyUI_windows_portable_nvidia.7z" -or
+        $report.portable_variants[0].asset -ne "ComfyUI_windows_portable_amd.7z" -or
         $report.portable_variants[0].inventory_status -ne "inventory_generated_review_pending") {
         throw "依赖清点脚本没有正确记录 portable 变体。"
     }
@@ -96,7 +117,93 @@ try {
         throw "依赖清点脚本没有实际提取 METADATA 和许可证证据。"
     }
 
-    Write-Host "ComfyUI 依赖清点集成测试通过：真实 7zr 归档列表、证据提取、运行库识别、pending 审核门禁。"
+    New-Item -ItemType Directory -Path $payloadRoot, $noticesRoot -Force | Out-Null
+    Copy-Item -LiteralPath $archive -Destination $payloadRoot
+    Copy-Item -LiteralPath $sevenZip -Destination $payloadRoot
+    $comfyLicenseRelative = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
+    $sevenZipLicenseRelative = "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt"
+    $sevenZipSourceRelative = "THIRD_PARTY_NOTICES/7z-source-fixture.7z"
+    Write-Utf8 (Join-Path $bundleRoot ($comfyLicenseRelative.Replace("/", "\"))) "GNU GENERAL PUBLIC LICENSE Version 3 - fixture notice"
+    Write-Utf8 (Join-Path $bundleRoot ($sevenZipLicenseRelative.Replace("/", "\"))) "GNU LGPL - fixture notice"
+    $sourceArchive = Join-Path $bundleRoot ($sevenZipSourceRelative.Replace("/", "\"))
+    Write-Utf8 $sourceArchive "fixture 7-Zip source archive"
+    $sourceHash = Get-Sha256 $sourceArchive
+    $archiveHash = Get-Sha256 $archive
+    $fixtureComfyVersion = "fixture-v1.0.0"
+
+    $assetNames = @(
+        "ComfyUI_windows_portable_nvidia.7z",
+        "ComfyUI_windows_portable_nvidia_cu126.7z",
+        "ComfyUI_windows_portable_amd.7z",
+        "ComfyUI_windows_portable_intel.7z"
+    )
+    $manifestAssets = @()
+    foreach ($name in $assetNames) {
+        $selected = ($name -ceq "ComfyUI_windows_portable_amd.7z")
+        $manifestAssets += @{
+            name = $name
+            source = "https://github.com/Comfy-Org/ComfyUI/releases/download/$fixtureComfyVersion/$name"
+            size_bytes = if ($selected) { [long](Get-Item $archive).Length } else { 1L }
+            sha256 = if ($selected) { $archiveHash } else { ("0" * 64) }
+            verified = $true
+        }
+    }
+
+    $bundleManifest = @{
+        target_architecture = "windows-x64"
+        bundle_type = "complete-offline-comfyui-engine-internal-validation-only"
+        distribution_approved = $false
+        distribution_status = "blocked-pending-third-party-dependency-audit"
+        comfyui_version = $fixtureComfyVersion
+        assets = $manifestAssets
+        license = @{ license_file = $comfyLicenseRelative }
+        seven_zip = @{
+            version = $release.tag_name
+            license_file = $sevenZipLicenseRelative
+            source_archive = $sevenZipSourceRelative
+            source_sha256 = $sourceHash
+        }
+        tools = @(@{
+            name = "7zr.exe"
+            source = $asset.browser_download_url
+            sha256 = $expectedHash
+            size_bytes = [long]$asset.size
+            verified = $true
+        })
+    }
+    Write-Utf8 (Join-Path $payloadRoot "manifest.json") ($bundleManifest | ConvertTo-Json -Depth 8)
+
+    $detectedAdapters = @([pscustomobject]@{
+        Name = "AMD Radeon(TM) Graphics"
+        PNPDeviceID = "PCI\VEN_1002&DEV_1636"
+    })
+    & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters $detectedAdapters
+
+    $installedMain = Join-Path $installRoot "ComfyUI\main.py"
+    $installedPython = Join-Path $installRoot "python_embeded\python.exe"
+    $cpuLauncher = Join-Path $installRoot "AI漫剧大师-CPU模式启动.bat"
+    $runtimeManifestPath = Join-Path $installRoot "runtime-manifest.json"
+    if (!(Test-Path -LiteralPath $installedMain -PathType Leaf) -or
+        !(Test-Path -LiteralPath $installedPython -PathType Leaf) -or
+        !(Test-Path -LiteralPath $cpuLauncher -PathType Leaf) -or
+        !(Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf)) {
+        throw "ComfyUI 离线安装测试失败：运行环境、CPU 启动器或运行清单缺失。"
+    }
+    $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($runtimeManifest.runtime_mode -ne "cpu" -or
+        $runtimeManifest.gpu_vendor -ne "AMD" -or
+        $runtimeManifest.selected_asset -ne "ComfyUI_windows_portable_amd.7z") {
+        throw "ComfyUI 硬件适配测试失败：Ryzen Vega 模拟设备没有选择安全的 CPU 模式。"
+    }
+
+    $sentinel = Join-Path $installRoot "ComfyUI\user\preserve-user-data.txt"
+    Write-Utf8 $sentinel "preserve existing ComfyUI user data"
+    & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters $detectedAdapters
+    if ((Get-Content -LiteralPath $sentinel -Raw) -ne "preserve existing ComfyUI user data") {
+        throw "ComfyUI 升级/重复安装测试失败：现有用户数据被覆盖。"
+    }
+
+    Write-Host "ComfyUI 集成测试通过：真实 7zr 目录清点、许可证证据提取、AMD Vega CPU 模式安装、运行清单、重复安装数据保护。"
 }
 finally {
     if (Test-Path -LiteralPath $temp) {
