@@ -37,6 +37,11 @@ if (Test-Path -LiteralPath $output) {
 }
 
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-local-ai-" + [Guid]::NewGuid().ToString("N"))
+$tempDrive = [System.IO.Path]::GetPathRoot($temp)
+$tempDriveInfo = [System.IO.DriveInfo]::new($tempDrive)
+if ($tempDriveInfo.AvailableFreeSpace -lt 12GB) {
+    throw ("制作本地 AI 离线载荷至少需要 12 GiB 临时空间，当前仅有 {0:N2} GiB。" -f ($tempDriveInfo.AvailableFreeSpace / 1GB))
+}
 $runtimeExtract = Join-Path $temp "runtime"
 $modelStore = Join-Path $temp "models"
 $logs = Join-Path $temp "logs"
@@ -147,6 +152,12 @@ try {
         $blob = Get-Item -LiteralPath $blobPath
         if ($blob.Length -ne [long]$descriptor.size -or (Get-Sha256 $blobPath) -ne $digest) {
             throw "qwen3:4b 模型层大小或 SHA-256 校验失败：$digest"
+        }
+        if ([string]$descriptor.mediaType -match "license") {
+            $licenseLayerText = Get-Content -LiteralPath $blobPath -Raw -Encoding UTF8
+            if ($licenseLayerText -notmatch "Apache License" -or $licenseLayerText -notmatch "Version 2.0") {
+                throw "qwen3:4b 模型自身许可证层未能确认 Apache-2.0：$digest"
+            }
         }
         $modelLayers += @{
             digest = "sha256:$digest"
