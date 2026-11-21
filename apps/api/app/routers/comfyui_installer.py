@@ -4,6 +4,7 @@ This endpoint does not download, install, launch, or modify anything. It reports
 hardware and storage constraints before the user chooses an installation plan.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
