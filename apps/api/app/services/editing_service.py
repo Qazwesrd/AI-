@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import uuid
 import math
@@ -9,7 +10,8 @@ import urllib.error
 from pathlib import Path
 
 from app.services.media_service import (
-    STORAGE, VIDEO_DIR, safe_storage_file, run_ffmpeg, probe_media
+    STORAGE, VIDEO_DIR, safe_storage_file, run_ffmpeg, run_ffmpeg_with_progress,
+    FFmpegCancelledError, probe_media, validate_rendered_video
 )
 
 EDIT_DIR = STORAGE / "edit-jobs"
@@ -225,14 +227,41 @@ def validate_plan(plan, allowed_files):
     }
 
 
-def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="replace"):
+def execute_edit_plan(
+    plan,
+    subtitle_path=None,
+    audio_path=None,
+    audio_mode="replace",
+    progress_callback=None,
+    cancel_event=None,
+    process_callback=None,
+):
     work = EDIT_DIR / uuid.uuid4().hex
     work.mkdir(parents=True, exist_ok=True)
-    output = None
+    output = VIDEO_DIR / f"ai_edit_{uuid.uuid4().hex}.mp4"
+    temporary_output = output.with_name(output.stem + ".partial" + output.suffix)
+    keep_work = False
+
+    def report(progress):
+        if progress_callback:
+            progress_callback(progress)
 
     try:
+        segments = plan["segments"]
+        total_duration = sum(
+            max(0.0, float(item["end"]) - float(item["start"]))
+            for item in segments
+        )
+        if total_duration <= 0:
+            raise ValueError("剪辑方案总时长必须大于 0")
+        completed_duration = 0.0
         clips = []
-        for index, segment in enumerate(plan["segments"]):
+        report({"percent": 0.0, "stage": "preparing", "completed_segments": 0,
+                "total_segments": len(segments)})
+
+        for index, segment in enumerate(segments):
+            if cancel_event is not None and cancel_event.is_set():
+                raise FFmpegCancelledError("用户请求停止视频剪辑")
             output_clip = work / f"segment_{index:04d}.mp4"
             duration = float(segment["end"]) - float(segment["start"])
             args = [
@@ -241,7 +270,7 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
                 "-t", str(duration),
                 "-vf",
                 f"scale={plan['width']}:{plan['height']}:force_original_aspect_ratio=decrease,"
-                f"pad={plan['width']}:{plan['height']}:(ow-iw)/2:(oh-ih)/2",
+                f"pad={plan['width']}:{plan['height]}:(ow-iw)/2:(oh-ih)/2",
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "21",
@@ -252,21 +281,45 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
                 "-movflags", "+faststart",
                 str(output_clip)
             ]
-            run_ffmpeg(args)
+
+            def segment_progress(value, base=completed_duration, part=duration, segment_index=index):
+                fraction = max(0.0, min(1.0, float(value.get("percent", 0)) / 100.0))
+                percent = (base + part * fraction) / total_duration * 85.0
+                report({
+                    **value,
+                    "percent": min(84.9, percent),
+                    "stage": "rendering_segments",
+                    "completed_segments": segment_index,
+                    "total_segments": len(segments),
+                    "current_segment": segment_index + 1,
+                })
+
+            run_ffmpeg_with_progress(
+                args,
+                duration_seconds=duration,
+                progress_callback=segment_progress,
+                cancel_event=cancel_event,
+                process_callback=process_callback,
+            )
             clips.append(output_clip)
+            completed_duration += duration
+            report({
+                "percent": min(85.0, completed_duration / total_duration * 85.0),
+                "stage": "rendering_segments",
+                "completed_segments": index + 1,
+                "total_segments": len(segments),
+            })
 
         concat_file = work / "concat.txt"
         concat_file.write_text(
             "".join(
-                "file '" + str(item).replace("\\", "/").replace("'", "'\\''") + "'\n"
+                "file '" + str(item).replace("\\", "/").replace("'", "'\\''") + "'\\n"
                 for item in clips
             ),
             encoding="utf-8"
         )
 
-        output = VIDEO_DIR / f"ai_edit_{uuid.uuid4().hex}.mp4"
         args = ["-f", "concat", "-safe", "0", "-i", str(concat_file)]
-
         audio = safe_storage_file(audio_path) if audio_path else None
         subtitle = safe_storage_file(subtitle_path) if subtitle_path else None
         if audio:
@@ -279,10 +332,8 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
             args += ["-vf", f"subtitles='{escaped}'"]
 
         if audio and audio_mode == "replace":
-            # Replace mode intentionally uses only the selected external track.
             args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
         elif audio and audio_mode == "mix":
-            # Mix selected audio with the original clip audio when available.
             streams = probe_media(clips[0]).get("streams", [])
             has_original_audio = any(x.get("codec_type") == "audio" for x in streams)
             if has_original_audio:
@@ -304,13 +355,43 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
             "-crf", "20",
             "-c:a", "aac",
             "-movflags", "+faststart",
-            str(output)
+            str(temporary_output)
         ]
-        run_ffmpeg(args)
+
+        def concat_progress(value):
+            fraction = max(0.0, min(1.0, float(value.get("percent", 0)) / 100.0))
+            report({
+                **value,
+                "percent": min(99.9, 85.0 + fraction * 14.9),
+                "stage": "concatenating",
+                "completed_segments": len(segments),
+                "total_segments": len(segments),
+            })
+
+        run_ffmpeg_with_progress(
+            args,
+            duration_seconds=total_duration,
+            progress_callback=concat_progress,
+            cancel_event=cancel_event,
+            process_callback=process_callback,
+        )
+        if cancel_event is not None and cancel_event.is_set():
+            raise FFmpegCancelledError("用户请求停止视频剪辑")
+        report({"percent": 99.9, "stage": "validating"})
+        validate_rendered_video(
+            temporary_output,
+            require_audio=bool(audio),
+        )
+        os.replace(temporary_output, output)
+        report({"percent": 100.0, "stage": "completed"})
         return str(output), output.stat().st_size
+    except FFmpegCancelledError:
+        keep_work = True
+        raise
     except Exception:
-        if output and output.exists():
+        if output.exists():
             output.unlink()
         raise
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if not keep_work:
+            shutil.rmtree(work, ignore_errors=True)
