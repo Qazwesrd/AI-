@@ -65,6 +65,15 @@ def _project_media_file_state(db, raw_path, project_id):
     return state
 
 
+def _subtitle_track_matches_episode(track, project_id, episode_id):
+    """Treat unscoped legacy tracks as shared; reject explicit foreign ownership."""
+    return bool(
+        track
+        and track.project_id in (None, project_id)
+        and track.episode_id in (None, episode_id)
+    )
+
+
 def _as_int_ids(values):
     result = set()
     if not isinstance(values, list):
@@ -385,9 +394,8 @@ def build_production_readiness_report(project_id: int, db: Session):
             candidate_track = db.query(SubtitleTrack).filter(
                 SubtitleTrack.id == subtitle_track_id
             ).first()
-            if candidate_track and (
-                candidate_track.project_id not in (None, project.id)
-                or candidate_track.episode_id not in (None, episode.id)
+            if candidate_track and not _subtitle_track_matches_episode(
+                candidate_track, project.id, episode.id
             ):
                 subtitle_track_mismatch = True
             else:
