@@ -71,6 +71,8 @@ export default function LocalImageStudioPage() {
     if (!targetShotId) { setShotImages([]); return; }
     let active = true;
     setShotImagesLoading(true);
+    setVersionsByLink({});
+    setReplaceMediaIds({});
     fetch(API + "/api/local-ai/images/library/images", { cache: "no-store" })
       .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.detail || "读取素材库图片失败"); if (active) setLibraryImages(Array.isArray(data.images) ? data.images : []); })
       .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取素材库图片失败"); });
