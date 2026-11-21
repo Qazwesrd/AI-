@@ -602,3 +602,183 @@ def archive_local_image_task_output(
         destination.unlink(missing_ok=True)
         temporary.unlink(missing_ok=True)
         raise
+
+
+class StoryboardConsistencyInput(BaseModel):
+    visual_style: str = Field(default="", max_length=1200)
+    negative_prompt: str = Field(default="", max_length=2000)
+    character_profiles: dict[str, str] = Field(default_factory=dict)
+    scene_profiles: dict[str, str] = Field(default_factory=dict)
+    prop_profiles: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("visual_style", "negative_prompt")
+    @classmethod
+    def clean_consistency_text(cls, value):
+        return value.strip()
+
+    @field_validator("character_profiles", "scene_profiles", "prop_profiles")
+    @classmethod
+    def validate_profiles(cls, value):
+        if len(value) > 100:
+            raise ValueError("每类一致性档案最多保存 100 项")
+        cleaned = {}
+        for key, description in value.items():
+            if not str(key).isdigit() or int(key) < 1:
+                raise ValueError("素材编号必须为正整数")
+            if not isinstance(description, str) or len(description.strip()) > 1200:
+                raise ValueError("每条外观描述最多 1200 个字符")
+            cleaned[str(int(key))] = description.strip()
+        return cleaned
+
+
+class StoryboardConsistencyPreflightInput(BaseModel):
+    shot_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+def _get_visual_consistency(project: StoryProject):
+    settings = project.settings if isinstance(project.settings, dict) else {}
+    profile = settings.get("visual_consistency", {})
+    return profile if isinstance(profile, dict) else {}
+
+
+def _consistency_prompt_for_shot(shot: StoryboardShot, profile: dict):
+    sections = []
+    style = str(profile.get("visual_style", "")).strip()
+    if style:
+        sections.append("【全项目统一画风】" + style)
+    characters = profile.get("character_profiles", {})
+    if isinstance(characters, dict):
+        for asset_id in shot.character_ids if isinstance(shot.character_ids, list) else []:
+            description = characters.get(str(asset_id), "")
+            if description:
+                sections.append(f"【角色外观锁定 #{asset_id}】{description}")
+    scenes = profile.get("scene_profiles", {})
+    if isinstance(scenes, dict) and shot.scene_asset_id:
+        description = scenes.get(str(shot.scene_asset_id), "")
+        if description:
+            sections.append(f"【场景外观锁定 #{shot.scene_asset_id}】{description}")
+    props = profile.get("prop_profiles", {})
+    if isinstance(props, dict):
+        for asset_id in shot.prop_ids if isinstance(shot.prop_ids, list) else []:
+            description = props.get(str(asset_id), "")
+            if description:
+                sections.append(f"【道具外观锁定 #{asset_id}】{description}")
+    if not sections:
+        return ""
+    return "\\n".join(sections)
+
+
+def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], profile: dict):
+    results = []
+    missing = {"characters": set(), "scenes": set(), "props": set()}
+    for shot in shots:
+        character_ids = shot.character_ids if isinstance(shot.character_ids, list) else []
+        prop_ids = shot.prop_ids if isinstance(shot.prop_ids, list) else []
+        character_profiles = profile.get("character_profiles", {})
+        scene_profiles = profile.get("scene_profiles", {})
+        prop_profiles = profile.get("prop_profiles", {})
+        for asset_id in character_ids:
+            if str(asset_id) not in character_profiles:
+                missing["characters"].add(str(asset_id))
+        if shot.scene_asset_id and str(shot.scene_asset_id) not in scene_profiles:
+            missing["scenes"].add(str(shot.scene_asset_id))
+        for asset_id in prop_ids:
+            if str(asset_id) not in prop_profiles:
+                missing["props"].add(str(asset_id))
+        consistency_prompt = _consistency_prompt_for_shot(shot, profile)
+        original = (shot.image_prompt or "").strip()
+        preview = original
+        if consistency_prompt:
+            preview = (original + "\\n\\n" if original else "") + consistency_prompt
+        results.append({
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "scene_name": shot.scene_name,
+            "character_count": len(character_ids),
+            "has_scene_asset": bool(shot.scene_asset_id),
+            "prop_count": len(prop_ids),
+            "consistency_rules_applied": bool(consistency_prompt),
+            "prompt_preview": preview,
+        })
+    missing_clean = {key: sorted(values, key=lambda item: int(item)) for key, values in missing.items()}
+    missing_count = sum(len(values) for values in missing_clean.values())
+    return {
+        "project_id": project.id,
+        "shot_count": len(shots),
+        "ready": missing_count == 0,
+        "missing_profiles": missing_clean,
+        "missing_profile_count": missing_count,
+        "shots": results,
+        "message": "所有已引用角色、场景和道具均有统一外观档案。" if missing_count == 0 else "部分角色、场景或道具缺少统一外观档案；补齐后可获得更稳定的跨分镜一致性。",
+        "local_only": True,
+        "cloud_api_used": False,
+    }
+
+
+@router.get("/projects/{project_id}/consistency")
+def get_storyboard_consistency(project_id: int, db: Session = Depends(get_db)):
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    return {"project_id": project.id, "profile": _get_visual_consistency(project), "local_only": True}
+
+
+@router.put("/projects/{project_id}/consistency")
+def save_storyboard_consistency(project_id: int, data: StoryboardConsistencyInput, db: Session = Depends(get_db)):
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    settings = dict(project.settings) if isinstance(project.settings, dict) else {}
+    settings["visual_consistency"] = data.model_dump()
+    project.settings = settings
+    db.commit()
+    return {"success": True, "project_id": project.id, "profile": data.model_dump(), "local_only": True}
+
+
+@router.post("/projects/{project_id}/consistency/preflight")
+def preflight_storyboard_consistency(project_id: int, data: StoryboardConsistencyPreflightInput, db: Session = Depends(get_db)):
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    query = db.query(StoryboardShot).filter(StoryboardShot.project_id == project.id)
+    if data.shot_ids:
+        query = query.filter(StoryboardShot.id.in_(data.shot_ids))
+    shots = query.order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).limit(200).all()
+    if data.shot_ids and {shot.id for shot in shots} != set(data.shot_ids):
+        raise HTTPException(404, "所选分镜中包含不存在或不属于当前项目的镜头")
+    if not shots:
+        raise HTTPException(404, "当前项目没有可检查的分镜")
+    return _consistency_preflight(project, shots, _get_visual_consistency(project))
+
+
+@router.post("/projects/{project_id}/consistency/apply")
+def apply_storyboard_consistency(project_id: int, data: StoryboardConsistencyPreflightInput, db: Session = Depends(get_db)):
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    query = db.query(StoryboardShot).filter(StoryboardShot.project_id == project.id)
+    if data.shot_ids:
+        query = query.filter(StoryboardShot.id.in_(data.shot_ids))
+    shots = query.order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).limit(200).all()
+    if data.shot_ids and {shot.id for shot in shots} != set(data.shot_ids):
+        raise HTTPException(404, "所选分镜中包含不存在或不属于当前项目的镜头")
+    if not shots:
+        raise HTTPException(404, "当前项目没有可应用的分镜")
+    profile = _get_visual_consistency(project)
+    preflight = _consistency_preflight(project, shots, profile)
+    if preflight["missing_profile_count"]:
+        raise HTTPException(409, "存在未配置统一外观的角色、场景或道具；请先补齐档案再应用。")
+    updated = 0
+    for shot in shots:
+        rules = _consistency_prompt_for_shot(shot, profile)
+        if not rules:
+            continue
+        original = (shot.image_prompt or "").strip()
+        marker_start = "【项目一致性规则开始】"
+        marker_end = "【项目一致性规则结束】"
+        if marker_start in original and marker_end in original:
+            original = original.split(marker_start, 1)[0].rstrip()
+        shot.image_prompt = (original + "\\n\\n" if original else "") + marker_start + "\\n" + rules + "\\n" + marker_end
+        updated += 1
+    db.commit()
+    return {"success": True, "updated_shot_count": updated, "preflight": preflight, "local_only": True, "cloud_api_used": False}
