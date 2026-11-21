@@ -247,6 +247,7 @@ This notice is attribution and provenance information, not a legal opinion or a 
             "THIRD_PARTY_NOTICES/Qwen3-MODEL-NOTICE.txt"
         )
         model_runtime_mode = "Ollama selects its supported backend at runtime; no GPU acceleration is promised without a device-specific test."
+        cloud_features_disabled = $true
         network_used_during_bundle_creation = $true
         network_required_after_install = $false
     }
