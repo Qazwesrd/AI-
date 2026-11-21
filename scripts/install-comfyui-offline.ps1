@@ -218,6 +218,42 @@ if ($manifestAssetItems.Count -ne 4 -or $manifestAssetNames.Count -ne 4 -or
     $assetDifferences.Count -gt 0) {
     throw "离线数据包缺少官方显卡运行包、包含重复项或包含未知文件。"
 }
+
+$bundleRoot = Split-Path -Parent $payload
+$inventoryReportRelative = [string]$manifest.dependency_inventory_report
+if ($inventoryReportRelative -cne "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json") {
+    throw "离线清单缺少四种 Portable 运行包的依赖清点报告路径。"
+}
+$inventoryReportPath = Join-Path $bundleRoot ($inventoryReportRelative.Replace("/", "\"))
+if (!(Test-Path -LiteralPath $inventoryReportPath -PathType Leaf)) {
+    throw "离线安装套件缺少四种 Portable 运行包的依赖清点报告。"
+}
+$inventoryReport = Get-Content -LiteralPath $inventoryReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($inventoryReport.audit_status -ne "pending" -or
+    $inventoryReport.distribution_approved -ne $false -or
+    $inventoryReport.release_tag -cne [string]$manifest.comfyui_version) {
+    throw "依赖清点报告的版本或人工审核门禁状态无效。"
+}
+$inventoryVariants = @($inventoryReport.portable_variants)
+$inventoryNames = @($inventoryVariants | ForEach-Object { [string]$_.asset } | Sort-Object -Unique)
+$inventoryDifferences = @(Compare-Object -ReferenceObject $expectedAssetNames -DifferenceObject $inventoryNames)
+if ($inventoryVariants.Count -ne 4 -or $inventoryNames.Count -ne 4 -or $inventoryDifferences.Count -gt 0) {
+    throw "依赖清点报告必须逐一覆盖四种官方 Portable 运行包。"
+}
+foreach ($variant in $inventoryVariants) {
+    $assetRecord = @($manifestAssetItems | Where-Object { $_.name -ceq [string]$variant.asset })
+    if ($assetRecord.Count -ne 1 -or
+        $variant.inventory_status -ne "inventory_generated_review_pending" -or
+        $variant.release_tag -cne [string]$manifest.comfyui_version -or
+        [string]$variant.sha256 -ne [string]$assetRecord[0].sha256 -or
+        [long]$variant.archive_size_bytes -ne [long]$assetRecord[0].size_bytes) {
+        throw "Portable 依赖清点报告与资产 SHA-256、大小或版本不匹配：$($variant.asset)"
+    }
+    $variantComponents = @($variant.components)
+    if (@($variantComponents | Where-Object { $_.license_review_status -ne "pending" }).Count -gt 0) {
+        throw "自动清点报告不得将任何组件许可证标记为已批准：$($variant.asset)"
+    }
+}
 foreach ($manifestAsset in $manifestAssetItems) {
     $expectedUrl = "https://github.com/Comfy-Org/ComfyUI/releases/download/$($manifest.comfyui_version)/$($manifestAsset.name)"
     if ($manifestAsset.verified -ne $true -or $manifestAsset.source -ne $expectedUrl -or
