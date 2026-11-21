@@ -57,6 +57,35 @@ class StoryboardImageReplaceInput(BaseModel):
     media_file_id: int = Field(ge=1)
 
 
+
+
+class LocalImageBatchInput(BaseModel):
+    project_id: int = Field(ge=1)
+    episode_id: int = Field(ge=1)
+    shot_ids: list[int] = Field(min_length=1, max_length=20)
+    checkpoint: str = Field(min_length=1, max_length=240)
+    style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
+    width: int = Field(default=768, ge=512, le=1536)
+    height: int = Field(default=768, ge=512, le=1536)
+    steps: int = Field(default=24, ge=1, le=40)
+    cfg: float = Field(default=7.0, ge=1.0, le=12.0)
+    confirm_local_generation: bool = False
+
+    @field_validator("shot_ids")
+    @classmethod
+    def validate_shot_ids(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("分镜编号不能重复")
+        return value
+
+    @field_validator("checkpoint")
+    @classmethod
+    def validate_batch_checkpoint(cls, value):
+        value = value.strip()
+        if not CHECKPOINT_RE.fullmatch(value) or ".." in value or "//" in value or "\\\\" in value:
+            raise ValueError("图片模型名称格式无效")
+        return value
+
 class LocalImageGenerateInput(BaseModel):
     checkpoint: str = Field(min_length=1, max_length=240)
     prompt: str = Field(min_length=3, max_length=6000)
@@ -213,6 +242,111 @@ def inspect_local_reference_capabilities():
         "installed_anything": False,
         "generation_started": False,
         "message": "已检测到参考图条件生图所需节点和模型。" if structural_ready and model_ready else "已完成本机兼容性检查；缺少的节点或模型需要你自行确认安装，本程序不会自动下载。",
+    }
+
+
+
+
+def _prepare_batch_shots(data: LocalImageBatchInput, db: Session):
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.project_id == data.project_id,
+        StoryboardShot.episode_id == data.episode_id,
+        StoryboardShot.id.in_(data.shot_ids),
+    ).all()
+    by_id = {shot.id: shot for shot in shots}
+    rows = []
+    missing = []
+    for shot_id in data.shot_ids:
+        shot = by_id.get(shot_id)
+        if shot is None:
+            missing.append({"shot_id": shot_id, "reason": "分镜不存在或不属于所选项目/分集"})
+            continue
+        prompt = (shot.image_prompt or "").strip()
+        if len(prompt) < 3:
+            missing.append({"shot_id": shot_id, "shot_number": shot.shot_number, "reason": "该分镜尚未填写图片提示词"})
+            continue
+        rows.append({
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "scene_name": shot.scene_name or "",
+            "prompt": prompt[:6000],
+        })
+    return rows, missing
+
+
+@router.post("/batch/preflight")
+def preflight_local_image_batch(data: LocalImageBatchInput, db: Session = Depends(get_db)):
+    rows, missing = _prepare_batch_shots(data, db)
+    return {
+        "project_id": data.project_id,
+        "episode_id": data.episode_id,
+        "requested_count": len(data.shot_ids),
+        "ready_count": len(rows),
+        "missing_count": len(missing),
+        "ready_shots": rows,
+        "missing_shots": missing,
+        "max_batch_size": 20,
+        "will_submit_to_local_queue": False,
+        "generation_started": False,
+        "message": "预检完成。此操作没有提交任务；确认后才会将合格分镜提交到本机 ComfyUI 队列。",
+    }
+
+
+@router.post("/batch/generate")
+def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends(get_db)):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "批量生成会连续占用本机 CPU/GPU；请明确确认后再提交。")
+    if data.width % 64 or data.height % 64:
+        raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
+    rows, missing = _prepare_batch_shots(data, db)
+    if not rows:
+        raise HTTPException(400, "所选分镜没有可生成的图片提示词；请先完成分镜提示词。")
+    object_info = _local_request("/object_info/CheckpointLoaderSimple")
+    if data.checkpoint not in _checkpoint_names(object_info):
+        raise HTTPException(404, "所选图片模型未安装在本机 ComfyUI 中；本程序不会自动下载模型。")
+    submitted = []
+    failed = []
+    for row in rows:
+        seed = uuid.uuid4().int % (2 ** 32)
+        payload = LocalImageGenerateInput(
+            checkpoint=data.checkpoint, prompt=row["prompt"], style=data.style,
+            width=data.width, height=data.height, steps=data.steps, cfg=data.cfg,
+            seed=seed, confirm_local_generation=True,
+        )
+        try:
+            result = _local_request("/prompt", {
+                "prompt": build_txt2img_workflow(payload, seed),
+                "client_id": str(uuid.uuid4()),
+            }, timeout=15.0)
+            prompt_id = result.get("prompt_id")
+            if not isinstance(prompt_id, str) or not PROMPT_ID_RE.fullmatch(prompt_id):
+                raise HTTPException(502, "ComfyUI 未返回有效任务编号")
+            submitted.append({
+                "shot_id": row["shot_id"], "shot_number": row["shot_number"],
+                "prompt_id": prompt_id, "seed": seed, "status": "queued",
+            })
+        except (HTTPException, ValueError) as exc:
+            failed.append({
+                "shot_id": row["shot_id"], "shot_number": row["shot_number"],
+                "reason": exc.detail if isinstance(exc, HTTPException) else str(exc),
+            })
+            break
+    return {
+        "success": bool(submitted),
+        "project_id": data.project_id,
+        "episode_id": data.episode_id,
+        "submitted_count": len(submitted),
+        "failed_count": len(failed),
+        "skipped_count": len(missing),
+        "tasks": submitted,
+        "failed_shots": failed,
+        "skipped_shots": missing,
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "paid_api_used": False,
+        "cloud_fallback": False,
+        "message": "已按分镜顺序提交到本机 ComfyUI 队列。请逐项检查任务状态并确认归档；未提交成功的任务不会自动重试。",
     }
 
 
