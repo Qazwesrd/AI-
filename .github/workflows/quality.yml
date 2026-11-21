@@ -32,7 +32,12 @@ jobs:
           }
           assert {item["asset"] for item in variants} == expected
           assert all(item["inventory_status"] != "approved" for item in variants)
-          print("ComfyUI third-party dependency audit is correctly blocked pending review.")
+          assert audit["local_ai_payload"]["runtime_audit_status"] == "not_started"
+          assert audit["local_ai_payload"]["model_license_review_status"] == "pending"
+          assert audit["policy"]["approved_local_text_model_bundle"] == "qwen3:4b"
+          assert audit["policy"]["local_ai_payload_included_in_full_offline_installer"] is True
+          assert audit["policy"]["public_distribution_blocked_until_approved"] is True
+          print("ComfyUI, Ollama, and Qwen3 third-party dependency audits are correctly blocked pending review.")
           PY
       - name: Test ComfyUI portable dependency audit utility safety guards
         run: python -m unittest apps/api/tests/test_comfyui_portable_audit_script.py -v
