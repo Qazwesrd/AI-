@@ -1,5 +1,8 @@
 """Read-only end-to-end production readiness audit for one story project."""
 from pathlib import Path
+import json
+import shutil
+import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -412,3 +415,161 @@ def get_project_production_readiness(project_id: int, db: Session = Depends(get_
         return build_production_readiness_report(project_id, db)
     except LookupError as exc:
         raise HTTPException(404, str(exc)) from exc
+
+
+
+def _probe_final_video(path: Path):
+    """Run bounded local FFprobe/FFmpeg checks; never uploads or modifies the source."""
+    ffprobe = shutil.which("ffprobe")
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffprobe:
+        return {
+            "status": "blocked",
+            "issues": [{"code": "ffprobe_unavailable", "severity": "blocker", "message": "未找到 FFprobe，无法验证视频流和时长。"}],
+            "probe": None,
+            "decode_check": "not_run",
+        }
+    command = [
+        ffprobe, "-v", "error", "-show_entries",
+        "format=duration,size,format_name:stream=codec_type,codec_name,width,height,r_frame_rate,sample_rate,channels",
+        "-of", "json", str(path),
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "blocked",
+            "issues": [{"code": "ffprobe_timeout", "severity": "blocker", "message": "FFprobe 检查超过 30 秒，已停止本次检查。"}],
+            "probe": None,
+            "decode_check": "not_run",
+        }
+    if result.returncode != 0:
+        return {
+            "status": "blocked",
+            "issues": [{"code": "ffprobe_failed", "severity": "blocker", "message": (result.stderr or "FFprobe 无法读取该文件。")[:1200]}],
+            "probe": None,
+            "decode_check": "not_run",
+        }
+    try:
+        info = json.loads(result.stdout)
+    except (TypeError, ValueError):
+        info = None
+    if not isinstance(info, dict):
+        return {
+            "status": "blocked",
+            "issues": [{"code": "ffprobe_invalid_json", "severity": "blocker", "message": "FFprobe 返回的数据格式无效。"}],
+            "probe": None,
+            "decode_check": "not_run",
+        }
+    streams = info.get("streams") if isinstance(info.get("streams"), list) else []
+    video_streams = [item for item in streams if isinstance(item, dict) and item.get("codec_type") == "video"]
+    audio_streams = [item for item in streams if isinstance(item, dict) and item.get("codec_type") == "audio"]
+    issues = []
+    if not video_streams:
+        issues.append({"code": "video_stream_missing", "severity": "blocker", "message": "文件中没有可识别的视频流。"})
+    if not audio_streams:
+        issues.append({"code": "audio_stream_missing", "severity": "warning", "message": "文件中没有音频流；请确认是否为无声作品。"})
+    fmt = info.get("format") if isinstance(info.get("format"), dict) else {}
+    try:
+        duration = float(fmt.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0
+    if duration <= 0:
+        issues.append({"code": "duration_invalid", "severity": "blocker", "message": "视频时长无效或无法读取。"})
+    decode_check = "not_run"
+    if ffmpeg and video_streams and duration > 0:
+        try:
+            decoded = subprocess.run(
+                [ffmpeg, "-v", "error", "-i", str(path), "-f", "null", "-"],
+                capture_output=True, text=True, timeout=180, check=False,
+            )
+            decode_check = "passed" if decoded.returncode == 0 else "failed"
+            if decoded.returncode != 0:
+                issues.append({
+                    "code": "decode_errors",
+                    "severity": "blocker",
+                    "message": (decoded.stderr or "FFmpeg 解码检查失败。")[-1600:],
+                })
+        except subprocess.TimeoutExpired:
+            decode_check = "timeout"
+            issues.append({"code": "decode_timeout", "severity": "warning", "message": "完整解码检查超过 180 秒，未判定文件完整。"})
+    elif not ffmpeg:
+        issues.append({"code": "ffmpeg_unavailable", "severity": "warning", "message": "未找到 FFmpeg，跳过完整解码检查。"})
+    return {
+        "status": "blocked" if any(item["severity"] == "blocker" for item in issues) else ("ready_with_warnings" if issues else "ready"),
+        "issues": issues,
+        "probe": {
+            "duration_seconds": round(duration, 3),
+            "size_bytes": path.stat().st_size,
+            "format_name": fmt.get("format_name"),
+            "video_streams": video_streams,
+            "audio_streams": audio_streams,
+        },
+        "decode_check": decode_check,
+    }
+
+
+@router.get("/{project_id}/episodes/{episode_id}/video-quality")
+def audit_episode_video_quality(project_id: int, episode_id: int, db: Session = Depends(get_db)):
+    """Explicit, read-only technical QA for a rendered episode video."""
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    episode = db.query(EpisodePlan).filter(
+        EpisodePlan.id == episode_id,
+        EpisodePlan.project_id == project_id,
+    ).first()
+    if not episode:
+        raise HTTPException(404, "该分集不属于此剧本项目")
+    candidates = db.query(MediaFile).filter(
+        MediaFile.category.in_(["video", "视频"])
+    ).order_by(MediaFile.id.desc()).all()
+    matched = []
+    for media in candidates:
+        metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+        try:
+            media_episode_id = int(metadata.get("episode_id") or 0)
+        except (TypeError, ValueError):
+            media_episode_id = 0
+        is_final = (
+            metadata.get("rendered_output") is True and media_episode_id == episode_id
+        ) or (
+            not metadata.get("shot_id") and (media.name or "").startswith(f"episode_{episode_id}_")
+        )
+        if is_final:
+            state = _local_file_state(media.file_path)
+            if state["exists"]:
+                matched.append(media)
+    if not matched:
+        raise HTTPException(404, "该分集没有可读取的最终合成视频")
+    results = []
+    for media in matched:
+        path = safe_storage_file(media.file_path)
+        if path.is_symlink() or not path.is_file():
+            continue
+        report = _probe_final_video(path)
+        probe = report.get("probe") or {}
+        duration = probe.get("duration_seconds")
+        if isinstance(duration, (int, float)) and duration > 0:
+            minimum = int(project.min_duration or 0)
+            maximum = int(project.max_duration or 0)
+            if minimum and duration < minimum or maximum and duration > maximum:
+                report["issues"].append({
+                    "code": "episode_duration_out_of_range",
+                    "severity": "warning",
+                    "message": f"实际时长 {duration:.1f} 秒，项目目标范围为 {minimum}-{maximum} 秒。",
+                })
+                if report["status"] == "ready":
+                    report["status"] = "ready_with_warnings"
+        results.append({"media_file_id": media.id, "file_name": media.name, **report})
+    return {
+        "project_id": project_id,
+        "episode_id": episode_id,
+        "episode_number": episode.episode_number,
+        "status": "blocked" if any(item["status"] == "blocked" for item in results) else ("ready_with_warnings" if any(item["status"] == "ready_with_warnings" for item in results) else "ready"),
+        "files": results,
+        "read_only": True,
+        "network_used": False,
+        "source_files_modified": False,
+        "notice": "本检查仅验证容器、音视频流、时长和完整解码；黑帧、静音、画面质量、口型同步与内容正确性仍需进一步检测或人工复核。",
+    }
