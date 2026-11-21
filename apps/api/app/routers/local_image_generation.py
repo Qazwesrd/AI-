@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaFile
-from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision
 from app.services.media_service import STORAGE
 from pydantic import BaseModel, Field, field_validator
 
@@ -46,6 +46,14 @@ class LocalImageArchiveInput(BaseModel):
     subfolder: str = Field(default="", max_length=240)
     type: Literal["output"] = "output"
     shot_id: int | None = Field(default=None, ge=1)
+
+
+class StoryboardImageReuseInput(BaseModel):
+    media_file_id: int = Field(ge=1)
+
+
+class StoryboardImageReplaceInput(BaseModel):
+    media_file_id: int = Field(ge=1)
 
 
 class LocalImageGenerateInput(BaseModel):
@@ -341,6 +349,110 @@ def list_shot_media(shot_id: int, db: Session = Depends(get_db)):
     return {"shot_id": shot.id, "images": result}
 
 
+
+
+def _replace_shot_media(db: Session, shot_id: int, link_id: int, media_file_id: int):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    link = db.query(StoryboardMediaLink).filter(
+        StoryboardMediaLink.id == link_id,
+        StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.project_id == shot.project_id,
+        StoryboardMediaLink.episode_id == shot.episode_id,
+    ).first()
+    if link is None:
+        raise HTTPException(404, "该图片关联不存在，或不属于当前分镜")
+    replacement = db.query(MediaFile).filter(
+        MediaFile.id == media_file_id,
+        MediaFile.category == "image",
+    ).first()
+    if replacement is None:
+        raise HTTPException(404, "素材库中不存在该图片")
+    if link.media_file_id == replacement.id:
+        return {"success": True, "unchanged": True, "media_file_id": replacement.id}
+    duplicate = db.query(StoryboardMediaLink).filter(
+        StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.media_file_id == replacement.id,
+    ).first()
+    if duplicate is not None and duplicate.id != link.id:
+        raise HTTPException(409, "该图片已经关联到当前分镜，请直接使用已有图片")
+    revisions = db.query(StoryboardMediaRevision).filter(
+        StoryboardMediaRevision.link_id == link.id,
+    ).order_by(StoryboardMediaRevision.version_number.desc()).all()
+    next_version = max((item.version_number for item in revisions), default=0) + 1
+    if not revisions:
+        db.add(StoryboardMediaRevision(shot_id=shot.id, link_id=link.id, media_file_id=link.media_file_id, version_number=1))
+        next_version = 2
+    db.add(StoryboardMediaRevision(shot_id=shot.id, link_id=link.id, media_file_id=replacement.id, version_number=next_version))
+    previous_id = link.media_file_id
+    link.media_file_id = replacement.id
+    db.commit()
+    return {"success": True, "replaced": True, "link_id": link.id, "media_file_id": replacement.id,
+            "version_number": next_version, "previous_media_file_id": previous_id}
+
+
+@router.get("/library/images")
+def list_reusable_library_images(db: Session = Depends(get_db)):
+    images = db.query(MediaFile).filter(MediaFile.category == "image").order_by(MediaFile.created_at.desc()).limit(200).all()
+    return {"images": [{"id": item.id, "name": item.name, "mime_type": item.mime_type, "file_size": item.file_size,
+                        "download_url": f"/api/media/files/{item.id}/download"} for item in images]}
+
+
+@router.post("/shots/{shot_id}/media/reuse")
+def reuse_library_image_for_shot(shot_id: int, data: StoryboardImageReuseInput, db: Session = Depends(get_db)):
+    media = db.query(MediaFile).filter(MediaFile.id == data.media_file_id, MediaFile.category == "image").first()
+    if media is None:
+        raise HTTPException(404, "素材库中不存在该图片")
+    link, existed = _attach_media_to_shot(db, media, shot_id)
+    db.commit()
+    return {"success": True, "already_linked": existed, "link_id": link.id, "media_file_id": media.id, "shot_id": shot_id}
+
+
+@router.put("/shots/{shot_id}/media/{link_id}")
+def replace_shot_media(shot_id: int, link_id: int, data: StoryboardImageReplaceInput, db: Session = Depends(get_db)):
+    return _replace_shot_media(db, shot_id, link_id, data.media_file_id)
+
+
+@router.get("/shots/{shot_id}/media/{link_id}/versions")
+def list_shot_media_versions(shot_id: int, link_id: int, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    link = db.query(StoryboardMediaLink).filter(StoryboardMediaLink.id == link_id, StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.project_id == shot.project_id, StoryboardMediaLink.episode_id == shot.episode_id).first()
+    if link is None:
+        raise HTTPException(404, "该图片关联不存在，或不属于当前分镜")
+    rows = db.query(StoryboardMediaRevision).filter(StoryboardMediaRevision.link_id == link.id).order_by(StoryboardMediaRevision.version_number.desc()).all()
+    if not rows:
+        rows = [type("CurrentRevision", (), {"version_number": 1, "media_file_id": link.media_file_id, "created_at": link.created_at})()]
+    elif not any(row.media_file_id == link.media_file_id for row in rows):
+        rows.append(type("CurrentRevision", (), {"version_number": max(row.version_number for row in rows) + 1, "media_file_id": link.media_file_id, "created_at": link.created_at})())
+    result = []
+    current_version = max(row.version_number for row in rows)
+    for row in sorted(rows, key=lambda item: item.version_number, reverse=True):
+        media = db.query(MediaFile).filter(MediaFile.id == row.media_file_id, MediaFile.category == "image").first()
+        if media:
+            result.append({"version_number": row.version_number, "media_file_id": media.id, "name": media.name,
+                "file_size": media.file_size, "download_url": f"/api/media/files/{media.id}/download",
+                "current": row.version_number == current_version})
+    return {"shot_id": shot.id, "link_id": link.id, "versions": result}
+
+
+@router.post("/shots/{shot_id}/media/{link_id}/restore/{version_number}")
+def restore_shot_media_version(shot_id: int, link_id: int, version_number: int, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    link = db.query(StoryboardMediaLink).filter(StoryboardMediaLink.id == link_id, StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.project_id == shot.project_id, StoryboardMediaLink.episode_id == shot.episode_id).first()
+    if link is None:
+        raise HTTPException(404, "该图片关联不存在，或不属于当前分镜")
+    revision = db.query(StoryboardMediaRevision).filter(StoryboardMediaRevision.link_id == link.id,
+        StoryboardMediaRevision.version_number == version_number).first()
+    if revision is None:
+        raise HTTPException(404, "找不到指定图片版本")
+    return _replace_shot_media(db, shot_id, link_id, revision.media_file_id)
 
 def _remove_media_link_from_shot(db: Session, shot_id: int, link_id: int):
     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()

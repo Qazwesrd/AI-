@@ -8,6 +8,8 @@ type TargetShot = { id: number; shot_number: number; scene_name: string; visual_
 type TargetEpisode = { id: number; episode_number: number; title: string; shots: TargetShot[] };
 type TargetProject = { id: number; name: string; episodes: TargetEpisode[] };
 type ShotImage = { link_id: number; media_file_id: number; name: string; mime_type: string | null; file_size: number; download_url: string };
+type LibraryImage = { id: number; name: string; mime_type: string | null; file_size: number; download_url: string };
+type ImageVersion = { version_number: number; media_file_id: number; name: string; file_size: number; download_url: string; current: boolean };
 const styles = ["国漫", "仿真人", "3D漫", "2D漫"] as const;
 
 export default function LocalImageStudioPage() {
@@ -35,6 +37,13 @@ export default function LocalImageStudioPage() {
   const [shotImages, setShotImages] = useState<ShotImage[]>([]);
   const [shotImagesLoading, setShotImagesLoading] = useState(false);
   const [unlinkingImage, setUnlinkingImage] = useState<number | null>(null);
+  const [libraryImages, setLibraryImages] = useState<LibraryImage[]>([]);
+  const [reuseMediaId, setReuseMediaId] = useState("");
+  const [reusingImage, setReusingImage] = useState(false);
+  const [replaceMediaIds, setReplaceMediaIds] = useState<Record<number, string>>({});
+  const [versionsByLink, setVersionsByLink] = useState<Record<number, ImageVersion[]>>({});
+  const [loadingVersions, setLoadingVersions] = useState<number | null>(null);
+  const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
 
   const refreshModels = useCallback(async () => {
     setChecking(true); setError("");
@@ -62,6 +71,11 @@ export default function LocalImageStudioPage() {
     if (!targetShotId) { setShotImages([]); return; }
     let active = true;
     setShotImagesLoading(true);
+    setVersionsByLink({});
+    setReplaceMediaIds({});
+    fetch(API + "/api/local-ai/images/library/images", { cache: "no-store" })
+      .then(async (response) => { const data = await response.json(); if (!response.ok) throw new Error(data.detail || "读取素材库图片失败"); if (active) setLibraryImages(Array.isArray(data.images) ? data.images : []); })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取素材库图片失败"); });
     fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media", { cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
@@ -72,6 +86,74 @@ export default function LocalImageStudioPage() {
       .finally(() => { if (active) setShotImagesLoading(false); });
     return () => { active = false; };
   }, [targetShotId]);
+
+  async function refreshShotImages() {
+    if (!targetShotId) return;
+    const response = await fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "刷新分镜图片失败");
+    setShotImages(Array.isArray(data.images) ? data.images : []);
+  }
+
+  async function reuseLibraryImage() {
+    if (!targetShotId || !reuseMediaId) return;
+    setReusingImage(true); setError("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media/reuse", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_file_id: Number(reuseMediaId) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "复用素材图片失败");
+      await refreshShotImages();
+      setMessage(data.already_linked ? "这张图片已经关联到当前分镜。" : "已将素材库图片复用到当前分镜；原素材没有复制或移动。");
+    } catch (err) { setError(err instanceof Error ? err.message : "复用素材图片失败"); }
+    finally { setReusingImage(false); }
+  }
+
+  async function replaceShotImage(linkId: number) {
+    const mediaId = replaceMediaIds[linkId];
+    if (!targetShotId || !mediaId) return;
+    setError("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media/" + linkId, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ media_file_id: Number(mediaId) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "替换分镜图片失败");
+      await refreshShotImages();
+      setMessage("图片已替换，旧版本仍保存在该分镜的版本历史中。");
+      await loadImageVersions(linkId);
+    } catch (err) { setError(err instanceof Error ? err.message : "替换分镜图片失败"); }
+  }
+
+  async function loadImageVersions(linkId: number) {
+    if (!targetShotId) return;
+    setLoadingVersions(linkId); setError("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media/" + linkId + "/versions", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取图片版本失败");
+      setVersionsByLink((current) => ({ ...current, [linkId]: Array.isArray(data.versions) ? data.versions : [] }));
+    } catch (err) { setError(err instanceof Error ? err.message : "读取图片版本失败"); }
+    finally { setLoadingVersions(null); }
+  }
+
+  async function restoreImageVersion(linkId: number, version: number) {
+    if (!targetShotId) return;
+    const key = linkId + ":" + version;
+    setRestoringVersion(key); setError("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media/" + linkId + "/restore/" + version, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "恢复图片版本失败");
+      await refreshShotImages();
+      await loadImageVersions(linkId);
+      setMessage("已恢复所选图片版本；原有版本记录仍然保留。");
+    } catch (err) { setError(err instanceof Error ? err.message : "恢复图片版本失败"); }
+    finally { setRestoringVersion(null); }
+  }
 
   async function unlinkShotImage(linkId: number) {
     if (!targetShotId) return;
@@ -229,10 +311,34 @@ export default function LocalImageStudioPage() {
             <div className="space-y-2 p-3">
               <p className="break-all text-xs text-white/70">{item.name}</p>
               <p className="text-xs text-white/40">素材编号 #{item.media_file_id} · {(item.file_size / 1024 / 1024).toFixed(2)} MiB</p>
+              <label className="block text-xs text-white/60">替换为素材库图片
+                <select value={replaceMediaIds[item.link_id] || ""} onChange={(event) => setReplaceMediaIds((current) => ({ ...current, [item.link_id]: event.target.value }))} className="mt-1 w-full rounded-lg border border-white/15 bg-slate-950 p-2">
+                  <option value="">选择已有图片</option>
+                  {libraryImages.filter((image) => image.id !== item.media_file_id).map((image) => <option key={image.id} value={image.id}>#{image.id} · {image.name}</option>)}
+                </select>
+              </label>
+              <button type="button" onClick={() => void replaceShotImage(item.link_id)} disabled={!replaceMediaIds[item.link_id]} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100 disabled:opacity-40">替换并保留旧版本</button>
+              <button type="button" onClick={() => void (versionsByLink[item.link_id] ? setVersionsByLink((current) => { const next = { ...current }; delete next[item.link_id]; return next; }) : loadImageVersions(item.link_id))} disabled={loadingVersions === item.link_id} className="rounded-lg border border-white/20 px-3 py-2 text-xs disabled:opacity-40">{loadingVersions === item.link_id ? "读取中…" : versionsByLink[item.link_id] ? "收起版本历史" : "查看版本历史"}</button>
+              {versionsByLink[item.link_id] && <div className="space-y-2 rounded-lg bg-black/20 p-2">
+                {versionsByLink[item.link_id].map((version) => <div key={version.version_number} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 truncate">版本 {version.version_number} · {version.name} {version.current ? "（当前）" : ""}</span>
+                  {!version.current && <button type="button" onClick={() => void restoreImageVersion(item.link_id, version.version_number)} disabled={restoringVersion !== null} className="shrink-0 rounded border border-amber-300/30 px-2 py-1 text-amber-100">{restoringVersion === item.link_id + ":" + version.version_number ? "恢复中…" : "恢复此版本"}</button>}
+                </div>)}
+              </div>}
               <button type="button" onClick={() => void unlinkShotImage(item.link_id)} disabled={unlinkingImage !== null} className="rounded-lg border border-rose-300/30 px-3 py-2 text-xs text-rose-100 disabled:opacity-40">{unlinkingImage === item.link_id ? "正在解除…" : "仅解除分镜关联"}</button>
             </div>
           </article>)}
         </div> : <p className="mt-3 text-sm text-white/50">该分镜暂时没有关联图片。归档新图片时选择此镜头即可添加。</p>}
+        <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/15 p-3">
+          <label className="block text-sm text-white/70">从素材库复用已有图片（最多显示最近 200 张）
+            <select value={reuseMediaId} onChange={(event) => setReuseMediaId(event.target.value)} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-900 p-3">
+              <option value="">选择素材库图片</option>
+              {libraryImages.map((image) => <option key={image.id} value={image.id}>#{image.id} · {image.name}</option>)}
+            </select>
+          </label>
+          <button type="button" onClick={() => void reuseLibraryImage()} disabled={!reuseMediaId || reusingImage} className="mt-2 rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100 disabled:opacity-40">{reusingImage ? "正在关联…" : "复用到当前分镜"}</button>
+          <p className="mt-2 text-xs text-white/45">复用只新增分镜关联，不会复制、移动或删除素材文件；同一张图可以关联多个分镜。</p>
+        </div>
         <p className="mt-3 text-xs text-white/40">解除关联不会删除素材库中的原图，也不会影响其他镜头使用该图片。</p>
       </section>}
 
