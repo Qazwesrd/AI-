@@ -30,6 +30,13 @@ type ModelItem = {
   };
 };
 
+type LocalRuntime = {
+  status: "ready" | "not_running";
+  models: { name: string; size_bytes?: number | null; modified_at?: string | null }[];
+  message: string;
+  cloud_fallback: false;
+};
+
 type Catalog = {
   items: ModelItem[];
   total: number;
@@ -63,6 +70,11 @@ export default function LocalModelsPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [runtime, setRuntime] = useState<LocalRuntime | null>(null);
+  const [runtimeModel, setRuntimeModel] = useState("");
+  const [runtimeResult, setRuntimeResult] = useState("");
+  const [runtimeError, setRuntimeError] = useState("");
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -80,7 +92,41 @@ export default function LocalModelsPage() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  const refreshRuntime = useCallback(async () => {
+    setRuntimeError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "本地引擎检测失败");
+      setRuntime(result);
+      setRuntimeModel((current) => current || result.models?.[0]?.name || "");
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "本地引擎检测失败");
+    }
+  }, []);
+
+  useEffect(() => { void refresh(); void refreshRuntime(); }, [refresh, refreshRuntime]);
+
+  const runLocalTest = async () => {
+    if (!runtimeModel) return;
+    setRuntimeBusy(true);
+    setRuntimeError("");
+    setRuntimeResult("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: runtimeModel }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "本地模型测试失败");
+      setRuntimeResult(result.response || "测试成功，但模型没有返回文本。");
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "本地模型测试失败");
+    } finally {
+      setRuntimeBusy(false);
+    }
+  };
 
   const chooseModel = (item: ModelItem) => {
     setSelected(item.name);
@@ -137,6 +183,33 @@ export default function LocalModelsPage() {
             {busy ? "处理中…" : "刷新模型库"}
           </button>
         </header>
+
+        <section className="rounded-2xl border border-cyan-300/20 bg-cyan-400/5 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-cyan-100">本地 AI 引擎连接测试</h2>
+              <p className="mt-1 text-xs text-white/55">仅连接本机 Ollama（127.0.0.1），不会访问云端、下载模型或自动启动软件。</p>
+            </div>
+            <button type="button" onClick={() => void refreshRuntime()} className="rounded-lg border border-cyan-200/30 px-3 py-2 text-sm">重新检测</button>
+          </div>
+          <div className="mt-3 text-sm text-white/75">
+            运行状态：<span className={runtime?.status === "ready" ? "text-emerald-200" : "text-amber-200"}>{runtime?.status === "ready" ? "已连接" : runtime ? "未运行" : "检测中"}</span>
+            <span className="ml-2 text-xs text-white/45">{runtime?.message || "正在检查本机 Ollama…"}</span>
+          </div>
+          {runtime?.models?.length ? (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <select value={runtimeModel} onChange={(event) => setRuntimeModel(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 px-3 py-3 text-white">
+                {runtime.models.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+              </select>
+              <button type="button" disabled={runtimeBusy || !runtimeModel} onClick={() => void runLocalTest()} className="rounded-lg bg-cyan-700 px-4 py-3 text-sm font-semibold disabled:opacity-40">{runtimeBusy ? "本机测试中…" : "测试本地模型"}</button>
+            </div>
+          ) : (
+            <p className="mt-3 text-xs text-white/55">没有发现已安装的 Ollama 模型。请自行安装并准备模型后重新检测；软件不会替你下载。</p>
+          )}
+          {runtimeError && <p className="mt-3 rounded-lg bg-rose-500/10 p-3 text-sm text-rose-200">{runtimeError}</p>}
+          {runtimeResult && <div className="mt-3 rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3"><div className="text-sm font-semibold text-emerald-100">本地生成测试成功</div><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/80">{runtimeResult}</p></div>}
+          <p className="mt-3 text-xs text-white/40">测试会在本机运行所选模型，可能占用较多内存、显存和电力；不会产生本软件的云端 API 调用，也不会自动回退到云端。</p>
+        </section>
 
         <section className="rounded-2xl border border-emerald-300/20 bg-emerald-400/5 p-4">
           <div className="font-semibold text-emerald-100">严格本地管理模式</div>

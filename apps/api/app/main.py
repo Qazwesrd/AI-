@@ -30,6 +30,7 @@ ROUTER_MODULES = [
     "app.routers.tasks",
     "app.routers.web_ai_tools",
     "app.routers.ai_collaboration",
+    "app.routers.local_ai_runtime",
 ]
 
 _loaded_routers: list[str] = []
