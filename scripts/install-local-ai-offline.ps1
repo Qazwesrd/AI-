@@ -135,6 +135,166 @@ if (Test-Path -LiteralPath $installFullPath) {
         if ($existingState.model_manifest_sha256 -ne $existingModelHash) {
             throw "现有 Qwen3 模型与安装记录不一致。为保护用户模型数据，拒绝自动升级。"
         }
+        $existingModelManifest = Get-Content -LiteralPath $existingManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+        $existingDescriptors = @()
+        if ($existingModelManifest.config) { $existingDescriptors += $existingModelManifest.config }
+        if ($existingModelManifest.layers) { $existingDescriptors += @($existingModelManifest.layers) }
+        foreach ($descriptor in $existingDescriptors) {
+            $digestMatch = [regex]::Match([string]$descriptor.digest, '^sha256:([0-9a-fA-F]{64})        if ($existingState.ollama_version -eq $manifest.ollama.version) {
+            Write-Host "检测到 Ollama 和 Qwen3 4B 已是当前载荷版本，为保护已有模型及配置，本次不覆盖。"
+            if ($transcriptStarted) {
+                Stop-Transcript | Out-Null
+                $transcriptStarted = $false
+            }
+            return
+        }
+
+        $upgradeParent = Split-Path -Parent $installFullPath
+        $upgradeDrive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($installFullPath))
+        $upgradeRequired = [long]$manifest.ollama.size_bytes + 1GB
+        if ($upgradeDrive.AvailableFreeSpace -lt $upgradeRequired) {
+            throw ("升级 Ollama 运行环境至少需要 {0:N2} GiB 可用空间。" -f ($upgradeRequired / 1GB))
+        }
+        $upgradeStage = Join-Path $upgradeParent (".Ollama-upgrade-" + [Guid]::NewGuid().ToString("N"))
+        $upgradeExtract = Join-Path $upgradeStage "extract"
+        $upgradeRuntime = Join-Path $upgradeStage "runtime"
+        $runtimeBackup = Join-Path $installFullPath (".runtime-backup-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $upgradeStage -Force | Out-Null
+        try {
+            Expand-Archive -LiteralPath $runtimeZip -DestinationPath $upgradeExtract -Force
+            $upgradeExe = Get-ChildItem -LiteralPath $upgradeExtract -Filter "ollama.exe" -File -Recurse | Select-Object -First 1
+            if (!$upgradeExe) {
+                throw "新版本 Ollama 运行包解压后缺少 ollama.exe。"
+            }
+            Move-Item -LiteralPath $upgradeExe.Directory.FullName -Destination $upgradeRuntime
+            Move-Item -LiteralPath $existingRuntime -Destination $runtimeBackup
+            try {
+                Move-Item -LiteralPath $upgradeRuntime -Destination $existingRuntime
+                if (!(Test-Path -LiteralPath (Join-Path $existingRuntime "ollama.exe") -PathType Leaf)) {
+                    throw "Ollama 新运行环境部署后缺少 ollama.exe。"
+                }
+                $updatedState = @{
+                    schema_version = 1
+                    ollama_version = $manifest.ollama.version
+                    model = $manifest.model.name
+                    model_manifest_sha256 = $existingModelHash
+                    installed_utc = [DateTime]::UtcNow.ToString("o")
+                    distribution_approved = $false
+                }
+                $stateTemp = Join-Path $installFullPath "install-manifest.json.new"
+                $updatedState | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $stateTemp -Encoding UTF8
+                Move-Item -LiteralPath $stateTemp -Destination $existingStatePath -Force
+                Remove-Item -LiteralPath $runtimeBackup -Recurse -Force -ErrorAction SilentlyContinue
+            } catch {
+                if (Test-Path -LiteralPath $existingRuntime) {
+                    Remove-Item -LiteralPath $existingRuntime -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if (Test-Path -LiteralPath $runtimeBackup) {
+                    Move-Item -LiteralPath $runtimeBackup -Destination $existingRuntime -Force
+                }
+                throw
+            }
+            Write-Host "Ollama 运行环境已升级到 $($manifest.ollama.version)；现有 Qwen3 模型和用户数据保持不变。"
+        } finally {
+            if (Test-Path -LiteralPath $upgradeStage) {
+                Remove-Item -LiteralPath $upgradeStage -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ($transcriptStarted) {
+            Stop-Transcript | Out-Null
+            $transcriptStarted = $false
+        }
+        return
+    }
+    throw "检测到已有本地 AI 目录但未找到完整且可验证的 Ollama/Qwen3 安装。为保护已有数据，安装已停止；请先备份并手动处理该目录。"
+}
+
+$installParent = Split-Path -Parent $installFullPath
+New-Item -ItemType Directory -Path $installParent -Force | Out-Null
+$driveRoot = [System.IO.Path]::GetPathRoot($installFullPath)
+$drive = [System.IO.DriveInfo]::new($driveRoot)
+$requiredBytes = [long]$manifest.ollama.size_bytes + $modelBytes + 1GB
+if ($drive.AvailableFreeSpace -lt $requiredBytes) {
+    throw ("本地 AI 安装空间不足。至少需要 {0:N2} GiB，可用 {1:N2} GiB。" -f ($requiredBytes / 1GB), ($drive.AvailableFreeSpace / 1GB))
+}
+
+$stage = Join-Path $installParent (".Ollama-stage-" + [Guid]::NewGuid().ToString("N"))
+$extractRoot = Join-Path $stage "runtime-extract"
+$runtimeRoot = Join-Path $stage "runtime"
+$modelsRoot = Join-Path $stage "models"
+New-Item -ItemType Directory -Path $stage -Force | Out-Null
+try {
+    Expand-Archive -LiteralPath $runtimeZip -DestinationPath $extractRoot -Force
+    $ollamaExe = Get-ChildItem -LiteralPath $extractRoot -Filter "ollama.exe" -File -Recurse | Select-Object -First 1
+    if (!$ollamaExe) {
+        throw "解压后的 Ollama 运行包缺少 ollama.exe。"
+    }
+    $runtimeSourceRoot = $ollamaExe.Directory.FullName
+    Move-Item -LiteralPath $runtimeSourceRoot -Destination $runtimeRoot
+    New-Item -ItemType Directory -Path $modelsRoot -Force | Out-Null
+    foreach ($modelItem in Get-ChildItem -LiteralPath (Join-Path $payload "models") -Force) {
+        Copy-Item -LiteralPath $modelItem.FullName -Destination $modelsRoot -Recurse
+    }
+
+    foreach ($file in $modelFiles) {
+        $relative = [string]$file.path
+        $installedPath = Resolve-SafeRelativePath $stage $relative
+        if (!(Test-Path -LiteralPath $installedPath -PathType Leaf) -or
+            (Get-Item -LiteralPath $installedPath).Length -ne [long]$file.size_bytes -or
+            (Get-Sha256 $installedPath) -ne ([string]$file.sha256).ToLowerInvariant()) {
+            throw "安装暂存区中的模型文件校验失败：$relative"
+        }
+    }
+
+    $launcher = Join-Path $stage "AI漫剧大师-启动本地AI.bat"
+    @(
+        "@echo off",
+        "setlocal",
+        'set "OLLAMA_MODELS=%~dp0models"',
+        'set "OLLAMA_HOST=127.0.0.1:11435"',
+        'cd /d "%~dp0runtime"',
+        '"ollama.exe" serve',
+        "endlocal"
+    ) | Set-Content -LiteralPath $launcher -Encoding ASCII
+
+    $installedManifest = @{
+        schema_version = 1
+        ollama_version = $manifest.ollama.version
+        model = $manifest.model.name
+        model_manifest_sha256 = $manifest.model.manifest_sha256
+        installed_utc = [DateTime]::UtcNow.ToString("o")
+        distribution_approved = $false
+    }
+    $installedManifest | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath (Join-Path $stage "install-manifest.json") -Encoding UTF8
+
+    Move-Item -LiteralPath $stage -Destination $installFullPath
+    Write-Host "本地 Ollama 运行环境和 Qwen3 4B 模型已部署到：$installFullPath"
+    Write-Host "本地模型存储路径：$(Join-Path $installFullPath 'models')"
+    Write-Host "本地服务地址：http://127.0.0.1:11435"
+    Write-Host "安装过程未联网下载模型；许可证审查状态仍为 pending。"
+}
+finally {
+    if (Test-Path -LiteralPath $stage) {
+        Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if ($transcriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+        $transcriptStarted = $false
+    }
+}
+)
+            if (!$digestMatch.Success -or [long]$descriptor.size -le 0) {
+                throw "现有 Qwen3 模型 manifest 包含无效的 blob 描述符。"
+            }
+            $digest = $digestMatch.Groups[1].Value.ToLowerInvariant()
+            $existingBlob = Join-Path (Join-Path $installFullPath "models\blobs") ("sha256-" + $digest)
+            if (!(Test-Path -LiteralPath $existingBlob -PathType Leaf) -or
+                (Get-Item -LiteralPath $existingBlob).Length -ne [long]$descriptor.size -or
+                (Get-Sha256 $existingBlob) -ne $digest) {
+                throw "现有 Qwen3 模型 blob 校验失败；为保护用户数据，拒绝升级。"
+            }
+        }
         if ($existingState.ollama_version -eq $manifest.ollama.version) {
             Write-Host "检测到 Ollama 和 Qwen3 4B 已是当前载荷版本，为保护已有模型及配置，本次不覆盖。"
             if ($transcriptStarted) {
