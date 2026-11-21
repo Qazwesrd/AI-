@@ -69,7 +69,8 @@ function Add-VerifiedRemoteEntry(
     [string]$EntryName,
     [string]$Url,
     [long]$ExpectedSize,
-    [string]$ExpectedSha256
+    [string]$ExpectedSha256,
+    [string]$MirrorPath
 ) {
     if ($ExpectedSize -le 0 -or $ExpectedSize -gt $MaxAssetBytes) {
         throw "官方资产大小无效或超过限制：$EntryName"
@@ -106,6 +107,12 @@ function Add-VerifiedRemoteEntry(
         $entry = $Archive.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::NoCompression)
         $output = $entry.Open()
         $input = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $mirror = $null
+        if ($MirrorPath) {
+            $mirrorParent = Split-Path -Parent $MirrorPath
+            if ($mirrorParent) { New-Item -ItemType Directory -Path $mirrorParent -Force | Out-Null }
+            $mirror = [System.IO.File]::Open($MirrorPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        }
         $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
         $buffer = [byte[]]::new($ChunkBytes)
         [long]$received = 0
@@ -114,6 +121,7 @@ function Add-VerifiedRemoteEntry(
                 $received += $read
                 if ($received -gt $ExpectedSize) { throw "下载数据超过官方声明大小：$EntryName" }
                 $output.Write($buffer, 0, $read)
+                if ($mirror) { $mirror.Write($buffer, 0, $read) }
                 $hasher.AppendData($buffer, 0, $read)
                 if (($received % (256MB)) -lt $read) {
                     Write-Host ("{0}: {1:N1}% ({2:N2} GiB)" -f $EntryName, ($received * 100.0 / $ExpectedSize), ($received / 1GB))
@@ -124,6 +132,7 @@ function Add-VerifiedRemoteEntry(
             $hasher.Dispose()
             $input.Dispose()
             $output.Dispose()
+            if ($mirror) { $mirror.Dispose() }
         }
         if ($received -ne $ExpectedSize) { throw "下载文件长度不匹配：$EntryName ($received / $ExpectedSize)" }
         if ($actualHash -ne $ExpectedSha256.ToLowerInvariant()) { throw "SHA-256 校验失败：$EntryName" }
