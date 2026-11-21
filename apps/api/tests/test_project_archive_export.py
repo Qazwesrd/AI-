@@ -165,6 +165,8 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     self.assertEqual(payload["project"]["name"], "测试漫剧项目")
                     self.assertIsNone(payload["project"]["settings"]["api_key"])
                     self.assertIsNone(payload["records"]["media_files"][0]["metadata_json"]["access_token"])
+                    self.assertEqual(len(payload["records"]["media_tasks"]), 1)
+                    self.assertTrue(payload["records"]["media_tasks"][0]["result_path"].startswith("files/"))
                     self.assertTrue(
                         payload["records"]["visual_assets"][0]["image_path"].startswith("files/")
                     )
