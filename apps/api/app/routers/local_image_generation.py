@@ -234,12 +234,21 @@ def inspect_local_reference_capabilities():
 
     has_load_image = nodes.get("LoadImage", {}).get("available", False)
     has_clip_vision = nodes.get("CLIPVisionLoader", {}).get("available", False)
-    has_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) or nodes.get("IPAdapterModelLoader", {}).get("available", False)
-    has_apply = nodes.get("IPAdapter", {}).get("available", False) or nodes.get("IPAdapterAdvanced", {}).get("available", False)
-    adapter_models = nodes.get("IPAdapterUnifiedLoader", {}).get("adapter_models") or nodes.get("IPAdapterModelLoader", {}).get("adapter_models") or []
+    unified_presets = _node_input_choices(
+        _local_request("/object_info/IPAdapterUnifiedLoader"), "preset"
+    ) if nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) else []
+    adapter_models = nodes.get("IPAdapterModelLoader", {}).get("adapter_models", [])
+    has_unified_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) and bool(unified_presets)
+    has_model_loader = nodes.get("IPAdapterModelLoader", {}).get("available", False) and bool(adapter_models)
+    has_adapter = has_unified_adapter or has_model_loader
+    apply_type = "IPAdapterAdvanced" if nodes.get("IPAdapterAdvanced", {}).get("available", False) else "IPAdapter"
+    apply_info = _local_request("/object_info/" + apply_type) if nodes.get(apply_type, {}).get("available", False) else {}
+    apply_schema = apply_info.get(apply_type, {})
+    apply_required = set((apply_schema.get("input") or {}).get("required", {}).keys()) if isinstance(apply_schema, dict) else set()
+    needs_clip_vision = "clip_vision" in apply_required
     clip_models = nodes.get("CLIPVisionLoader", {}).get("clip_vision_models", [])
-    structural_ready = has_load_image and has_clip_vision and has_adapter and has_apply
-    model_ready = bool(adapter_models) and bool(clip_models)
+    structural_ready = has_load_image and has_adapter and bool(apply_schema)
+    model_ready = (has_unified_adapter or has_model_loader) and (not needs_clip_vision or (has_clip_vision and bool(clip_models)))
     return {
         "engine": "ComfyUI",
         "status": "ready",
@@ -249,11 +258,12 @@ def inspect_local_reference_capabilities():
         "reference_conditioning_ready": structural_ready and model_ready,
         "missing_node_types": [name for name, present in (
             ("LoadImage", has_load_image), ("CLIPVisionLoader", has_clip_vision),
-            ("IPAdapterUnifiedLoader or IPAdapterModelLoader", has_adapter),
-            ("IPAdapter or IPAdapterAdvanced", has_apply),
+            ("IPAdapterUnifiedLoader or IPAdapterModelLoader with available models", has_adapter),
+            ("IPAdapter or IPAdapterAdvanced", bool(apply_schema)),
         ) if not present],
         "missing_model_files": [name for name, present in (
-            ("IP-Adapter model", bool(adapter_models)), ("CLIP Vision model", bool(clip_models)),
+            ("IP-Adapter preset/model", bool(unified_presets or adapter_models)),
+            *([( "CLIP Vision model", bool(clip_models))] if needs_clip_vision else []),
         ) if not present],
         "local_only": True,
         "network_used": False,
