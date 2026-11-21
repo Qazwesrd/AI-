@@ -14,7 +14,7 @@ if (!(Test-Path -LiteralPath $auditScript -PathType Leaf) -or
 # are checked and returned before this ownership flag is ever set.
 $installerSource = Get-Content -LiteralPath $installScript -Raw -Encoding UTF8
 if ($installerSource -notmatch '\$deploymentOwned\s*=\s*\$true' -or
-    $installerSource -notmatch '(?s}catch\s*\{.*?\$deploymentOwned\s*-and\s*\(Test-Path\s+-LiteralPath\s+\$installFullPath\).*?Remove-Item\s+-LiteralPath\s+\$installFullPath\s+-Recurse\s+-Force') {
+    $installerSource -notmatch '(?s)catch\s*\{.*?\$deploymentOwned\s*-and\s*\(Test-Path\s+-LiteralPath\s+\$installFullPath\).*?Remove-Item\s+-LiteralPath\s+\$installFullPath\s+-Recurse\s+-Force') {
     throw "ComfyUI 安装器缺少仅针对本次新建目录的失败回滚保护。"
 }
 
@@ -334,6 +334,7 @@ try {
     $failureFixtureRoot = Join-Path $temp "failure-fixture"
     $failurePortableRoot = Join-Path $failureFixtureRoot "ComfyUI"
     $failureArchive = Join-Path $temp "ComfyUI_windows_portable_amd-failure.7z"
+    New-Item -ItemType Directory -Path $failureFixtureRoot -Force | Out-Null
     Copy-Item -LiteralPath $comfyRoot -Destination $failurePortableRoot -Recurse
     New-Item -ItemType Directory -Path (Join-Path $failurePortableRoot "runtime-manifest.json") -Force | Out-Null
     Push-Location $failureFixtureRoot
