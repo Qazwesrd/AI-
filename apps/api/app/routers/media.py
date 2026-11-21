@@ -2618,6 +2618,15 @@ def get_local_render_job(task_id: int, db: Session = Depends(get_db)):
                 "请检查部分文件后手动新建任务。"
             )
             task.updated_at = datetime.utcnow()
+            task_payload = task.request_data if isinstance(task.request_data, dict) else {}
+            if task_payload.get("render_kind") == "video_edit":
+                from app.models.editing import VideoEditJob
+                edit_job = db.query(VideoEditJob).filter(
+                    VideoEditJob.id == task_payload.get("video_edit_job_id")
+                ).first()
+                if edit_job:
+                    edit_job.status = "interrupted_unknown"
+                    edit_job.error = task.error
             db.commit()
     return {
         "task_id": task.id, "status": task.status, "task_type": task.task_type,
@@ -2645,6 +2654,15 @@ def cancel_local_render_job(task_id: int, db: Session = Depends(get_db)):
         task.status = "cancelled"
         task.error = "用户在渲染开始前取消任务"
         task.updated_at = datetime.utcnow()
+        task_payload = task.request_data if isinstance(task.request_data, dict) else {}
+        if task_payload.get("render_kind") == "video_edit":
+            from app.models.editing import VideoEditJob
+            edit_job = db.query(VideoEditJob).filter(
+                VideoEditJob.id == task_payload.get("video_edit_job_id")
+            ).first()
+            if edit_job:
+                edit_job.status = "cancelled"
+                edit_job.error = task.error
         db.commit()
         return {"task_id": task_id, "status": "cancelled", "message": "已取消尚未启动的本地任务。"}
     if task.status != "processing":
