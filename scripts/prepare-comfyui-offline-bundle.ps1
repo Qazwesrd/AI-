@@ -266,9 +266,9 @@ try {
     }
     Add-TextEntry $archive "ComfyUI-Payload/manifest.json" ($manifest | ConvertTo-Json -Depth 8)
 
-    Add-FileEntry $archive $setupItem.Name $setupItem.FullName
+    Add-FileEntry $archive "Setup.exe" $setupItem.FullName
     $setupHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    Add-TextEntry $archive "$($setupItem.Name).sha256" "$setupHash  $($setupItem.Name)"
+    Add-TextEntry $archive "Setup.exe.sha256" "$setupHash  Setup.exe"
     Add-TextEntry $archive "安装说明.txt" @'
 AI漫剧制作大师 - ComfyUI 完整离线安装套件
 
