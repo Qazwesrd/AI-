@@ -214,7 +214,9 @@ def run_ffmpeg_with_progress(
                         )
                     latest["stage"] = "rendering"
                     if value == "end":
-                        latest["percent"] = 100.0
+                        # FFmpeg has finished writing, but the output is not
+                        # complete until the caller validates and publishes it.
+                        latest["percent"] = 99.9
                         latest["stage"] = "validating"
                     if progress_callback:
                         progress_callback(dict(latest))
