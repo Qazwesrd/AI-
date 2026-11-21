@@ -27,7 +27,7 @@ $archives = @(
 
 You may pass only the variants actually available; every supplied archive must use one of the four exact official asset filenames. Verify the archive SHA-256 and release tag against the official release before treating the report as evidence.
 
-The complete offline bundle builder also runs this inventory automatically against each of the four downloaded official portable archives, one at a time. It includes the combined report at `THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json`, records each archive SHA-256 and release tag, and refuses to package if any inventory fails. The installer checks that all four report entries match the asset hashes and sizes in the bundle manifest. This automated evidence remains `pending`; it is not a license approval.
+The complete offline bundle builder also runs this inventory automatically against each of the four downloaded official portable archives, one at a time. It includes the combined report at `THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json`, records each archive SHA-256 and release tag, and refuses to package if any inventory fails. The bundle copy of the audit register is populated with those exact hashes, release tags, component records, and report path; the source register in the repository remains an unapproved template. The installer checks that all four report entries and register entries match the asset hashes and sizes in the bundle manifest. This automated evidence remains `pending`; it is not a license approval.
 
 ## Safety and limitations
 
