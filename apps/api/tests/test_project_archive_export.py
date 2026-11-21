@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models.media import MediaFile
+from app.models.media import MediaFile, MediaTask
 from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
@@ -54,6 +54,8 @@ class ProjectArchiveExportTests(unittest.TestCase):
             image.write_bytes(b"fake-image-content")
             music = storage / "music.wav"
             music.write_bytes(b"fake-audio-content")
+            video = storage / "shot.mp4"
+            video.write_bytes(b"fake-video-content")
             outside = root / "outside-secret.txt"
             outside.write_text("not included", encoding="utf-8")
 
@@ -123,6 +125,12 @@ class ProjectArchiveExportTests(unittest.TestCase):
                         episode_id=episode.id,
                         edit_data={"music_path": str(music)},
                     ),
+                    MediaTask(
+                        task_type="storyboard_video",
+                        status="completed",
+                        request_data={"episode_id": episode.id, "shot_id": shot.id},
+                        result_path=str(video),
+                    ),
                     ImageTask(
                         asset_id=asset.id,
                         prompt="角色参考图",
@@ -145,14 +153,14 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     )
 
                 self.assertTrue(archive_path.is_file())
-                self.assertEqual(manifest["file_count"], 2)
+                self.assertEqual(manifest["file_count"], 3)
                 self.assertEqual(manifest["missing_file_count"], 1)
                 with zipfile.ZipFile(archive_path, "r") as archive:
                     self.assertIsNone(archive.testzip())
                     names = set(archive.namelist())
                     self.assertIn("project-data.json", names)
                     self.assertIn("manifest.json", names)
-                    self.assertEqual(len([name for name in names if name.startswith("files/")]), 2)
+                    self.assertEqual(len([name for name in names if name.startswith("files/")]), 3)
                     payload = json.loads(archive.read("project-data.json"))
                     self.assertEqual(payload["project"]["name"], "测试漫剧项目")
                     self.assertIsNone(payload["project"]["settings"]["api_key"])
