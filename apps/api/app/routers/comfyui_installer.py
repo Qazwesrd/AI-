@@ -87,14 +87,6 @@ def fetch_official_release_catalog(opener=urlopen):
         raise RuntimeError("官方发布信息格式无效，已停止读取。") from exc
 
 
-@router.get("/release-catalog")
-def comfyui_official_release_catalog():
-    """Fetch official release metadata only; never download or install release assets."""
-    try:
-        return fetch_official_release_catalog()
-    except RuntimeError as exc:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -184,3 +176,12 @@ def comfyui_install_readiness():
         "read_only": True,
     })
     return result
+
+@router.get("/release-catalog")
+def comfyui_official_release_catalog():
+    """Fetch official release metadata only; never download or install release assets."""
+    from fastapi import HTTPException
+    try:
+        return fetch_official_release_catalog()
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
