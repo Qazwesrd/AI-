@@ -1390,6 +1390,21 @@ def get_episode_render_job(task_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/video/episodes/{episode_id}/render/jobs/latest")
+def get_latest_episode_render_job(episode_id: int, db: Session = Depends(get_db)):
+    candidates = db.query(MediaTask).filter(
+        MediaTask.task_type == "episode_render"
+    ).order_by(MediaTask.id.desc()).limit(200).all()
+    task = next((
+        item for item in candidates
+        if isinstance(item.request_data, dict)
+        and item.request_data.get("episode_id") == episode_id
+    ), None)
+    if not task:
+        return {"task": None}
+    return {"task": get_episode_render_job(task.id, db)}
+
+
 @router.post("/video/episodes/render/jobs/{task_id}/cancel")
 def cancel_episode_render_job(task_id: int, db: Session = Depends(get_db)):
     task = db.query(MediaTask).filter(
