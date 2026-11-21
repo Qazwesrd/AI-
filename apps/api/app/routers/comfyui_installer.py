@@ -4,6 +4,97 @@ This endpoint does not download, install, launch, or modify anything. It reports
 hardware and storage constraints before the user chooses an installation plan.
 """
 import shutil
+
+import json
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+GITHUB_RELEASE_API = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
+MAX_RELEASE_METADATA_BYTES = 5 * 1024 * 1024
+OFFICIAL_ASSET_PREFIX = "ComfyUI_windows_portable_"
+ALLOWED_ASSET_NAMES = {
+    "ComfyUI_windows_portable_nvidia.7z",
+    "ComfyUI_windows_portable_nvidia_cu126.7z",
+    "ComfyUI_windows_portable_amd.7z",
+    "ComfyUI_windows_portable_intel.7z",
+}
+
+
+def parse_official_release(payload: dict):
+    if not isinstance(payload, dict) or not isinstance(payload.get("tag_name"), str):
+        raise ValueError("GitHub release metadata is invalid")
+    assets = payload.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("GitHub release asset list is invalid")
+    result = []
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        name = asset.get("name")
+        url = asset.get("browser_download_url")
+        size_bytes = asset.get("size")
+        if name not in ALLOWED_ASSET_NAMES:
+            continue
+        if not isinstance(url, str) or not url.startswith(
+            "https://github.com/Comfy-Org/ComfyUI/releases/download/"
+        ):
+            continue
+        if not isinstance(size_bytes, int) or size_bytes <= 0:
+            continue
+        digest = asset.get("digest")
+        if digest is not None and (
+            not isinstance(digest, str) or not digest.startswith("sha256:")
+        ):
+            digest = None
+        result.append({
+            "name": name,
+            "download_url": url,
+            "size_bytes": size_bytes,
+            "sha256": digest[7:] if isinstance(digest, str) and digest.startswith("sha256:") else None,
+            "digest_available": bool(isinstance(digest, str) and digest.startswith("sha256:")),
+        })
+    result.sort(key=lambda item: item["name"])
+    return {
+        "version": payload["tag_name"][:100],
+        "published_at": str(payload.get("published_at") or "")[:40],
+        "assets": result,
+        "source": GITHUB_RELEASE_API,
+        "download_started": False,
+        "installation_started": False,
+        "note": "仅读取 Comfy-Org 官方 GitHub Release 元数据，没有下载或安装文件。若官方未提供 SHA-256 摘要，后续安装器必须停止自动安装并要求可信校验来源。",
+    }
+
+
+def fetch_official_release_catalog(opener=urlopen):
+    request = Request(
+        GITHUB_RELEASE_API,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "AI-Comic-Studio-ComfyUI-Installer",
+        },
+    )
+    try:
+        with opener(request, timeout=12) as response:
+            raw = response.read(MAX_RELEASE_METADATA_BYTES + 1)
+        if len(raw) > MAX_RELEASE_METADATA_BYTES:
+            raise ValueError("GitHub release metadata exceeds the size limit")
+        payload = json.loads(raw.decode("utf-8"))
+        return parse_official_release(payload)
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("无法读取 Comfy-Org 官方发布信息，请检查网络后重试。") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("官方发布信息格式无效，已停止读取。") from exc
+
+
+@router.get("/release-catalog")
+def comfyui_official_release_catalog():
+    """Fetch official release metadata only; never download or install release assets."""
+    try:
+        return fetch_official_release_catalog()
+    except RuntimeError as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 from pathlib import Path
 
 from fastapi import APIRouter
