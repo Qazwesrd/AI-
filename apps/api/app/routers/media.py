@@ -845,7 +845,13 @@ def render_episode_from_shots(
     output_name = re.sub(r"[^a-zA-Z0-9_-]", "_", output_name)
     if not output_name.lower().endswith(".mp4"):
         output_name += ".mp4"
-    output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
+    final_output = VIDEO_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}_{output_name}"
+    output = final_output.with_name(final_output.stem + ".partial" + final_output.suffix)
+    task_id = getattr(_EPISODE_RENDER_CONTEXT, "task_id", None)
+    if task_id is not None:
+        _update_episode_render_job(task_id, result_path=str(output), progress={
+            "percent": 8, "stage": "preparing", "output_path": str(output),
+        })
     try:
         # 统一分辨率、帧率、像素格式和音频采样率，兼容不同视频模型输出规格。
         ffmpeg_args = []
@@ -1117,6 +1123,8 @@ def render_episode_from_shots(
             output, expected_duration=total_video_duration,
             duration_tolerance=2.0, require_audio=True,
         )
+        os.replace(output, final_output)
+        output = final_output
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
@@ -1170,7 +1178,7 @@ _EPISODE_RENDER_LOCK = threading.Lock()
 _EPISODE_RENDER_CONTEXT = threading.local()
 
 
-def _update_episode_render_job(task_id, *, status=None, progress=None, result_data=None, error=None):
+def _update_episode_render_job(task_id, *, status=None, progress=None, result_data=None, error=None, result_path=None):
     db = SessionLocal()
     try:
         task = db.query(MediaTask).filter(
@@ -1188,6 +1196,8 @@ def _update_episode_render_job(task_id, *, status=None, progress=None, result_da
             task.result_data = result_data
         if error is not None:
             task.error = str(error)[:4000]
+        if result_path is not None:
+            task.result_path = str(result_path)
         task.updated_at = datetime.utcnow()
         db.commit()
     finally:
@@ -1372,6 +1382,7 @@ def get_episode_render_job(task_id: int, db: Session = Depends(get_db)):
         "task_id": task.id, "episode_id": (task.request_data or {}).get("episode_id"),
         "status": task.status, "progress": data.get("progress", {}),
         "output": task.result_path if task.status == "completed" else None,
+        "partial_output": task.result_path if task.status in ("interrupted_unknown", "failed", "cancelled") else None,
         "result": data.get("result") if task.status == "completed" else None,
         "error": task.error,
         "created_at": task.created_at.isoformat() if task.created_at else None,
