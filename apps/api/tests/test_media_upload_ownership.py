@@ -52,6 +52,7 @@ class MediaUploadOwnershipTests(unittest.TestCase):
                 category="audio",
                 project_id=1,
                 episode_id=1,
+                description="",
                 db=self.db,
             ))
         record = self.db.query(MediaFile).filter(MediaFile.id == result["id"]).first()
