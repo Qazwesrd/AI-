@@ -2381,6 +2381,33 @@ def check_media_audio_video_sync(path: str):
         raise HTTPException(422, "音画同步检查失败：" + str(exc)[:1200]) from exc
 
 
+@router.get("/final-quality-report")
+def scan_episode_final_quality(path: str, episode_id: Optional[int] = None, db: Session = Depends(get_db)):
+    """Run an opt-in local final-cut report; findings are advisory."""
+    try:
+        file_path = safe_storage_file(path)
+        subtitle_cues = []
+        if episode_id is not None:
+            record = db.query(EpisodeEditTimeline).filter(EpisodeEditTimeline.episode_id == episode_id).first()
+            edit_data = record.edit_data if record and isinstance(record.edit_data, dict) else {}
+            subtitle_cues = edit_data.get("subtitle_cues") or []
+            if not subtitle_cues:
+                speech_tasks = db.query(MediaTask).filter(
+                    MediaTask.task_type == "episode_speech_track"
+                ).order_by(MediaTask.id.desc()).all()
+                for speech_task in speech_tasks:
+                    speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
+                    if speech_meta.get("episode_id") == episode_id:
+                        candidate = speech_meta.get("subtitle_cues")
+                        if isinstance(candidate, list):
+                            subtitle_cues = candidate
+                        break
+        from app.services.media_service import scan_final_cut_quality
+        return scan_final_cut_quality(file_path, subtitle_cues)
+    except Exception as exc:
+        raise HTTPException(422, "成片综合质量检查失败：" + str(exc)[:1200]) from exc
+
+
 @router.get("/quality-scan")
 def scan_media_output_quality(path: str):
     """Run an opt-in FFmpeg scan for sustained black frames and silence."""

@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.media_service import analyze_audio_video_sync
+from app.services.media_service import analyze_audio_video_sync, analyze_subtitle_timing
 
 
 class AudioVideoSyncDiagnosticsTests(unittest.TestCase):
@@ -56,6 +56,39 @@ class AudioVideoSyncDiagnosticsTests(unittest.TestCase):
                 "format": {"duration": "5"},
                 "streams": [{"codec_type": "audio", "start_time": "0", "duration": "5"}],
             })
+
+    def test_subtitle_cues_within_video_duration_are_valid(self):
+        result = analyze_subtitle_timing([
+            {"start": 0, "end": 2, "text": "开场"},
+            {"start": 2.1, "end": 4, "text": "对白"},
+        ], 5)
+        self.assertEqual(result["invalid_ranges"], [])
+        self.assertEqual(result["overlaps"], [])
+        self.assertEqual(result["warnings"], [])
+
+    def test_subtitle_cue_after_video_duration_is_reported(self):
+        result = analyze_subtitle_timing([{"start": 4, "end": 6, "text": "超出时长"}], 5)
+        self.assertEqual(len(result["invalid_ranges"]), 1)
+        self.assertIn("超出成片时长", result["invalid_ranges"][0]["reason"])
+
+    def test_overlapping_subtitle_cues_are_reported(self):
+        result = analyze_subtitle_timing([
+            {"start": 0, "end": 2, "text": "第一句"},
+            {"start": 1.5, "end": 3, "text": "第二句"},
+        ], 5)
+        self.assertEqual(len(result["overlaps"]), 1)
+        self.assertAlmostEqual(result["overlaps"][0]["overlap_seconds"], 0.5)
+
+    def test_invalid_negative_or_reversed_subtitle_cue_is_reported(self):
+        result = analyze_subtitle_timing([
+            {"start": -1, "end": 1, "text": "负数"},
+            {"start": 3, "end": 2, "text": "倒序"},
+        ], 5)
+        self.assertEqual(len(result["invalid_ranges"]), 2)
+
+    def test_subtitle_report_rejects_unknown_video_duration(self):
+        with self.assertRaises(ValueError):
+            analyze_subtitle_timing([], 0)
 
 
 if __name__ == "__main__":

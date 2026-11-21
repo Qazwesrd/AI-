@@ -408,3 +408,75 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         "warnings": warnings,
         "note": "黑屏和静音检测结果仅供复核；有意的转场、片头片尾或静音镜头可能被识别为提示。",
     }
+
+
+def analyze_subtitle_timing(cues, video_duration, tolerance=0.05):
+    """Validate subtitle cue ranges and overlaps against the rendered video duration."""
+    try:
+        duration = float(video_duration)
+    except (TypeError, ValueError):
+        raise ValueError("无法确认成片时长，不能校验字幕时间")
+    if not duration > 0:
+        raise ValueError("成片时长必须大于 0 秒")
+    if not isinstance(cues, list):
+        cues = []
+    invalid_ranges, normalized = [], []
+    for index, cue in enumerate(cues):
+        if not isinstance(cue, dict):
+            invalid_ranges.append({"index": index, "reason": "字幕条目格式无效"})
+            continue
+        try:
+            start, end = float(cue.get("start")), float(cue.get("end"))
+        except (TypeError, ValueError):
+            invalid_ranges.append({"index": index, "reason": "开始或结束时间不是有效数字"})
+            continue
+        if not (start >= 0 and end > start):
+            invalid_ranges.append({"index": index, "start_seconds": start, "end_seconds": end,
+                                   "reason": "字幕时间范围无效，开始必须非负且结束必须晚于开始"})
+            continue
+        normalized.append({"index": index, "start": start, "end": end})
+        if end > duration + float(tolerance):
+            invalid_ranges.append({"index": index, "start_seconds": round(start, 3),
+                                   "end_seconds": round(end, 3),
+                                   "reason": f"字幕结束时间超出成片时长 {duration:.3f} 秒"})
+    ordered = sorted(normalized, key=lambda item: (item["start"], item["end"]))
+    overlaps = []
+    for previous, current in zip(ordered, ordered[1:]):
+        overlap = previous["end"] - current["start"]
+        if overlap > float(tolerance):
+            overlaps.append({"previous_index": previous["index"], "current_index": current["index"],
+                             "overlap_seconds": round(overlap, 3)})
+    warnings = []
+    if invalid_ranges:
+        warnings.append(f"发现 {len(invalid_ranges)} 条字幕时间范围无效或超出成片时长")
+    if overlaps:
+        warnings.append(f"发现 {len(overlaps)} 处字幕时间重叠，请确认是否为有意叠字")
+    return {"total_cues": len(cues), "invalid_ranges": invalid_ranges,
+            "overlaps": overlaps, "warnings": warnings}
+
+
+def scan_final_cut_quality(path, subtitle_cues=None):
+    """Create an opt-in local report combining stream, black-frame, silence and subtitle checks."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise ValueError("待检测的成片文件不存在")
+    info = probe_media(file_path)
+    validation = validate_rendered_video(file_path)
+    sync = analyze_audio_video_sync(info)
+    media_quality = scan_media_quality(file_path)
+    subtitles = analyze_subtitle_timing(subtitle_cues or [], validation["duration_seconds"])
+    warnings = []
+    warnings.extend(validation.get("warnings") or [])
+    warnings.extend(sync.get("warnings") or [])
+    warnings.extend(media_quality.get("warnings") or [])
+    warnings.extend(subtitles.get("warnings") or [])
+    return {
+        "scan_complete": True, "status": "warning" if warnings else "ok",
+        "duration_seconds": validation["duration_seconds"],
+        "resolution": {"width": validation["width"], "height": validation["height"]},
+        "streams": {"video_codec": validation.get("video_codec"),
+                    "audio_codec": validation.get("audio_codec"), "has_audio": validation.get("has_audio")},
+        "audio_video_sync": sync, "media_quality": media_quality,
+        "subtitle_timing": subtitles, "warnings": warnings,
+        "note": "本报告只提供本地媒体技术检查和字幕时间范围检查；不会自动修改字幕或成片，也不能判断人物口型与对白语义是否一致。所有提示均需人工复核。",
+    }
