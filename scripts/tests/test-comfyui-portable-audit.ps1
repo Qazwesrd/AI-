@@ -184,7 +184,14 @@ try {
         Name = "AMD Radeon(TM) Graphics"
         PNPDeviceID = "PCI\VEN_1002&DEV_1636"
     })
-    & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters $detectedAdapters
+    try {
+        & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters $detectedAdapters
+    } catch {
+        Write-Host "ComfyUI installer diagnostic:"
+        Write-Host ($_ | Format-List * -Force | Out-String)
+        Write-Host (Get-PSCallStack | Out-String)
+        throw
+    }
 
     $installedMain = Join-Path $installRoot "ComfyUI\main.py"
     $installedPython = Join-Path $installRoot "python_embeded\python.exe"
@@ -205,7 +212,14 @@ try {
 
     $sentinel = Join-Path $installRoot "ComfyUI\user\preserve-user-data.txt"
     Write-Utf8 $sentinel "preserve existing ComfyUI user data"
-    & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters $detectedAdapters
+    try {
+        & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters $detectedAdapters
+    } catch {
+        Write-Host "ComfyUI repeat-install diagnostic:"
+        Write-Host ($_ | Format-List * -Force | Out-String)
+        Write-Host (Get-PSCallStack | Out-String)
+        throw
+    }
     if ((Get-Content -LiteralPath $sentinel -Raw) -ne "preserve existing ComfyUI user data") {
         throw "ComfyUI 升级/重复安装测试失败：现有用户数据被覆盖。"
     }
