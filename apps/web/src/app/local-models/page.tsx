@@ -38,7 +38,7 @@ type LocalImageRuntime = {
   status: string; message: string; checkpoint_count: number; checkpoints: string[];
   hardware: { ram_bytes: number | null; vram_bytes: number | null; gpu_level: string; reasons: string[]; note: string };
   limitations?: string; installed?: boolean; managed_by_application?: boolean; process_id?: number | null;
-  runtime_mode?: string | null; log_path?: string; install_directory?: string;
+  runtime_mode?: string | null; log_path?: string; install_directory?: string; last_exit_code?: number | null;
 };
 type HardwareReadiness = {
   model: string; status: string; label: string; free_disk_bytes: number | null;
@@ -479,7 +479,7 @@ export default function LocalModelsPage() {
           {imageRuntime ? (
             <>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "starting" ? "正在启动" : imageRuntime.status === "stopped" ? "已安装，未启动" : imageRuntime.status === "not_installed" ? "尚未安装" : "检测异常"}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "starting" ? "正在启动" : imageRuntime.status === "failed" ? "启动失败" : imageRuntime.status === "stopped" ? "已安装，未启动" : imageRuntime.status === "not_installed" ? "尚未安装" : "检测异常"}</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已安装图片模型</div><div className="mt-1 font-semibold">{imageRuntime.checkpoint_count} 个 checkpoint</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">显存适配初筛</div><div className="mt-1 font-semibold">{({unknown:"未知",limited:"显存紧张",basic:"基础运行",capable:"具备一定余量",strong:"较充足"} as Record<string,string>)[imageRuntime.hardware?.gpu_level] || "待检测"}</div></div>
               </div>
