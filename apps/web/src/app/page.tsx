@@ -57,11 +57,11 @@ const navigation = [
     items: [
       ["✍️", "小说创作", "/novels"],
       ["📁", "项目管理", "/novels"],
-      ["👤", "人物角色", "/visual-studio"],
+      ["👤", "人物角色", "/visual-studio?category=characters"],
       ["🧬", "人物与素材状态追踪", "/asset-timeline"],
-      ["🏞️", "场景设定", "/visual-studio"],
-      ["💎", "道具素材", "/visual-studio"],
-      ["🌌", "世界观设定", "/novels"]
+      ["🏞️", "场景设定", "/visual-studio?category=scenes"],
+      ["💎", "道具素材", "/visual-studio?category=props"],
+      ["🌌", "小说与世界观", "/novels"]
     ]
   },
   {
@@ -279,7 +279,7 @@ export default function Home() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
                 {[
                   ["📖", "小说解析", "/novels"],
-                  ["👥", "人物识别", "/visual-studio"],
+                  ["👥", "人物识别", "/visual-studio?category=characters"],
                   ["🎞️", "智能分镜", "/storyboard"],
                   ["🎥", "视频生成", "/media-studio"],
                   ["🧭", "统一任务", "/tasks"],
