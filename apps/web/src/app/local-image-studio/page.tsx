@@ -258,6 +258,24 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
     finally { setBusy(false); }
   }
 
+  async function refreshBatchStatus() {
+    if (!result?.tasks.length) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/batch/tasks`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tasks: result.tasks.map((task) => ({ shot_id: task.shot_id, shot_number: task.shot_number, prompt_id: task.prompt_id })) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "批量任务状态刷新失败");
+      setResult((current) => current ? { ...current, tasks: current.tasks.map((task) => {
+        const updated = data.tasks.find((item: { prompt_id: string }) => item.prompt_id === task.prompt_id);
+        return updated ? { ...task, status: updated.status } : task;
+      }) } : current);
+    } catch (err) { setError(err instanceof Error ? err.message : "批量任务状态刷新失败"); }
+    finally { setBusy(false); }
+  }
+
   async function submitBatch() {
     if (!preflight?.ready_count || !confirmed) return;
     setBusy(true); setError(""); setResult(null);
@@ -312,8 +330,10 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
     </div>}
     {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
     {result && <div className="space-y-2 rounded-xl border border-emerald-300/20 bg-emerald-950/15 p-3">
-      <p className="text-sm">已提交 {result.submitted_count} 个任务；跳过 {result.skipped_count} 个；提交失败 {result.failed_count} 个。</p>
-      {result.tasks.map((task) => <p key={task.prompt_id} className="break-all text-xs text-emerald-200">镜头 {task.shot_number} · 任务 {task.prompt_id} · 种子 {task.seed}</p>)}
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm">已提交 {result.submitted_count} 个任务；跳过 {result.skipped_count} 个；提交失败 {result.failed_count} 个。</p>
+        <button type="button" onClick={() => void refreshBatchStatus()} disabled={busy} className="rounded-lg border border-white/20 px-3 py-2 text-xs disabled:opacity-40">{busy ? "刷新中…" : "刷新全部任务状态"}</button>
+      </div>
+      {result.tasks.map((task) => <p key={task.prompt_id} className="break-all text-xs text-emerald-200">镜头 {task.shot_number} · {task.status === "completed" ? "已完成" : task.status === "failed" ? "失败" : task.status === "unavailable" ? "暂不可查询" : task.status === "running" ? "生成中" : "排队中"} · 任务 {task.prompt_id} · 种子 {task.seed}</p>)}
       {result.failed_shots.map((item) => <p key={item.shot_id} className="text-xs text-rose-200">镜头 {item.shot_number}：{item.reason}</p>)}
       {result.skipped_shots.map((item) => <p key={item.shot_id} className="text-xs text-amber-200">镜头 #{item.shot_id}：{item.reason}</p>)}
     </div>}
