@@ -892,6 +892,7 @@ def render_episode_from_shots(
                 400,
                 f"本集镜头视频总时长为 {total_video_duration:.1f} 秒，必须控制在 90–150 秒；请调整镜头时长或视频生成设置后再合成。",
             )
+        _EPISODE_RENDER_CONTEXT.duration_seconds = total_video_duration
         filters.extend(video_filters)
         audio_filters, audio_label = build_episode_audio_filter(
             [shot.id for shot in shots], transition_items
@@ -1231,7 +1232,9 @@ def _run_episode_render_ffmpeg(args):
         })
 
     run_ffmpeg_with_progress(
-        args, progress_callback=report,
+        args,
+        duration_seconds=getattr(_EPISODE_RENDER_CONTEXT, "duration_seconds", None),
+        progress_callback=report,
         cancel_event=runtime["cancel"],
     )
     if runtime["cancel"].is_set():
