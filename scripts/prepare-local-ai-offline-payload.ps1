@@ -50,6 +50,8 @@ $oldModels = $env:OLLAMA_MODELS
 $oldHost = $env:OLLAMA_HOST
 $oldKeepAlive = $env:OLLAMA_KEEP_ALIVE
 $oldNoCloud = $env:OLLAMA_NO_CLOUD
+$oldNumParallel = $env:OLLAMA_NUM_PARALLEL
+$oldMaxLoadedModels = $env:OLLAMA_MAX_LOADED_MODELS
 
 try {
     New-Item -ItemType Directory -Path $temp, $logs -Force | Out-Null
@@ -93,6 +95,8 @@ try {
     $env:OLLAMA_HOST = "127.0.0.1:11435"
     $env:OLLAMA_KEEP_ALIVE = "5m"
     $env:OLLAMA_NO_CLOUD = "1"
+    $env:OLLAMA_NUM_PARALLEL = "1"
+    $env:OLLAMA_MAX_LOADED_MODELS = "1"
 
     $serverOut = Join-Path $logs "ollama-server.log"
     $serverErr = Join-Path $logs "ollama-server-error.log"
@@ -255,6 +259,8 @@ This notice is attribution and provenance information, not a legal opinion or a 
         )
         model_runtime_mode = "Ollama selects its supported backend at runtime; no GPU acceleration is promised without a device-specific test."
         cloud_features_disabled = $true
+        minimum_system_ram_bytes = 8GB
+        recommended_system_ram_bytes = 16GB
         network_used_during_bundle_creation = $true
         network_required_after_install = $false
     }
@@ -273,6 +279,8 @@ finally {
     if ($null -eq $oldHost) { Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue } else { $env:OLLAMA_HOST = $oldHost }
     if ($null -eq $oldKeepAlive) { Remove-Item Env:OLLAMA_KEEP_ALIVE -ErrorAction SilentlyContinue } else { $env:OLLAMA_KEEP_ALIVE = $oldKeepAlive }
     if ($null -eq $oldNoCloud) { Remove-Item Env:OLLAMA_NO_CLOUD -ErrorAction SilentlyContinue } else { $env:OLLAMA_NO_CLOUD = $oldNoCloud }
+    if ($null -eq $oldNumParallel) { Remove-Item Env:OLLAMA_NUM_PARALLEL -ErrorAction SilentlyContinue } else { $env:OLLAMA_NUM_PARALLEL = $oldNumParallel }
+    if ($null -eq $oldMaxLoadedModels) { Remove-Item Env:OLLAMA_MAX_LOADED_MODELS -ErrorAction SilentlyContinue } else { $env:OLLAMA_MAX_LOADED_MODELS = $oldMaxLoadedModels }
     if (Test-Path -LiteralPath $temp) {
         Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
     }
