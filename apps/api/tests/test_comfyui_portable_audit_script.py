@@ -34,9 +34,9 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
     def test_archive_listing_optional_fields_are_guarded(self):
         source_path = REPO_ROOT / "scripts" / "audit-comfyui-portable-dependencies.ps1"
         source = source_path.read_text(encoding="utf-8")
-        self.assertEqual(source.count('ContainsKey("Folder")'), 2)
-        self.assertEqual(source.count('ContainsKey("Attributes")'), 2)
-        self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
+        self.assertEqual(source.count('ContainsKey("Folder")'), 4)
+        self.assertEqual(source.count('ContainsKey("Attributes")'), 4)
+        self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 4)
         self.assertIn('"e", "-y", "-spd"', source)
         self.assertIn("return $entries.ToArray()", source)
         self.assertIn('if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive -and !$record.ContainsKey("Type"))', source)
