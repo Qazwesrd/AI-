@@ -376,9 +376,12 @@ try {
 
     $zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
     "$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
-    if (!(Test-Path -LiteralPath "$target.sha256" -PathType Leaf) -or
-        (Get-Content -LiteralPath "$target.sha256" -Raw) -notmatch ("(?i)^" + [regex]::Escape($zipHash) + "\\s+")) {
-        throw "完整离线 ZIP 的 SHA-256 清单写入或回读校验失败。"
+    if (!(Test-Path -LiteralPath "$target.sha256" -PathType Leaf)) {
+        throw "完整离线 ZIP 的 SHA-256 清单写入失败。"
+    }
+    $checksumLine = (Get-Content -LiteralPath "$target.sha256" -Raw).Trim()
+    if ($checksumLine -cne "$zipHash  $($zipItem.Name)") {
+        throw "完整离线 ZIP 的 SHA-256 清单回读校验失败。"
     }
 
     Write-Host ("离线套件已生成：{0}" -f $target)
