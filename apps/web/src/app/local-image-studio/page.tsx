@@ -3,6 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+type LocalImageRuntime = {
+  status: string;
+  installed?: boolean;
+  managed_by_application?: boolean;
+  process_id?: number | null;
+  runtime_mode?: string | null;
+  install_directory?: string;
+  checkpoint_count?: number;
+  message?: string;
+  hardware?: { reasons?: string[]; note?: string };
+};
+
 type ImageTask = { prompt_id: string; status: string; images?: Array<{ filename: string; subfolder: string; type: string }> };
 type TargetShot = { id: number; shot_number: number; scene_name: string; visual_description: string };
 type TargetEpisode = { id: number; episode_number: number; title: string; shots: TargetShot[] };
@@ -549,6 +561,9 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
 
 export default function LocalImageStudioPage() {
   const [models, setModels] = useState<string[]>([]);
+  const [runtime, setRuntime] = useState<LocalImageRuntime | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeError, setRuntimeError] = useState("");
   const [checkpoint, setCheckpoint] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("低质量、模糊、畸形肢体、多余手指、文字、水印");
@@ -580,6 +595,40 @@ export default function LocalImageStudioPage() {
   const [loadingVersions, setLoadingVersions] = useState<number | null>(null);
   const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
 
+  const refreshRuntime = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取本地引擎状态失败");
+      setRuntime(data as LocalImageRuntime);
+      setRuntimeError("");
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "读取本地引擎状态失败");
+    }
+  }, []);
+
+  async function controlRuntime(action: "start" | "stop") {
+    setRuntimeBusy(true);
+    setRuntimeError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime/${action}`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || (action === "start" ? "启动本地引擎失败" : "停止本地引擎失败"));
+      if (action === "start") setRuntime((current) => ({ ...(current || {}), ...data, status: data.status || "starting" }));
+      await refreshRuntime();
+      if (action === "start") setMessage("已请求启动本地 ComfyUI。引擎完成健康检查后即可刷新模型列表；首次启动可能需要一些时间。");
+      else {
+        setModels([]);
+        setCheckpoint("");
+        setMessage("本地 ComfyUI 已停止。");
+      }
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "本地引擎操作失败");
+    } finally {
+      setRuntimeBusy(false);
+    }
+  }
+
   const refreshModels = useCallback(async () => {
     setChecking(true); setError("");
     try {
@@ -598,6 +647,12 @@ export default function LocalImageStudioPage() {
       setError(err instanceof Error ? err.message : "未连接本机 ComfyUI");
     } finally { setChecking(false); }
   }, []);
+
+  useEffect(() => {
+    void refreshRuntime();
+    const timer = window.setInterval(() => { void refreshRuntime(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [refreshRuntime]);
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
 
@@ -770,6 +825,35 @@ export default function LocalImageStudioPage() {
         <h1 className="mt-2 text-3xl font-bold">本地图片生成工作台</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">使用已安装并正在运行的 ComfyUI 和本地图片模型生成图片。所有生成请求只发送到本机 127.0.0.1:8188，不调用云端 API。</p>
       </header>
+
+      <section className="rounded-2xl border border-cyan-300/20 bg-cyan-950/15 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">本地图片引擎</h2>
+            <p className="mt-1 text-sm text-white/55">引擎随完整离线安装套件部署在本机。不会自动启动、联网下载模型或切换云端服务。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => void refreshRuntime()} disabled={runtimeBusy} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40">刷新状态</button>
+            {runtime?.status === "ready" ? (
+              runtime.managed_by_application ? <button type="button" onClick={() => void controlRuntime("stop")} disabled={runtimeBusy} className="rounded-lg border border-rose-300/30 px-3 py-2 text-sm text-rose-100 disabled:opacity-40">{runtimeBusy ? "处理中…" : "停止本地引擎"}</button> : <span className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/55">检测到外部引擎，本软件不会接管或停止</span>
+            ) : runtime?.status === "starting" ? (
+              <span className="rounded-lg border border-amber-300/30 px-3 py-2 text-xs text-amber-100">正在启动…</span>
+            ) : (
+              <button type="button" onClick={() => void controlRuntime("start")} disabled={runtimeBusy || !runtime?.installed} className="rounded-lg bg-cyan-200 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">{runtimeBusy ? "处理中…" : "启动本地引擎"}</button>
+            )}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg bg-black/20 p-3"><p className="text-xs text-white/45">引擎状态</p><p className="mt-1 text-sm font-medium">{runtime?.status === "ready" ? "运行正常" : runtime?.status === "starting" ? "启动中" : runtime?.status === "stopped" ? "已停止" : runtime?.status === "not_installed" ? "未安装" : runtime?.status === "failed" ? "启动失败" : runtime?.status || "检测中"}</p></div>
+          <div className="rounded-lg bg-black/20 p-3"><p className="text-xs text-white/45">运行模式</p><p className="mt-1 text-sm font-medium">{runtime?.runtime_mode === "cpu" ? "CPU 模式" : runtime?.runtime_mode === "gpu" ? "GPU 模式" : "尚未启动/未知"}</p></div>
+          <div className="rounded-lg bg-black/20 p-3"><p className="text-xs text-white/45">已发现模型</p><p className="mt-1 text-sm font-medium">{runtime?.checkpoint_count ?? models.length}</p></div>
+        </div>
+        {runtime?.message && <p className="mt-3 text-sm text-white/70">{runtime.message}</p>}
+        {runtime?.status === "not_installed" && <p className="mt-2 text-xs text-amber-200">当前没有发现引擎文件。请使用包含 ComfyUI-Payload 的完整离线安装套件重新安装；单独运行 Setup.exe 不包含引擎数据。</p>}
+        {runtime?.runtime_mode === "cpu" && <p className="mt-2 text-xs text-amber-200">当前使用 CPU 模式，生成速度会明显慢于受支持的独立 GPU。不会假称集显获得 GPU 加速。</p>}
+        {runtime?.install_directory && <p className="mt-2 break-all text-xs text-white/40">安装位置：{runtime.install_directory}</p>}
+        {runtimeError && <p role="alert" className="mt-3 text-sm text-rose-200">{runtimeError}</p>}
+      </section>
 
       <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
