@@ -208,5 +208,56 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
 
 
+    def test_media_pause_only_pauses_local_queued_task_without_remote_id(self):
+        task = Mock(task_type="storyboard_video", status="queued", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        with patch("app.routers.tasks.remove_queued_task", return_value=True) as remove:
+            result = control_unified_task("media", 61, "pause", db=db)
+        self.assertEqual(task.status, "paused")
+        self.assertTrue(result["success"])
+        remove.assert_called_once_with(db, "media", 61)
+        db.commit.assert_called_once()
+
+    def test_media_resume_requeues_without_submitting_ai(self):
+        task = Mock(task_type="video", status="paused", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        with patch("app.routers.tasks.enqueue_task", return_value={"queue_id": 8, "position": 1}) as enqueue:
+            result = control_unified_task("media", 62, "resume", db=db)
+        self.assertEqual(task.status, "queued")
+        self.assertEqual(result["queue"]["position"], 1)
+        enqueue.assert_called_once_with(db, "media", 62, priority=0, reason="用户手动恢复媒体等待任务")
+        db.commit.assert_called_once()
+
+    def test_media_pause_refuses_task_already_accepted_by_remote_engine(self):
+        task = Mock(task_type="storyboard_video", status="submitted", remote_task_id="remote-123")
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 63, "pause", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+    def test_media_pause_refuses_active_local_execution_lease(self):
+        task = Mock(task_type="speech", status="queued", remote_task_id=None)
+        lease = Mock(status="active")
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, lease]
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 64, "pause", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+    def test_media_resume_requires_paused_state(self):
+        task = Mock(task_type="video", status="queued", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 65, "resume", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
