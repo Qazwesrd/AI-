@@ -3,7 +3,6 @@ import json
 import shutil
 import uuid
 import re
-import uuid
 import urllib.request
 from pathlib import Path
 from typing import Literal, Optional
@@ -78,6 +77,27 @@ def _read_text(path: Path):
         except UnicodeDecodeError:
             continue
     raise ValueError("字幕文件编码无法识别，请另存为 UTF-8 格式")
+
+
+def _subtitle_ownership(db, source_path):
+    """Carry project/episode ownership forward when a subtitle is translated or dubbed."""
+    normalized = str(source_path)
+    track = db.query(SubtitleTrack).filter(SubtitleTrack.file_path == normalized).first()
+    if track:
+        return track.project_id, track.episode_id
+    media = db.query(MediaFile).filter(MediaFile.file_path == normalized).first()
+    metadata = media.metadata_json if media and isinstance(media.metadata_json, dict) else {}
+    project_id = metadata.get("project_id")
+    episode_id = metadata.get("episode_id")
+    try:
+        project_id = int(project_id) if project_id not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        project_id = None
+    try:
+        episode_id = int(episode_id) if episode_id not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        episode_id = None
+    return project_id, episode_id
 
 
 def _chat_completion(base, key, model, cues, target_language):
@@ -183,6 +203,7 @@ def translate_subtitles(data: TranslateInput, db: Session = Depends(get_db)):
         if source.suffix.lower() != ".srt":
             raise HTTPException(400, "当前版本的 AI 字幕翻译仅支持 SRT；请先将 ASS/SSA/VTT 转换为 SRT")
         cues = parse_srt(_read_text(source))
+        project_id, episode_id = _subtitle_ownership(db, source)
         config, key, base = get_provider(db, data.provider, data.confirm_paid)
         if getattr(config, "purpose", "text") not in ("text", "translation", "general"):
             raise HTTPException(400, "请选择已配置的文本类 AI 服务商进行字幕翻译")
@@ -199,12 +220,18 @@ def translate_subtitles(data: TranslateInput, db: Session = Depends(get_db)):
         filename = filename[:140] + "_" + uuid.uuid4().hex[:8] + ".srt"
         destination = SUBTITLE_DIR / filename
         destination.write_text(render_srt(output_cues), encoding="utf-8-sig")
-        track = SubtitleTrack(name=filename, file_path=str(destination), format="srt",
-                              language={"zh": "zh-CN", "en": "en", "zh-en": "zh-CN+en"}[data.target_language])
+        track = SubtitleTrack(
+            name=filename, file_path=str(destination), format="srt",
+            language={"zh": "zh-CN", "en": "en", "zh-en": "zh-CN+en"}[data.target_language],
+            project_id=project_id, episode_id=episode_id,
+        )
         db.add(track)
         db.add(MediaFile(name=filename, category="other", file_path=str(destination),
                          mime_type="application/x-subrip", file_size=destination.stat().st_size,
-                         metadata_json={"subtitle_language": data.target_language, "source": str(source)}))
+                         metadata_json={
+                             "subtitle_language": data.target_language, "source": str(source),
+                             "project_id": project_id, "episode_id": episode_id,
+                         }))
         db.add(AIUsageLog(provider=data.provider, model=data.model, task="subtitle_translation",
                           status="completed", detail=f"字幕条数：{len(cues)}；目标语言：{data.target_language}"))
         db.commit()
@@ -225,6 +252,7 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
         if subtitle.suffix.lower() != ".srt":
             raise HTTPException(400, "当前版本的字幕配音仅支持 SRT 文件")
         cues = parse_srt(_read_text(subtitle))
+        project_id, episode_id = _subtitle_ownership(db, subtitle)
         config, key, base = get_provider(db, data.provider, data.confirm_paid)
         if getattr(config, "purpose", "text") not in ("text", "audio", "speech"):
             raise HTTPException(400, "请选择支持语音合成的服务商")
@@ -247,6 +275,8 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
                          status="pending", prompt=f"字幕逐条配音：{subtitle.name}",
                          request_data={"fingerprint": fingerprint, "voice": data.voice,
                                        "speed": data.speed, "cue_count": len(cues),
+                                       "subtitle_source": str(subtitle),
+                                       "project_id": project_id, "episode_id": episode_id,
                                        "confirm_paid": data.confirm_paid})
         db.add(task)
         db.commit()
@@ -302,7 +332,10 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
             task.error = None
             db.add(MediaFile(name=filename, category="audio", file_path=str(destination),
                              mime_type="audio/mpeg", file_size=destination.stat().st_size,
-                             metadata_json={"subtitle_source": str(subtitle), "voice": data.voice}))
+                             metadata_json={
+                                 "subtitle_source": str(subtitle), "voice": data.voice,
+                                 "project_id": project_id, "episode_id": episode_id,
+                             }))
             db.add(AIUsageLog(provider=data.provider, model=data.model, task="subtitle_dubbing",
                               status="completed", detail=f"字幕条数：{len(cues)}；语音：{data.voice}"))
             db.commit()
@@ -334,6 +367,7 @@ def translate_subtitles_locally(data: LocalTranslateInput, db: Session = Depends
     if source.suffix.lower() != ".srt":
         raise HTTPException(400, "本机字幕翻译当前仅支持 SRT。")
     cues = parse_srt(_read_text(source))
+    project_id, episode_id = _subtitle_ownership(db, source)
     try:
         installed = {item["name"] for item in _installed_models()}
     except HTTPException:
@@ -413,6 +447,8 @@ def translate_subtitles_locally(data: LocalTranslateInput, db: Session = Depends
         file_path=str(destination),
         format="srt",
         language={"zh": "zh-CN", "en": "en", "zh-en": "zh-CN+en"}[data.target_language],
+        project_id=project_id,
+        episode_id=episode_id,
     )
     media_record = MediaFile(
         name=filename,
@@ -424,6 +460,8 @@ def translate_subtitles_locally(data: LocalTranslateInput, db: Session = Depends
             "subtitle_language": data.target_language,
             "source": str(source),
             "local_model": data.model,
+            "project_id": project_id,
+            "episode_id": episode_id,
             "network_used": False,
         },
     )
@@ -479,6 +517,7 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
         if source.suffix.lower() != ".srt":
             raise HTTPException(400, "本机离线配音当前仅支持 SRT 字幕。")
         cues = parse_srt(_read_text(source))
+        project_id, episode_id = _subtitle_ownership(db, source)
         job_dir, segment_paths = synthesize_local_sapi_cues(cues, data.voice, data.rate, AUDIO_DIR)
         generated = []
         filters = []
@@ -526,6 +565,8 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
             prompt=f"本机离线字幕配音：{source.name}",
             request_data={
                 "subtitle_source": str(source),
+                "project_id": project_id,
+                "episode_id": episode_id,
                 "voice": data.voice,
                 "rate": data.rate,
                 "cue_count": len(cues),
@@ -548,6 +589,8 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
             duration=duration,
             metadata_json={
                 "subtitle_source": str(source),
+                "project_id": project_id,
+                "episode_id": episode_id,
                 "voice": data.voice,
                 "local_tts": True,
                 "network_used": False,
