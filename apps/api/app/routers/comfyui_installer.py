@@ -171,6 +171,7 @@ def parse_windows_video_adapters(payload):
             "name": name.strip()[:200],
             "vendor": classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None),
             "vram_bytes": None,
+            "recommended_asset": recommend_official_asset(classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None), name, platform.machine()),
             "vram_note": "Windows CIM 的 AdapterRAM 字段可能被 32 位截断，因此不作为显存依据；显存需由对应厂商工具单独验证。",
         })
     return adapters
