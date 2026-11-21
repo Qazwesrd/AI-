@@ -102,13 +102,13 @@ type ReferencePreflightResult = {
   checked_reference_count: number;
   references_ready: boolean;
   reference_conditioning_ready: boolean;
-  references: Array<{ category: "characters" | "scenes" | "props"; label: string; asset_id: number; media_file_id: number; ready: boolean; reason?: string }>;
+  references: Array<{ category: "characters" | "scenes" | "props"; label: string; asset_id: number; media_file_id: number; shot_ids: number[]; ready: boolean; reason?: string }>;
   failures: Array<{ label: string; asset_id: number; reason: string }>;
   comfyui?: { message?: string };
   message?: string;
 };
 
-function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
+function StoryboardConsistencyPanel({ projectId, checkpoint, style, width, height, steps }: { projectId: string; checkpoint: string; style: (typeof styles)[number]; width: string; height: string; steps: string }) {
   const [visualStyle, setVisualStyle] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [characters, setCharacters] = useState("");
@@ -208,6 +208,27 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     finally { setBusy(false); }
   }
 
+  async function generateReferenceShot(shotId: number) {
+    if (!checkpoint) { setError("请先在页面上方选择本机已安装的图片模型。"); return; }
+    const accepted = window.confirm(`确认使用镜头 #${shotId} 已上传的角色、场景和道具参考图，在本机 ComfyUI 开始生成？这会占用电脑显卡和内存。`);
+    if (!accepted) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/projects/${projectId}/consistency/reference-generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shot_id: shotId, checkpoint, negative_prompt: negativePrompt, style,
+          width: Number(width), height: Number(height), steps: Number(steps), cfg: 7,
+          confirm_local_generation: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "参考图条件生图提交失败");
+      setNotice(`镜头 #${shotId} 已提交到本机 ComfyUI，任务编号：${data.prompt_id}。生成仍在本机进行。`);
+    } catch (err) { setError(err instanceof Error ? err.message : "参考图条件生图提交失败"); }
+    finally { setBusy(false); }
+  }
+
   async function uploadReference(reference: ReferencePreflightResult["references"][number]) {
     if (!reference.ready) return;
     const accepted = window.confirm(`确认将这张${reference.label}参考图上传到本机 ComfyUI？\n\n只会上传到本机 127.0.0.1，不会发送到云端，也不会开始生成。`);
@@ -287,7 +308,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
         <div className="mt-2 max-h-64 space-y-2 overflow-auto">{result.shots.map((shot) => <div key={shot.shot_id} className="rounded bg-black/20 p-2"><p className="font-medium">镜头 {shot.shot_number} · #{shot.shot_id}</p><pre className="mt-1 whitespace-pre-wrap break-words">{shot.prompt_preview || "尚无图片提示词或一致性规则"}</pre></div>)}</div>
       </details>
     </div>}
-    {referencePreflight && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs"><p>已检查参考图 {referencePreflight.checked_reference_count} 张；文件与项目归属：{referencePreflight.references_ready ? "通过" : "未通过"}；ComfyUI 条件生图：{referencePreflight.reference_conditioning_ready ? "已具备节点和模型" : "尚未具备完整条件"}。</p>{referencePreflight.failures?.map((item, index: number) => <p key={index} className="text-amber-200">{item.label}素材 #{item.asset_id}：{item.reason}</p>)}{referencePreflight.references?.filter((item) => item.ready).map((item) => <div key={`${item.category}-${item.asset_id}-${item.media_file_id}`} className="flex flex-wrap items-center justify-between gap-2 rounded bg-black/20 p-2"><span>{item.label}素材 #{item.asset_id} · 图片 #{item.media_file_id}</span><button type="button" disabled={busy} onClick={() => void uploadReference(item)} className="rounded border border-cyan-300/30 px-3 py-1.5 text-cyan-100 disabled:opacity-40">确认上传到本机 ComfyUI</button></div>)}<p className="text-white/50">{referencePreflight.comfyui?.message}</p><p className="text-white/40">预检不会上传图片；只有点击对应按钮并再次确认后才会上传到本机 ComfyUI，上传本身不会启动生成。</p></div>}
+    {referencePreflight && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs"><p>已检查参考图 {referencePreflight.checked_reference_count} 张；文件与项目归属：{referencePreflight.references_ready ? "通过" : "未通过"}；ComfyUI 条件生图：{referencePreflight.reference_conditioning_ready ? "已具备节点和模型" : "尚未具备完整条件"}。</p>{referencePreflight.failures?.map((item, index: number) => <p key={index} className="text-amber-200">{item.label}素材 #{item.asset_id}：{item.reason}</p>)}{Array.from(new Set(referencePreflight.references?.flatMap((item) => item.ready ? item.shot_ids : []) || [])).map((shotId) => <div key={`shot-${shotId}`} className="flex items-center justify-between gap-2 rounded bg-black/30 p-2"><span>镜头 #{shotId} · 使用该镜头全部已上传参考图</span><button type="button" disabled={busy || !checkpoint} onClick={() => void generateReferenceShot(shotId)} className="rounded border border-emerald-300/30 px-3 py-1.5 text-emerald-100 disabled:opacity-40">开始条件生图</button></div>)}{referencePreflight.references?.filter((item) => item.ready).map((item) => <div key={`${item.category}-${item.asset_id}-${item.media_file_id}`} className="flex flex-wrap items-center justify-between gap-2 rounded bg-black/20 p-2"><span>{item.label}素材 #{item.asset_id} · 图片 #{item.media_file_id}</span><button type="button" disabled={busy} onClick={() => void uploadReference(item)} className="rounded border border-cyan-300/30 px-3 py-1.5 text-cyan-100 disabled:opacity-40">确认上传到本机 ComfyUI</button></div>)}<p className="text-white/50">{referencePreflight.comfyui?.message}</p><p className="text-white/40">预检不会上传图片；只有点击对应按钮并再次确认后才会上传到本机 ComfyUI，上传本身不会启动生成。</p></div>}
     <p className="text-xs text-amber-200/80">本阶段新增参考图文件安全与项目归属预检，以及本机 ComfyUI 节点/模型检测；尚未将图片上传为 ComfyUI 条件输入。不会自动下载插件或模型。</p>
     <p className="text-xs text-white/40">本功能仅生成和保存本地提示词规则，不会调用云端 AI，也不会自动开始生图；ComfyUI 仍需用户单独确认生成。</p>
   </section>;
@@ -814,7 +835,7 @@ export default function LocalImageStudioPage() {
       </section>
 
 
-      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}
+      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} checkpoint={checkpoint} style={style} width={width} height={height} steps={steps} />}
       <StoryboardBatchImagePanel projects={targets} checkpoint={checkpoint} style={style} width={width} height={height} steps={steps} />\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
