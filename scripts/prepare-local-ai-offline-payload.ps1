@@ -61,8 +61,8 @@ try {
     $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ollama/ollama/releases/latest" -Headers $headers -TimeoutSec 30
     if (!$release.tag_name -or $release.tag_name -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$' -or !$release.assets) {
         throw "无法读取有效的 Ollama 官方 Release 元数据。"
-}
-$asset = @($release.assets | Where-Object { $_.name -ceq "ollama-windows-amd64.zip" }) | Select-Object -First 1
+    }
+    $asset = @($release.assets | Where-Object { $_.name -ceq "ollama-windows-amd64.zip" }) | Select-Object -First 1
     if (!$asset -or $asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
         throw "Ollama 官方 Windows x64 运行包缺少可信 SHA-256。"
     }
