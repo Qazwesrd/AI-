@@ -45,7 +45,9 @@ jobs:
             "scripts/prepare-comfyui-offline-bundle.ps1",
             "scripts/install-comfyui-offline.ps1",
             "scripts/create-comfyui-offline-installer.ps1",
-            "scripts/audit-comfyui-portable-dependencies.ps1"
+            "scripts/audit-comfyui-portable-dependencies.ps1",
+            "scripts/prepare-local-ai-offline-payload.ps1",
+            "scripts/install-local-ai-offline.ps1"
           )) {
             $tokens = $null
             $errors = $null
