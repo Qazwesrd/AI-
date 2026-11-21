@@ -413,3 +413,63 @@ def validate_archive_entries(entries):
             raise ValueError("压缩包解压总大小超过安全上限")
         checked.append({"path": "/".join(parts), "size": size})
     return checked
+
+
+
+def build_comfyui_install_plan(asset: dict, release_tag: str, free_disk_bytes: int | None,
+                              install_target: str):
+    """Build a reviewed plan only; it never downloads, extracts, or launches files."""
+    verified = validate_official_asset_for_install(asset, release_tag)
+    if not isinstance(install_target, str) or not install_target:
+        raise ValueError("安装目标目录无效")
+    # Keep the archive until its digest is verified, then extract into a staging
+    # directory. Reserve both archive bytes and conservative engine workspace.
+    required_free_bytes = verified["size_bytes"] + ENGINE_RESERVE_BYTES
+    if free_disk_bytes is None:
+        raise ValueError("无法读取目标磁盘剩余空间，不能生成安装计划")
+    if free_disk_bytes < required_free_bytes:
+        raise ValueError(
+            f"目标磁盘空间不足：需要至少 {required_free_bytes} 字节，当前仅有 {free_disk_bytes} 字节"
+        )
+    return {
+        "status": "plan_ready",
+        "version": release_tag,
+        "asset_name": verified["name"],
+        "download_url": verified["url"],
+        "archive_size_bytes": verified["size_bytes"],
+        "sha256": verified["sha256"],
+        "install_target": install_target,
+        "required_free_bytes": required_free_bytes,
+        "free_disk_bytes": free_disk_bytes,
+        "download_started": False,
+        "installation_started": False,
+        "network_used": False,
+        "note": "安装计划已生成，但尚未下载、解压或启动。真正下载前还需单独确认；下载完成后必须重新计算 SHA-256 并通过校验。",
+    }
+
+
+@router.post("/install-plan")
+def comfyui_install_plan(payload: dict):
+    """Create a disk-checked install plan after an explicit user confirmation."""
+    from fastapi import HTTPException
+    if not isinstance(payload, dict) or payload.get("confirm_plan") is not True:
+        raise HTTPException(status_code=400, detail="需要先明确确认生成安装计划")
+    asset_name = payload.get("asset_name")
+    if not isinstance(asset_name, str) or asset_name not in ALLOWED_ASSET_NAMES:
+        raise HTTPException(status_code=400, detail="请选择官方列表中的 Windows 安装包")
+    try:
+        catalog = fetch_official_release_catalog()
+        asset = next((item for item in catalog["assets"] if item["name"] == asset_name), None)
+        if asset is None:
+            raise ValueError("官方最新版本中没有该安装包，或缺少可信 SHA-256")
+        home = Path.home()
+        disk_root = home
+        while not disk_root.exists() and disk_root != disk_root.parent:
+            disk_root = disk_root.parent
+        free_disk = shutil.disk_usage(disk_root).free
+        return build_comfyui_install_plan(
+            asset, catalog["version"], free_disk,
+            str(home / "AIComicStudio" / "ComfyUI"),
+        )
+    except (RuntimeError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
