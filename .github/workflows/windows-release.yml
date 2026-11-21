@@ -47,7 +47,8 @@ jobs:
             "scripts/create-comfyui-offline-installer.ps1",
             "scripts/audit-comfyui-portable-dependencies.ps1",
             "scripts/prepare-local-ai-offline-payload.ps1",
-            "scripts/install-local-ai-offline.ps1"
+            "scripts/install-local-ai-offline.ps1",
+            "scripts/tests/test-local-ai-offline-install.ps1"
           )) {
             $tokens = $null
             $errors = $null
@@ -62,6 +63,10 @@ jobs:
             }
             Write-Host "PowerShell syntax is valid: $script"
           }
+
+      - name: Run local AI offline installer integration test
+        shell: pwsh
+        run: ./scripts/tests/test-local-ai-offline-install.ps1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
