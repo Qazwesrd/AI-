@@ -40,6 +40,8 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertEqual(source.count('ContainsKey("Attributes")'), 2)
         self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
         self.assertIn('"e", "-y", "-spd"', source)
+        self.assertIn('$extracted = Join-Path $Destination $leaf', source)
+        self.assertIn("Each evidence file gets a unique destination directory", source)
         self.assertIn("return $entries.ToArray()", source)
         self.assertIn('if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive -and !$record.ContainsKey("Type"))', source)
         self.assertIn("components = $components.ToArray()", source)
