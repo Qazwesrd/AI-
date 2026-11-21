@@ -40,7 +40,7 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertEqual(source.count('ContainsKey("Attributes")'), 4)
         self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
         self.assertIn("Expand-ValidatedArchive", source)
-        self.assertEqual(source.count('-match "(^|\\\\s)D"'), 2)
+        self.assertEqual(source.count('-match "(^|\\s)D"'), 2)
         self.assertIn('"x", "-y", "-sccUTF-8"', source)
         self.assertIn("10GB", source)
         self.assertIn("$destinationDrive.AvailableFreeSpace", source)
