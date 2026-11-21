@@ -181,8 +181,12 @@ def speech_task_is_in_flight(task):
     return task.status in ("queued", "submitting", "submission_unknown", "interrupted_unknown")
 
 
-def resolve_episode_shot_voice(shot, voice_by_character_id, default_voice):
+def resolve_episode_shot_voice(shot, voice_by_character_id, default_voice, speaker_character_id=None):
     character_ids = getattr(shot, "character_ids", None) or []
+    if speaker_character_id is not None:
+        if str(speaker_character_id) not in {str(value) for value in character_ids}:
+            raise ValueError("指定说话人不属于当前分镜")
+        return voice_by_character_id.get(str(speaker_character_id), default_voice)
     if len(character_ids) == 1:
         return voice_by_character_id.get(str(character_ids[0]), default_voice)
     return default_voice
@@ -1322,11 +1326,35 @@ class SpeechInput(BaseModel):
     force_regenerate: bool = False
 
 
+class EpisodeDialogueSegmentInput(BaseModel):
+    speaker_character_id: Optional[int] = None
+    text: str = Field(min_length=1, max_length=2000)
+
+
+def validate_dialogue_segments_for_shot(shot, segments):
+    if not segments:
+        return
+    if len(segments) > 20:
+        raise HTTPException(422, "每个镜头最多配置 20 条对白")
+    allowed_speakers = {
+        int(value) for value in (shot.character_ids or []) if str(value).isdigit()
+    }
+    for segment in segments:
+        if not segment.text.strip():
+            raise HTTPException(422, "对白内容不能为空或仅包含空格")
+        if segment.speaker_character_id is not None and segment.speaker_character_id not in allowed_speakers:
+            raise HTTPException(422, f"镜头 {shot.shot_number} 的对白说话人不属于该镜头角色")
+        if len(allowed_speakers) > 1 and segment.speaker_character_id is None:
+            raise HTTPException(422, f"镜头 {shot.shot_number} 有多个角色，请为每句对白指定说话人")
+
+
 class EpisodeSpeechInput(BaseModel):
     provider: str
     model: str
     voice: str = "alloy"
     voice_by_character_id: dict[str, str] = Field(default_factory=dict)
+    speaker_by_shot_id: dict[str, int] = Field(default_factory=dict)
+    dialogue_segments_by_shot_id: dict[str, list[EpisodeDialogueSegmentInput]] = Field(default_factory=dict)
     confirm_paid: bool = False
     speed: float = Field(default=1.0, ge=0.5, le=2.0)
 
@@ -1357,11 +1385,32 @@ def generate_episode_voice_track(
         raise HTTPException(422, "角色音色配置引用了不属于本集分镜的角色")
     if any(not str(value).strip() or len(str(value)) > 100 for value in data.voice_by_character_id.values()):
         raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
+    shots_by_id = {str(shot.id): shot for shot in shots}
+    unknown_speaker_shots = set(data.speaker_by_shot_id) - set(shots_by_id)
+    if unknown_speaker_shots:
+        raise HTTPException(422, "说话人配置引用了不属于本集的分镜")
+    for shot_key, speaker_id in data.speaker_by_shot_id.items():
+        if str(speaker_id) not in {str(value) for value in (shots_by_id[shot_key].character_ids or [])}:
+            raise HTTPException(422, "所选说话人不属于对应分镜")
+    unknown_segment_shots = set(data.dialogue_segments_by_shot_id) - set(shots_by_id)
+    if unknown_segment_shots:
+        raise HTTPException(422, "对白拆分引用了不属于本集的镜头")
+    for shot_key, segments in data.dialogue_segments_by_shot_id.items():
+        validate_dialogue_segments_for_shot(shots_by_id[shot_key], segments)
 
     def voice_for_shot(shot):
-        return resolve_episode_shot_voice(
-            shot, data.voice_by_character_id, data.voice
-        )
+        selected_speaker = data.speaker_by_shot_id.get(str(shot.id))
+        try:
+            return resolve_episode_shot_voice(
+                shot, data.voice_by_character_id, data.voice, selected_speaker
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    def voice_for_segment(shot, segment):
+        if segment.speaker_character_id is not None:
+            return data.voice_by_character_id.get(str(segment.speaker_character_id), data.voice)
+        return voice_for_shot(shot)
 
     # Prefer the real generated clip duration over the planned storyboard duration.
     # This keeps the voice timeline aligned with the video that will actually be rendered.
@@ -1400,10 +1449,206 @@ def generate_episode_voice_track(
     prior_tasks = db.query(MediaTask).filter(
         MediaTask.task_type == "episode_speech"
     ).order_by(MediaTask.id.desc()).all()
+    # Explicitly segmented dialogue is generated line-by-line so each speaker can use
+    # their own configured voice. Each line has its own idempotent task record.
+    segmented_shot_ids = {
+        int(key) for key, segments in data.dialogue_segments_by_shot_id.items() if segments
+    }
+    segmented_audio = {}
+    for shot_key, segments in data.dialogue_segments_by_shot_id.items():
+        if not segments:
+            continue
+        shot = shots_by_id[shot_key]
+        segment_paths = []
+        segment_durations = []
+        segment_failed = False
+        for segment_index, segment in enumerate(segments):
+            text_value = segment.text.strip()
+            selected_voice = voice_for_segment(shot, segment)
+            prior_segment = None
+            for prior in db.query(MediaTask).filter(
+                MediaTask.task_type == "episode_speech_segment"
+            ).order_by(MediaTask.id.desc()).all():
+                meta = prior.request_data if isinstance(prior.request_data, dict) else {}
+                if (
+                    meta.get("episode_id") == episode_id
+                    and meta.get("shot_id") == shot.id
+                    and meta.get("segment_index") == segment_index
+                    and meta.get("speaker_character_id") == segment.speaker_character_id
+                    and prior.provider == data.provider
+                    and prior.model == data.model
+                    and prior.prompt == text_value
+                    and meta.get("voice") == selected_voice
+                    and float(meta.get("speed", 1.0)) == float(data.speed)
+                ):
+                    prior_segment = prior
+                    break
+            if prior_segment and prior_segment.status == "completed" and prior_segment.result_path and Path(prior_segment.result_path).is_file():
+                segment_path = Path(prior_segment.result_path)
+                segment_info = probe_media(segment_path)
+                segment_duration = float((segment_info.get("format") or {}).get("duration") or 0)
+                if segment_duration <= 0:
+                    blocked_shots.add(shot.id)
+                    failures.append({
+                        "shot_number": shot.shot_number,
+                        "segment_index": segment_index,
+                        "task_id": prior_segment.id,
+                        "error": "已缓存的对白音频时长无效，请检查素材文件；系统不会自动重复请求以避免额外费用。",
+                    })
+                    segment_failed = True
+                    break
+                segment_paths.append(segment_path)
+                segment_durations.append(segment_duration)
+                continue
+            if prior_segment and speech_task_is_in_flight(prior_segment):
+                segment_failed = True
+                failures.append({
+                    "shot_number": shot.shot_number,
+                    "segment_index": segment_index,
+                    "task_id": prior_segment.id,
+                    "status": prior_segment.status,
+                    "error": "该句对白已有任务正在提交或等待核实；为避免重复扣费，本次不会再次提交。",
+                })
+                break
+            filename = f"episode_{episode_id}_shot_{shot.id}_line_{segment_index + 1}_{uuid.uuid4().hex[:8]}.mp3"
+            destination = AUDIO_DIR / filename
+            task = prior_segment if prior_segment and prior_segment.status == "pending" else MediaTask(
+                task_type="episode_speech_segment", provider=data.provider, model=data.model,
+                status="pending", prompt=text_value,
+                request_data={
+                    "episode_id": episode_id, "shot_id": shot.id,
+                    "shot_number": shot.shot_number, "segment_index": segment_index,
+                    "speaker_character_id": segment.speaker_character_id,
+                    "voice": selected_voice, "speed": data.speed,
+                    "confirm_paid": data.confirm_paid,
+                },
+            )
+            if prior_segment is None:
+                db.add(task)
+                db.commit()
+                db.refresh(task)
+            request_started = False
+            lease_acquired = False
+            try:
+                acquire_task_lease(db, "media", task.id, priority=2)
+                lease_acquired = True
+                task.status = "submitting"
+                task.error = None
+                db.commit()
+                payload = {
+                    "model": data.model, "input": text_value,
+                    "voice": selected_voice, "response_format": "mp3",
+                    "speed": data.speed,
+                }
+                request = urllib.request.Request(
+                    base + "/audio/speech",
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+                    method="POST",
+                )
+                request_started = True
+                with urllib.request.urlopen(request, timeout=300) as response:
+                    with destination.open("wb") as output:
+                        while True:
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            output.write(chunk)
+                if destination.stat().st_size < 128:
+                    raise RuntimeError("语音服务返回的音频文件为空或无效")
+                segment_info = probe_media(destination)
+                segment_duration = float((segment_info.get("format") or {}).get("duration") or 0)
+                if segment_duration <= 0:
+                    raise RuntimeError("语音服务返回的音频时长无效")
+                task.status = "completed"
+                task.result_path = str(destination)
+                task.error = None
+                task.request_data = {
+                    **(task.request_data if isinstance(task.request_data, dict) else {}),
+                    "audio_duration": segment_duration,
+                }
+                db.add(MediaFile(
+                    name=filename, category="audio", file_path=str(destination),
+                    mime_type="audio/mpeg", file_size=destination.stat().st_size,
+                ))
+                db.add(AIUsageLog(
+                    provider=data.provider, model=data.model, task="episode_speech_segment",
+                    status="completed",
+                    detail=f"分集：{episode_id}；镜头：{shot.id}；对白行：{segment_index + 1}；任务：{task.id}",
+                ))
+                db.commit()
+                release_task_lease(db, "media", task.id, True)
+                segment_paths.append(destination)
+                segment_durations.append(segment_duration)
+            except Exception as exc:
+                db.rollback()
+                task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+                if task:
+                    task.status = "submission_unknown" if request_started else "failed"
+                    task.error = (
+                        "语音请求已发出但结果无法确认；请核对服务商记录，勿直接重复提交。"
+                        if request_started else "语音请求尚未发出："
+                    ) + str(exc)[:1000]
+                    db.commit()
+                    if lease_acquired:
+                        release_task_lease(db, "media", task.id, False, task.error)
+                destination.unlink(missing_ok=True)
+                failures.append({
+                    "shot_number": shot.shot_number,
+                    "segment_index": segment_index,
+                    "task_id": task.id if task else None,
+                    "status": task.status if task else "failed",
+                    "error": str(exc)[:1000],
+                })
+                segment_failed = True
+                break
+        if segment_failed or not segment_paths:
+            blocked_shots.add(shot.id)
+            continue
+        combined_duration = sum(segment_durations)
+        target_duration = clip_durations.get(
+            shot.id, max(1.0, float(shot.duration_seconds or 5))
+        )
+        if combined_duration > target_duration * 1.5:
+            blocked_shots.add(shot.id)
+            failures.append({
+                "shot_number": shot.shot_number,
+                "error": f"拆分对白总时长 {combined_duration:.1f} 秒超过镜头时长 {target_duration:.1f} 秒的 1.5 倍，请延长镜头或精简对白。",
+            })
+            continue
+        if len(segment_paths) == 1:
+            shot_audio = segment_paths[0]
+        else:
+            shot_audio = AUDIO_DIR / f"episode_{episode_id}_shot_{shot.id}_dialogue_{uuid.uuid4().hex[:8]}.mp3"
+            concat_inputs = []
+            concat_filters = []
+            concat_labels = []
+            for index, segment_path in enumerate(segment_paths):
+                concat_inputs += ["-i", str(segment_path)]
+                concat_filters.append(
+                    f"[{index}:a:0]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=PTS-STARTPTS[line{index}]"
+                )
+                concat_labels.append(f"[line{index}]")
+            concat_filters.append("".join(concat_labels) + f"concat=n={len(segment_paths)}:v=0:a=1[out]")
+            run_ffmpeg(concat_inputs + [
+                "-filter_complex", ";".join(concat_filters), "-map", "[out]",
+                "-c:a", "libmp3lame", "-q:a", "3", str(shot_audio),
+            ])
+            db.add(MediaFile(
+                name=shot_audio.name, category="audio", file_path=str(shot_audio),
+                mime_type="audio/mpeg", file_size=shot_audio.stat().st_size,
+            ))
+            db.commit()
+        generated[shot.id] = shot_audio
+        speech_durations[shot.id] = combined_duration
+        segmented_audio[shot.id] = len(segment_paths)
+
     handled_shots = set()
     for prior in prior_tasks:
         prior_meta = prior.request_data if isinstance(prior.request_data, dict) else {}
         prior_shot_id = prior_meta.get("shot_id")
+        if prior_shot_id in segmented_shot_ids:
+            continue
         current_shot = next((item for item in shots if item.id == prior_shot_id), None)
         current_dialogue = (current_shot.dialogue or "").strip() if current_shot else None
         selected_voice = voice_for_shot(current_shot) if current_shot else data.voice
@@ -1472,10 +1717,10 @@ def generate_episode_voice_track(
             failures.append({"shot_number": shot.shot_number, "error": "单镜头对白超过4096字符，请先拆分对白"})
             continue
         selected_voice = voice_for_shot(shot)
-        if len(shot.character_ids or []) > 1:
+        if len(shot.character_ids or []) > 1 and str(shot.id) not in data.speaker_by_shot_id:
             warnings.append({
                 "shot_number": shot.shot_number,
-                "message": "该镜头包含多个角色，但对白没有拆分说话人；为避免错配，暂用默认音色。建议按说话人拆分对白镜头。",
+                "message": "该镜头包含多个角色且未指定说话人，暂用默认音色。请在分集工作台选择本镜头的对白说话人。",
             })
         filename = f"episode_{episode_id}_shot_{shot.id}_{uuid.uuid4().hex[:8]}.mp3"
         destination = AUDIO_DIR / filename
@@ -1498,6 +1743,7 @@ def generate_episode_voice_track(
                 request_data={"episode_id": episode_id, "shot_id": shot.id,
                               "shot_number": shot.shot_number, "voice": selected_voice,
                               "character_ids": shot.character_ids or [],
+                              "speaker_character_id": data.speaker_by_shot_id.get(str(shot.id)),
                               "speed": data.speed, "confirm_paid": data.confirm_paid},
             )
             db.add(task)
@@ -1649,6 +1895,7 @@ def generate_episode_voice_track(
             result_path=str(track_path),
             request_data={"episode_id": episode_id, "voice": data.voice,
                           "voice_by_character_id": data.voice_by_character_id,
+                          "segmented_shots": segmented_audio,
                           "shot_count": len(generated), "aligned_to_storyboard": True},
         )
         db.add(task)
@@ -1663,8 +1910,10 @@ def generate_episode_voice_track(
     return {
         "success": not failures, "episode_id": episode_id,
         "voice_track": str(track_path), "generated_shots": len(generated),
+        "generated_dialogue_segments": sum(segmented_audio.values()),
+        "segmented_shots": len(segmented_audio),
         "failures": failures, "warnings": warnings,
-        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，失败 {len(failures)} 个，提醒 {len(warnings)} 条。",
+        "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，拆分对白 {sum(segmented_audio.values())} 句，失败 {len(failures)} 个，提醒 {len(warnings)} 条。",
     }
 
 
@@ -2134,6 +2383,8 @@ class EpisodeSoundEffectInput(BaseModel):
 class EpisodeTimelineInput(BaseModel):
     shot_order: list[int]
     character_voice_profiles: dict[str, str] = Field(default_factory=dict)
+    speaker_by_shot_id: dict[str, int] = Field(default_factory=dict)
+    dialogue_segments_by_shot_id: dict[str, list[EpisodeDialogueSegmentInput]] = Field(default_factory=dict)
     subtitle_burn_in: bool = True
     subtitle_font_name: str = Field(default="Microsoft YaHei", min_length=1, max_length=80, pattern=r"^[A-Za-z0-9 _-]+$")
     subtitle_font_size: int = Field(default=36, ge=16, le=72)
@@ -2253,6 +2504,17 @@ def save_episode_edit_timeline(
         raise HTTPException(422, "角色音色配置引用了不属于本集分镜的角色")
     if any(not str(value).strip() or len(str(value)) > 100 for value in data.character_voice_profiles.values()):
         raise HTTPException(422, "角色音色名称不能为空且不能超过100个字符")
+    shots_by_id = {str(shot.id): shot for shot in shots}
+    if set(data.speaker_by_shot_id) - set(shots_by_id):
+        raise HTTPException(422, "说话人配置引用了不属于本集的分镜")
+    for shot_key, speaker_id in data.speaker_by_shot_id.items():
+        if str(speaker_id) not in {str(value) for value in (shots_by_id[shot_key].character_ids or [])}:
+            raise HTTPException(422, "所选说话人不属于对应分镜")
+    unknown_segment_shots = set(data.dialogue_segments_by_shot_id) - set(shots_by_id)
+    if unknown_segment_shots:
+        raise HTTPException(422, "对白拆分引用了不属于本集的镜头")
+    for shot_key, segments in data.dialogue_segments_by_shot_id.items():
+        validate_dialogue_segments_for_shot(shots_by_id[shot_key], segments)
     for selected_path, label in ((data.music_path, "背景音乐"), (data.voice_path, "对白配音")):
         if selected_path:
             audio_path = safe_storage_file(selected_path)

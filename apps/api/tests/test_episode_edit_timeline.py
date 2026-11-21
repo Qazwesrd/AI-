@@ -50,9 +50,14 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         self.character = VisualAsset(
             category="characters", name="主角", confirmed=True,
         )
-        self.db.add(self.character)
+        self.character_two = VisualAsset(
+            category="characters", name="对手", confirmed=True,
+        )
+        self.db.add_all([self.character, self.character_two])
         self.db.flush()
         self.shot_a.character_ids = [self.character.id]
+        self.shot_b.character_ids = [self.character.id, self.character_two.id]
+        self.shot_b.dialogue = "你终于来了。"
         self.db.add_all([self.shot_a, self.shot_b])
         self.db.commit()
 
@@ -97,11 +102,45 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
             reloaded["timeline"]["character_voice_profiles"],
             {str(self.character.id): "nova"},
         )
-        self.assertEqual(
+        self.assertIn(
+            {"id": self.character.id, "name": "主角"},
             reloaded["characters"],
-            [{"id": self.character.id, "name": "主角"}],
         )
         self.assertEqual(reloaded["shots"][0]["character_ids"], [self.character.id])
+
+    def test_speaker_by_shot_id_is_saved_and_returned(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            speaker_by_shot_id={str(self.shot_b.id): self.character_two.id},
+        )
+        save_episode_edit_timeline(self.episode_id, payload, self.db)
+        reloaded = get_episode_edit_timeline(self.episode_id, self.db)
+        self.assertEqual(
+            reloaded["timeline"]["speaker_by_shot_id"],
+            {str(self.shot_b.id): self.character_two.id},
+        )
+        self.assertEqual(
+            set(reloaded["shots"][1]["character_ids"]),
+            {self.character.id, self.character_two.id},
+        )
+
+    def test_rejects_speaker_not_assigned_to_shot(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            speaker_by_shot_id={str(self.shot_a.id): self.character_two.id},
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_rejects_speaker_for_shot_outside_episode(self):
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            speaker_by_shot_id={"99999": self.character.id},
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
 
     def test_rejects_voice_profile_for_character_outside_episode(self):
         payload = EpisodeTimelineInput(
