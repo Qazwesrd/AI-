@@ -21,7 +21,6 @@ ALLOWED_ASSET_NAMES = {
     "ComfyUI_windows_portable_nvidia_cu126.7z",
     "ComfyUI_windows_portable_amd.7z",
     "ComfyUI_windows_portable_intel.7z",
-    "ComfyUI_windows_portable_nvidia_arm64.7z",
 }
 
 
@@ -29,15 +28,14 @@ ALLOWED_ASSET_NAMES = {
 def recommend_official_asset(vendor: str, gpu_name: str | None = None, architecture: str | None = None):
     """Return a conservative asset filename suggestion; unknown hardware stays manual."""
     arch = (architecture or "").lower().replace("-", "").replace("_", "")
-    if vendor == "NVIDIA" and arch in {"arm64", "aarch64"}:
-        return "ComfyUI_windows_portable_nvidia_arm64.7z"
+    if arch not in {"amd64", "x8664", "x64"}:
+        return None
     if vendor == "NVIDIA":
         label = (gpu_name or "").lower()
-        # Official portable guidance reserves cu126 for GTX 10-series and older.
-        if re.search(r"(gtx\s*([0-9]{3,4})|geforce\s*([0-9]{3,4}))", label):
-            match = re.search(r"(?:gtx|geforce)\s*([0-9]{3,4})", label)
-            if match and int(match.group(1)) < 2000:
-                return "ComfyUI_windows_portable_nvidia_cu126.7z"
+        # Official guidance uses cu126 for GTX 10-series and older.
+        match = re.search(r"(?:gtx|geforce)\s*([0-9]{3,4})", label)
+        if match and int(match.group(1)) <= 1099:
+            return "ComfyUI_windows_portable_nvidia_cu126.7z"
         return "ComfyUI_windows_portable_nvidia.7z"
     if vendor == "AMD":
         return "ComfyUI_windows_portable_amd.7z"
@@ -798,78 +796,3 @@ def _run_download_task(task_id, asset, version, install_root):
             _DOWNLOAD_THREADS.pop(task_id, None)
 
 
-@router.post("/download/start")
-def start_comfyui_download(payload: dict):
-    """Start an official asset download only after a separate explicit confirmation."""
-    from fastapi import HTTPException
-    if not isinstance(payload, dict) or payload.get("confirm_download") is not True:
-        raise HTTPException(status_code=400, detail="下载前必须单独明确确认")
-    asset_name = payload.get("asset_name")
-    expected_version = payload.get("version")
-    if not isinstance(asset_name, str) or asset_name not in ALLOWED_ASSET_NAMES:
-        raise HTTPException(status_code=400, detail="请选择官方列表中的安装包")
-    try:
-        catalog = fetch_official_release_catalog()
-        if expected_version != catalog["version"]:
-            raise ValueError("官方版本已变化，请重新查询版本并生成安装计划")
-        asset = next((item for item in catalog["assets"] if item["name"] == asset_name), None)
-        if asset is None:
-            raise ValueError("官方资产不存在或没有可信 SHA-256")
-        root = Path.home() / "AIComicStudio" / "ComfyUI"
-        root.mkdir(parents=True, exist_ok=True)
-        free = shutil.disk_usage(root).free
-        build_comfyui_install_plan(asset, catalog["version"], free, str(root))
-        task_id = uuid.uuid4().hex
-        task = {
-            "task_id": task_id, "status": "queued", "asset_name": asset_name,
-            "version": catalog["version"], "received_bytes": 0,
-            "total_bytes": asset["size_bytes"], "percent": 0, "error": None,
-            "cancel_event": threading.Event(),
-        }
-        with _DOWNLOAD_TASKS_LOCK:
-            _DOWNLOAD_TASKS[task_id] = task
-            _persist_download_tasks_locked()
-            worker = threading.Thread(
-                target=_run_download_task,
-                args=(task_id, asset, catalog["version"], str(root)),
-                name=f"comfyui-download-{task_id[:8]}", daemon=True,
-            )
-            _DOWNLOAD_THREADS[task_id] = worker
-            worker.start()
-        return _public_download_task(task)
-    except (RuntimeError, ValueError, OSError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@router.get("/download/history")
-def list_comfyui_download_history():
-    with _DOWNLOAD_TASKS_LOCK:
-        return {"tasks": [_public_download_task(task) for task in list(_DOWNLOAD_TASKS.values())[-200:]]}
-
-
-@router.get("/download/{task_id}")
-def get_comfyui_download(task_id: str):
-    from fastapi import HTTPException
-    with _DOWNLOAD_TASKS_LOCK:
-        task = _DOWNLOAD_TASKS.get(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="下载任务不存在")
-        return _public_download_task(task)
-
-
-@router.post("/download/{task_id}/cancel")
-def cancel_comfyui_download(task_id: str):
-    from fastapi import HTTPException
-    with _DOWNLOAD_TASKS_LOCK:
-        task = _DOWNLOAD_TASKS.get(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="下载任务不存在")
-        if task["status"] in _TERMINAL_DOWNLOAD_STATES:
-            return _public_download_task(task)
-        task["cancel_event"].set()
-        task["status"] = "cancelling"
-        _persist_download_tasks_locked()
-        return _public_download_task(task)
-
-
-_restore_download_tasks()
