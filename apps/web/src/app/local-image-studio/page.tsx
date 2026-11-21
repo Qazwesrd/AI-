@@ -152,6 +152,60 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
   </section>;
 }
 
+
+type ReferenceCapabilityResult = {
+  reference_conditioning_ready: boolean;
+  reference_conditioning_nodes_ready: boolean;
+  reference_conditioning_models_ready: boolean;
+  missing_node_types: string[];
+  missing_model_files: string[];
+  reference_nodes: Record<string, { available: boolean; input_names?: string[]; adapter_models?: string[]; clip_vision_models?: string[]; reason?: string }>;
+  message: string;
+};
+
+function ReferenceCapabilityPanel() {
+  const [result, setResult] = useState<ReferenceCapabilityResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function inspect() {
+    setChecking(true); setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/reference-capabilities`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "参考图兼容性检测失败");
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "参考图兼容性检测失败");
+    } finally { setChecking(false); }
+  }
+
+  return <section className="space-y-3 rounded-2xl border border-cyan-300/20 bg-cyan-950/10 p-5">
+    <div><h2 className="text-lg font-semibold">本机参考图生图兼容性</h2>
+      <p className="mt-1 text-sm text-white/55">检查 ComfyUI 是否已有 IP-Adapter、CLIP Vision、Load Image 节点及对应模型。检测只读取本机节点信息，不安装、不下载、不生成。</p></div>
+    <button type="button" onClick={() => void inspect()} disabled={checking} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">{checking ? "正在检测本机节点…" : "检测参考图生图环境"}</button>
+    {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
+    {result && <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-sm">{result.message}</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">节点条件</p><p className="mt-1 text-sm">{result.reference_conditioning_nodes_ready ? "已满足" : "未满足"}</p></div>
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">模型文件</p><p className="mt-1 text-sm">{result.reference_conditioning_models_ready ? "已发现" : "未发现完整组合"}</p></div>
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">整体状态</p><p className="mt-1 text-sm">{result.reference_conditioning_ready ? "可以进入工作流适配" : "需要补齐环境"}</p></div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {Object.entries(result.reference_nodes).map(([name, node]) => <div key={name} className="rounded-lg border border-white/10 p-2 text-xs">
+          <p className="flex items-center justify-between gap-2"><span className="font-medium">{name}</span><span className={node.available ? "text-emerald-300" : "text-amber-200"}>{node.available ? "已安装" : "未发现"}</span></p>
+          {node.adapter_models && <p className="mt-1 break-words text-white/50">IP-Adapter 模型：{node.adapter_models.length ? node.adapter_models.join("、") : "未发现"}</p>}
+          {node.clip_vision_models && <p className="mt-1 break-words text-white/50">CLIP Vision 模型：{node.clip_vision_models.length ? node.clip_vision_models.join("、") : "未发现"}</p>}
+        </div>)}
+      </div>
+      {result.missing_node_types.length > 0 && <p className="text-xs text-amber-200">缺少节点：{result.missing_node_types.join("、")}</p>}
+      {result.missing_model_files.length > 0 && <p className="text-xs text-amber-200">缺少模型：{result.missing_model_files.join("、")}</p>}
+      {result.reference_conditioning_ready && <p className="text-xs text-emerald-200">本机环境已具备基本组件；仍需对实际 ComfyUI 工作流的输入接口进行验证，不能仅凭节点存在就保证所有模型组合兼容。</p>}
+    </div>}
+  </section>;
+}
+
 export default function LocalImageStudioPage() {
   const [models, setModels] = useState<string[]>([]);
   const [checkpoint, setCheckpoint] = useState("");
@@ -440,7 +494,7 @@ export default function LocalImageStudioPage() {
       </section>
 
 
-      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
+      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
           <span className="text-xs text-white/50">{shotImages.length} 张</span>
