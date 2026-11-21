@@ -8,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
-try { Start-Transcript -LiteralPath $LogPath -Append -ErrorAction Stop | Out-Null } catch {}
+try { Start-Transcript -Path $LogPath -Append -ErrorAction Stop | Out-Null } catch {}
 
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
