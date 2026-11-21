@@ -121,8 +121,12 @@ function Get-ExtractedEvidence {
         [long]$MaximumBytes
     )
 
-    $hasDrivePrefix = $EntryPath -match '^[A-Za-z]:'
-    $hasParentTraversal = $EntryPath -match '(^|[/\\])\.\.([/\\]|$)'
+    $hasDrivePrefix = $false
+    if ($EntryPath.Length -ge 2) {
+        $hasDrivePrefix = [char]::IsLetter($EntryPath[0]) -and $EntryPath[1] -eq ':'
+    }
+    $normalizedEntryPath = $EntryPath.Replace("\", "/")
+    $hasParentTraversal = @($normalizedEntryPath.Split("/") | Where-Object { $_ -eq ".." }).Count -gt 0
     if ([string]::IsNullOrWhiteSpace($EntryPath) -or $EntryPath.StartsWith("/") -or $hasDrivePrefix) {
         throw "拒绝异常归档内部路径：$EntryPath"
     }
