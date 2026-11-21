@@ -18,8 +18,8 @@
     "Record the exact Qwen3 4B Ollama manifest digest and verify every referenced model blob SHA-256.",
     "Review the Qwen3 model license and attribution for the exact model revision, and retain the upstream license and model notice.",
     "Confirm the combined offline installer includes the correct runtime, model store, and third-party notices without relying on post-install network downloads.",
-    "Review the exact Stable Diffusion 1.5 FP16 checkpoint revision and CreativeML Open RAIL-M redistribution/use restrictions; include the complete license and pass-through restrictions before bundling it for third parties.",
-    "Verify the pinned Stable Diffusion checkpoint SHA-256 against the downloaded bytes and perform a small-resolution CPU-only inference test on the target AMD Ryzen 7 4800U device before claiming image generation is ready."
+    "Verify the pinned Stable Diffusion checkpoint SHA-256 against the downloaded bytes and perform a small-resolution CPU-only inference test on the target AMD Ryzen 7 4800U device before claiming image generation is ready.",
+    "Stable Diffusion 1.5 Open RAIL-M: implement an enforceable end-user agreement and affirmative acceptance for paragraph 5 / Attachment A restrictions, and package the complete license plus attribution notices before enabling checkpoint distribution."
   ],
   "portable_variants": [
     {
@@ -74,7 +74,7 @@
       "name": "Qwen3 4B model",
       "license": "Apache-2.0 as declared by Qwen3 upstream and Ollama model catalog",
       "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt; Qwen3-MODEL-NOTICE.txt; exact Ollama manifest and blob SHA-256 inventory",
-      "status": "model_digest_verification_implemented_license_review_pending"
+      "status": "upstream_apache_2_0_license_confirmed_exact_ollama_payload_and_runtime_dependencies_pending"
     }
   ],
   "policy": {
@@ -93,7 +93,17 @@
     "model_manifest_sha256": null,
     "model_blob_inventory_status": "not_started",
     "model_license": "Apache-2.0",
-    "model_license_review_status": "pending"
+    "model_license_review_status": "upstream_license_confirmed_exact_payload_digest_and_dependency_audit_pending",
+    "upstream_license_evidence": {
+      "model_repository": "Qwen/Qwen3-4B",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen3-4B",
+      "license": "Apache-2.0",
+      "ollama_model_page": "https://ollama.com/library/qwen3:4b",
+      "ollama_model_page_license": "Apache License Version 2.0",
+      "exact_ollama_manifest_sha256": null,
+      "exact_blob_hashes_verified_at_payload_build": true,
+      "review_note": "Upstream license identity is confirmed. This is not approval of the exact bundled Ollama conversion or its runtime dependencies; preserve the exact manifest, layer hashes, model attribution, and Apache-2.0 notice for each built payload."
+    }
   },
   "image_model_candidates": [
     {
@@ -109,14 +119,30 @@
       "sha256_source": "Hugging Face pinned file page",
       "license": "CreativeML Open RAIL-M",
       "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
-      "license_review_status": "pending",
+      "license_review_status": "restricted_license_terms_identified_user_agreement_and_acceptance_not_implemented",
       "sha256_verified_locally": false,
       "included_in_offline_bundle": false,
       "hardware_status": "cpu_not_recommended",
       "hardware_validation_status": "pending_target_device_test",
       "use_restrictions_must_be_passed_to_users": true,
       "distribution_approved": false,
-      "status": "candidate_only_not_downloaded"
+      "status": "candidate_only_not_downloaded",
+      "license_obligations": [
+        "Provide the complete CreativeML Open RAIL-M license to each recipient when redistributing the checkpoint.",
+        "Make paragraph 5 use-based restrictions and Attachment A enforceable in the user agreement governing model use/distribution.",
+        "Notify downstream recipients that the checkpoint and derivatives are subject to paragraph 5 restrictions.",
+        "Retain applicable copyright, patent, trademark, and attribution notices; do not imply upstream endorsement."
+      ],
+      "license_review_evidence": {
+        "license": "CreativeML Open RAIL-M dated August 22, 2022",
+        "source_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+        "key_sections": [
+          "4. Distribution and Redistribution",
+          "5. Use-based restrictions",
+          "Attachment A"
+        ],
+        "review_note": "The license grants reproduction/distribution subject to pass-through and use restrictions; it is not an unrestricted permissive license. No model redistribution approval is granted."
+      }
     }
   ]
 }
