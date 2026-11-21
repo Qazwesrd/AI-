@@ -10,7 +10,7 @@ from app.models.visual import VisualAsset
 from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.routers.media import (
     EpisodeTimelineInput, SubtitleInput, get_episode_edit_timeline,
-    save_episode_edit_timeline, create_subtitle,
+    save_episode_edit_timeline, create_subtitle, list_subtitles,
 )
 from fastapi import HTTPException
 
@@ -113,6 +113,20 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
                     )
             self.assertEqual(caught.exception.status_code, 422)
             self.assertEqual(list(Path(temporary).glob("*.srt")), [])
+
+    def test_subtitle_library_scope_includes_current_project_and_shared_tracks_only(self):
+        tracks = [
+            SubtitleTrack(name="episode.srt", file_path="/episode.srt", project_id=1, episode_id=self.episode_id),
+            SubtitleTrack(name="project.srt", file_path="/project.srt", project_id=1),
+            SubtitleTrack(name="shared.srt", file_path="/shared.srt"),
+            SubtitleTrack(name="foreign-project.srt", file_path="/foreign-project.srt", project_id=2),
+            SubtitleTrack(name="foreign-episode.srt", file_path="/foreign-episode.srt", project_id=1, episode_id=999),
+        ]
+        self.db.add_all(tracks)
+        self.db.commit()
+        result = list_subtitles(project_id=1, episode_id=self.episode_id, db=self.db)
+        names = {item["name"] for item in result}
+        self.assertEqual(names, {"episode.srt", "project.srt", "shared.srt"})
 
     def test_default_timeline_uses_all_existing_shots(self):
         result = get_episode_edit_timeline(self.episode_id, self.db)
