@@ -46,6 +46,7 @@ function Get-ArchiveEntries {
                     Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
                     IsFolder = ($record.ContainsKey("Folder") -and $record["Folder"] -eq "+")
                     Attributes = if ($record.ContainsKey("Attributes")) { [string]$record["Attributes"] } else { "" }
+                    IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))
                 })
                 if ($entries.Count -gt $EntryLimit) {
                     throw "归档条目超过安全上限 $EntryLimit：$Archive"
@@ -68,6 +69,7 @@ function Get-ArchiveEntries {
             Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
             IsFolder = ($record.ContainsKey("Folder") -and $record["Folder"] -eq "+")
             Attributes = if ($record.ContainsKey("Attributes")) { [string]$record["Attributes"] } else { "" }
+            IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))
         })
     }
     if ($entries.Count -gt $EntryLimit) {
@@ -111,7 +113,7 @@ function Get-ExtractedEvidence {
     $leaf = [System.IO.Path]::GetFileName($EntryPath)
     if (!$leaf) { throw "归档证据文件名无效：$EntryPath" }
     $null = New-Item -ItemType Directory -Path $Destination -Force
-    $arguments = @("e", "-y", "-o$Destination", $Archive, $EntryPath)
+    $arguments = @("e", "-y", "-spd", "-o$Destination", $Archive, $EntryPath)
     $output = @(& $Tool @arguments 2>&1)
     if ($LASTEXITCODE -ne 0) {
         throw "提取证据文件失败：$EntryPath；$($output -join ' ')"
@@ -190,6 +192,9 @@ try {
             $isMetadata = $MetadataNames -contains $leaf
             $isLicense = $leaf -match $LicenseNamePattern
             if (!$isMetadata -and !$isLicense) { continue }
+            if ($entry.IsLink) {
+                throw "拒绝提取符号链接或硬链接形式的许可证证据：$($entry.Path)"
+            }
 
             $evidenceCount++
             if ($evidenceCount -gt $MaximumEvidenceFiles) {
