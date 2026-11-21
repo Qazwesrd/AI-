@@ -41,7 +41,8 @@ try {
     $blobPath = Join-Path (Join-Path $payload "models\blobs") $blobName
     New-Item -ItemType Directory -Path (Split-Path -Parent $blobPath) -Force | Out-Null
     Copy-Item -LiteralPath $temporaryBlob -Destination $blobPath
-    Write-Utf8 $modelManifestPath '{"schemaVersion":2,"config":{"digest":"sha256:' + $blobHash + '","size":' + ([System.Text.Encoding]::UTF8.GetByteCount($blobContent)) + '},"layers":[]}'
+    $modelManifestJson = '{"schemaVersion":2,"config":{"digest":"sha256:' + $blobHash + '","size":' + ([System.Text.Encoding]::UTF8.GetByteCount($blobContent)) + '},"layers":[]}'
+    Write-Utf8 $modelManifestPath $modelManifestJson
 
     $modelManifestHash = Hash $modelManifestPath
     $modelFiles = @(
