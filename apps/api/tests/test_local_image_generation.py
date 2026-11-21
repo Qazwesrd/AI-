@@ -68,14 +68,14 @@ class LocalImageGenerationTests(unittest.TestCase):
         for item in (
             {"filename": "../secret.png", "subfolder": "", "type": "output"},
             {"filename": "safe.png", "subfolder": "../secret", "type": "output"},
-            {"filename": "safe.png", "subfolder": "folder\\\\escape", "type": "output"},
+            {"filename": "safe.png", "subfolder": "folder\\escape", "type": "output"},
             {"filename": "safe.png", "subfolder": "", "type": "temp"},
         ):
             with self.subTest(item=item), self.assertRaises(HTTPException):
                 _safe_output_image(item)
 
     def test_archive_download_checks_image_magic_bytes(self):
-        png = b"\\x89PNG\\r\\n\\x1a\\n" + b"fake-image-payload"
+        png = b"\x89PNG\r\n\x1a\n" + b"fake-image-payload"
         with patch("app.routers.local_image_generation.OPENER.open") as opened:
             class Response:
                 def __enter__(self): return self
@@ -94,8 +94,10 @@ class LocalImageGenerationTests(unittest.TestCase):
             "status": {"completed": True},
             "outputs": {"9": {"images": [{"filename": "actual.png", "subfolder": "", "type": "output"}]}},
         }}
-        with patch("app.routers.local_image_generation._local_request", return_value=history), \\
-             patch("app.routers.local_image_generation._download_comfyui_output") as download:
+        with (
+            patch("app.routers.local_image_generation._local_request", return_value=history),
+            patch("app.routers.local_image_generation._download_comfyui_output") as download,
+        ):
             with self.assertRaises(HTTPException) as caught:
                 archive_local_image_task_output(prompt_id, payload, db=None)
         self.assertEqual(caught.exception.status_code, 404)
