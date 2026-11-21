@@ -273,7 +273,6 @@ jobs:
 
           - 包含桌面启动器、本地 API 和 Web 前端。
           - 包含 FFmpeg / FFprobe 媒体处理组件。
-          - 同时提供包含安装程序、中文 PDF 使用说明书和实际界面截图的本地测试 ZIP。
           - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
           '@
 
@@ -308,11 +307,9 @@ jobs:
           $releaseDir = Join-Path $PWD "apps/desktop/release"
           $files = @(Get-ChildItem $releaseDir -File | Where-Object {
             $_.Name -like "*Setup*.exe" -or
-            $_.Name -like "*Setup*.exe.sha256" -or
-            $_.Name -like "*测试包*.zip" -or
-            $_.Name -like "*测试包*.zip.sha256"
+            $_.Name -like "*Setup*.exe.sha256"
           } | Sort-Object Name)
-          if ($files.Count -ne 4) { throw "预期上传 4 个发布文件，实际找到 $($files.Count) 个。" }
+          if ($files.Count -ne 2) { throw "正式版只允许上传 Setup.exe 和 SHA-256 文件；预期 2 个，实际找到 $($files.Count) 个。" }
 
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
