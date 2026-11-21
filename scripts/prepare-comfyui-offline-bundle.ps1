@@ -46,6 +46,21 @@ function Add-TextEntry([System.IO.Compression.ZipArchive]$Archive, [string]$Entr
     } finally { $output.Dispose() }
 }
 
+function Get-ZipEntrySha256([System.IO.Compression.ZipArchiveEntry]$Entry) {
+    $input = $Entry.Open()
+    $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
+    $buffer = [byte[]]::new($ChunkBytes)
+    try {
+        while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $hasher.AppendData($buffer, 0, $read)
+        }
+        return [BitConverter]::ToString($hasher.GetHashAndReset()).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $hasher.Dispose()
+        $input.Dispose()
+    }
+}
+
 function Add-VerifiedRemoteEntry(
     [System.IO.Compression.ZipArchive]$Archive,
     [System.Net.Http.HttpClient]$Client,
@@ -299,6 +314,57 @@ AI漫剧制作大师 - ComfyUI 完整离线安装套件
     $archive.Dispose()
     $stream.Dispose()
     $client.Dispose()
+}
+
+# Re-open the finished ZIP and verify its central directory, required entries,
+# lengths and SHA-256 values after packaging. This catches truncated/corrupt ZIP output.
+$verifyStream = [System.IO.File]::OpenRead($target)
+$verifyArchive = $null
+try {
+    $verifyArchive = [System.IO.Compression.ZipArchive]::new($verifyStream, [System.IO.Compression.ZipArchiveMode]::Read, $false)
+    $entryNames = @($verifyArchive.Entries | ForEach-Object { $_.FullName })
+    if ($entryNames.Count -ne @($entryNames | Select-Object -Unique).Count) {
+        throw "完整离线 ZIP 中存在重复文件条目。"
+    }
+
+    $expectedEntries = @()
+    foreach ($assetResult in $manifestResults) {
+        $expectedEntries += @{
+            path = "ComfyUI-Payload/$($assetResult.name)"
+            size = [long]$assetResult.size_bytes
+            sha256 = [string]$assetResult.sha256
+        }
+    }
+    $expectedEntries += @{ path = "ComfyUI-Payload/7zr.exe"; size = [long]$toolResult.size_bytes; sha256 = [string]$toolResult.sha256 }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"; size = [long]$sevenZipSourceResult.size_bytes; sha256 = [string]$sevenZipSourceResult.sha256 }
+    $expectedEntries += @{ path = "Setup.exe"; size = [long]$setupItem.Length; sha256 = $setupHash }
+
+    foreach ($expected in $expectedEntries) {
+        $matches = @($verifyArchive.Entries | Where-Object { $_.FullName -ceq $expected.path })
+        if ($matches.Count -ne 1 -or [long]$matches[0].Length -ne $expected.size) {
+            throw "离线 ZIP 条目缺失或大小不匹配：$($expected.path)"
+        }
+        $actualHash = Get-ZipEntrySha256 $matches[0]
+        if ($actualHash -ne $expected.sha256.ToLowerInvariant()) {
+            throw "离线 ZIP 条目 SHA-256 校验失败：$($expected.path)"
+        }
+    }
+
+    foreach ($requiredName in @(
+        "ComfyUI-Payload/manifest.json",
+        "ComfyUI-Payload/install-comfyui-offline.ps1",
+        "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
+        "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
+        "安装说明.txt",
+        "Setup.exe.sha256"
+    )) {
+        if (@($entryNames | Where-Object { $_ -ceq $requiredName }).Count -ne 1) {
+            throw "离线 ZIP 缺少必要文件：$requiredName"
+        }
+    }
+} finally {
+    if ($verifyArchive) { $verifyArchive.Dispose() }
+    $verifyStream.Dispose()
 }
 
 $zipItem = Get-Item -LiteralPath $target
