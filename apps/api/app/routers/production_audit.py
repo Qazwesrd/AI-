@@ -504,6 +504,8 @@ def _probe_final_video(path: Path):
     if duration <= 0:
         issues.append({"code": "duration_invalid", "severity": "blocker", "message": "视频时长无效或无法读取。"})
     decode_check = "not_run"
+    black_events = []
+    silence_events = []
     if ffmpeg and video_streams and duration > 0:
         try:
             scan_command = [
