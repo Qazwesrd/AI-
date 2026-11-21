@@ -231,7 +231,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         from pathlib import Path
         from unittest.mock import patch
 
-        audio_path = "/managed/audio/foreign-music.mp3"
+        audio_path = str(Path("/managed/audio/foreign-music.mp3"))
         self.db.add(MediaFile(
             name="foreign-music.mp3",
             category="audio",
@@ -256,7 +256,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         from pathlib import Path
         from unittest.mock import patch
 
-        audio_path = "/managed/audio/other-episode.mp3"
+        audio_path = str(Path("/managed/audio/other-episode.mp3"))
         self.db.add(MediaFile(
             name="other-episode.mp3",
             category="audio",
@@ -281,7 +281,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         from pathlib import Path
         from unittest.mock import patch
 
-        audio_path = "/managed/audio/shared-music.mp3"
+        audio_path = str(Path("/managed/audio/shared-music.mp3"))
         self.db.add(MediaFile(
             name="shared-music.mp3",
             category="audio",
@@ -304,7 +304,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         from pathlib import Path
         from unittest.mock import patch
 
-        effect_path = "/managed/audio/foreign-effect.mp3"
+        effect_path = str(Path("/managed/audio/foreign-effect.mp3"))
         self.db.add(MediaFile(
             name="foreign-effect.mp3",
             category="audio",
