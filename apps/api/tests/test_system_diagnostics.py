@@ -4,10 +4,20 @@ from pathlib import Path
 
 from unittest.mock import patch
 
-from app.routers.system import _check_local_ai_tools, _health_status, _recommend_local_model_tier, _scan_local_model_files
+from app.routers.system import _check_local_ai_tools, _health_status, _recommend_local_model_tier, _scan_local_model_files, classify_display_adapter_vendor
 
 
 class SystemDiagnosticsTests(unittest.TestCase):
+    def test_display_adapter_vendor_detection_uses_pnp_vendor_ids(self):
+        self.assertEqual(classify_display_adapter_vendor("Generic Display Adapter", "PCI\\VEN_1002&DEV_1636"), "AMD")
+        self.assertEqual(classify_display_adapter_vendor("Generic Display Adapter", "PCI\\VEN_10DE&DEV_2684"), "NVIDIA")
+        self.assertEqual(classify_display_adapter_vendor("Generic Display Adapter", "PCI\\VEN_8086&DEV_56A0"), "Intel")
+        self.assertEqual(classify_display_adapter_vendor("Mystery Adapter", None), "unknown")
+
+    def test_display_adapter_vendor_detection_has_name_fallback(self):
+        self.assertEqual(classify_display_adapter_vendor("AMD Radeon(TM) Graphics"), "AMD")
+        self.assertEqual(classify_display_adapter_vendor("Intel UHD Graphics"), "Intel")
+
     def test_model_tier_recommends_small_model_for_low_ram(self):
         result = _recommend_local_model_tier(6 * 1024 ** 3, None)
         self.assertEqual(result["tier"], "very_small_or_not_recommended")
