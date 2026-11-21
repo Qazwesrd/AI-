@@ -74,7 +74,7 @@ class FFmpegProgressRunnerTests(unittest.TestCase):
     def test_nonzero_exit_includes_ffmpeg_diagnostic(self, popen, _path):
         process = FakeProcess("", returncode=1)
         popen.return_value = process
-        with patch("app.services.media_service.subprocess.TemporaryFile") as temp:
+        with patch("app.services.media_service.tempfile.TemporaryFile") as temp:
             output = temp.return_value.__enter__.return_value
             output.read.return_value = "invalid input"
             with self.assertRaisesRegex(RuntimeError, "FFmpeg 执行失败"):
