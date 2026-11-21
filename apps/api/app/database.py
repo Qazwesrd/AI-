@@ -262,6 +262,17 @@ def get_schema_version():
     return int(value or 0)
 
 
+def _assert_supported_schema_version():
+    """Refuse newer databases before any schema mutation."""
+    current = get_schema_version()
+    if current > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"数据库结构版本 {current} 高于当前软件支持版本 {SCHEMA_VERSION}，"
+            "为防止旧版软件修改新版数据库，已在任何结构变更前停止启动。"
+        )
+    return current
+
+
 def _record_schema_version():
     with engine.begin() as connection:
         current = connection.execute(
@@ -293,6 +304,9 @@ def init_database():
             else:
                 print(f"[模型依赖错误] {module_name}: {exc}")
                 raise
+
+    # Check compatibility before backups or schema mutations.
+    _assert_supported_schema_version()
 
     # Snapshot an existing database before create_all can add any tables.
     # The old order backed up only after create_all, which meant the backup
