@@ -324,6 +324,7 @@ try {
             runtime_version = $localAIManifest.ollama.version
             runtime_asset = "LocalAI-Payload/ollama-windows-amd64.zip"
             runtime_sha256 = $localAIManifest.ollama.sha256
+            payload_manifest_sha256 = (Get-FileHash -LiteralPath $localAIManifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
             model = $localAIManifest.model.name
             model_manifest_path = "LocalAI-Payload/$($localAIManifest.model.manifest_path)"
             model_manifest_sha256 = $localAIManifest.model.manifest_sha256
