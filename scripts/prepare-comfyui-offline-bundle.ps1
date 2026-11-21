@@ -195,6 +195,9 @@ foreach ($toolAsset in @($sevenZipTool, $sevenZipSource)) {
 $totalBytes = ($manifestAssets | Measure-Object -Property size_bytes -Sum).Sum
 $estimatedBundleBytes = [long]$totalBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + 1GB
 $target = [System.IO.Path]::GetFullPath($OutputZip)
+if (Test-Path -LiteralPath $target) {
+    throw "输出文件已存在：$target。为保护已有离线安装套件，底层打包脚本不会覆盖或删除它。若确认重新制作，请先通过 create-comfyui-offline-installer.ps1 -Force 明确删除旧包。"
+}
 $targetDir = Split-Path -Parent $target
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 $targetDrive = [System.IO.Path]::GetPathRoot($target)
@@ -209,7 +212,6 @@ Write-Host "图片生成模型不包含在本套件中。"
 $installScript = Join-Path $PSScriptRoot "install-comfyui-offline.ps1"
 if (!(Test-Path -LiteralPath $installScript -PathType Leaf)) { throw "离线安装脚本不存在：$installScript" }
 
-if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
 
 $clientHandler = [System.Net.Http.HttpClientHandler]::new()
 $clientHandler.AllowAutoRedirect = $false
