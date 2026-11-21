@@ -34,6 +34,14 @@ _CATALOG = [
         "sha256_source": "Hugging Face 文件页显示的 SHA-256",
         "sha256_verified": False,
         "catalog_status": "preview_only",
+        "download_eligible": False,
+        "install_eligible": False,
+        "eligibility_blockers": [
+            "尚未取得并核验精确文件字节数（Content-Length）。",
+            "尚未在本机完成下载后 SHA-256 复核。",
+            "CreativeML OpenRAIL-M 商用及内容限制尚待逐项审核。",
+            "尚未在目标 CPU-only 设备上完成 ComfyUI 实机性能测试。",
+        ],
     }
 ]
 
@@ -48,5 +56,7 @@ def list_image_model_catalog():
         "network_used": False,
         "download_started": False,
         "installation_started": False,
-        "note": "这是经来源整理的预览清单。下载功能尚未开放；SHA-256 来自发布页面，下载后仍必须在本机重新计算并比对，未完成比对前不得安装。文件大小目前只有上游页面的四舍五入显示值，后续下载前必须取得精确 Content-Length。",
+        "download_available": False,
+        "install_available": False,
+        "note": "这是经来源整理的预览清单。下载和安装功能均未开放。候选条目明确标记 download_eligible=false、install_eligible=false；必须先取得精确 Content-Length、完成本机 SHA-256 复核、审核许可证并通过目标设备实机测试。",
     }
