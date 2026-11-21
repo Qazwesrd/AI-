@@ -88,7 +88,7 @@ function Get-ArchiveEntries {
     if ($entries.Count -eq 0) {
         throw "7-Zip 未返回任何归档文件条目，拒绝生成空清点报告：$Archive"
     }
-    return @($entries)
+    return $entries.ToArray()
 }
 
 function Get-MetadataValue {
@@ -281,9 +281,9 @@ try {
             extracted_evidence_bytes = $totalEvidenceBytes
             python_package_count = $components.Count
             evidence_extraction_limit_bytes = $MaximumTotalEvidenceBytes
-            components = @($components)
-            runtime_files = @($runtimeFiles | Sort-Object -Unique)
-            evidence_files = @($evidence)
+            components = $components.ToArray()
+            runtime_files = @($runtimeFiles.ToArray() | Sort-Object -Unique)
+            evidence_files = $evidence.ToArray()
             unresolved_items = @(
                 "Confirm each component version, license text, copyright and NOTICE obligations.",
                 "Review bundled native libraries and transitive runtime dependencies.",
