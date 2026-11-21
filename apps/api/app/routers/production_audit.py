@@ -180,8 +180,7 @@ def build_production_readiness_report(project_id: int, db: Session):
     dialogue_shots = 0
     for shot in shots:
         referenced_asset_ids = _as_int_ids(shot.character_ids or []) | _as_int_ids(shot.prop_ids or [])
-        if shot.scene_asset_id:
-            referenced_asset_ids.add(int(shot.scene_asset_id))
+        referenced_asset_ids.update(_as_int_ids([shot.scene_asset_id]))
         missing_asset_ids = sorted(referenced_asset_ids - set(assets_by_id))
         if missing_asset_ids:
             add_issue("warning", "shot_asset_reference_missing", f"镜头 #{shot.shot_number} 引用了不存在的视觉素材 ID：{missing_asset_ids}", shot.episode_id, shot.id)
