@@ -43,6 +43,9 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn('"x", "-y", "-sccUTF-8"', source)
         self.assertIn("2GB", source)
         self.assertIn('$extracted = Join-Path $Destination $relativeEntryPath', source)
+        evidence_function = source.split("function Get-ExtractedEvidence", 1)[1].split("if (!(Test-Path -LiteralPath $SevenZipPath", 1)[0]
+        self.assertNotIn("$output", evidence_function)
+        self.assertIn("同名候选", evidence_function)
         
         self.assertIn("return $entries.ToArray()", source)
         self.assertIn('if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive -and !$record.ContainsKey("Type"))', source)
