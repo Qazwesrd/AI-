@@ -12,6 +12,7 @@ from app.models.novel import Chapter, Novel
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject
 from app.routers.production_audit import (
     _as_int_ids,
+    _subtitle_track_matches_episode,
     _project_media_file_state,
     build_production_readiness_report,
     audit_episode_video_quality,
@@ -19,6 +20,26 @@ from app.routers.production_audit import (
 
 
 class ProductionReadinessAuditTests(unittest.TestCase):
+    def test_subtitle_track_ownership_rejects_foreign_project_or_episode(self):
+        from types import SimpleNamespace
+
+        self.assertTrue(_subtitle_track_matches_episode(
+            SimpleNamespace(project_id=11, episode_id=21), 11, 21
+        ))
+        self.assertFalse(_subtitle_track_matches_episode(
+            SimpleNamespace(project_id=12, episode_id=21), 11, 21
+        ))
+        self.assertFalse(_subtitle_track_matches_episode(
+            SimpleNamespace(project_id=11, episode_id=22), 11, 21
+        ))
+
+    def test_subtitle_track_ownership_preserves_legacy_shared_tracks(self):
+        from types import SimpleNamespace
+
+        self.assertTrue(_subtitle_track_matches_episode(
+            SimpleNamespace(project_id=None, episode_id=None), 11, 21
+        ))
+
     def test_as_int_ids_ignores_invalid_values(self):
         self.assertEqual(_as_int_ids([1, "2", 0, -1, "bad", None]), {1, 2})
         self.assertEqual(_as_int_ids(None), set())
