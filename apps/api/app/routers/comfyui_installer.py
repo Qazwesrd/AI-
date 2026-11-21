@@ -7,7 +7,7 @@ import shutil
 
 import json
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen\nfrom urllib.parse import urlsplit\nimport re
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
 MAX_RELEASE_METADATA_BYTES = 5 * 1024 * 1024
@@ -35,15 +35,27 @@ def parse_official_release(payload: dict):
         size_bytes = asset.get("size")
         if name not in ALLOWED_ASSET_NAMES:
             continue
-        if not isinstance(url, str) or not url.startswith(
-            "https://github.com/Comfy-Org/ComfyUI/releases/download/"
+        if not isinstance(url, str):
+            continue
+        parsed_url = urlsplit(url)
+        expected_path = f"/Comfy-Org/ComfyUI/releases/download/{payload['tag_name']}/{name}"
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname != "github.com"
+            or parsed_url.port is not None
+            or parsed_url.username is not None
+            or parsed_url.password is not None
+            or parsed_url.path != expected_path
+            or parsed_url.query
+            or parsed_url.fragment
         ):
             continue
-        if not isinstance(size_bytes, int) or size_bytes <= 0:
+        if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or size_bytes <= 0:
             continue
         digest = asset.get("digest")
-        if digest is not None and (
-            not isinstance(digest, str) or not digest.startswith("sha256:")
+        if not (
+            isinstance(digest, str)
+            and re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest)
         ):
             digest = None
         result.append({
