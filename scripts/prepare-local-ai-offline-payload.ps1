@@ -49,6 +49,7 @@ $server = $null
 $oldModels = $env:OLLAMA_MODELS
 $oldHost = $env:OLLAMA_HOST
 $oldKeepAlive = $env:OLLAMA_KEEP_ALIVE
+$oldNoCloud = $env:OLLAMA_NO_CLOUD
 
 try {
     New-Item -ItemType Directory -Path $temp, $logs -Force | Out-Null
@@ -91,6 +92,7 @@ try {
     $env:OLLAMA_MODELS = $modelStore
     $env:OLLAMA_HOST = "127.0.0.1:11435"
     $env:OLLAMA_KEEP_ALIVE = "5m"
+    $env:OLLAMA_NO_CLOUD = "1"
 
     $serverOut = Join-Path $logs "ollama-server.log"
     $serverErr = Join-Path $logs "ollama-server-error.log"
@@ -262,6 +264,7 @@ finally {
     if ($null -eq $oldModels) { Remove-Item Env:OLLAMA_MODELS -ErrorAction SilentlyContinue } else { $env:OLLAMA_MODELS = $oldModels }
     if ($null -eq $oldHost) { Remove-Item Env:OLLAMA_HOST -ErrorAction SilentlyContinue } else { $env:OLLAMA_HOST = $oldHost }
     if ($null -eq $oldKeepAlive) { Remove-Item Env:OLLAMA_KEEP_ALIVE -ErrorAction SilentlyContinue } else { $env:OLLAMA_KEEP_ALIVE = $oldKeepAlive }
+    if ($null -eq $oldNoCloud) { Remove-Item Env:OLLAMA_NO_CLOUD -ErrorAction SilentlyContinue } else { $env:OLLAMA_NO_CLOUD = $oldNoCloud }
     if (Test-Path -LiteralPath $temp) {
         Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
     }
