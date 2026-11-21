@@ -399,45 +399,56 @@ try {
 
     # The target was checked before extraction. Never replace or delete an existing
     # ComfyUI folder because it may contain user models, custom nodes, or settings.
-    Move-Item -LiteralPath $portableRoot -Destination $installFullPath
+    # From this point the destination belongs to this installation attempt. If any
+    # post-move step fails, remove only this newly-created destination so a later
+    # retry is not blocked by a half-installed directory.
+    $deploymentOwned = $true
+    try {
+        Move-Item -LiteralPath $portableRoot -Destination $installFullPath
 
-    # Provide an explicit CPU launcher for integrated/unsupported GPU devices.
-    # This follows the official ComfyUI portable CPU invocation and does not
-    # install extra runtimes or download anything.
-    $cpuLauncher = Join-Path $installFullPath "AI漫剧大师-CPU模式启动.bat"
-    $cpuLauncherContent = @(
-        "@echo off",
-        "setlocal",
-        'cd /d "%~dp0"',
-        'if not exist "python_embeded\python.exe" (echo ComfyUI embedded Python is missing.& pause & exit /b 1)',
-        'if not exist "ComfyUI\main.py" (echo ComfyUI main.py is missing.& pause & exit /b 1)',
-        '"python_embeded\python.exe" -s "ComfyUI\main.py" --cpu --windows-standalone-build',
-        "if errorlevel 1 (echo ComfyUI CPU mode exited with an error.& pause & exit /b 1)",
-        "endlocal"
-    )
-    Set-Content -LiteralPath $cpuLauncher -Value $cpuLauncherContent -Encoding ASCII
+        # Provide an explicit CPU launcher for integrated/unsupported GPU devices.
+        # This follows the official ComfyUI portable CPU invocation and does not
+        # install extra runtimes or download anything.
+        $cpuLauncher = Join-Path $installFullPath "AI漫剧大师-CPU模式启动.bat"
+        $cpuLauncherContent = @(
+            "@echo off",
+            "setlocal",
+            'cd /d "%~dp0"',
+            'if not exist "python_embeded\python.exe" (echo ComfyUI embedded Python is missing.& pause & exit /b 1)',
+            'if not exist "ComfyUI\main.py" (echo ComfyUI main.py is missing.& pause & exit /b 1)',
+            '"python_embeded\python.exe" -s "ComfyUI\main.py" --cpu --windows-standalone-build',
+            "if errorlevel 1 (echo ComfyUI CPU mode exited with an error.& pause & exit /b 1)",
+            "endlocal"
+        )
+        Set-Content -LiteralPath $cpuLauncher -Value $cpuLauncherContent -Encoding ASCII
 
-    $runtimeManifest = @{
-        schema_version = 1
-        comfyui_version = $manifest.comfyui_version
-        selected_asset = $selection.name
-        archive_sha256 = ([string]$asset.sha256).ToLowerInvariant()
-        gpu_vendor = $selection.vendor
-        detected_gpu = $selection.detected_gpu
-        runtime_mode = $selection.runtime_mode
-        selection_reason = $selection.selection_reason
-        installed_utc = [DateTime]::UtcNow.ToString("o")
-        distribution_approved = $false
+        $runtimeManifest = @{
+            schema_version = 1
+            comfyui_version = $manifest.comfyui_version
+            selected_asset = $selection.name
+            archive_sha256 = ([string]$asset.sha256).ToLowerInvariant()
+            gpu_vendor = $selection.vendor
+            detected_gpu = $selection.detected_gpu
+            runtime_mode = $selection.runtime_mode
+            selection_reason = $selection.selection_reason
+            installed_utc = [DateTime]::UtcNow.ToString("o")
+            distribution_approved = $false
+        }
+        $runtimeManifest | ConvertTo-Json -Depth 5 |
+            Set-Content -LiteralPath (Join-Path $installFullPath "runtime-manifest.json") -Encoding UTF8
+
+        Write-Host "ComfyUI 引擎已部署到：$installFullPath"
+        if ($selection.runtime_mode -eq "cpu") {
+            Write-Host "当前设备将使用 CPU 模式；首次图片生成可能较慢。"
+        }
+        Write-Host ("CPU 模式启动器：{0}" -f $cpuLauncher)
+        Write-Host "图片生成模型未包含在安装包内，也没有下载任何模型。"
+    } catch {
+        if ($deploymentOwned -and (Test-Path -LiteralPath $installFullPath)) {
+            Remove-Item -LiteralPath $installFullPath -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        throw
     }
-    $runtimeManifest | ConvertTo-Json -Depth 5 |
-        Set-Content -LiteralPath (Join-Path $installFullPath "runtime-manifest.json") -Encoding UTF8
-
-    Write-Host "ComfyUI 引擎已部署到：$installFullPath"
-    if ($selection.runtime_mode -eq "cpu") {
-        Write-Host "当前设备将使用 CPU 模式；首次图片生成可能较慢。"
-    }
-    Write-Host ("CPU 模式启动器：{0}" -f $cpuLauncher)
-    Write-Host "图片生成模型未包含在安装包内，也没有下载任何模型。"
 } finally {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
     if ($transcriptStarted) {
