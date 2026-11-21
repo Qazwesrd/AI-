@@ -176,7 +176,19 @@ if (Test-Path -LiteralPath $installFullPath) {
         if ($existingModelManifest.config) { $existingDescriptors += $existingModelManifest.config }
         if ($existingModelManifest.layers) { $existingDescriptors += @($existingModelManifest.layers) }
         foreach ($descriptor in $existingDescriptors) {
-            $digestMatch = [regex]::Match([string]$descriptor.digest, '^sha256:([0-9a-fA-F]{64})        if ($existingState.ollama_version -eq $manifest.ollama.version) {
+            $digestMatch = [regex]::Match([string]$descriptor.digest, '^sha256:([0-9a-fA-F]{64})$')
+            if (!$digestMatch.Success -or [long]$descriptor.size -le 0) {
+                throw "现有 Qwen3 模型 manifest 包含无效的 blob 描述符。"
+            }
+            $digest = $digestMatch.Groups[1].Value.ToLowerInvariant()
+            $existingBlob = Join-Path (Join-Path $installFullPath "models\blobs") ("sha256-" + $digest)
+            if (!(Test-Path -LiteralPath $existingBlob -PathType Leaf) -or
+                (Get-Item -LiteralPath $existingBlob).Length -ne [long]$descriptor.size -or
+                (Get-Sha256 $existingBlob) -ne $digest) {
+                throw "现有 Qwen3 模型 blob 校验失败；为保护用户数据，拒绝升级。"
+            }
+        }
+        if ($existingState.ollama_version -eq $manifest.ollama.version) {
             Write-Host "检测到 Ollama 和 Qwen3 4B 已是当前载荷版本，为保护已有模型及配置，本次不覆盖。"
             if ($transcriptStarted) {
                 Stop-Transcript | Out-Null
