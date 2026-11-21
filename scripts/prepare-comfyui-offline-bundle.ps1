@@ -310,7 +310,30 @@ try {
     Add-TextEntry $archive $inventoryReportPath ($inventoryBase | ConvertTo-Json -Depth 12)
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
     Add-FileEntry $archive "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" $auditScript
-    Add-FileEntry $archive "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json" $auditPath
+
+    $bundleAuditRegister = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach ($registerVariant in @($bundleAuditRegister.portable_variants)) {
+        $inventoryVariant = @($inventoryBase.portable_variants | Where-Object { $_.asset -ceq [string]$registerVariant.asset })
+        if ($inventoryVariant.Count -ne 1) {
+            throw "审查登记表与本次四种 Portable 依赖清点结果无法对应：$($registerVariant.asset)"
+        }
+        $registerVariant.inventory_status = [string]$inventoryVariant[0].inventory_status
+        $registerVariant.sha256 = [string]$inventoryVariant[0].sha256
+        $registerVariant.release_tag = [string]$inventoryVariant[0].release_tag
+        $registerVariant.components = $inventoryVariant[0].components
+        $registerVariant.inventory_report_path = $inventoryReportPath
+        $registerVariant.inventory_generated_utc = [string]$inventoryBase.generated_utc
+    }
+    $bundleAuditRegister.release_blockers[0] = "Manually review the generated file inventory for each official Windows portable archive and identify bundled redistributable components not surfaced by automated metadata scanning."
+    $bundleAuditRegister.release_blockers[1] = "Review embedded Python package metadata and license evidence for completeness; confirm package licenses and notices manually."
+    $bundleAuditRegister.release_blockers[2] = "Review PyTorch, torchvision, torchaudio, CUDA/ROCm/XPU runtime libraries and their separate license and notice obligations for each GPU variant."
+    $bundleAuditRegister.known_components[0].status = "license_text_included_inventory_generated_manual_license_review_pending"
+    $bundleAuditRegister.local_ai_payload.runtime_version = [string]$localAIManifest.ollama.version
+    $bundleAuditRegister.local_ai_payload.runtime_sha256 = [string]$localAIManifest.ollama.sha256
+    $bundleAuditRegister.local_ai_payload.runtime_audit_status = "runtime_digest_verified_dependency_audit_pending"
+    $bundleAuditRegister.local_ai_payload.model_manifest_sha256 = [string]$localAIManifest.model.manifest_sha256
+    $bundleAuditRegister.local_ai_payload.model_blob_inventory_status = "manifest_and_blob_sha256_verified_license_review_pending"
+    Add-TextEntry $archive "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json" ($bundleAuditRegister | ConvertTo-Json -Depth 12)
     Add-FileEntry $archive "LocalAI-Payload/install-local-ai-offline.ps1" $localAIInstallScript
     foreach ($localAIFile in $localAIPayloadFiles) {
         $relative = $localAIFile.FullName.Substring($LocalAIPayloadRoot.Length).TrimStart("\", "/").Replace("\", "/")
