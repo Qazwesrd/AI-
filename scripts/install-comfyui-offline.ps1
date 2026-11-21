@@ -2,11 +2,20 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PayloadRoot,
     [Parameter(Mandatory = $true)]
-    [string]$InstallRoot
+    [string]$InstallRoot,
+    [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-ComfyUI-install.log")
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+
+try {
+    $logDirectory = Split-Path -Parent ([System.IO.Path]::GetFullPath($LogPath))
+    if ($logDirectory) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
+    Start-Transcript -LiteralPath $LogPath -Append -ErrorAction Stop | Out-Null
+} catch {
+    Write-Warning "无法创建 ComfyUI 安装日志：$($_.Exception.Message)"
+}
 
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
