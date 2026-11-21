@@ -1,19 +1,22 @@
 import json
 import uuid
+import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.editing import VideoEditJob
-from app.models.media import MediaFile
+from app.models.media import MediaFile, MediaTask
 from app.services.editing_service import (
     call_ai_for_edit_plan, validate_plan, execute_edit_plan
 )
-from app.services.media_service import safe_storage_file, probe_media
+from app.services.media_service import safe_storage_file, probe_media, FFmpegCancelledError
+from app.routers.media import _LOCAL_RENDER_RUNTIME, _LOCAL_RENDER_LOCK
 
 router = APIRouter(prefix="/api/video-editor", tags=["AI 视频剪辑"])
 
@@ -267,35 +270,160 @@ def get_edit_job(job_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/jobs/{job_id}/execute")
-def execute_job(job_id: int, data: ExecuteEditInput, db: Session = Depends(get_db)):
+def _run_video_edit_render_job(job_id: int, task_id: int, payload: dict):
+    db = SessionLocal()
+    runtime = None
+    try:
+        job = db.query(VideoEditJob).filter(VideoEditJob.id == job_id).first()
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if not job or not task or task.status != "queued":
+            return
+        with _LOCAL_RENDER_LOCK:
+            runtime = _LOCAL_RENDER_RUNTIME.get(task_id)
+            if runtime is None:
+                runtime = {"cancel": threading.Event(), "process": None}
+                _LOCAL_RENDER_RUNTIME[task_id] = runtime
+        if runtime["cancel"].is_set():
+            task.status = "cancelled"
+            task.error = "用户在剪辑开始前取消任务"
+            job.status = "cancelled"
+            job.error = task.error
+            db.commit()
+            return
+
+        task.status = "processing"
+        task.error = None
+        task.result_data = {"progress": {"percent": 0, "stage": "preparing"}}
+        job.status = "rendering"
+        job.error = None
+        db.commit()
+
+        def report(progress):
+            task_row = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+            if task_row:
+                task_row.result_data = {"progress": progress}
+                task_row.updated_at = datetime.utcnow()
+                db.commit()
+
+        def process_changed(process):
+            runtime["process"] = process
+
+        output, size = execute_edit_plan(
+            job.edit_plan,
+            subtitle_path=payload.get("subtitle_path"),
+            audio_path=payload.get("audio_path"),
+            audio_mode=payload.get("audio_mode", "replace"),
+            progress_callback=report,
+            cancel_event=runtime["cancel"],
+            process_callback=process_changed,
+        )
+        db.expire_all()
+        job = db.query(VideoEditJob).filter(VideoEditJob.id == job_id).first()
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        job.output_path = output
+        job.status = "completed"
+        job.error = None
+        task.result_path = output
+        task.status = "completed"
+        task.error = None
+        task.result_data = {"progress": {"percent": 100, "stage": "completed"},
+                            "size": size, "video_edit_job_id": job_id}
+        db.add(MediaFile(
+            name=Path(output).name, category="video", file_path=output,
+            mime_type="video/mp4", file_size=size,
+        ))
+        db.commit()
+    except FFmpegCancelledError as exc:
+        db.rollback()
+        job = db.query(VideoEditJob).filter(VideoEditJob.id == job_id).first()
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if job:
+            job.status = "cancelled"
+            job.error = str(exc)
+        if task:
+            task.status = "cancelled"
+            task.error = str(exc)
+            task.result_data = {"progress": {"stage": "cancelled"},
+                                "video_edit_job_id": job_id}
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        job = db.query(VideoEditJob).filter(VideoEditJob.id == job_id).first()
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if job:
+            job.status = "failed"
+            job.error = str(exc)[:4000]
+        if task:
+            task.status = "failed"
+            task.error = str(exc)[:4000]
+            task.result_data = {"progress": {"stage": "failed"},
+                                "video_edit_job_id": job_id}
+        db.commit()
+    finally:
+        db.close()
+        with _LOCAL_RENDER_LOCK:
+            _LOCAL_RENDER_RUNTIME.pop(task_id, None)
+
+
+@router.post("/jobs/{job_id}/execute", status_code=202)
+def execute_job(
+    job_id: int,
+    data: ExecuteEditInput,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     job = _get_job(db, job_id)
     if job.status != "planned" or not job.edit_plan:
         raise HTTPException(400, "任务尚未生成有效剪辑方案")
     try:
+        if data.subtitle_path:
+            safe_storage_file(data.subtitle_path)
+        if data.audio_path:
+            safe_storage_file(data.audio_path)
+        task = MediaTask(
+            task_type="local_render",
+            provider="local_ffmpeg",
+            model="video_edit_plan",
+            status="queued",
+            prompt=f"本地剪辑：{job.title}",
+            request_data={
+                "render_kind": "video_edit",
+                "video_edit_job_id": job.id,
+                "subtitle_path": data.subtitle_path,
+                "audio_path": data.audio_path,
+                "audio_mode": data.audio_mode,
+            },
+            result_data={"progress": {"percent": 0, "stage": "queued"},
+                         "video_edit_job_id": job.id},
+        )
         job.status = "rendering"
-        db.commit()
-        output, size = execute_edit_plan(
-            job.edit_plan,
-            subtitle_path=data.subtitle_path,
-            audio_path=data.audio_path,
-            audio_mode=data.audio_mode,
-        )
-        job.output_path = output
-        job.status = "completed"
         job.error = None
-        media = MediaFile(
-            name=Path(output).name, category="video", file_path=output,
-            mime_type="video/mp4", file_size=size
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        with _LOCAL_RENDER_LOCK:
+            _LOCAL_RENDER_RUNTIME[task.id] = {"cancel": threading.Event(), "process": None}
+        background_tasks.add_task(
+            _run_video_edit_render_job,
+            job.id,
+            task.id,
+            {
+                "subtitle_path": data.subtitle_path,
+                "audio_path": data.audio_path,
+                "audio_mode": data.audio_mode,
+            },
         )
-        db.add(media)
-        db.commit()
-        return {"id": job.id, "status": job.status, "output_path": output, "size": size}
+        return {
+            "id": job.id,
+            "status": "rendering",
+            "task_id": task.id,
+            "message": "剪辑已加入本地后台渲染；可在统一任务中心查看进度或安全停止。不会调用云端 AI。",
+        }
+    except HTTPException:
+        raise
     except Exception as exc:
-        job.status = "failed"
-        job.error = str(exc)
-        db.commit()
-        raise HTTPException(500, f"视频剪辑执行失败：{exc}")
+        db.rollback()
+        raise HTTPException(500, f"无法创建本地剪辑任务：{exc}") from exc
 
 
 @router.get("/health")
