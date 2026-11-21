@@ -966,11 +966,26 @@ def render_episode_from_shots(
             ).first()
             if not voice_record:
                 raise HTTPException(422, "对白配音必须来自本地音频素材库")
+            if not _media_file_belongs_to_project(voice_record, episode.project_id):
+                raise HTTPException(422, "对白配音属于其他项目，不能跨项目引用")
         else:
             for speech_task in speech_tasks:
                 speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
-                if speech_meta.get("episode_id") == episode_id and speech_task.result_path and Path(speech_task.result_path).is_file():
+                if (
+                    speech_meta.get("episode_id") == episode_id
+                    and speech_meta.get("project_id") in (None, episode.project_id)
+                    and speech_task.result_path
+                    and Path(speech_task.result_path).is_file()
+                ):
                     speech_path = safe_storage_file(speech_task.result_path)
+                    speech_record = db.query(MediaFile).filter(
+                        MediaFile.category == "audio",
+                        MediaFile.file_path == str(speech_path),
+                    ).first()
+                    if speech_record and not _media_file_belongs_to_project(
+                        speech_record, episode.project_id
+                    ):
+                        continue
                     break
         voice_volume = max(0.0, min(2.0, float(timeline.get("voice_volume", 1.0))))
         original_volume = max(0.0, min(2.0, float(timeline.get("original_volume", 0.35))))
@@ -983,6 +998,8 @@ def render_episode_from_shots(
             ).first()
             if not music_record:
                 raise HTTPException(422, "背景音乐必须先上传并登记到本地音频素材库")
+            if not _media_file_belongs_to_project(music_record, episode.project_id):
+                raise HTTPException(422, "背景音乐属于其他项目，不能跨项目引用")
             music_info = probe_media(music)
             if not any(stream.get("codec_type") == "audio" for stream in music_info.get("streams", [])):
                 raise HTTPException(422, "所选背景音乐文件不包含可用音轨")
@@ -999,6 +1016,8 @@ def render_episode_from_shots(
             ).first()
             if not effect_record:
                 raise HTTPException(422, "音效必须来自本地音频素材库")
+            if not _media_file_belongs_to_project(effect_record, episode.project_id):
+                raise HTTPException(422, "音效属于其他项目，不能跨项目引用")
             effect_info = probe_media(effect_path)
             if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
                 raise HTTPException(422, "音效文件不包含可用音轨")
@@ -1087,7 +1106,21 @@ def render_episode_from_shots(
                 overlap = float(transition_by_shot.get(shot.id, {}).get("duration_seconds", 0))
                 elapsed += duration - overlap
         subtitle_path = None
-        if subtitle_lines:
+        selected_subtitle_id = timeline.get("subtitle_track_id")
+        if selected_subtitle_id:
+            selected_track = db.query(SubtitleTrack).filter(
+                SubtitleTrack.id == selected_subtitle_id
+            ).first()
+            if not selected_track:
+                raise HTTPException(422, "时间轴选择的字幕轨道不存在")
+            if selected_track.project_id not in (None, episode.project_id):
+                raise HTTPException(422, "时间轴字幕轨道属于其他项目，不能跨项目使用")
+            if selected_track.episode_id not in (None, episode.id):
+                raise HTTPException(422, "时间轴字幕轨道属于其他分集，不能跨分集使用")
+            if Path(selected_track.file_path).suffix.lower() != ".srt":
+                raise HTTPException(422, "当前成片字幕烧录仅支持 SRT 格式")
+            subtitle_path = str(safe_storage_file(selected_track.file_path))
+        elif subtitle_lines:
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
             subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
             subtitle_path = str(subtitle_file)
@@ -2282,7 +2315,8 @@ def generate_episode_voice_track(
             task_type="episode_speech_track", provider=data.provider, model=data.model,
             status="completed", prompt=f"第{episode.episode_number}集对白配音",
             result_path=str(track_path),
-            request_data={"episode_id": episode_id, "voice": data.voice,
+            request_data={"episode_id": episode_id, "project_id": episode.project_id,
+                          "voice": data.voice,
                           "voice_by_character_id": data.voice_by_character_id,
                           "segmented_shots": segmented_audio,
                           "subtitle_cues": subtitle_cues,
@@ -2292,6 +2326,7 @@ def generate_episode_voice_track(
         db.add(MediaFile(
             name=track_path.name, category="audio", file_path=str(track_path),
             mime_type="audio/mpeg", file_size=track_path.stat().st_size,
+            metadata_json={"project_id": episode.project_id, "episode_id": episode_id},
         ))
         db.commit()
     except Exception as exc:
