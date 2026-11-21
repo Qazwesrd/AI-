@@ -320,6 +320,7 @@ AI漫剧制作大师 - ComfyUI 完整离线安装套件
 # lengths and SHA-256 values after packaging. This catches truncated/corrupt ZIP output.
 $verifyStream = [System.IO.File]::OpenRead($target)
 $verifyArchive = $null
+$verificationFailure = $null
 try {
     $verifyArchive = [System.IO.Compression.ZipArchive]::new($verifyStream, [System.IO.Compression.ZipArchiveMode]::Read, $false)
     $entryNames = @($verifyArchive.Entries | ForEach-Object { $_.FullName })
@@ -362,12 +363,20 @@ try {
             throw "离线 ZIP 缺少必要文件：$requiredName"
         }
     }
+} catch {
+    $verificationFailure = $_.Exception
 } finally {
     if ($verifyArchive) { $verifyArchive.Dispose() }
     $verifyStream.Dispose()
 }
 
-# Never leave a seemingly complete ZIP behind if post-write verification fails.
+if ($verificationFailure) {
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath "$target.sha256") { Remove-Item -LiteralPath "$target.sha256" -Force -ErrorAction SilentlyContinue }
+    throw $verificationFailure
+}
+
+# Never leave a seemingly complete ZIP behind if final checksum verification fails.
 try {
     $zipItem = Get-Item -LiteralPath $target -ErrorAction Stop
     if ($zipItem.Length -lt ([long]$totalBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length)) {
