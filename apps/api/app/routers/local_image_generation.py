@@ -1121,7 +1121,7 @@ def _consistency_prompt_for_shot(shot: StoryboardShot, profile: dict):
                     sections.append(f"【{label}参考图已绑定本地素材库图片 #{media_id}；生成前请在本地素材库查看并作为视觉参考】")
     if not sections:
         return ""
-    return "\\n".join(sections)
+    return "\n".join(sections)
 
 
 def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], profile: dict):
@@ -1145,7 +1145,7 @@ def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], p
         original = (shot.image_prompt or "").strip()
         preview = original
         if consistency_prompt:
-            preview = (original + "\\n\\n" if original else "") + consistency_prompt
+            preview = (original + "\n\n" if original else "") + consistency_prompt
         results.append({
             "shot_id": shot.id,
             "shot_number": shot.shot_number,
@@ -1230,14 +1230,14 @@ def _upload_reference_to_local_comfyui(media: MediaFile, project_id: int, catego
     chunks = []
     for name, value in fields:
         chunks.extend([
-            f"--{boundary}\\r\\n".encode(),
-            f'Content-Disposition: form-data; name="{name}"\\r\\n\\r\\n'.encode(),
-            value.encode("utf-8") + b"\\r\\n",
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+            value.encode("utf-8") + b"\r\n",
         ])
     chunks.extend([
-        f"--{boundary}\\r\\n".encode(),
-        f'Content-Disposition: form-data; name="image"; filename="{filename}"\\r\\n'.encode(),
-        f'Content-Type: {validation["mime_type"]}\\r\\n\\r\\n'.encode(),
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'.encode(),
+        f'Content-Type: {validation["mime_type"]}\r\n\r\n'.encode(),
     ])
     with path.open("rb") as stream:
         while True:
@@ -1245,7 +1245,7 @@ def _upload_reference_to_local_comfyui(media: MediaFile, project_id: int, catego
             if not block:
                 break
             chunks.append(block)
-    chunks.append(f"\\r\\n--{boundary}--\\r\\n".encode())
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
     body = b"".join(chunks)
     request = Request(
         COMFYUI_BASE_URL + "/upload/image",
@@ -1513,7 +1513,7 @@ def apply_storyboard_consistency(project_id: int, data: StoryboardConsistencyPre
         marker_end = "【项目一致性规则结束】"
         if marker_start in original and marker_end in original:
             original = original.split(marker_start, 1)[0].rstrip()
-        shot.image_prompt = (original + "\\n\\n" if original else "") + marker_start + "\\n" + rules + "\\n" + marker_end
+        shot.image_prompt = (original + "\n\n" if original else "") + marker_start + "\n" + rules + "\n" + marker_end
         updated += 1
     db.commit()
     return {"success": True, "updated_shot_count": updated, "preflight": preflight, "local_only": True, "cloud_api_used": False}
