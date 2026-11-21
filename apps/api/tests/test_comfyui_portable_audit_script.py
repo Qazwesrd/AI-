@@ -99,6 +99,7 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn("Remove-TransactionOwnedInstall", transaction)
         self.assertIn("$comfyExistedBefore", transaction)
         self.assertIn("$localAIExistedBefore", transaction)
+        self.assertIn('Join-Path $LocalAIPayloadRoot "install-local-ai-offline.ps1"', transaction)
 
         local_ai_installer = (REPO_ROOT / "scripts" / "install-local-ai-offline.ps1").read_text(encoding="utf-8")
         self.assertIn("[switch]$ValidateOnly", local_ai_installer)
