@@ -27,6 +27,8 @@ $archives = @(
 
 You may pass only the variants actually available; every supplied archive must use one of the four exact official asset filenames. Verify the archive SHA-256 and release tag against the official release before treating the report as evidence.
 
+The current image-checkpoint candidate is Stable Diffusion 1.5 FP16 from the pinned Comfy-Org repository revision. Its published SHA-256 is recorded, but it is **not downloaded or included** until the local hash, CreativeML Open RAIL-M redistribution/use restrictions, and target-device CPU inference performance have been reviewed. The full license is sourced from the upstream CompVis repository; the license's use restrictions must be passed through to recipients if the weights are redistributed. This is a deliberate release blocker, not a claim that image generation is ready immediately after installation.
+
 The complete offline bundle builder also runs this inventory automatically against each of the four downloaded official portable archives, one at a time. It includes the combined report at `THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json`, records each archive SHA-256 and release tag, and refuses to package if any inventory fails. The bundle copy of the audit register is populated with those exact hashes, release tags, component records, and report path; the source register in the repository remains an unapproved template. The installer checks that all four report entries and register entries match the asset hashes and sizes in the bundle manifest. This automated evidence remains `pending`; it is not a license approval.
 
 ## Safety and limitations
