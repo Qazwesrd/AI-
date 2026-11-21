@@ -140,7 +140,7 @@ function Get-ExtractedEvidence {
     $arguments = @("e", "-y", "-spd", "-o$Destination", $Archive, $EntryPath)
     $output = @(& $Tool @arguments 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        $outputText = $output -join [string][char]32
+        $outputText = [string]::Join(" ", [string[]]$output)
         throw "提取证据文件失败：$EntryPath；$outputText"
     }
     $extracted = Join-Path $Destination $leaf
@@ -162,7 +162,20 @@ $SevenZipPath = [System.IO.Path]::GetFullPath($SevenZipPath)
 if ($ArchivePaths.Count -lt 1 -or $ArchivePaths.Count -gt 4) {
     throw "请提供 1 到 4 个官方 ComfyUI Windows portable 归档。"
 }
-if ($ReleaseTag -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+$invalidReleaseTag = [string]::IsNullOrWhiteSpace($ReleaseTag) -or $ReleaseTag.Length -gt 128
+if (!$invalidReleaseTag) {
+    if (![char]::IsLetterOrDigit($ReleaseTag[0])) {
+        $invalidReleaseTag = $true
+    }
+    foreach ($releaseTagCharacter in $ReleaseTag.ToCharArray()) {
+        $codePoint = [int]$releaseTagCharacter
+        if (![char]::IsLetterOrDigit($releaseTagCharacter) -and $codePoint -notin @(45, 46, 95)) {
+            $invalidReleaseTag = $true
+            break
+        }
+    }
+}
+if ($invalidReleaseTag) {
     throw "ReleaseTag 格式无效：$ReleaseTag"
 }
 
