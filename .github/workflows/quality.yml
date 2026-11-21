@@ -34,6 +34,8 @@ jobs:
           assert all(item["inventory_status"] != "approved" for item in variants)
           print("ComfyUI third-party dependency audit is correctly blocked pending review.")
           PY
+      - name: Test ComfyUI portable dependency audit utility safety guards
+        run: python -m unittest apps/api/tests/test_comfyui_portable_audit_script.py -v
       - name: Validate ComfyUI dependency inventory tool safeguards
         run: |
           from pathlib import Path
