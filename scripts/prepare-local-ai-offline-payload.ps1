@@ -215,6 +215,13 @@ This notice is attribution and provenance information, not a legal opinion or a 
             sha256 = Get-Sha256 $file.FullName
         }
     }
+    $modelStoreBytes = ($modelFiles | Measure-Object -Property size_bytes -Sum).Sum
+    if ([long]$asset.size -lt 100MB -or [long]$asset.size -gt 8GB) {
+        throw "Ollama 官方运行包大小超出预期安全范围。"
+    }
+    if ([long]$modelStoreBytes -lt 1GB -or [long]$modelStoreBytes -gt 8GB) {
+        throw "qwen3:4b 模型存储大小超出预期安全范围，拒绝打包不完整或异常模型。"
+    }
     $modelManifestOutputPath = Join-Path (Join-Path $output "models") ($modelManifestRelative.Replace("/", "\"))
     $modelManifestHash = Get-Sha256 $modelManifestOutputPath
     $modelManifestDigest = "sha256:" + $modelManifestHash
