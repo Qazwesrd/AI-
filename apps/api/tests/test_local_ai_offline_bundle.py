@@ -79,7 +79,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         runtime = (ROOT / "apps" / "api" / "app" / "routers" / "local_ai_runtime.py").read_text(encoding="utf-8")
         model_installer = (ROOT / "apps" / "api" / "app" / "routers" / "local_model_installer.py").read_text(encoding="utf-8")
         self.assertIn('path.join(ollamaRuntime, "ollama.exe")', main)
-        self.assertIn('OLLAMA_HOST: "127.0.0.1:11435"', main)
+        self.assertIn('host: "127.0.0.1:11435"', main)
         self.assertIn('OLLAMA_NO_CLOUD: "1"', main)
         self.assertIn('OLLAMA_NUM_PARALLEL: "1"', main)
         self.assertIn('OLLAMA_MAX_LOADED_MODELS: "1"', main)
