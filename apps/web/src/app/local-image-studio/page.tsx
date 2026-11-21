@@ -573,9 +573,9 @@ export default function LocalImageStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("低质量、模糊、畸形肢体、多余手指、文字、水印");
   const [style, setStyle] = useState<(typeof styles)[number]>("国漫");
-  const [width, setWidth] = useState("768");
-  const [height, setHeight] = useState("768");
-  const [steps, setSteps] = useState("24");
+  const [width, setWidth] = useState("512");
+  const [height, setHeight] = useState("512");
+  const [steps, setSteps] = useState("16");
   const [seed, setSeed] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [task, setTask] = useState<ImageTask | null>(null);
@@ -871,7 +871,7 @@ export default function LocalImageStudioPage() {
         </div>
         {runtime?.message && <p className="mt-3 text-sm text-white/70">{runtime.message}</p>}
         {runtime?.status === "not_installed" && <p className="mt-2 text-xs text-amber-200">当前没有发现引擎文件。请使用包含 ComfyUI-Payload 的完整离线安装套件重新安装；单独运行 Setup.exe 不包含引擎数据。</p>}
-        {runtime?.runtime_mode === "cpu" && <p className="mt-2 text-xs text-amber-200">当前使用 CPU 模式，生成速度会明显慢于受支持的独立 GPU。不会假称集显获得 GPU 加速。</p>}
+        {runtime?.runtime_mode === "cpu" && <p className="mt-2 text-xs text-amber-200">当前使用 CPU 模式，生成速度会明显慢于受支持的独立 GPU。默认采用 512×512、16 步的轻量设置；如愿意等待，可手动提高分辨率和步数。不会假称集显获得 GPU 加速。</p>}
         {runtime?.install_directory && <p className="mt-2 break-all text-xs text-white/40">安装位置：{runtime.install_directory}</p>}
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => void loadRuntimeLogs()} disabled={logsBusy} className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/70 disabled:opacity-40">{logsBusy ? "读取中…" : "查看运行日志"}</button>
