@@ -498,7 +498,17 @@ ipcMain.handle("ai-browser:fill-prompt", async (_event, payload = {}) => {
     target.dispatchEvent(new Event("change", { bubbles: true }));
     return { ok: true, length: text.length };
   }.toString() + ")(" + JSON.stringify(prompt) + ")";
-  const result = await browser.webContents.executeJavaScript(script);
+  let result = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (browser.isDestroyed() || browser.webContents.isDestroyed()) throw new Error("AI 网页已关闭，请重新打开");
+    const latestUrl = new URL(browser.webContents.getURL());
+    if (latestUrl.protocol !== "https:" || !allowedHosts.has(latestUrl.hostname)) {
+      throw new Error("AI 网页已跳转到未允许自动填入的站点，已停止操作");
+    }
+    result = await browser.webContents.executeJavaScript(script);
+    if (result && result.ok) break;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 600));
+  }
   if (!result || !result.ok) throw new Error((result && result.reason) || "自动填入失败，请手动粘贴交接包");
   return { filled: true, length: result.length, submitted: false };
 });
