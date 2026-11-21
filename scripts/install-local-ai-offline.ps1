@@ -124,17 +124,84 @@ foreach ($notice in @($manifest.notices)) {
 $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
 if (Test-Path -LiteralPath $installFullPath) {
     $existingOllama = Join-Path $installFullPath "runtime\ollama.exe"
+    $existingRuntime = Join-Path $installFullPath "runtime"
     $existingManifest = Resolve-SafeRelativePath $installFullPath ([string]$manifest.model.manifest_path)
+    $existingStatePath = Join-Path $installFullPath "install-manifest.json"
     if ((Test-Path -LiteralPath $existingOllama -PathType Leaf) -and
-        (Test-Path -LiteralPath $existingManifest -PathType Leaf)) {
-        Write-Host "检测到已有本地 Ollama 运行环境和 Qwen3 模型，为保护已有模型及配置，本次不覆盖。"
+        (Test-Path -LiteralPath $existingManifest -PathType Leaf) -and
+        (Test-Path -LiteralPath $existingStatePath -PathType Leaf)) {
+        $existingState = Get-Content -LiteralPath $existingStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $existingModelHash = Get-Sha256 $existingManifest
+        if ($existingState.model_manifest_sha256 -ne $existingModelHash) {
+            throw "现有 Qwen3 模型与安装记录不一致。为保护用户模型数据，拒绝自动升级。"
+        }
+        if ($existingState.ollama_version -eq $manifest.ollama.version) {
+            Write-Host "检测到 Ollama 和 Qwen3 4B 已是当前载荷版本，为保护已有模型及配置，本次不覆盖。"
+            if ($transcriptStarted) {
+                Stop-Transcript | Out-Null
+                $transcriptStarted = $false
+            }
+            return
+        }
+
+        $upgradeParent = Split-Path -Parent $installFullPath
+        $upgradeDrive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($installFullPath))
+        $upgradeRequired = [long]$manifest.ollama.size_bytes + 1GB
+        if ($upgradeDrive.AvailableFreeSpace -lt $upgradeRequired) {
+            throw ("升级 Ollama 运行环境至少需要 {0:N2} GiB 可用空间。" -f ($upgradeRequired / 1GB))
+        }
+        $upgradeStage = Join-Path $upgradeParent (".Ollama-upgrade-" + [Guid]::NewGuid().ToString("N"))
+        $upgradeExtract = Join-Path $upgradeStage "extract"
+        $upgradeRuntime = Join-Path $upgradeStage "runtime"
+        $runtimeBackup = Join-Path $installFullPath (".runtime-backup-" + [Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $upgradeStage -Force | Out-Null
+        try {
+            Expand-Archive -LiteralPath $runtimeZip -DestinationPath $upgradeExtract -Force
+            $upgradeExe = Get-ChildItem -LiteralPath $upgradeExtract -Filter "ollama.exe" -File -Recurse | Select-Object -First 1
+            if (!$upgradeExe) {
+                throw "新版本 Ollama 运行包解压后缺少 ollama.exe。"
+            }
+            Move-Item -LiteralPath $upgradeExe.Directory.FullName -Destination $upgradeRuntime
+            Move-Item -LiteralPath $existingRuntime -Destination $runtimeBackup
+            try {
+                Move-Item -LiteralPath $upgradeRuntime -Destination $existingRuntime
+                if (!(Test-Path -LiteralPath (Join-Path $existingRuntime "ollama.exe") -PathType Leaf)) {
+                    throw "Ollama 新运行环境部署后缺少 ollama.exe。"
+                }
+                $updatedState = @{
+                    schema_version = 1
+                    ollama_version = $manifest.ollama.version
+                    model = $manifest.model.name
+                    model_manifest_sha256 = $existingModelHash
+                    installed_utc = [DateTime]::UtcNow.ToString("o")
+                    distribution_approved = $false
+                }
+                $stateTemp = Join-Path $installFullPath "install-manifest.json.new"
+                $updatedState | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $stateTemp -Encoding UTF8
+                Move-Item -LiteralPath $stateTemp -Destination $existingStatePath -Force
+                Remove-Item -LiteralPath $runtimeBackup -Recurse -Force -ErrorAction SilentlyContinue
+            } catch {
+                if (Test-Path -LiteralPath $existingRuntime) {
+                    Remove-Item -LiteralPath $existingRuntime -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if (Test-Path -LiteralPath $runtimeBackup) {
+                    Move-Item -LiteralPath $runtimeBackup -Destination $existingRuntime -Force
+                }
+                throw
+            }
+            Write-Host "Ollama 运行环境已升级到 $($manifest.ollama.version)；现有 Qwen3 模型和用户数据保持不变。"
+        } finally {
+            if (Test-Path -LiteralPath $upgradeStage) {
+                Remove-Item -LiteralPath $upgradeStage -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
         if ($transcriptStarted) {
             Stop-Transcript | Out-Null
             $transcriptStarted = $false
         }
         return
     }
-    throw "检测到已有本地 AI 目录但未找到完整的 Ollama/Qwen3 安装。为保护已有数据，安装已停止；请先备份并手动处理该目录。"
+    throw "检测到已有本地 AI 目录但未找到完整且可验证的 Ollama/Qwen3 安装。为保护已有数据，安装已停止；请先备份并手动处理该目录。"
 }
 
 $installParent = Split-Path -Parent $installFullPath
