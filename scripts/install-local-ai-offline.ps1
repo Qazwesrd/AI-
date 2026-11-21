@@ -49,6 +49,42 @@ function Resolve-SafeRelativePath([string]$Root, [string]$RelativePath) {
     return $fullPath
 }
 
+function Restore-OllamaUpgradeTransaction([string]$InstallDirectory) {
+    $journalPath = Join-Path $InstallDirectory ".ollama-upgrade-transaction.json"
+    if (!(Test-Path -LiteralPath $journalPath -PathType Leaf)) { return }
+
+    $journal = Get-Content -LiteralPath $journalPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($journal.schema_version -ne 1 -or
+        [string]$journal.runtime_backup -notmatch '^\.runtime-backup-[0-9a-f]{32}$' -or
+        [string]$journal.state_backup -notmatch '^\.install-manifest-backup-[0-9a-f]{32}$') {
+        throw "检测到无法验证的 Ollama 升级事务日志。为保护用户数据，已停止自动恢复。"
+    }
+
+    $runtimePath = Join-Path $InstallDirectory "runtime"
+    $runtimeBackupPath = Join-Path $InstallDirectory ([string]$journal.runtime_backup)
+    $statePath = Join-Path $InstallDirectory "install-manifest.json"
+    $stateBackupPath = Join-Path $InstallDirectory ([string]$journal.state_backup)
+    if (Test-Path -LiteralPath $runtimeBackupPath) {
+        if (Test-Path -LiteralPath $runtimePath) {
+            Remove-Item -LiteralPath $runtimePath -Recurse -Force
+        }
+        Move-Item -LiteralPath $runtimeBackupPath -Destination $runtimePath
+    }
+    if (Test-Path -LiteralPath $stateBackupPath -PathType Leaf) {
+        Copy-Item -LiteralPath $stateBackupPath -Destination $statePath -Force
+    }
+
+    $stateTemp = Join-Path $InstallDirectory "install-manifest.json.new"
+    if (Test-Path -LiteralPath $stateTemp) {
+        Remove-Item -LiteralPath $stateTemp -Recurse -Force
+    }
+    Remove-Item -LiteralPath $journalPath -Force
+    if (Test-Path -LiteralPath $stateBackupPath) {
+        Remove-Item -LiteralPath $stateBackupPath -Force
+    }
+    Write-Warning "检测到上次 Ollama 升级未完成，已恢复旧运行环境和安装清单；模型与用户数据未更改。"
+}
+
 $transcriptStarted = $false
 try {
     try {
@@ -200,6 +236,9 @@ try {
 
     $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
     if (Test-Path -LiteralPath $installFullPath) {
+        Restore-OllamaUpgradeTransaction $installFullPath
+    }
+    if (Test-Path -LiteralPath $installFullPath) {
         $existingOllama = Join-Path $installFullPath "runtime\ollama.exe"
         $existingRuntime = Join-Path $installFullPath "runtime"
         $existingManifest = Resolve-SafeRelativePath $installFullPath ([string]$manifest.model.manifest_path)
@@ -247,7 +286,10 @@ try {
             $upgradeStage = Join-Path $upgradeParent (".Ollama-upgrade-" + [Guid]::NewGuid().ToString("N"))
             $upgradeExtract = Join-Path $upgradeStage "extract"
             $upgradeRuntime = Join-Path $upgradeStage "runtime"
-            $runtimeBackup = Join-Path $installFullPath (".runtime-backup-" + [Guid]::NewGuid().ToString("N"))
+            $transactionId = [Guid]::NewGuid().ToString("N")
+            $runtimeBackup = Join-Path $installFullPath (".runtime-backup-" + $transactionId)
+            $stateBackup = Join-Path $installFullPath (".install-manifest-backup-" + $transactionId)
+            $journalPath = Join-Path $installFullPath ".ollama-upgrade-transaction.json"
             New-Item -ItemType Directory -Path $upgradeStage -Force | Out-Null
             try {
                 Expand-Archive -LiteralPath $runtimeZip -DestinationPath $upgradeExtract -Force
@@ -256,6 +298,19 @@ try {
                     throw "新版本 Ollama 运行包解压后缺少 ollama.exe。"
                 }
                 Move-Item -LiteralPath $upgradeExe.Directory.FullName -Destination $upgradeRuntime
+
+                $journal = @{
+                    schema_version = 1
+                    runtime_backup = [System.IO.Path]::GetFileName($runtimeBackup)
+                    state_backup = [System.IO.Path]::GetFileName($stateBackup)
+                    target_version = [string]$manifest.ollama.version
+                }
+                [System.IO.File]::WriteAllText(
+                    $journalPath,
+                    ($journal | ConvertTo-Json -Depth 4),
+                    [System.Text.UTF8Encoding]::new($false)
+                )
+                Copy-Item -LiteralPath $existingStatePath -Destination $stateBackup
                 Move-Item -LiteralPath $existingRuntime -Destination $runtimeBackup
                 try {
                     Move-Item -LiteralPath $upgradeRuntime -Destination $existingRuntime
@@ -274,13 +329,16 @@ try {
                     $stateTemp = Join-Path $installFullPath "install-manifest.json.new"
                     $updatedState | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $stateTemp -Encoding UTF8
                     Move-Item -LiteralPath $stateTemp -Destination $existingStatePath -Force
+
+                    # Removing the journal is the commit point. Until then, restart rolls back.
+                    Remove-Item -LiteralPath $journalPath -Force
                     Remove-Item -LiteralPath $runtimeBackup -Recurse -Force -ErrorAction SilentlyContinue
+                    Remove-Item -LiteralPath $stateBackup -Force -ErrorAction SilentlyContinue
                 } catch {
-                    if (Test-Path -LiteralPath $existingRuntime) {
-                        Remove-Item -LiteralPath $existingRuntime -Recurse -Force -ErrorAction SilentlyContinue
-                    }
-                    if (Test-Path -LiteralPath $runtimeBackup) {
-                        Move-Item -LiteralPath $runtimeBackup -Destination $existingRuntime -Force
+                    try {
+                        Restore-OllamaUpgradeTransaction $installFullPath
+                    } catch {
+                        throw "Ollama 升级失败，且自动恢复未能完成。事务日志和备份已保留，请勿删除安装目录。恢复错误：$($_.Exception.Message)"
                     }
                     throw
                 }
