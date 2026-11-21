@@ -1,3 +1,5 @@
+import BeginnerQuickStart from "../components/beginner-quick-start";
+
 const features = [
   {
     number: "01",
