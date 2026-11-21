@@ -55,6 +55,11 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn("comfyui-portable-dependency-inventory.json", builder)
         self.assertIn("largestAssetBytes", builder)
         self.assertIn("inventoryReports.Count -ne 4", builder)
+        installer_path = REPO_ROOT / "scripts" / "install-comfyui-offline.ps1"
+        installer = installer_path.read_text(encoding="utf-8")
+        self.assertIn("inventoryReportPath", installer)
+        self.assertIn("inventoryVariants.Count -ne 4", installer)
+        self.assertIn("archive_size_bytes", installer)
 
     def test_comfyui_installer_records_runtime_and_preserves_existing_install(self):
         installer_path = REPO_ROOT / "scripts" / "install-comfyui-offline.ps1"
