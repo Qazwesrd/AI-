@@ -37,7 +37,8 @@ type InstallerInfo = { engine_status: string; model: string; model_size_bytes: n
 type LocalImageRuntime = {
   status: string; message: string; checkpoint_count: number; checkpoints: string[];
   hardware: { ram_bytes: number | null; vram_bytes: number | null; gpu_level: string; reasons: string[]; note: string };
-  limitations?: string;
+  limitations?: string; installed?: boolean; managed_by_application?: boolean; process_id?: number | null;
+  runtime_mode?: string | null; log_path?: string; install_directory?: string;
 };
 type HardwareReadiness = {
   model: string; status: string; label: string; free_disk_bytes: number | null;
@@ -120,6 +121,10 @@ export default function LocalModelsPage() {
   const [checkingHardware, setCheckingHardware] = useState(false);
   const [imageRuntime, setImageRuntime] = useState<LocalImageRuntime | null>(null);
   const [checkingImageRuntime, setCheckingImageRuntime] = useState(false);
+  const [imageRuntimeAction, setImageRuntimeAction] = useState<"start" | "stop" | "">("");
+  const [imageRuntimeNotice, setImageRuntimeNotice] = useState("");
+  const [imageRuntimeLogs, setImageRuntimeLogs] = useState("");
+  const [showImageRuntimeLogs, setShowImageRuntimeLogs] = useState(false);
   const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
 
@@ -166,6 +171,35 @@ export default function LocalModelsPage() {
       setCheckingImageRuntime(false);
     }
   }, []);
+
+  const controlImageRuntime = async (action: "start" | "stop") => {
+    setImageRuntimeAction(action);
+    setImageRuntimeNotice("");
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime/${action}`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || (action === "start" ? "启动本地图片引擎失败" : "停止本地图片引擎失败"));
+      setImageRuntimeNotice(result.message || (action === "start" ? "已发出启动请求。" : "已发出停止请求。"));
+      await refreshImageRuntime();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "本地图片引擎操作失败");
+    } finally {
+      setImageRuntimeAction("");
+    }
+  };
+
+  const loadImageRuntimeLogs = async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime/logs`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取引擎日志失败");
+      setImageRuntimeLogs(result.available ? result.content : "尚无 ComfyUI 运行日志。");
+      setShowImageRuntimeLogs(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取引擎日志失败");
+    }
+  };
 
   const refreshComfyReadiness = useCallback(async () => {
     setCheckingComfyReadiness(true);
@@ -427,24 +461,34 @@ export default function LocalModelsPage() {
               <h2 className="text-xl font-semibold">本地图片生成引擎检测（ComfyUI）</h2>
               <p className="mt-1 text-sm leading-6 text-white/55">检测本机 ComfyUI 是否运行、已安装哪些 checkpoint，并评估显存适配情况。</p>
             </div>
-            <button type="button" disabled={checkingImageRuntime} onClick={() => void refreshImageRuntime()} className="rounded-lg border border-fuchsia-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingImageRuntime ? "检测中…" : "重新检测图片引擎"}</button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" disabled={checkingImageRuntime || !!imageRuntimeAction} onClick={() => void refreshImageRuntime()} className="rounded-lg border border-fuchsia-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingImageRuntime ? "检测中…" : "重新检测"}</button>
+              <button type="button" disabled={!imageRuntime?.installed || imageRuntime?.status === "ready" || imageRuntime?.status === "starting" || !!imageRuntimeAction} onClick={() => void controlImageRuntime("start")} className="rounded-lg bg-fuchsia-500 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">{imageRuntimeAction === "start" ? "正在启动…" : "启动本地图片引擎"}</button>
+              <button type="button" disabled={!imageRuntime?.managed_by_application || !!imageRuntimeAction} onClick={() => void controlImageRuntime("stop")} className="rounded-lg border border-rose-300/30 px-3 py-2 text-sm disabled:opacity-40">{imageRuntimeAction === "stop" ? "正在停止…" : "停止引擎"}</button>
+              <button type="button" onClick={() => void loadImageRuntimeLogs()} className="rounded-lg border border-white/15 px-3 py-2 text-sm">查看运行日志</button>
+            </div>
           </div>
+          {imageRuntimeNotice && <p className="mt-3 rounded-lg bg-emerald-500/10 p-3 text-sm text-emerald-100">{imageRuntimeNotice}</p>}
+          {showImageRuntimeLogs && <div className="mt-3 rounded-xl border border-white/10 bg-black/30 p-3"><div className="mb-2 flex items-center justify-between gap-2"><span className="text-sm font-semibold">ComfyUI 最近运行日志</span><button type="button" onClick={() => setShowImageRuntimeLogs(false)} className="text-xs text-white/60">收起</button></div><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs text-white/70">{imageRuntimeLogs || "暂无日志"}</pre></div>}
           {imageRuntime ? (
             <>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未安装或启动" : "检测异常"}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "starting" ? "正在启动" : imageRuntime.status === "stopped" ? "已安装，未启动" : imageRuntime.status === "not_installed" ? "尚未安装" : "检测异常"}</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已安装图片模型</div><div className="mt-1 font-semibold">{imageRuntime.checkpoint_count} 个 checkpoint</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">显存适配初筛</div><div className="mt-1 font-semibold">{({unknown:"未知",limited:"显存紧张",basic:"基础运行",capable:"具备一定余量",strong:"较充足"} as Record<string,string>)[imageRuntime.hardware?.gpu_level] || "待检测"}</div></div>
               </div>
               <div className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm">
                 <p>{imageRuntime.message}</p>
+                {imageRuntime.runtime_mode && <p className="mt-2 text-fuchsia-100">当前运行模式：{imageRuntime.runtime_mode === "cpu" ? "CPU（速度较慢）" : "GPU 加速"} · 进程 PID：{imageRuntime.process_id || "未知"}</p>}
+                {imageRuntime.log_path && <p className="mt-1 break-all text-xs text-white/45">日志：{imageRuntime.log_path}</p>}
+                {imageRuntime.install_directory && <p className="mt-1 break-all text-xs text-white/45">引擎目录：{imageRuntime.install_directory}</p>}
                 {imageRuntime.checkpoints.length > 0 && <div className="mt-2 space-y-1 text-white/65">{imageRuntime.checkpoints.slice(0,12).map((name) => <p key={name} className="break-all">• {name}</p>)}</div>}
                 {imageRuntime.hardware?.reasons?.map((reason,index) => <p key={index} className="mt-2 text-white/65">• {reason}</p>)}
               </div>
               <p className="mt-2 text-xs leading-5 text-amber-100/65">{imageRuntime.hardware?.note} {imageRuntime.limitations || "本阶段仅做本地引擎和模型检测，尚未提交图片生成任务。"}</p>
             </>
           ) : <p className="mt-3 text-sm text-white/55">正在检测本机图片引擎…</p>}
-          <p className="mt-3 text-xs leading-5 text-white/45">本检测只访问本机 127.0.0.1:8188，不会联网下载模型、启动程序、提交生成任务或调用云端 API。ComfyUI 和图片模型需要另行安装；后续会增加经过确认的安装向导。</p>
+          <p className="mt-3 text-xs leading-5 text-white/45">启动只调用安装目录中的固定 Python 和 ComfyUI 主程序，不下载模型、不联网、不提交生成任务。停止操作只针对本软件自己启动并持有进程句柄的 ComfyUI，不会结束其他 Python 程序。Ryzen 7 4800U 使用 CPU 模式，生成速度会较慢。</p>
         </section>
 
         <section className="rounded-2xl border border-purple-300/25 bg-slate-950/70 p-5">
