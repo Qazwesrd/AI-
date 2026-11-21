@@ -1118,7 +1118,13 @@ def render_episode_from_shots(
             name=output.name, category="video", file_path=str(output),
             mime_type="video/mp4", file_size=output.stat().st_size,
             duration=quality_report["duration_seconds"],
-            metadata_json={"quality_checked": True, "quality_report": quality_report},
+            metadata_json={
+                "quality_checked": True,
+                "quality_report": quality_report,
+                "project_id": episode.project_id,
+                "episode_id": episode.id,
+                "rendered_output": True,
+            },
         ))
         episode.status = "rendered"
         db.commit()
