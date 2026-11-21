@@ -5,6 +5,8 @@ from fastapi import HTTPException
 
 from app.routers.local_ai_runtime import (
     LocalModelTestInput,
+    LocalCreativeInput,
+    generate_local_creative_content,
     _installed_models,
     local_ai_runtime,
     test_local_model,
@@ -68,6 +70,42 @@ class LocalAIRuntimeTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as caught:
             test_local_model(LocalModelTestInput(model="../bad"))
         self.assertEqual(caught.exception.status_code, 400)
+
+    def test_creative_generation_requires_preinstalled_model(self):
+        payload = LocalCreativeInput(model="missing", source_text="故事梗概")
+        with patch("app.routers.local_ai_runtime._installed_models", return_value=[]), patch(
+            "app.routers.local_ai_runtime._ollama_request"
+        ) as request:
+            with self.assertRaises(HTTPException) as caught:
+                generate_local_creative_content(payload)
+        self.assertEqual(caught.exception.status_code, 404)
+        request.assert_not_called()
+
+    def test_creative_generation_uses_only_local_model_and_selected_style(self):
+        payload = LocalCreativeInput(
+            model="qwen2.5:3b",
+            task="storyboard",
+            style="3D漫",
+            source_text="主角走进古老神殿。",
+            extra_requirements="保持服装连续性",
+        )
+        with patch(
+            "app.routers.local_ai_runtime._installed_models",
+            return_value=[{"name": "qwen2.5:3b"}],
+        ), patch(
+            "app.routers.local_ai_runtime._ollama_request",
+            return_value={"response": "镜头1：远景……"},
+        ) as request:
+            result = generate_local_creative_content(payload)
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["style"], "3D漫")
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["cloud_fallback"])
+        self.assertFalse(result["saved_automatically"])
+        body = request.call_args.args[1]
+        self.assertEqual(body["model"], "qwen2.5:3b")
+        self.assertIn("3D漫", body["system"])
+        self.assertIn("保持服装连续性", body["prompt"])
 
 
 if __name__ == "__main__":
