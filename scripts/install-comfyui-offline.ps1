@@ -73,10 +73,21 @@ function Select-ComfyAsset($Adapters) {
                 name = "ComfyUI_windows_portable_amd.7z"
                 detected_gpu = $model
                 vendor = "AMD"
-                selection_reason = "检测到官方 Windows AMD 运行包支持的 GPU 系列"
+                runtime_mode = "gpu"
+                selection_reason = "检测到已列入官方 Windows AMD 加速支持范围的 GPU 系列"
             }
         }
-        throw "检测到 AMD 显卡，但型号不在已核实的 Windows 运行包支持范围内。安装已停止，不会猜测或联网回退。"
+
+        # Older Radeon Vega APUs (including Ryzen 7 4800U Radeon Graphics)
+        # are not assumed to support the current Windows ROCm GPU path.
+        # The official AMD portable also supports CPU-only execution.
+        return @{
+            name = "ComfyUI_windows_portable_amd.7z"
+            detected_gpu = $model
+            vendor = "AMD"
+            runtime_mode = "cpu"
+            selection_reason = "该 AMD 集成显卡未列入已确认的 GPU 加速支持范围，安全使用官方便携包 CPU 模式"
+        }
     }
 
     $intel = @($recognized | Where-Object Vendor -eq "Intel")
@@ -87,10 +98,17 @@ function Select-ComfyAsset($Adapters) {
                 name = "ComfyUI_windows_portable_intel.7z"
                 detected_gpu = $model
                 vendor = "Intel"
+                runtime_mode = "gpu"
                 selection_reason = "检测到 Intel Arc GPU，使用官方 Intel 运行包"
             }
         }
-        throw "检测到 Intel 显卡，但当前官方 Windows XPU 运行包面向 Intel Arc；未识别到 Arc 型号，安装已停止。"
+        return @{
+            name = "ComfyUI_windows_portable_intel.7z"
+            detected_gpu = $intel[0].Name
+            vendor = "Intel"
+            runtime_mode = "cpu"
+            selection_reason = "未识别到 Intel Arc 加速型号，使用官方便携包 CPU 模式"
+        }
     }
 
     throw "没有识别到受支持的 NVIDIA、AMD 或 Intel GPU。安装已停止，不会猜测运行包，也不会联网下载。"
@@ -255,6 +273,8 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 try {
     Write-Host ("已识别显卡：{0}（{1}）" -f $selection.detected_gpu, $selection.vendor)
     Write-Host ("选择运行包：{0}" -f $selection.name)
+    Write-Host ("运行模式：{0}" -f $selection.runtime_mode)
+    Write-Host ("适配说明：{0}" -f $selection.selection_reason)
     Write-Host ("解压约 {0:N2} GiB，请保持电脑供电并等待完成。" -f ($archiveInfo.ExpandedBytes / 1GB))
 
     & $sevenZip x -y ("-o" + $stage) -- $archivePath
@@ -278,7 +298,28 @@ try {
     # The target was checked before extraction. Never replace or delete an existing
     # ComfyUI folder because it may contain user models, custom nodes, or settings.
     Move-Item -LiteralPath $portableRoot -Destination $installFullPath
+
+    # Provide an explicit CPU launcher for integrated/unsupported GPU devices.
+    # This follows the official ComfyUI portable CPU invocation and does not
+    # install extra runtimes or download anything.
+    $cpuLauncher = Join-Path $installFullPath "AI漫剧大师-CPU模式启动.bat"
+    $cpuLauncherContent = @(
+        "@echo off",
+        "setlocal",
+        'cd /d "%~dp0"',
+        'if not exist "python_embeded\python.exe" (echo ComfyUI embedded Python is missing.& pause & exit /b 1)',
+        'if not exist "ComfyUI\main.py" (echo ComfyUI main.py is missing.& pause & exit /b 1)',
+        '"python_embeded\python.exe" -s "ComfyUI\main.py" --cpu --windows-standalone-build',
+        "if errorlevel 1 (echo ComfyUI CPU mode exited with an error.& pause & exit /b 1)",
+        "endlocal"
+    )
+    Set-Content -LiteralPath $cpuLauncher -Value $cpuLauncherContent -Encoding ASCII
+
     Write-Host "ComfyUI 引擎已部署到：$installFullPath"
+    if ($selection.runtime_mode -eq "cpu") {
+        Write-Host "当前设备将使用 CPU 模式；首次图片生成可能较慢。"
+    }
+    Write-Host ("CPU 模式启动器：{0}" -f $cpuLauncher)
     Write-Host "图片生成模型未包含在安装包内，也没有下载任何模型。"
 } finally {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
