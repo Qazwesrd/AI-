@@ -88,12 +88,14 @@ class LocalImageRuntimeTests(unittest.TestCase):
         self.assertTrue(any("不能据此判断没有 GPU" in item for item in result["reasons"]))
 
     def test_cpu_launch_command_explicitly_disables_gpu(self):
-        command = _build_runtime_command(Path("python.exe"), Path("ComfyUI/main.py"), "cpu")
-        self.assertEqual(command, ["python.exe", "-s", "ComfyUI/main.py", "--cpu", "--windows-standalone-build"])
+        main_py = Path("ComfyUI") / "main.py"
+        command = _build_runtime_command(Path("python.exe"), main_py, "cpu")
+        self.assertEqual(command, ["python.exe", "-s", str(main_py), "--cpu", "--windows-standalone-build"])
 
     def test_gpu_launch_command_does_not_add_cpu_flag(self):
-        command = _build_runtime_command(Path("python.exe"), Path("ComfyUI/main.py"), "gpu")
-        self.assertEqual(command, ["python.exe", "-s", "ComfyUI/main.py", "--windows-standalone-build"])
+        main_py = Path("ComfyUI") / "main.py"
+        command = _build_runtime_command(Path("python.exe"), main_py, "gpu")
+        self.assertEqual(command, ["python.exe", "-s", str(main_py), "--windows-standalone-build"])
         self.assertNotIn("--cpu", command)
 
     def test_ryzen_4800u_integrated_radeon_uses_cpu_mode(self):
