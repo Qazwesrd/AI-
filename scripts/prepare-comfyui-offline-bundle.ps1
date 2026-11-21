@@ -163,6 +163,401 @@ $totalBytes = ($manifestAssets | Measure-Object -Property size_bytes -Sum).Sum
 Write-Host ("ComfyUI 官方版本：{0}，四种 Windows x64 运行包总计 {1:N2} GiB。" -f $release.tag_name, ($totalBytes / 1GB))
 Write-Host "安装包内只包含引擎运行环境；图片生成模型不包含在内。"
 
+# The installer needs a local 7z extractor. Resolve both the executable and its
+# matching upstream source from the official 7-Zip release and verify digests.
+$sevenZipApi = "https://api.github.com/repos/ip7z/7zip/releases/latest"
+$sevenZipRelease = Invoke-RestMethod -Uri $sevenZipApi -Headers $headers -TimeoutSec 30
+$sevenZipTool = @($sevenZipRelease.assets | Where-Object { $_.name -ceq "7zr.exe" }) | Select-Object -First 1
+$sevenZipSource = @($sevenZipRelease.assets | Where-Object { $_.name -match '^7z[0-9]+-src\.7z
+$target = [System.IO.Path]::GetFullPath($OutputZip)
+$targetDir = Split-Path -Parent $target
+New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+
+$clientHandler = [System.Net.Http.HttpClientHandler]::new()
+$clientHandler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($clientHandler)
+$client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+$stream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+    $manifestResults = @()
+    foreach ($asset in $manifestAssets) {
+        $manifestResults += Add-VerifiedRemoteEntry $archive $client ("ComfyUI-Payload/" + $asset.name) $asset.url $asset.size_bytes $asset.sha256
+    }
+    $toolResults = @()
+    $toolResults += Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest
+    $sourceResult = Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest
+    $installScript = Join-Path $PSScriptRoot "install-comfyui-offline.ps1"
+    if (!(Test-Path -LiteralPath $installScript -PathType Leaf)) { throw "离线安装脚本不存在：$installScript" }
+    Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
+
+    $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
+    $licenseUri = Assert-OfficialUri $licenseUrl @("raw.githubusercontent.com")
+    $licenseResponse = $client.GetAsync($licenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$licenseResponse.IsSuccessStatusCode) { throw "无法读取该版本 ComfyUI GPL-3.0 许可证文本。" }
+        $licenseText = $licenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($licenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or $licenseText -notmatch "Version 3") {
+            throw "ComfyUI 许可证内容校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt" $licenseText
+    $sevenZipLicenseUrl = "https://raw.githubusercontent.com/ip7z/7zip/$($sevenZipRelease.tag_name)/DOC/License.txt"
+    $sevenZipLicenseUri = Assert-OfficialUri $sevenZipLicenseUrl @("raw.githubusercontent.com")
+    $sevenZipLicenseResponse = $client.GetAsync($sevenZipLicenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$sevenZipLicenseResponse.IsSuccessStatusCode) { throw "无法读取 7-Zip 官方许可证文本。" }
+        $sevenZipLicenseText = $sevenZipLicenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($sevenZipLicenseText -notmatch "7-Zip source code" -or $sevenZipLicenseText -notmatch "GNU LGPL") { throw "7-Zip 许可证内容校验失败。" }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt" $sevenZipLicenseText
+    } finally { $sevenZipLicenseResponse.Dispose() }
+    } finally { $licenseResponse.Dispose() }
+
+    $manifest = @{
+        schema_version = 1
+        product = "AI漫剧制作大师"
+        bundle_type = "complete-offline-comfyui-engine"
+        comfyui_version = $release.tag_name
+        source = $ReleaseApi
+        created_utc = [DateTime]::UtcNow.ToString("o")
+        target_architecture = "windows-x64"
+        gpu_selection = @{
+            nvidia = "ComfyUI_windows_portable_nvidia.7z"
+            nvidia_legacy_gtx10_and_older = "ComfyUI_windows_portable_nvidia_cu126.7z"
+            amd = "ComfyUI_windows_portable_amd.7z"
+            intel = "ComfyUI_windows_portable_intel.7z"
+            unknown = "manual-selection-required"
+        }
+        model_policy = "Image-generation models are separate optional downloads and are not included or downloaded automatically."
+        assets = $manifestResults
+        tools = $toolResults
+        license = @{
+            spdx_id = "GPL-3.0"
+            license_file = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
+            upstream_source = "https://github.com/Comfy-Org/ComfyUI/tree/$($release.tag_name)"
+            note = "This notice covers ComfyUI itself only. A full dependency/license audit is required before public distribution."
+        }
+        seven_zip = @{
+            version = $sevenZipRelease.tag_name
+            executable = "ComfyUI-Payload/7zr.exe"
+            source_archive = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"
+            source_url = "https://github.com/ip7z/7zip/tree/$($sevenZipRelease.tag_name)"
+            license_file = "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt"
+        }
+    }
+    Add-TextEntry $archive "ComfyUI-Payload/manifest.json" ($manifest | ConvertTo-Json -Depth 8)
+    Add-FileEntry $archive "$($setupItem.Name)" $setupItem.FullName
+    $setupHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    Add-TextEntry $archive "$($setupItem.Name).sha256" "$setupHash  $($setupItem.Name)"
+    Add-TextEntry $archive "安装说明.txt" @"
+AI漫剧制作大师 - ComfyUI 完整离线安装套件
+
+1. 解压本 ZIP。
+2. 双击根目录中的 Setup.exe。
+3. 安装程序会检测显卡，校验并仅部署匹配的一个 ComfyUI Windows x64 运行包。
+4. 安装过程不需要联网下载 ComfyUI；所有引擎运行包均已包含在本 ZIP 中。
+5. 图片生成模型不包含在本套件中；后续下载模型前必须显示来源、大小、磁盘空间并再次征求确认。
+6. 本套件面向 Windows x64。未知显卡或无法识别的硬件会停止安装，不会猜测或联网回退。
+7. ComfyUI 采用 GPL-3.0；7-Zip 采用其上游许可证。详见 THIRD_PARTY_NOTICES。完整依赖许可证审查仍是正式公开分发前的必要关卡。
+
+本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
+"@
+} catch {
+    $archive.Dispose()
+    $stream.Dispose()
+    $client.Dispose()
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+    throw
+} finally {
+    if ($archive) { $archive.Dispose() }
+    if ($stream) { $stream.Dispose() }
+    $client.Dispose()
+}
+
+$zipItem = Get-Item -LiteralPath $target
+$zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+"$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+Write-Host ("离线套件已生成：{0}" -f $target)
+Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
+Write-Host "ZIP SHA-256：$zipHash"
+ }) | Select-Object -First 1
+if (!$sevenZipTool -or !$sevenZipSource) { throw "官方 7-Zip Release 缺少 7zr.exe 或对应源代码包。" }
+foreach ($toolAsset in @($sevenZipTool, $sevenZipSource)) {
+    if ($toolAsset.digest -notmatch '^sha256:([0-9a-fA-F]{64})
+$target = [System.IO.Path]::GetFullPath($OutputZip)
+$targetDir = Split-Path -Parent $target
+New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+
+$clientHandler = [System.Net.Http.HttpClientHandler]::new()
+$clientHandler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($clientHandler)
+$client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+$stream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+    $manifestResults = @()
+    foreach ($asset in $manifestAssets) {
+        $manifestResults += Add-VerifiedRemoteEntry $archive $client ("ComfyUI-Payload/" + $asset.name) $asset.url $asset.size_bytes $asset.sha256
+    }
+
+    $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
+    $licenseUri = Assert-OfficialUri $licenseUrl @("raw.githubusercontent.com")
+    $licenseResponse = $client.GetAsync($licenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$licenseResponse.IsSuccessStatusCode) { throw "无法读取该版本 ComfyUI GPL-3.0 许可证文本。" }
+        $licenseText = $licenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($licenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or $licenseText -notmatch "Version 3") {
+            throw "ComfyUI 许可证内容校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt" $licenseText
+    } finally { $licenseResponse.Dispose() }
+
+    $manifest = @{
+        schema_version = 1
+        product = "AI漫剧制作大师"
+        bundle_type = "complete-offline-comfyui-engine"
+        comfyui_version = $release.tag_name
+        source = $ReleaseApi
+        created_utc = [DateTime]::UtcNow.ToString("o")
+        target_architecture = "windows-x64"
+        gpu_selection = @{
+            nvidia = "ComfyUI_windows_portable_nvidia.7z"
+            nvidia_legacy_gtx10_and_older = "ComfyUI_windows_portable_nvidia_cu126.7z"
+            amd = "ComfyUI_windows_portable_amd.7z"
+            intel = "ComfyUI_windows_portable_intel.7z"
+            unknown = "manual-selection-required"
+        }
+        model_policy = "Image-generation models are separate optional downloads and are not included or downloaded automatically."
+        assets = $manifestResults
+        license = @{
+            spdx_id = "GPL-3.0"
+            license_file = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
+            upstream_source = "https://github.com/Comfy-Org/ComfyUI/tree/$($release.tag_name)"
+            note = "This notice covers ComfyUI itself only. A full dependency/license audit is required before public distribution."
+        }
+    }
+    Add-TextEntry $archive "ComfyUI-Payload/manifest.json" ($manifest | ConvertTo-Json -Depth 8)
+    Add-FileEntry $archive "安装程序/$($setupItem.Name)" $setupItem.FullName
+    $setupHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    Add-TextEntry $archive "安装程序/$($setupItem.Name).sha256" "$setupHash  $($setupItem.Name)"
+    Add-TextEntry $archive "安装说明.txt" @"
+AI漫剧制作大师 - ComfyUI 完整离线安装套件
+
+1. 解压本 ZIP。
+2. 运行“安装程序”目录中的 Setup.exe。
+3. ComfyUI 引擎运行环境随本套件提供，不需要在安装后联网下载 ComfyUI。
+4. 安装程序/首次启动流程必须检测显卡后仅部署匹配的一个运行包。
+5. 图片生成模型不包含在本套件中；后续下载模型前必须显示来源、大小、磁盘空间并再次征求确认。
+6. 本套件面向 Windows x64。未知显卡或无法识别的硬件必须要求人工选择，不能猜测。
+7. ComfyUI 本身采用 GPL-3.0；详见 THIRD_PARTY_NOTICES。其他依赖仍需逐项许可证审计后才能正式公开分发。
+
+本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
+"@
+} catch {
+    $archive.Dispose()
+    $stream.Dispose()
+    $client.Dispose()
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+    throw
+} finally {
+    if ($archive) { $archive.Dispose() }
+    if ($stream) { $stream.Dispose() }
+    $client.Dispose()
+}
+
+$zipItem = Get-Item -LiteralPath $target
+$zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+"$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+Write-Host ("离线套件已生成：{0}" -f $target)
+Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
+Write-Host "ZIP SHA-256：$zipHash"
+) { throw "7-Zip 官方资产缺少可信 SHA-256：$($toolAsset.name)" }
+    $toolUri = Assert-OfficialUri $toolAsset.browser_download_url @("github.com")
+    $expectedToolPath = "/ip7z/7zip/releases/download/$($sevenZipRelease.tag_name)/$($toolAsset.name)"
+    if ($toolUri.AbsolutePath -cne $expectedToolPath -or $toolUri.Query -or $toolUri.Fragment) { throw "7-Zip 资产 URL 不匹配：$($toolAsset.name)" }
+}
+$sevenZipToolDigest = ([regex]::Match($sevenZipTool.digest, '^sha256:([0-9a-fA-F]{64})
+$target = [System.IO.Path]::GetFullPath($OutputZip)
+$targetDir = Split-Path -Parent $target
+New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+
+$clientHandler = [System.Net.Http.HttpClientHandler]::new()
+$clientHandler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($clientHandler)
+$client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+$stream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+    $manifestResults = @()
+    foreach ($asset in $manifestAssets) {
+        $manifestResults += Add-VerifiedRemoteEntry $archive $client ("ComfyUI-Payload/" + $asset.name) $asset.url $asset.size_bytes $asset.sha256
+    }
+
+    $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
+    $licenseUri = Assert-OfficialUri $licenseUrl @("raw.githubusercontent.com")
+    $licenseResponse = $client.GetAsync($licenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$licenseResponse.IsSuccessStatusCode) { throw "无法读取该版本 ComfyUI GPL-3.0 许可证文本。" }
+        $licenseText = $licenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($licenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or $licenseText -notmatch "Version 3") {
+            throw "ComfyUI 许可证内容校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt" $licenseText
+    } finally { $licenseResponse.Dispose() }
+
+    $manifest = @{
+        schema_version = 1
+        product = "AI漫剧制作大师"
+        bundle_type = "complete-offline-comfyui-engine"
+        comfyui_version = $release.tag_name
+        source = $ReleaseApi
+        created_utc = [DateTime]::UtcNow.ToString("o")
+        target_architecture = "windows-x64"
+        gpu_selection = @{
+            nvidia = "ComfyUI_windows_portable_nvidia.7z"
+            nvidia_legacy_gtx10_and_older = "ComfyUI_windows_portable_nvidia_cu126.7z"
+            amd = "ComfyUI_windows_portable_amd.7z"
+            intel = "ComfyUI_windows_portable_intel.7z"
+            unknown = "manual-selection-required"
+        }
+        model_policy = "Image-generation models are separate optional downloads and are not included or downloaded automatically."
+        assets = $manifestResults
+        license = @{
+            spdx_id = "GPL-3.0"
+            license_file = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
+            upstream_source = "https://github.com/Comfy-Org/ComfyUI/tree/$($release.tag_name)"
+            note = "This notice covers ComfyUI itself only. A full dependency/license audit is required before public distribution."
+        }
+    }
+    Add-TextEntry $archive "ComfyUI-Payload/manifest.json" ($manifest | ConvertTo-Json -Depth 8)
+    Add-FileEntry $archive "安装程序/$($setupItem.Name)" $setupItem.FullName
+    $setupHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    Add-TextEntry $archive "安装程序/$($setupItem.Name).sha256" "$setupHash  $($setupItem.Name)"
+    Add-TextEntry $archive "安装说明.txt" @"
+AI漫剧制作大师 - ComfyUI 完整离线安装套件
+
+1. 解压本 ZIP。
+2. 运行“安装程序”目录中的 Setup.exe。
+3. ComfyUI 引擎运行环境随本套件提供，不需要在安装后联网下载 ComfyUI。
+4. 安装程序/首次启动流程必须检测显卡后仅部署匹配的一个运行包。
+5. 图片生成模型不包含在本套件中；后续下载模型前必须显示来源、大小、磁盘空间并再次征求确认。
+6. 本套件面向 Windows x64。未知显卡或无法识别的硬件必须要求人工选择，不能猜测。
+7. ComfyUI 本身采用 GPL-3.0；详见 THIRD_PARTY_NOTICES。其他依赖仍需逐项许可证审计后才能正式公开分发。
+
+本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
+"@
+} catch {
+    $archive.Dispose()
+    $stream.Dispose()
+    $client.Dispose()
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+    throw
+} finally {
+    if ($archive) { $archive.Dispose() }
+    if ($stream) { $stream.Dispose() }
+    $client.Dispose()
+}
+
+$zipItem = Get-Item -LiteralPath $target
+$zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+"$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+Write-Host ("离线套件已生成：{0}" -f $target)
+Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
+Write-Host "ZIP SHA-256：$zipHash"
+)).Groups[1].Value.ToLowerInvariant()
+$sevenZipSourceDigest = ([regex]::Match($sevenZipSource.digest, '^sha256:([0-9a-fA-F]{64})
+$target = [System.IO.Path]::GetFullPath($OutputZip)
+$targetDir = Split-Path -Parent $target
+New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+
+$clientHandler = [System.Net.Http.HttpClientHandler]::new()
+$clientHandler.AllowAutoRedirect = $false
+$client = [System.Net.Http.HttpClient]::new($clientHandler)
+$client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
+$stream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+try {
+    $manifestResults = @()
+    foreach ($asset in $manifestAssets) {
+        $manifestResults += Add-VerifiedRemoteEntry $archive $client ("ComfyUI-Payload/" + $asset.name) $asset.url $asset.size_bytes $asset.sha256
+    }
+
+    $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
+    $licenseUri = Assert-OfficialUri $licenseUrl @("raw.githubusercontent.com")
+    $licenseResponse = $client.GetAsync($licenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$licenseResponse.IsSuccessStatusCode) { throw "无法读取该版本 ComfyUI GPL-3.0 许可证文本。" }
+        $licenseText = $licenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($licenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or $licenseText -notmatch "Version 3") {
+            throw "ComfyUI 许可证内容校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt" $licenseText
+    } finally { $licenseResponse.Dispose() }
+
+    $manifest = @{
+        schema_version = 1
+        product = "AI漫剧制作大师"
+        bundle_type = "complete-offline-comfyui-engine"
+        comfyui_version = $release.tag_name
+        source = $ReleaseApi
+        created_utc = [DateTime]::UtcNow.ToString("o")
+        target_architecture = "windows-x64"
+        gpu_selection = @{
+            nvidia = "ComfyUI_windows_portable_nvidia.7z"
+            nvidia_legacy_gtx10_and_older = "ComfyUI_windows_portable_nvidia_cu126.7z"
+            amd = "ComfyUI_windows_portable_amd.7z"
+            intel = "ComfyUI_windows_portable_intel.7z"
+            unknown = "manual-selection-required"
+        }
+        model_policy = "Image-generation models are separate optional downloads and are not included or downloaded automatically."
+        assets = $manifestResults
+        license = @{
+            spdx_id = "GPL-3.0"
+            license_file = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
+            upstream_source = "https://github.com/Comfy-Org/ComfyUI/tree/$($release.tag_name)"
+            note = "This notice covers ComfyUI itself only. A full dependency/license audit is required before public distribution."
+        }
+    }
+    Add-TextEntry $archive "ComfyUI-Payload/manifest.json" ($manifest | ConvertTo-Json -Depth 8)
+    Add-FileEntry $archive "安装程序/$($setupItem.Name)" $setupItem.FullName
+    $setupHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+    Add-TextEntry $archive "安装程序/$($setupItem.Name).sha256" "$setupHash  $($setupItem.Name)"
+    Add-TextEntry $archive "安装说明.txt" @"
+AI漫剧制作大师 - ComfyUI 完整离线安装套件
+
+1. 解压本 ZIP。
+2. 运行“安装程序”目录中的 Setup.exe。
+3. ComfyUI 引擎运行环境随本套件提供，不需要在安装后联网下载 ComfyUI。
+4. 安装程序/首次启动流程必须检测显卡后仅部署匹配的一个运行包。
+5. 图片生成模型不包含在本套件中；后续下载模型前必须显示来源、大小、磁盘空间并再次征求确认。
+6. 本套件面向 Windows x64。未知显卡或无法识别的硬件必须要求人工选择，不能猜测。
+7. ComfyUI 本身采用 GPL-3.0；详见 THIRD_PARTY_NOTICES。其他依赖仍需逐项许可证审计后才能正式公开分发。
+
+本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
+"@
+} catch {
+    $archive.Dispose()
+    $stream.Dispose()
+    $client.Dispose()
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+    throw
+} finally {
+    if ($archive) { $archive.Dispose() }
+    if ($stream) { $stream.Dispose() }
+    $client.Dispose()
+}
+
+$zipItem = Get-Item -LiteralPath $target
+$zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+"$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+Write-Host ("离线套件已生成：{0}" -f $target)
+Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
+Write-Host "ZIP SHA-256：$zipHash"
+)).Groups[1].Value.ToLowerInvariant()
+
 $target = [System.IO.Path]::GetFullPath($OutputZip)
 $targetDir = Split-Path -Parent $target
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
