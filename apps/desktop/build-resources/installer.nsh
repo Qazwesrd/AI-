@@ -6,10 +6,13 @@
   DetailPrint "正在检测显卡并安装匹配的 ComfyUI 本地引擎..."
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$EXEDIR\ComfyUI-Payload\install-comfyui-offline.ps1" -PayloadRoot "$EXEDIR\ComfyUI-Payload" -InstallRoot "$PROFILE\AIComicStudio\ComfyUI"' $0
 
-  ${if} $0 != 0
+  IntCmp $0 0 comfyui_install_success comfyui_install_failed comfyui_install_failed
+
+  comfyui_install_failed:
     MessageBox MB_ICONSTOP|MB_OK "ComfyUI 本地引擎部署失败（错误代码：$0）。安装已停止。请确认完整离线 ZIP 已解压，且电脑有受支持的 NVIDIA、AMD 或 Intel 显卡及足够磁盘空间。"
     Abort
-  ${endIf}
+
+  comfyui_install_success:
   Goto comfyui_payload_done
 
   comfyui_engine_exists:
