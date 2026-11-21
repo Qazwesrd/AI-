@@ -400,6 +400,9 @@ def download_story_project_export(project_id: int, filename: str):
     if (
         not filename.endswith(".zip")
         or Path(filename).name != filename
+        or "/" in filename
+        or "\\" in filename
+        or ":" in filename
         or not filename.startswith(f"project-{project_id}-")
     ):
         raise HTTPException(400, "项目归档文件名无效")
