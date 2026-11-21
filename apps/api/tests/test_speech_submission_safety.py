@@ -50,6 +50,22 @@ class SpeechSubmissionSafetyTests(unittest.TestCase):
             "alloy",
         )
 
+    def test_episode_voice_resolution_uses_manually_selected_speaker(self):
+        shot = SimpleNamespace(character_ids=[42, 43])
+        self.assertEqual(
+            resolve_episode_shot_voice(
+                shot, {"42": "nova", "43": "echo"}, "alloy", speaker_character_id=43
+            ),
+            "echo",
+        )
+
+    def test_episode_voice_resolution_rejects_speaker_not_in_shot(self):
+        shot = SimpleNamespace(character_ids=[42, 43])
+        with self.assertRaises(ValueError):
+            resolve_episode_shot_voice(
+                shot, {"42": "nova", "43": "echo"}, "alloy", speaker_character_id=99
+            )
+
     def test_output_format_cannot_inject_a_file_path(self):
         with self.assertRaises(ValidationError):
             SpeechInput(
