@@ -26,13 +26,13 @@ class EpisodeVideoQualityAuditTests(unittest.TestCase):
             payload = {
                 "format": {"duration": "121.5", "size": str(video.stat().st_size), "format_name": "mov,mp4"},
                 "streams": [
-                    {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080},
-                    {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": 2},
+                    {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "start_time": "0.0", "duration": "121.5"},
+                    {"codec_type": "audio", "codec_name": "aac", "sample_rate": "48000", "channels": 2, "start_time": "0.0", "duration": "121.5"},
                 ],
             }
             responses = [
                 SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr=""),
-                SimpleNamespace(returncode=0, stdout="", stderr=""),
+                SimpleNamespace(returncode=0, stdout="", stderr="[blackdetect] black_start:10.0 black_end:11.0 black_duration:1.0\\n[silencedetect] silence_start:20.0 silence_end:22.0 silence_duration:2.0"),
             ]
             with (
                 patch("app.routers.production_audit.shutil.which", side_effect=lambda name: f"/tools/{name}"),
@@ -44,6 +44,10 @@ class EpisodeVideoQualityAuditTests(unittest.TestCase):
         self.assertEqual(result["probe"]["video_streams"][0]["codec_name"], "h264")
         self.assertEqual(result["probe"]["audio_streams"][0]["codec_name"], "aac")
         self.assertEqual(result["decode_check"], "passed")
+        self.assertEqual(result["content_checks"]["black_frame_segments"], 1)
+        self.assertEqual(result["content_checks"]["silence_segments"], 1)
+        self.assertIn("black_frames_detected", {item["code"] for item in result["issues"]})
+        self.assertIn("silence_detected", {item["code"] for item in result["issues"]})
         self.assertEqual(run.call_count, 2)
 
     def test_missing_audio_is_warning_not_blocker(self):
