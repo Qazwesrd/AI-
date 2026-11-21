@@ -30,7 +30,7 @@ type ModelItem = {
   };
 };
 
-type Catalog = {
+type RuntimeModel = { name: string; size_bytes?: number | null };\ntype Runtime = { status: string; models: RuntimeModel[]; message: string };\n\ntype Catalog = {
   items: ModelItem[];
   total: number;
   directory: string;
@@ -62,7 +62,7 @@ export default function LocalModelsPage() {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState("");\n  const [runtime, setRuntime] = useState<Runtime | null>(null);\n  const [baseModel, setBaseModel] = useState("");\n  const [newModelName, setNewModelName] = useState("comic-writer");\n  const [modelRole, setModelRole] = useState("all_rounder");\n  const [modelStyle, setModelStyle] = useState("国漫");\n  const [modelInstructions, setModelInstructions] = useState("");\n  const [creatingModel, setCreatingModel] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -80,7 +80,7 @@ export default function LocalModelsPage() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refresh(); void refreshRuntime(); }, [refresh]);\n\n  const refreshRuntime = async () => {\n    try {\n      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });\n      const result = await response.json();\n      if (!response.ok) throw new Error(result.detail || "无法检测本地 Ollama");\n      setRuntime(result);\n      setBaseModel((current) => current || result.models?.[0]?.name || "");\n    } catch (err) {\n      setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });\n    }\n  };\n\n  const createSpecializedModel = async () => {\n    if (!baseModel || !newModelName.trim()) return;\n    if (!window.confirm("将使用已安装的基础模型，在本机创建一个新的专用模型。不会下载模型或调用云端服务。继续吗？")) return;\n    setCreatingModel(true); setError(""); setMessage("");\n    try {\n      const response = await fetch(`${API}/api/local-ai/models/create`, {\n        method: "POST", headers: { "Content-Type": "application/json" },\n        body: JSON.stringify({ base_model: baseModel, name: newModelName, role: modelRole, style: modelStyle, instructions: modelInstructions }),\n      });\n      const result = await response.json();\n      if (!response.ok) throw new Error(result.detail || "专用模型创建失败");\n      setMessage(`专用模型 ${result.model} 已在本机创建。刷新模型列表即可选择使用。`);\n      setNewModelName("");\n      await refreshRuntime();\n    } catch (err) { setError(err instanceof Error ? err.message : "专用模型创建失败"); }\n    finally { setCreatingModel(false); }\n  };
 
   const chooseModel = (item: ModelItem) => {
     setSelected(item.name);
@@ -149,7 +149,49 @@ export default function LocalModelsPage() {
         {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
         {message && <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-emerald-100">{message}</div>}
 
-        {catalog && (
+
+        <section className="rounded-2xl border border-cyan-300/25 bg-slate-950/70 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">本地 AI 专用模型工坊</h2>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">从已安装的 Ollama 基础模型创建漫剧编剧、分镜导演、人物设定或图片提示词专用模型。只在本机执行，不下载基础模型。</p>
+            </div>
+            <button type="button" onClick={() => void refreshRuntime()} className="rounded-lg border border-cyan-200/30 px-3 py-2 text-sm">检测本地引擎</button>
+          </div>
+          <div className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm text-white/65">
+            {runtime?.status === "ready" ? `Ollama 已连接 · 已安装 ${runtime.models.length} 个模型` : runtime?.message || "正在检测本机 Ollama…"}
+          </div>
+          {runtime?.models?.length ? (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="space-y-2 text-sm"><span className="text-white/70">基础模型（必须已安装）</span>
+                <select value={baseModel} onChange={e => setBaseModel(e.target.value)} className="w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-3 text-white">
+                  {runtime.models.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
+                </select>
+              </label>
+              <label className="space-y-2 text-sm"><span className="text-white/70">新模型名称</span>
+                <input value={newModelName} onChange={e => setNewModelName(e.target.value)} maxLength={63} placeholder="例如 comic-writer" className="w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-3 text-white placeholder:text-white/30" />
+              </label>
+              <label className="space-y-2 text-sm"><span className="text-white/70">专用方向</span>
+                <select value={modelRole} onChange={e => setModelRole(e.target.value)} className="w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-3 text-white">
+                  <option value="all_rounder">全能漫剧助手</option><option value="screenwriter">漫剧编剧</option><option value="storyboard_director">分镜导演</option><option value="character_designer">人物设定设计师</option><option value="prompt_artist">图片提示词设计师</option>
+                </select>
+              </label>
+              <label className="space-y-2 text-sm"><span className="text-white/70">默认画面风格</span>
+                <select value={modelStyle} onChange={e => setModelStyle(e.target.value)} className="w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-3 text-white">
+                  <option>国漫</option><option>仿真人</option><option>3D漫</option><option>2D漫</option>
+                </select>
+              </label>
+            </div>
+          ) : <p className="mt-3 text-sm text-amber-100/80">当前没有检测到已安装的 Ollama 模型。请先在本机准备好基础模型；此处不会自动下载。</p>}
+          <label className="mt-3 block space-y-2 text-sm"><span className="text-white/70">额外创作规则（可选）</span>
+            <textarea value={modelInstructions} onChange={e => setModelInstructions(e.target.value)} maxLength={4000} rows={3} placeholder="例如：尊重原著，不擅自改变人物关系；每个镜头必须保持角色服装、发型和道具一致。" className="w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-3 text-white placeholder:text-white/30" />
+          </label>
+          <button type="button" disabled={!runtime?.models?.length || !baseModel || !newModelName.trim() || creatingModel} onClick={() => void createSpecializedModel()} className="mt-4 rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
+            {creatingModel ? "正在本机创建专用模型…" : "创建本地专用模型"}
+          </button>
+          <p className="mt-2 text-xs leading-5 text-white/45">创建过程可能占用 CPU、内存和磁盘空间；复用基础模型但会生成额外模型配置/数据。不会覆盖同名模型，创建前会再次确认。模型能力取决于基础模型本身，不等同于从零训练。</p>
+        </section>
+\n        {catalog && (
           <>
             <section className="rounded-2xl border border-purple-300/20 bg-slate-950/65 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
