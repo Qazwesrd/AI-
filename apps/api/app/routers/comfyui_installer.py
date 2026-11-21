@@ -473,3 +473,131 @@ def comfyui_install_plan(payload: dict):
         )
     except (RuntimeError, ValueError, OSError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+ALLOWED_DOWNLOAD_HOSTS = {"github.com", "release-assets.githubusercontent.com"}
+
+
+class DownloadCancelled(Exception):
+    """Raised when the user cancels a local asset download."""
+
+
+def validate_download_destination(destination, install_root):
+    """Ensure the archive is written only inside the dedicated ComfyUI staging area."""
+    from pathlib import Path
+    root = Path(install_root).resolve()
+    target = Path(destination).resolve()
+    if target == root or root not in target.parents:
+        raise ValueError("下载目标必须位于 ComfyUI 安装暂存目录内")
+    if target.suffix.lower() != ".7z" or target.name not in ALLOWED_ASSET_NAMES:
+        raise ValueError("下载目标文件名不在官方安装包允许列表中")
+    return target
+
+
+def download_verified_official_asset(asset, release_tag, install_root, destination,
+                                     cancel_event=None, progress_callback=None,
+                                     opener=urlopen):
+    """Stream a verified official archive to a staging file and atomically publish it.
+
+    This helper is deliberately not wired to an API endpoint yet. Callers must
+    obtain a separate explicit user confirmation before invoking it.
+    """
+    import hashlib
+    import threading
+    from pathlib import Path
+    from urllib.error import HTTPError, URLError
+    from urllib.request import HTTPRedirectHandler, build_opener
+
+    verified = validate_official_asset_for_install(asset, release_tag)
+    root = Path(install_root).resolve()
+    target = validate_download_destination(destination, root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_name(target.name + ".part")
+    if partial.exists():
+        raise ValueError("检测到未完成的下载文件；当前版本尚不支持续传，请先在界面中清理后重试")
+    if target.exists():
+        raise ValueError("目标安装包已存在，请先执行完整性检查或清理旧文件")
+
+    class OfficialRedirectOnly(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            parsed = urlsplit(newurl)
+            if (
+                parsed.scheme != "https"
+                or parsed.hostname not in ALLOWED_DOWNLOAD_HOSTS
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.port is not None
+            ):
+                raise ValueError("下载重定向目标不在官方允许域名内")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+    if opener is urlopen:
+        safe_opener = build_opener(OfficialRedirectOnly())
+        open_response = lambda request, timeout: safe_opener.open(request, timeout=timeout)
+    else:
+        open_response = opener
+
+    request = Request(
+        verified["url"],
+        headers={
+            "Accept-Encoding": "identity",
+            "User-Agent": "AI-Comic-Studio-ComfyUI-Installer",
+        },
+    )
+    cancel_event = cancel_event or threading.Event()
+    digest = hashlib.sha256()
+    received = 0
+    try:
+        with open_response(request, timeout=30) as response:
+            final_url = response.geturl()
+            final = urlsplit(final_url)
+            if final.scheme != "https" or final.hostname not in ALLOWED_DOWNLOAD_HOSTS:
+                raise ValueError("最终下载地址不是允许的官方 HTTPS 资源地址")
+            metadata = validate_download_response(
+                getattr(response, "status", response.getcode()),
+                dict(response.headers.items()),
+                verified["size_bytes"],
+            )
+            with partial.open("xb") as output:
+                while True:
+                    if cancel_event.is_set():
+                        raise DownloadCancelled("用户已取消 ComfyUI 下载")
+                    chunk = response.read(DOWNLOAD_CHUNK_BYTES)
+                    if not chunk:
+                        break
+                    received += len(chunk)
+                    if received > verified["size_bytes"]:
+                        raise ValueError("下载数据超过官方声明的文件大小")
+                    output.write(chunk)
+                    digest.update(chunk)
+                    if progress_callback:
+                        progress_callback({
+                            "status": "downloading",
+                            "received_bytes": received,
+                            "total_bytes": verified["size_bytes"],
+                            "percent": min(99, int(received * 100 / verified["size_bytes"])),
+                        })
+                output.flush()
+                os.fsync(output.fileno())
+        if received != verified["size_bytes"] or received != metadata["expected_response_bytes"]:
+            raise ValueError("下载文件长度与官方声明不一致")
+        if digest.hexdigest().lower() != verified["sha256"]:
+            raise ValueError("下载文件 SHA-256 校验失败，已拒绝保留安装包")
+        if cancel_event.is_set():
+            raise DownloadCancelled("用户已取消 ComfyUI 下载")
+        os.replace(partial, target)
+        if progress_callback:
+            progress_callback({
+                "status": "verified",
+                "received_bytes": received,
+                "total_bytes": verified["size_bytes"],
+                "percent": 100,
+            })
+        return {"path": str(target), "size_bytes": received, "sha256": digest.hexdigest()}
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError, DownloadCancelled):
+        try:
+            partial.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
