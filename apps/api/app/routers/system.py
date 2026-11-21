@@ -140,6 +140,7 @@ def system_diagnostics(db: Session = Depends(get_db)):
         "database": {**database, "path": str(DATABASE_PATH)},
         "storage": {"path": str(STORAGE_DIR), "disk": disk},
         "media_tools": {"ffmpeg": ffmpeg, "ffprobe": ffprobe},
+        "local_ai": _check_local_ai_tools(),
         "ai_permissions": {
             "network_enabled": bool(runtime and runtime.network_enabled),
             "paid_api_allowed": bool(runtime and runtime.paid_api_allowed),
