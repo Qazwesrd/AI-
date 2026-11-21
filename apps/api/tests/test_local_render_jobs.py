@@ -102,6 +102,39 @@ class LocalRenderJobPersistenceTests(unittest.TestCase):
             self.assertFalse(partial.exists())
             self.assertEqual(saved.result_data["progress"]["percent"], 100)
 
+    def test_create_job_persists_task_and_schedules_background_worker(self):
+        import tempfile
+        from pathlib import Path
+        from fastapi import BackgroundTasks
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(media, "safe_storage_file", return_value=Path(directory) / "source.mp4"):
+                with patch.object(media, "VIDEO_DIR", Path(directory)):
+                    with patch.dict(media._LOCAL_RENDER_RUNTIME, {}, clear=True):
+                        background = BackgroundTasks()
+                        data = media.RenderInput(video_path="source.mp4", output_name="episode final")
+                        result = media.create_local_render_job(data, background, self.db)
+            self.assertEqual(result["status"], "queued")
+            self.assertEqual(len(background.tasks), 1)
+            saved = self.db.query(MediaTask).filter(MediaTask.id == result["task_id"]).one()
+            self.assertEqual(saved.task_type, "local_render")
+            self.assertTrue(saved.result_path.endswith("_episode_final.mp4"))
+            self.assertEqual(saved.result_data["progress"]["stage"], "queued")
+
+    def test_processing_cancel_requests_ffmpeg_stop_without_claiming_completed(self):
+        import threading
+
+        event = threading.Event()
+        with patch.dict(
+            media._LOCAL_RENDER_RUNTIME,
+            {self.task.id: {"cancel": event, "process": object()}},
+            clear=True,
+        ):
+            result = media.cancel_local_render_job(self.task.id, self.db)
+        self.assertEqual(result["status"], "cancellation_requested")
+        self.assertTrue(event.is_set())
+        self.assertEqual(self.task.status, "processing")
+
     def test_progress_updates_are_saved_to_media_task(self):
         with patch.object(media, "SessionLocal", self.Session):
             media._update_local_render_job(
