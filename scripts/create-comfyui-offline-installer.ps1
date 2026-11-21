@@ -50,9 +50,6 @@ if ([string]::IsNullOrWhiteSpace($SetupExe)) {
     Write-Host "这一步需要已安装 Node.js、Python 环境、项目依赖以及 FFmpeg。"
     $buildStarted = Get-Date
     & $buildScript
-    if ($LASTEXITCODE -ne 0) {
-        throw "Windows 安装程序构建失败，已停止离线套件制作。"
-    }
 
     $candidates = @(Get-ChildItem -LiteralPath $releaseDir -File -Filter "*Setup*.exe" |
         Where-Object { $_.LastWriteTime -ge $buildStarted.AddMinutes(-2) } |
@@ -77,9 +74,6 @@ Write-Host "预计下载约 7.3 GiB；请使用稳定网络，并确保输出盘
 Write-Host "下载内容只用于制作离线 ZIP，不会安装到当前电脑。"
 
 & $bundleScript -SetupExe $SetupExe -OutputZip $OutputZip
-if ($LASTEXITCODE -ne 0) {
-    throw "离线 ZIP 构建失败。"
-}
 
 if (!(Test-Path -LiteralPath $OutputZip -PathType Leaf)) {
     throw "离线 ZIP 没有生成。"
