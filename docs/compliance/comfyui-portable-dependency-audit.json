@@ -101,8 +101,9 @@
       "ollama_model_page": "https://ollama.com/library/qwen3:4b",
       "ollama_model_page_license": "Apache License Version 2.0",
       "exact_ollama_manifest_sha256": null,
-      "exact_blob_hashes_verified_at_payload_build": true,
-      "review_note": "Upstream license identity is confirmed. This is not approval of the exact bundled Ollama conversion or its runtime dependencies; preserve the exact manifest, layer hashes, model attribution, and Apache-2.0 notice for each built payload."
+      "review_note": "Upstream license identity is confirmed. This is not approval of the exact bundled Ollama conversion or its runtime dependencies; preserve the exact manifest, layer hashes, model attribution, and Apache-2.0 notice for each built payload.",
+      "exact_blob_hash_verification_implemented_in_builder": true,
+      "exact_blob_hashes_verified_for_current_release_payload": false
     }
   },
   "image_model_candidates": [
