@@ -73,7 +73,9 @@ export default function LocalModelsPage() {
   const [modelRole, setModelRole] = useState("all_rounder");
   const [modelStyle, setModelStyle] = useState("国漫");
   const [modelInstructions, setModelInstructions] = useState("");
-  const [creatingModel, setCreatingModel] = useState(false);\n  const [installerInfo, setInstallerInfo] = useState<InstallerInfo | null>(null);\n  const [installingBaseModel, setInstallingBaseModel] = useState(false);
+  const [creatingModel, setCreatingModel] = useState(false);
+  const [installerInfo, setInstallerInfo] = useState<InstallerInfo | null>(null);
+  const [installingBaseModel, setInstallingBaseModel] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
