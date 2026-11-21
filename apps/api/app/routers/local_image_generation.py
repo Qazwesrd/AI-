@@ -341,6 +341,30 @@ def list_shot_media(shot_id: int, db: Session = Depends(get_db)):
     return {"shot_id": shot.id, "images": result}
 
 
+
+def _remove_media_link_from_shot(db: Session, shot_id: int, link_id: int):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    link = db.query(StoryboardMediaLink).filter(
+        StoryboardMediaLink.id == link_id,
+        StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.project_id == shot.project_id,
+        StoryboardMediaLink.episode_id == shot.episode_id,
+    ).first()
+    if link is None:
+        raise HTTPException(404, "该图片关联不存在，或不属于当前分镜")
+    db.delete(link)
+    db.commit()
+    return {"success": True, "unlinked": True, "media_file_id": link.media_file_id}
+
+
+@router.delete("/shots/{shot_id}/media/{link_id}")
+def unlink_shot_media(shot_id: int, link_id: int, db: Session = Depends(get_db)):
+    """Remove only the storyboard association; keep the media file in the library."""
+    return _remove_media_link_from_shot(db, shot_id, link_id)
+
+
 def _attach_media_to_shot(db: Session, media: MediaFile, shot_id: int):
     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
     if shot is None:

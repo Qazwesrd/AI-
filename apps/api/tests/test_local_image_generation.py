@@ -8,7 +8,7 @@ from app.routers.local_image_generation import (
     LocalImageGenerateInput, _checkpoint_names, build_txt2img_workflow,
     generate_local_image, get_local_image_task, LocalImageArchiveInput,
     _safe_output_image, _download_comfyui_output, archive_local_image_task_output,
-    _attach_media_to_shot,
+    _attach_media_to_shot, _remove_media_link_from_shot,
 )
 
 
@@ -129,12 +129,20 @@ class _FakeDB:
     def __init__(self, rows=None):
         self.rows = rows or {}
         self.added = []
+        self.deleted = []
+        self.committed = False
 
     def query(self, model):
         return _FakeQuery(self.rows, model)
 
     def add(self, value):
         self.added.append(value)
+
+    def delete(self, value):
+        self.deleted.append(value)
+
+    def commit(self):
+        self.committed = True
 
 
 class StoryboardImageLinkTests(unittest.TestCase):
@@ -178,6 +186,24 @@ class StoryboardImageLinkTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as caught:
             _attach_media_to_shot(db, MediaFile(), 11)
         self.assertEqual(caught.exception.status_code, 409)
+
+
+    def test_unlink_removes_only_the_association(self):
+        link = StoryboardMediaLink()
+        link.media_file_id = 19
+        db = _FakeDB({StoryboardShot: self._rows()[StoryboardShot], StoryboardMediaLink: link})
+        result = _remove_media_link_from_shot(db, 11, 21)
+        self.assertTrue(result["unlinked"])
+        self.assertEqual(result["media_file_id"], 19)
+        self.assertEqual(db.deleted, [link])
+        self.assertTrue(db.committed)
+
+    def test_unlink_rejects_link_not_found(self):
+        db = _FakeDB({StoryboardShot: self._rows()[StoryboardShot], StoryboardMediaLink: None})
+        with self.assertRaises(HTTPException) as caught:
+            _remove_media_link_from_shot(db, 11, 404)
+        self.assertEqual(caught.exception.status_code, 404)
+        self.assertEqual(db.deleted, [])
 
     def test_archive_input_accepts_optional_shot_id(self):
         data = LocalImageArchiveInput(filename="frame.png", shot_id=11)
