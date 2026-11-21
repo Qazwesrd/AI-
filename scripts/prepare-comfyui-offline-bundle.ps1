@@ -143,7 +143,7 @@ function Get-RequiredSha256($Asset, [string]$Label) {
 }
 
 if (!(Test-Path -LiteralPath $SetupExe -PathType Leaf)) { throw "找不到桌面安装程序：$SetupExe" }
-$auditPath = Join-Path $PSScriptRoot "..\\docs\\compliance\\comfyui-portable-dependency-audit.json"
+$auditPath = Join-Path $PSScriptRoot "..\docs\compliance\comfyui-portable-dependency-audit.json"
 $auditPath = [System.IO.Path]::GetFullPath($auditPath)
 if (!(Test-Path -LiteralPath $auditPath -PathType Leaf)) {
     throw "缺少第三方依赖许可证审查登记表：$auditPath"
