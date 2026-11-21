@@ -183,8 +183,9 @@ class LocalAIRuntimeTests(unittest.TestCase):
             "app.routers.local_ai_runtime._ollama_request", side_effect=generated
         ) as request:
             result = generate_local_episode_package(payload, db=db)
-            saved_file = Path(result["saved_path"])
-            self.assertTrue(saved_file.is_file())
+            saved_files = list(Path(temporary).glob("*.md"))
+            self.assertEqual(len(saved_files), 1)
+            saved_file = saved_files[0]
             saved_content = saved_file.read_text(encoding="utf-8")
         self.assertEqual(result["stage_count"], 5)
         self.assertEqual([x["stage"] for x in result["stages"]], ["screenplay", "character", "plot", "storyboard", "image_prompt"])
