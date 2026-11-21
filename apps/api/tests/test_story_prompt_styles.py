@@ -1,6 +1,14 @@
 import unittest
 
-from app.routers.story import AIPlanInput, PROMPT_STYLE_GUIDANCE, prompt_style_guidance
+from fastapi import HTTPException
+
+from app.routers.story import (
+    AIPlanInput,
+    PROMPT_STYLE_GUIDANCE,
+    generate_episode_script_and_shots,
+    plan_episodes_with_ai,
+    prompt_style_guidance,
+)
 
 
 class StoryPromptStyleTests(unittest.TestCase):
@@ -24,6 +32,18 @@ class StoryPromptStyleTests(unittest.TestCase):
         payload = AIPlanInput(confirm_paid=True)
         self.assertEqual(payload.prompt_style, "professional")
         self.assertEqual(payload.additional_instructions, "")
+
+    def test_cloud_ai_episode_planning_is_blocked_before_database_access(self):
+        with self.assertRaises(HTTPException) as raised:
+            plan_episodes_with_ai(1, AIPlanInput(confirm_paid=True), db=None)
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertIn("严格零费用模式", raised.exception.detail)
+
+    def test_cloud_ai_script_and_storyboard_generation_is_blocked_before_database_access(self):
+        with self.assertRaises(HTTPException) as raised:
+            generate_episode_script_and_shots(1, AIPlanInput(confirm_paid=True), db=None)
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertIn("严格零费用模式", raised.exception.detail)
 
     def test_additional_instructions_are_bounded(self):
         with self.assertRaises(Exception):

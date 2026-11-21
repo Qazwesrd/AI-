@@ -70,7 +70,8 @@
             "shortcutName": "AI漫剧制作大师",
             "allowToChangeInstallationDirectory": true,
             "oneClick": false,
-            "createStartMenuShortcut": true
+            "createStartMenuShortcut": true,
+            "include": "build-resources/installer.nsh"
         },
         "artifactName": "${productName}-Setup-${version}.${ext}"
     },

@@ -66,13 +66,20 @@ def assess_qwen3_4b(hardware: dict, free_disk_bytes: int | None, system_name: st
     else:
         reasons.append("系统内存达到较舒适的建议范围。")
 
-    if vram is not None:
+    gpu_vendor = gpu.get("vendor")
+    gpu_name = gpu.get("name")
+    if vram is not None and gpu_vendor == "NVIDIA":
         if vram >= 6 * GIB:
-            reasons.append("检测到 NVIDIA 显存达到 6 GiB，可尝试 GPU 加速；实际还取决于驱动和 Ollama 支持。")
+            reasons.append("检测到 NVIDIA 显存达到 6 GiB，可尝试 GPU 加速；实际还取决于驱动和 Ollama 支持，尚未进行推理基准测试。")
         elif vram >= 4 * GIB:
             reasons.append("检测到 NVIDIA 显卡，但显存较紧张，模型可能部分或全部使用系统内存。")
         else:
             reasons.append("检测到的 NVIDIA 显存不足 4 GiB，不建议依赖 GPU 完整加载模型。")
+    elif gpu_vendor in {"AMD", "Intel"}:
+        reasons.append(
+            f"检测到 {gpu_vendor} 显示适配器（{gpu_name or '型号未知'}）；"
+            "当前安装流程没有验证该设备的 Ollama GPU 后端，按 CPU 推理方案评估，不承诺 GPU 加速。"
+        )
     else:
         reasons.append("未能读取 NVIDIA 显卡信息；这不代表电脑没有其他品牌显卡，先按 CPU/内存方案评估。")
 
@@ -106,6 +113,10 @@ def assess_qwen3_4b(hardware: dict, free_disk_bytes: int | None, system_name: st
         "reasons": reasons,
         "blockers": blockers,
         "network_used": False,
+        "recommended_inference_mode": (
+            "gpu_candidate" if gpu_vendor == "NVIDIA" and vram is not None and vram >= 6 * GIB else "cpu"
+        ),
+        "gpu_acceleration_verified": False,
         "no_stress_test": True,
         "note": "这是安装前的静态初筛，不是实际推理性能测试或运行保证。模型文件大小不等于实际内存需求；量化、上下文长度、系统占用、GPU 驱动和显存共享都会影响结果。",
     }

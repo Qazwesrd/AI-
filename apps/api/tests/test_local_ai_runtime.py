@@ -163,18 +163,39 @@ class LocalAIRuntimeTests(unittest.TestCase):
         self.assertLessEqual(sum(len(__import__("json").dumps(x, ensure_ascii=False)) for x in result), 1200)
 
 
-    def test_episode_package_runs_five_local_stages_and_carries_previous_context(self):
-        payload = LocalEpisodePackageInput(model="qwen2.5:3b", style="国漫", source_text="主角进入神殿。")
+    def test_episode_package_runs_five_local_stages_and_saves_to_media_library(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import Mock
+
+        payload = LocalEpisodePackageInput(
+            model="qwen2.5:3b", style="国漫", source_text="主角进入神殿。",
+            novel_id=4, chapter_id=9,
+        )
         generated = [{"response": f"阶段{i}成果"} for i in range(1, 6)]
-        with patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name": "qwen2.5:3b"}]), patch(
+        db = Mock()
+        def assign_media_id():
+            db.add.call_args.args[0].id = 42
+        db.flush.side_effect = assign_media_id
+        with tempfile.TemporaryDirectory() as temporary, patch(
+            "app.routers.local_ai_runtime.LOCAL_AI_RESULTS_DIR", Path(temporary)
+        ), patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name": "qwen2.5:3b"}]), patch(
             "app.routers.local_ai_runtime._ollama_request", side_effect=generated
         ) as request:
-            result = generate_local_episode_package(payload)
+            result = generate_local_episode_package(payload, db=db)
+            saved_files = list(Path(temporary).glob("*.md"))
+            self.assertEqual(len(saved_files), 1)
+            saved_file = saved_files[0]
+            saved_content = saved_file.read_text(encoding="utf-8")
         self.assertEqual(result["stage_count"], 5)
         self.assertEqual([x["stage"] for x in result["stages"]], ["screenplay", "character", "plot", "storyboard", "image_prompt"])
         self.assertFalse(result["network_used"])
         self.assertFalse(result["cloud_fallback"])
-        self.assertFalse(result["saved_automatically"])
+        self.assertTrue(result["saved_automatically"])
+        self.assertIn("阶段1成果", saved_content)
+        self.assertEqual(result["media_file_id"], 42)
+        db.flush.assert_called_once()
+        db.commit.assert_called_once()
         self.assertEqual(request.call_count, 5)
         self.assertIn("阶段1成果", request.call_args_list[3].args[1]["prompt"])
         self.assertIn("阶段2成果", request.call_args_list[3].args[1]["prompt"])

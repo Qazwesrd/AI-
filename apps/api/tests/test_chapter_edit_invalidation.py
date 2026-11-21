@@ -10,7 +10,7 @@ from app.models.novel import Novel, Chapter, AnalysisItem
 from app.models.story import StoryProject
 from app.routers.novels import ChapterUpdate, update_chapter
 from app.routers.story import AIPlanInput, generate_episode_script_and_shots
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from fastapi import HTTPException
 
 
@@ -39,8 +39,11 @@ class ChapterEditInvalidationTests(unittest.TestCase):
             project,
         ]
 
-        with self.assertRaises(HTTPException) as raised:
-            generate_episode_script_and_shots(3, AIPlanInput(), db)
+        # Bypass the global zero-cost guard only in this focused test so it
+        # continues to exercise stale-source validation ordering.
+        with patch("app.routers.story.require_cloud_ai_api_disabled"):
+            with self.assertRaises(HTTPException) as raised:
+                generate_episode_script_and_shots(3, AIPlanInput(), db)
 
         self.assertEqual(raised.exception.status_code, 409)
 

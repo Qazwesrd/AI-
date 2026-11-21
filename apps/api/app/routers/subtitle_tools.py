@@ -1,7 +1,8 @@
 import hashlib
 import json
-import re
+import shutil
 import uuid
+import re
 import urllib.request
 from pathlib import Path
 from typing import Literal, Optional
@@ -14,6 +15,8 @@ from app.database import get_db
 from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.models.studio import AIUsageLog
 from app.routers.media import get_provider
+from app.services.local_tts import LocalTtsUnavailable, list_local_sapi_voices, synthesize_local_sapi_cues
+from app.routers.local_ai_runtime import MODEL_NAME_PATTERN, _installed_models, _ollama_request
 from app.services.media_service import (
     AUDIO_DIR, SUBTITLE_DIR, VIDEO_DIR, probe_media, run_ffmpeg, safe_storage_file,
     validate_rendered_video,
@@ -74,6 +77,27 @@ def _read_text(path: Path):
         except UnicodeDecodeError:
             continue
     raise ValueError("字幕文件编码无法识别，请另存为 UTF-8 格式")
+
+
+def _subtitle_ownership(db, source_path):
+    """Carry project/episode ownership forward when a subtitle is translated or dubbed."""
+    normalized = str(source_path)
+    track = db.query(SubtitleTrack).filter(SubtitleTrack.file_path == normalized).first()
+    if track:
+        return track.project_id, track.episode_id
+    media = db.query(MediaFile).filter(MediaFile.file_path == normalized).first()
+    metadata = media.metadata_json if media and isinstance(media.metadata_json, dict) else {}
+    project_id = metadata.get("project_id")
+    episode_id = metadata.get("episode_id")
+    try:
+        project_id = int(project_id) if project_id not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        project_id = None
+    try:
+        episode_id = int(episode_id) if episode_id not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        episode_id = None
+    return project_id, episode_id
 
 
 def _chat_completion(base, key, model, cues, target_language):
@@ -144,6 +168,20 @@ class VoiceInput(BaseModel):
     confirm_paid: bool = False
 
 
+class LocalTranslateInput(BaseModel):
+    subtitle_path: str
+    model: str = Field(min_length=1, max_length=128)
+    target_language: Literal["zh", "en", "zh-en"]
+    confirm_local_generation: bool = False
+
+
+class LocalVoiceInput(BaseModel):
+    subtitle_path: str
+    voice: str = Field(min_length=1, max_length=160)
+    rate: int = Field(default=0, ge=-5, le=5)
+    confirm_local_generation: bool = False
+
+
 class StyledRenderInput(BaseModel):
     video_path: str
     subtitle_path: str
@@ -165,6 +203,7 @@ def translate_subtitles(data: TranslateInput, db: Session = Depends(get_db)):
         if source.suffix.lower() != ".srt":
             raise HTTPException(400, "当前版本的 AI 字幕翻译仅支持 SRT；请先将 ASS/SSA/VTT 转换为 SRT")
         cues = parse_srt(_read_text(source))
+        project_id, episode_id = _subtitle_ownership(db, source)
         config, key, base = get_provider(db, data.provider, data.confirm_paid)
         if getattr(config, "purpose", "text") not in ("text", "translation", "general"):
             raise HTTPException(400, "请选择已配置的文本类 AI 服务商进行字幕翻译")
@@ -181,12 +220,18 @@ def translate_subtitles(data: TranslateInput, db: Session = Depends(get_db)):
         filename = filename[:140] + "_" + uuid.uuid4().hex[:8] + ".srt"
         destination = SUBTITLE_DIR / filename
         destination.write_text(render_srt(output_cues), encoding="utf-8-sig")
-        track = SubtitleTrack(name=filename, file_path=str(destination), format="srt",
-                              language={"zh": "zh-CN", "en": "en", "zh-en": "zh-CN+en"}[data.target_language])
+        track = SubtitleTrack(
+            name=filename, file_path=str(destination), format="srt",
+            language={"zh": "zh-CN", "en": "en", "zh-en": "zh-CN+en"}[data.target_language],
+            project_id=project_id, episode_id=episode_id,
+        )
         db.add(track)
         db.add(MediaFile(name=filename, category="other", file_path=str(destination),
                          mime_type="application/x-subrip", file_size=destination.stat().st_size,
-                         metadata_json={"subtitle_language": data.target_language, "source": str(source)}))
+                         metadata_json={
+                             "subtitle_language": data.target_language, "source": str(source),
+                             "project_id": project_id, "episode_id": episode_id,
+                         }))
         db.add(AIUsageLog(provider=data.provider, model=data.model, task="subtitle_translation",
                           status="completed", detail=f"字幕条数：{len(cues)}；目标语言：{data.target_language}"))
         db.commit()
@@ -207,6 +252,7 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
         if subtitle.suffix.lower() != ".srt":
             raise HTTPException(400, "当前版本的字幕配音仅支持 SRT 文件")
         cues = parse_srt(_read_text(subtitle))
+        project_id, episode_id = _subtitle_ownership(db, subtitle)
         config, key, base = get_provider(db, data.provider, data.confirm_paid)
         if getattr(config, "purpose", "text") not in ("text", "audio", "speech"):
             raise HTTPException(400, "请选择支持语音合成的服务商")
@@ -229,6 +275,8 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
                          status="pending", prompt=f"字幕逐条配音：{subtitle.name}",
                          request_data={"fingerprint": fingerprint, "voice": data.voice,
                                        "speed": data.speed, "cue_count": len(cues),
+                                       "subtitle_source": str(subtitle),
+                                       "project_id": project_id, "episode_id": episode_id,
                                        "confirm_paid": data.confirm_paid})
         db.add(task)
         db.commit()
@@ -284,7 +332,10 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
             task.error = None
             db.add(MediaFile(name=filename, category="audio", file_path=str(destination),
                              mime_type="audio/mpeg", file_size=destination.stat().st_size,
-                             metadata_json={"subtitle_source": str(subtitle), "voice": data.voice}))
+                             metadata_json={
+                                 "subtitle_source": str(subtitle), "voice": data.voice,
+                                 "project_id": project_id, "episode_id": episode_id,
+                             }))
             db.add(AIUsageLog(provider=data.provider, model=data.model, task="subtitle_dubbing",
                               status="completed", detail=f"字幕条数：{len(cues)}；语音：{data.voice}"))
             db.commit()
@@ -304,6 +355,287 @@ def create_subtitle_voice(data: VoiceInput, db: Session = Depends(get_db)):
     except Exception as exc:
         db.rollback()
         raise HTTPException(502, "字幕配音失败：" + str(exc)[:1500]) from exc
+
+
+@router.post("/translate-local")
+def translate_subtitles_locally(data: LocalTranslateInput, db: Session = Depends(get_db)):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "本机字幕翻译会占用 CPU；请明确确认后再开始。")
+    if not MODEL_NAME_PATTERN.fullmatch(data.model.strip()):
+        raise HTTPException(400, "本地模型名称格式无效。")
+    source = safe_storage_file(data.subtitle_path)
+    if source.suffix.lower() != ".srt":
+        raise HTTPException(400, "本机字幕翻译当前仅支持 SRT。")
+    cues = parse_srt(_read_text(source))
+    project_id, episode_id = _subtitle_ownership(db, source)
+    try:
+        installed = {item["name"] for item in _installed_models()}
+    except HTTPException:
+        raise
+    if data.model not in installed:
+        raise HTTPException(404, "所选模型未安装在本机；不会自动下载模型。")
+    translated = []
+    language_instruction = {
+        "zh": "Translate every subtitle into natural Simplified Chinese.",
+        "en": "Translate every subtitle into natural English.",
+        "zh-en": "For every subtitle, output two lines: first natural Simplified Chinese, then natural English.",
+    }[data.target_language]
+    try:
+        for offset in range(0, len(cues), 20):
+            batch = cues[offset:offset + 20]
+            prompt = (
+                "You are a professional subtitle translator. " + language_instruction
+                + " Preserve meaning, names, tone and concise subtitle style. "
+                + "Keep every id unchanged, do not omit, merge, reorder or add entries. "
+                + "Return JSON only: {\"translations\":[{\"id\":1,\"text\":\"...\"}]}.\n"
+                + json.dumps(
+                    [{"id": index + 1, "text": cue["text"]} for index, cue in enumerate(batch, start=offset)],
+                    ensure_ascii=False,
+                )
+            )
+            result = _ollama_request("/api/generate", {
+                "model": data.model,
+                "system": "只翻译字幕，不解释，不修改编号。严格输出 JSON。",
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.2, "num_predict": 4096},
+            }, timeout=300.0)
+            raw = result.get("response") if isinstance(result, dict) else None
+            if not isinstance(raw, str) or not raw.strip():
+                raise ValueError("本地模型没有返回字幕翻译内容")
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                left, right = raw.find("{"), raw.rfind("}")
+                if left < 0 or right <= left:
+                    raise ValueError("本地模型返回的翻译 JSON 无效")
+                parsed = json.loads(raw[left:right + 1])
+            rows = parsed.get("translations") if isinstance(parsed, dict) else None
+            if not isinstance(rows, list) or len(rows) != len(batch):
+                raise ValueError("本地模型返回的翻译条数不正确")
+            mapped = {}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    row_id = int(row.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                value = str(row.get("text") or "").strip()
+                if value and row_id not in mapped:
+                    mapped[row_id] = value
+            expected_ids = set(range(offset + 1, offset + len(batch) + 1))
+            if set(mapped) != expected_ids:
+                raise ValueError("本地模型返回的字幕编号缺失、重复或错位")
+            translated.extend(mapped[index] for index in sorted(expected_ids))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, "本机字幕翻译失败：" + str(exc)[:1000]) from exc
+
+    output_cues = [
+        {"start": cue["start"], "end": cue["end"], "text": translated[index]}
+        for index, cue in enumerate(cues)
+    ]
+    stem = re.sub(r"[^A-Za-z0-9_\-\u4e00-\u9fff]", "_", source.stem + "_local_translated")[:140]
+    filename = stem + "_" + uuid.uuid4().hex[:8] + ".srt"
+    destination = SUBTITLE_DIR / filename
+    destination.write_text(render_srt(output_cues), encoding="utf-8-sig")
+    track = SubtitleTrack(
+        name=filename,
+        file_path=str(destination),
+        format="srt",
+        language={"zh": "zh-CN", "en": "en", "zh-en": "zh-CN+en"}[data.target_language],
+        project_id=project_id,
+        episode_id=episode_id,
+    )
+    media_record = MediaFile(
+        name=filename,
+        category="other",
+        file_path=str(destination),
+        mime_type="application/x-subrip",
+        file_size=destination.stat().st_size,
+        metadata_json={
+            "subtitle_language": data.target_language,
+            "source": str(source),
+            "local_model": data.model,
+            "project_id": project_id,
+            "episode_id": episode_id,
+            "network_used": False,
+        },
+    )
+    db.add(track)
+    db.add(media_record)
+    db.add(AIUsageLog(
+        provider="ollama-local",
+        model=data.model,
+        task="subtitle_translation_local",
+        status="completed",
+        detail=f"字幕条数：{len(cues)}；目标语言：{data.target_language}；本机离线处理",
+    ))
+    db.flush()
+    db.commit()
+    return {
+        "success": True,
+        "path": str(destination),
+        "name": filename,
+        "media_file_id": media_record.id,
+        "download_url": f"/api/media/files/{media_record.id}/download",
+        "cue_count": len(cues),
+        "timecodes_preserved": True,
+        "network_used": False,
+        "paid_api_used": False,
+        "message": f"已使用本机模型 {data.model} 翻译 {len(cues)} 条字幕；原时间轴和顺序保持不变，没有调用云端 API。",
+    }
+
+
+@router.get("/local-voices")
+def list_local_subtitle_voices():
+    try:
+        voices = list_local_sapi_voices()
+    except LocalTtsUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {
+        "engine": "windows-sapi",
+        "voices": voices,
+        "voice_count": len(voices),
+        "network_used": False,
+        "paid_api_used": False,
+        "message": "已读取本机 Windows 离线语音列表；不会访问网络或下载语音包。",
+    }
+
+
+@router.post("/voice-local")
+def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get_db)):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "本机离线配音会占用 CPU；请明确确认后再开始。")
+    job_dir = None
+    destination = None
+    try:
+        source = safe_storage_file(data.subtitle_path)
+        if source.suffix.lower() != ".srt":
+            raise HTTPException(400, "本机离线配音当前仅支持 SRT 字幕。")
+        cues = parse_srt(_read_text(source))
+        project_id, episode_id = _subtitle_ownership(db, source)
+        job_dir, segment_paths = synthesize_local_sapi_cues(cues, data.voice, data.rate, AUDIO_DIR)
+        generated = []
+        filters = []
+        labels = []
+        max_end = max(cue["end"] for cue in cues)
+        for index, (cue, path) in enumerate(zip(cues, segment_paths)):
+            info = probe_media(path)
+            duration = float((info.get("format") or {}).get("duration") or 0)
+            slot = cue["end"] - cue["start"]
+            ratio = duration / slot if slot > 0 else 1.0
+            if duration <= 0 or ratio > 2.0:
+                raise HTTPException(422, f"第 {index + 1} 条本机语音无法在字幕时间窗内自然播放；请缩短字幕或延长时间轴。")
+            tempo = f"atempo={max(1.0, ratio):.4f}," if ratio > 1.02 else ""
+            delay = int(round(cue["start"] * 1000))
+            filters.append(
+                f"[{index}:a:0]aresample=48000,{tempo}apad,atrim=duration={slot:.3f},"
+                f"adelay={delay}|{delay}[v{index}]"
+            )
+            generated.append(path)
+            labels.append(f"[v{index}]")
+        filters.append(
+            "".join(labels)
+            + f"amix=inputs={len(labels)}:duration=longest:normalize=0,atrim=duration={max_end:.3f}[voice]"
+        )
+        args = []
+        for path in generated:
+            args += ["-i", str(path)]
+        filename = f"subtitle_local_voice_{uuid.uuid4().hex[:12]}.mp3"
+        destination = AUDIO_DIR / filename
+        filter_script = job_dir / "mix-filter.txt"
+        filter_script.write_text(";".join(filters), encoding="utf-8")
+        run_ffmpeg(args + [
+            "-filter_complex_script", str(filter_script), "-map", "[voice]",
+            "-t", f"{max_end:.3f}", "-c:a", "libmp3lame", "-q:a", "3", str(destination),
+        ])
+        info = probe_media(destination)
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        if duration <= 0:
+            raise RuntimeError("本机配音合成结果时长无效")
+        task = MediaTask(
+            task_type="subtitle_dubbing_local",
+            provider="windows-sapi",
+            model=data.voice,
+            status="completed",
+            prompt=f"本机离线字幕配音：{source.name}",
+            request_data={
+                "subtitle_source": str(source),
+                "project_id": project_id,
+                "episode_id": episode_id,
+                "voice": data.voice,
+                "rate": data.rate,
+                "cue_count": len(cues),
+                "subtitle_cues": [
+                    {"start": cue["start"], "end": cue["end"], "text": cue["text"]}
+                    for cue in cues
+                ],
+                "network_used": False,
+                "paid_api_used": False,
+            },
+            result_path=str(destination),
+        )
+        db.add(task)
+        media_record = MediaFile(
+            name=filename,
+            category="audio",
+            file_path=str(destination),
+            mime_type="audio/mpeg",
+            file_size=destination.stat().st_size,
+            duration=duration,
+            metadata_json={
+                "subtitle_source": str(source),
+                "project_id": project_id,
+                "episode_id": episode_id,
+                "voice": data.voice,
+                "local_tts": True,
+                "network_used": False,
+            },
+        )
+        db.add(media_record)
+        db.flush()
+        db.add(AIUsageLog(
+            provider="windows-sapi",
+            model=data.voice,
+            task="subtitle_dubbing_local",
+            status="completed",
+            detail=f"字幕条数：{len(cues)}；本机离线合成；语速：{data.rate}",
+        ))
+        db.commit()
+        return {
+            "success": True,
+            "task_id": task.id,
+            "path": str(destination),
+            "name": filename,
+            "media_file_id": media_record.id,
+            "download_url": f"/api/media/files/{media_record.id}/download",
+            "cue_count": len(cues),
+            "duration_seconds": duration,
+            "timeline_aligned": True,
+            "network_used": False,
+            "paid_api_used": False,
+            "message": "已使用 Windows 本机离线语音生成配音，并按原字幕时间轴合成；没有调用云端 TTS。",
+        }
+    except HTTPException:
+        if destination:
+            destination.unlink(missing_ok=True)
+        raise
+    except LocalTtsUnavailable as exc:
+        if destination:
+            destination.unlink(missing_ok=True)
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        if destination:
+            destination.unlink(missing_ok=True)
+        raise HTTPException(500, "本机离线配音失败：" + str(exc)[:1200]) from exc
+    finally:
+        if job_dir:
+            shutil.rmtree(job_dir, ignore_errors=True)
 
 
 @router.post("/render")

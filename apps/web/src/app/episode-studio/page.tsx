@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -47,8 +47,13 @@ type EpisodeTimeline = {
   original_volume: number;
   sound_effect_tracks: { path: string; name: string; start_seconds: number; volume: number }[];
   subtitle_cues?: { start: number; end: number; text: string }[] | null;
+  subtitle_track_id?: number | null;
 };
 
+type SubtitleTrackOption = {
+  id: number; name: string; path: string; format: string;
+  language?: string | null; project_id?: number | null; episode_id?: number | null;
+};
 type EpisodeCharacter = { id: number; name: string };
 type EpisodeShot = { id: number; shot_number: number; dialogue?: string; character_ids: number[] };
 
@@ -77,6 +82,18 @@ export default function EpisodeReadinessPage() {
   const [episodeId, setEpisodeId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [productionAudit, setProductionAudit] = useState<{
+    status: string;
+    summary: { chapter_count: number; covered_chapter_count: number; chapter_coverage_ratio: number; episode_count: number; visual_asset_count: number; shot_count: number; shots_with_video: number; final_rendered_episode_count: number; shots_missing_video: number; shots_with_image: number; dialogue_shot_count: number; blocker_count: number; warning_count: number };
+    issues: { severity: string; code: string; message: string; episode_id: number | null; shot_id: number | null }[];
+    limitations: string[];
+    message: string;
+  } | null>(null);
+  useEffect(() => {
+    setProductionAudit(null);
+  }, [projectId]);
   const [batchReport, setBatchReport] = useState<{
     project_id: number; project_title: string;
     summary: { episodes: number; ready_episodes: number; incomplete_episodes: number; total_shots: number; ready_shots: number; missing_shots: number; processing_shots: number; broken_shots: number; scan_errors: number };
@@ -88,6 +105,13 @@ export default function EpisodeReadinessPage() {
   const [message, setMessage] = useState("");
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
+  const [episodeRenderJob, setEpisodeRenderJob] = useState<{
+    task_id: number; status: string;
+    progress?: { percent?: number; stage?: string; phase?: number; phase_count?: number };
+    result?: { output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } };
+    partial_output?: string | null;
+    error?: string;
+  } | null>(null);
   const [syncReport, setSyncReport] = useState<{ status?: string; metadata_only?: boolean; audio_video_start_offset_seconds?: number | null; audio_video_duration_delta_seconds?: number | null; warnings?: string[]; note?: string } | null>(null);
   const [finalQualityReport, setFinalQualityReport] = useState<{
     status?: string; duration_seconds?: number;
@@ -99,6 +123,7 @@ export default function EpisodeReadinessPage() {
     note?: string;
   } | null>(null);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
+  const [subtitleTracks, setSubtitleTracks] = useState<SubtitleTrackOption[]>([]);
   const [generatedSubtitleCues, setGeneratedSubtitleCues] = useState<{ start: number; end: number; text: string }[]>([]);
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [timelineBusy, setTimelineBusy] = useState(false);
@@ -107,6 +132,31 @@ export default function EpisodeReadinessPage() {
   const [speechProvider, setSpeechProvider] = useState("");
   const [speechModel, setSpeechModel] = useState("");
   const [defaultSpeechVoice, setDefaultSpeechVoice] = useState("alloy");
+
+  useEffect(() => {
+    const jobId = episodeRenderJob?.task_id;
+    if (!jobId || !["queued", "processing", "cancellation_requested"].includes(episodeRenderJob?.status || "")) return;
+    let active = true;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(`${API}/api/media/video/episodes/render/jobs/${jobId}`);
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取分集合成进度失败");
+        if (!active) return;
+        setEpisodeRenderJob(data);
+        if (data.status === "completed" && data.result) {
+          setRenderResult(data.result);
+          setMessage("分集成片已生成，并完成基础音视频质量检查。");
+          await checkReadiness(false);
+        } else if (["failed", "cancelled", "interrupted_unknown"].includes(data.status)) {
+          setMessage(data.error || (data.status === "cancelled" ? "分集合成已停止。" : "分集合成未完成，请检查任务详情。"));
+        }
+      } catch (error) {
+        if (active) setMessage(error instanceof Error ? error.message : "读取分集合成进度失败");
+      }
+    }, 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [episodeRenderJob?.task_id, episodeRenderJob?.status]);
 
   async function loadTimeline(id: number, readiness?: Readiness) {
     try {
@@ -152,6 +202,17 @@ export default function EpisodeReadinessPage() {
       }
       setTimeline(saved);
       setTimelineVersion(data.version || 0);
+      const projectScope = projectId ? "&project_id=" + encodeURIComponent(projectId) : "";
+      const subtitleResponse = await fetch(
+        API + "/api/media/subtitles?episode_id=" + encodeURIComponent(String(id)) + projectScope
+      );
+      if (subtitleResponse.ok) {
+        const subtitleData = await subtitleResponse.json();
+        setSubtitleTracks(Array.isArray(subtitleData) ? subtitleData : []);
+      } else {
+        setSubtitleTracks([]);
+      }
+      if (data.subtitle_track_warning) setMessage(data.subtitle_track_warning);
     } catch (error) {
       setTimeline(null);
       setMessage(error instanceof Error ? error.message : "读取剪辑时间轴失败");
@@ -208,6 +269,8 @@ export default function EpisodeReadinessPage() {
     try {
       const form = new FormData();
       form.append("file", file);
+      if (projectId) form.append("project_id", projectId);
+      if (report?.episode_id) form.append("episode_id", String(report.episode_id));
       const response = await fetch(API + "/api/media/files/upload?category=audio", { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "音频上传失败");
@@ -329,8 +392,30 @@ export default function EpisodeReadinessPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "检查失败");
       setReport(data);
-      setMessage(data.message);
       await loadTimeline(id, data as Readiness);
+      const recentResponse = await fetch(`${API}/api/media/video/episodes/${id}/render/jobs/latest`);
+      if (recentResponse.ok) {
+        const recentPayload = await recentResponse.json();
+        const recent = recentPayload.task;
+        if (recent) {
+          setEpisodeRenderJob(recent);
+          if (recent.status === "completed" && recent.result) {
+            setRenderResult(recent.result);
+            setMessage("已恢复显示本集最近一次已完成的成片记录。");
+          } else if (recent.status === "interrupted_unknown") {
+            setMessage("发现上次合成因软件关闭或进程中断而未完成。已保留部分输出供检查，不会自动重新合成；确认后可手动重新创建任务。");
+          } else if (["queued", "processing"].includes(recent.status)) {
+            setMessage("已找到本机后台合成任务，正在恢复读取进度……");
+          } else {
+            setMessage(data.message);
+          }
+        } else {
+          setEpisodeRenderJob(null);
+          setMessage(data.message);
+        }
+      } else {
+        setMessage(data.message);
+      }
     } catch (error) {
       setReport(null);
       setMessage(error instanceof Error ? error.message : "检查失败");
@@ -358,6 +443,56 @@ export default function EpisodeReadinessPage() {
       setMessage(error instanceof Error ? error.message : "项目批量质检失败");
     } finally {
       setBatchBusy(false);
+    }
+  }
+
+  async function checkProductionReadiness() {
+    const id = Number(projectId);
+    if (!Number.isInteger(id) || id <= 0) {
+      setMessage("请输入有效的项目 ID（正整数）。");
+      return;
+    }
+    setAuditBusy(true);
+    setProductionAudit(null);
+    setMessage("正在检查原著章节、分集、剧本、分镜、视觉素材、视频、配音和字幕关联；不会调用 AI 或联网……");
+    try {
+      const response = await fetch(`${API}/api/story/projects/${id}/production-readiness`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "完整生产链路检查失败");
+      setProductionAudit(data);
+      setMessage(data.message || "完整生产链路检查完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "完整生产链路检查失败");
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
+  async function exportProjectArchive() {
+    const id = Number(projectId);
+    if (!Number.isInteger(id) || id <= 0) {
+      setMessage("请输入有效的项目 ID（正整数）。");
+      return;
+    }
+    if (!window.confirm("将导出该项目的小说正文、分集、剧本、分镜、角色/场景/道具资料，以及已关联的本地图片、视频和音频文件。归档仅在本机生成，不会上传。确认导出？")) return;
+    setArchiveBusy(true);
+    setMessage("正在整理项目资料、校验关联素材并生成项目归档……");
+    try {
+      const response = await fetch(`${API}/api/story/projects/${id}/export`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "项目归档导出失败");
+      const anchor = document.createElement("a");
+      anchor.href = API + data.download_url;
+      anchor.download = data.filename || `AI漫剧制作大师-项目${id}-归档.zip`;
+      anchor.rel = "noopener";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setMessage(`项目归档已生成并开始下载：包含 ${data.file_count ?? 0} 个素材文件；缺失引用 ${data.missing_file_count ?? 0} 个。详情请查看 ZIP 内 manifest.json。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "项目归档导出失败");
+    } finally {
+      setArchiveBusy(false);
     }
   }
 
@@ -394,20 +529,33 @@ export default function EpisodeReadinessPage() {
       setMessage("仍有缺失、生成中或损坏的镜头，不能开始合成。");
       return;
     }
-    if (!window.confirm(`确认合成第 ${report.episode_number ?? ""} 集？将使用当前检查通过的镜头视频，并在本地执行 FFmpeg 合成。`)) return;
+    if (!window.confirm(`确认合成第 ${report.episode_number ?? ""} 集？任务将在本机后台执行，不会调用云端 AI。`)) return;
     setBusy(true);
-    setMessage("正在合成分集视频，请保持软件运行……");
+    setMessage("正在创建本地后台合成任务……");
     try {
-      const response = await fetch(`${API}/api/media/video/episodes/${report.episode_id}/render`, { method: "POST" });
+      const response = await fetch(`${API}/api/media/video/episodes/${report.episode_id}/render/jobs`, { method: "POST" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "合成失败");
-      setRenderResult(data);
-      setMessage("分集成片已生成，并完成基础音视频质量检查。");
-      await checkReadiness(false);
+      if (!response.ok) throw new Error(data.detail || "创建合成任务失败");
+      setEpisodeRenderJob({ task_id: data.task_id, status: data.status, progress: { percent: 0, stage: "queued" } });
+      setRenderResult(null);
+      setMessage("本地合成任务已创建；可在此查看进度，软件重启后不会自动重复合成。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "合成失败");
+      setMessage(error instanceof Error ? error.message : "创建合成任务失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function cancelEpisodeRender() {
+    if (!episodeRenderJob?.task_id) return;
+    try {
+      const response = await fetch(`${API}/api/media/video/episodes/render/jobs/${episodeRenderJob.task_id}/cancel`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "停止合成失败");
+      setEpisodeRenderJob(current => current ? { ...current, status: data.status } : current);
+      setMessage(data.message || "已发送停止请求，正在等待 FFmpeg 安全退出。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "停止合成失败");
     }
   }
 
@@ -481,7 +629,47 @@ export default function EpisodeReadinessPage() {
           <div className="flex flex-wrap gap-3">
             <input value={projectId} onChange={event => setProjectId(event.target.value)} inputMode="numeric" placeholder="输入项目 ID，例如 1" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-3" />
             <button disabled={batchBusy} onClick={() => void checkProjectQuality()} className="rounded-lg border border-cyan-300/40 bg-cyan-900/40 px-5 py-3 font-semibold text-cyan-100 disabled:opacity-50">{batchBusy ? "批量扫描中…" : "扫描项目全部分集"}</button>
+            <button disabled={archiveBusy || batchBusy} onClick={() => void exportProjectArchive()} className="rounded-lg border border-violet-300/40 bg-violet-900/40 px-5 py-3 font-semibold text-violet-100 disabled:opacity-50">{archiveBusy ? "正在生成项目包…" : "导出完整项目包"}</button>
+            <button disabled={auditBusy || batchBusy} onClick={() => void checkProductionReadiness()} className="rounded-lg border border-amber-300/40 bg-amber-900/30 px-5 py-3 font-semibold text-amber-100 disabled:opacity-50">{auditBusy ? "正在检查链路…" : "检查完整生产链路"}</button>
           </div>
+          {productionAudit && (
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold text-white">完整生产链路报告</h3>
+                <span className={productionAudit.status === "ready" ? "text-emerald-300" : productionAudit.status === "blocked" ? "text-rose-300" : "text-amber-200"}>
+                  {productionAudit.status === "ready" ? "检查通过" : productionAudit.status === "blocked" ? "存在阻断项" : "有待复核项目"}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+                <p>原著覆盖：{Math.round(productionAudit.summary.chapter_coverage_ratio * 100)}%（{productionAudit.summary.covered_chapter_count}/{productionAudit.summary.chapter_count}）</p>
+                <p>分集：{productionAudit.summary.episode_count}</p>
+                <p>视觉素材：{productionAudit.summary.visual_asset_count}</p>
+                <p>分镜：{productionAudit.summary.shot_count}</p>
+                <p>已关联视频：{productionAudit.summary.shots_with_video}/{productionAudit.summary.shot_count}</p>
+                <p>已完成成片：{productionAudit.summary.final_rendered_episode_count}/{productionAudit.summary.episode_count} 集</p>
+                <p>已关联图片：{productionAudit.summary.shots_with_image}</p>
+                <p>对白镜头：{productionAudit.summary.dialogue_shot_count}</p>
+                <p className="text-rose-200">阻断项：{productionAudit.summary.blocker_count}</p>
+                <p className="text-amber-200">提醒：{productionAudit.summary.warning_count}</p>
+              </div>
+              {!!productionAudit.issues.length && (
+                <ul className="mt-4 max-h-72 space-y-2 overflow-y-auto border-t border-white/10 pt-3 text-sm">
+                  {productionAudit.issues.map((issue, index) => (
+                    <li key={issue.code + "-" + (issue.episode_id ?? "p") + "-" + (issue.shot_id ?? "s") + "-" + index} className="flex gap-2">
+                      <span className={issue.severity === "blocker" ? "shrink-0 text-rose-300" : "shrink-0 text-amber-200"}>{issue.severity === "blocker" ? "阻断" : "提醒"}</span>
+                      <span className="text-white/75">{issue.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-3 border-t border-white/10 pt-3">
+                <p className="text-xs font-semibold text-white/70">检查范围说明</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-white/45">
+                  {productionAudit.limitations.map((item, index) => <li key={index}>{item}</li>)}
+                </ul>
+              </div>
+            </div>
+          )}
           {batchReport && (
             <div className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -524,8 +712,25 @@ export default function EpisodeReadinessPage() {
                   <h2 className="text-xl font-semibold">{report.episode_title || `分集 #${report.episode_id}`}</h2>
                   <p className="mt-1 text-sm text-white/55">共 {report.total_shots} 个镜头 · 逐个验证视频文件与可解码视频流</p>
                 </div>
-                <button disabled={busy || !report.ready} onClick={() => void renderEpisode()} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">合成分集 MP4</button>
+                {episodeRenderJob && ["queued", "processing", "cancellation_requested"].includes(episodeRenderJob.status) ? (
+                  <button disabled={episodeRenderJob.status === "cancellation_requested"} onClick={() => void cancelEpisodeRender()} className="rounded-xl bg-rose-700 px-5 py-3 font-semibold disabled:opacity-40">停止合成</button>
+                ) : (
+                  <button disabled={busy || !report.ready} onClick={() => void renderEpisode()} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">合成分集 MP4</button>
+                )}
               </div>
+              {episodeRenderJob && (
+                <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                    <span>后台合成任务 #{episodeRenderJob.task_id} · {episodeRenderJob.progress?.stage || episodeRenderJob.status}</span>
+                    <span>{Math.round(episodeRenderJob.progress?.percent || 0)}%</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-black/40">
+                    <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${Math.max(0, Math.min(100, episodeRenderJob.progress?.percent || 0))}%` }} />
+                  </div>
+                  {episodeRenderJob.error && <p className="mt-2 break-words text-xs text-rose-200">{episodeRenderJob.error}</p>}
+                  {episodeRenderJob.partial_output && <p className="mt-2 break-all text-xs text-amber-200">中断时保留的部分文件：{episodeRenderJob.partial_output}（未验证为可播放成片）</p>}
+                </div>
+              )}
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
                 {counts.map(([label, value, color]) => <div key={label} className="rounded-xl bg-black/25 p-4"><div className={`text-2xl font-bold ${color}`}>{value}</div><div className="mt-1 text-sm text-white/55">{label}</div></div>)}
               </div>
@@ -752,6 +957,28 @@ export default function EpisodeReadinessPage() {
                   {timeline.music_name && <p className="mt-2 break-all text-sm text-emerald-200">当前音乐：{timeline.music_name}</p>}
                   <input type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.opus" disabled={timelineBusy || busy} onChange={event => void uploadBackgroundMusic(event.target.files?.[0] || null)} className="mt-3 block w-full text-xs" />
                   {timeline.music_path && <button type="button" onClick={() => setTimeline({ ...timeline, music_path: null, music_name: null })} className="mt-2 rounded border border-white/15 px-3 py-1 text-xs">移除背景音乐</button>}
+                </div>
+                <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
+                  <h3 className="font-semibold">字幕素材轨道</h3>
+                  <p className="mt-1 text-xs text-white/45">可选择本项目或本分集的 SRT 字幕素材。选择后，最终合成优先使用该字幕文件；清空选择则使用下方手动字幕时间轴。</p>
+                  <select
+                    value={timeline.subtitle_track_id ?? ""}
+                    onChange={event => setTimeline({
+                      ...timeline,
+                      subtitle_track_id: event.target.value ? Number(event.target.value) : null,
+                    })}
+                    className="mt-3 w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-white"
+                  >
+                    <option value="">不指定字幕素材（使用下方字幕时间轴）</option>
+                    {subtitleTracks.filter(track => String(track.format || "").toLowerCase() === "srt").map(track => (
+                      <option key={track.id} value={track.id}>
+                        {track.name}{track.episode_id === report?.episode_id ? " · 本集" : track.project_id ? " · 本项目" : " · 共享素材"}
+                      </option>
+                    ))}
+                  </select>
+                  {timeline.subtitle_track_id && !subtitleTracks.some(track => track.id === timeline.subtitle_track_id) && (
+                    <p className="mt-2 text-xs text-amber-200">当前选中的字幕素材不在可用列表中，请重新选择或清空。</p>
+                  )}
                 </div>
                 <div className="mt-5 rounded-xl border border-white/10 bg-black/20 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">

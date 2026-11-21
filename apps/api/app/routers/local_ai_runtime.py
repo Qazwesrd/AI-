@@ -3,19 +3,28 @@
 No model pulls, cloud fallback, arbitrary endpoints, or automatic process startup.
 """
 import json
+import os
+import uuid
+from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.database import get_db, ROOT_DIR
+from app.models.media import MediaFile
+from app.models.novel import Chapter
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地 AI 引擎"])
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TEST_PROMPT = "请用简体中文写一句话，说明你已成功在本机运行。"
 OPENER = build_opener(ProxyHandler({}))
+LOCAL_AI_RESULTS_DIR = Path(ROOT_DIR) / "storage" / "local-ai-results"
 
 
 class LocalModelTestInput(BaseModel):
@@ -35,6 +44,8 @@ class LocalEpisodePackageInput(BaseModel):
     style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
     source_text: str = Field(min_length=1, max_length=12000)
     extra_requirements: str = Field(default="", max_length=3000)
+    novel_id: int | None = Field(default=None, ge=1)
+    chapter_id: int | None = Field(default=None, ge=1)
 
 
 
@@ -335,8 +346,17 @@ def get_local_novel_context(novel_id: int, chapter_id: int):
 
 
 @router.post("/generate-package")
-def generate_local_episode_package(payload: LocalEpisodePackageInput):
+def generate_local_episode_package(payload: LocalEpisodePackageInput, db: Session = Depends(get_db)):
     """Generate a five-stage episode package with an already-installed local model."""
+    if (payload.novel_id is None) != (payload.chapter_id is None):
+        raise HTTPException(422, "小说和章节必须同时关联，不能只填写其中一个编号。")
+    if payload.chapter_id is not None:
+        chapter = db.query(Chapter).filter(
+            Chapter.id == payload.chapter_id,
+            Chapter.novel_id == payload.novel_id,
+        ).first()
+        if not chapter:
+            raise HTTPException(404, "所关联的章节不属于所选小说，已阻止错误关联。")
     model = payload.model.strip()
     if not MODEL_NAME_PATTERN.fullmatch(model):
         raise HTTPException(400, "模型名称格式无效")
@@ -374,9 +394,49 @@ def generate_local_episode_package(payload: LocalEpisodePackageInput):
         content = response.strip()[:16000]
         outputs.append({"stage": key, "title": label, "content": content})
         previous += "\n\n" + label + "\n" + content
+    markdown = "\n\n---\n\n".join(
+        "# " + item["title"] + "\n\n" + item["content"] for item in outputs
+    )
+    filename = "本地创作包_" + uuid.uuid4().hex[:12] + ".md"
+    destination = LOCAL_AI_RESULTS_DIR / filename
+    try:
+        LOCAL_AI_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            "# 本地 AI 整章创作包\n\n"
+            + f"- 模型：{model}\n- 画风：{payload.style}\n"
+            + f"- 小说 ID：{payload.novel_id or '未关联'}\n- 章节 ID：{payload.chapter_id or '未关联'}\n\n"
+            + markdown,
+            encoding="utf-8",
+        )
+        media = MediaFile(
+            name=filename,
+            category="other",
+            file_path=str(destination),
+            mime_type="text/markdown",
+            file_size=destination.stat().st_size,
+            metadata_json={
+                "local_ai_package": True,
+                "model": model,
+                "style": payload.style,
+                "novel_id": payload.novel_id,
+                "chapter_id": payload.chapter_id,
+                "stage_count": len(outputs),
+                "network_used": False,
+                "cloud_fallback": False,
+            },
+        )
+        db.add(media)
+        db.flush()
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        destination.unlink(missing_ok=True)
+        raise HTTPException(500, "本地创作包生成成功，但自动保存到素材库失败：" + str(exc)[:800]) from exc
     return {
         "status": "success", "engine": "ollama", "model": model, "style": payload.style,
         "stages": outputs, "stage_count": len(outputs), "network_used": False,
-        "downloaded": False, "cloud_fallback": False, "saved_automatically": False,
-        "message": "整章创作包已在本机生成。请检查后手动复制保存。",
+        "downloaded": False, "cloud_fallback": False, "saved_automatically": True,
+        "media_file_id": media.id,
+        "download_url": f"/api/media/files/{media.id}/download",
+        "message": "五阶段创作包已在本机生成，并自动保存到素材库；不会覆盖原稿。",
     }

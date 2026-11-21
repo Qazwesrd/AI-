@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "product": "AI漫剧制作大师",
+  "component": "ComfyUI Windows portable, Ollama Windows runtime, and bundled Qwen3 4B model",
+  "audit_status": "pending",
+  "distribution_approved": false,
+  "reviewed_at_utc": null,
+  "reviewer": null,
+  "release_blockers": [
+    "Inventory every file in each official Windows portable archive and identify bundled redistributable components.",
+    "Inventory embedded Python packages from dist-info METADATA, wheel metadata, and package license files.",
+    "Identify PyTorch, torchvision, torchaudio, CUDA/ROCm/XPU runtime libraries, and their separate license/notice obligations for each GPU variant.",
+    "Collect upstream license texts, copyright notices, attribution requirements, and source-offer/source-code obligations where applicable.",
+    "Review 7-Zip executable and source archive licensing for the exact selected release.",
+    "Check trademark, redistribution, export, and model-license issues separately from software package licenses.",
+    "Have the completed inventory and obligations reviewed before any public or customer distribution.",
+    "Inventory every dependency and redistribution notice in the exact Ollama Windows amd64 standalone runtime release.",
+    "Record the exact Qwen3 4B Ollama manifest digest and verify every referenced model blob SHA-256.",
+    "Review the Qwen3 model license and attribution for the exact model revision, and retain the upstream license and model notice.",
+    "Confirm the combined offline installer includes the correct runtime, model store, and third-party notices without relying on post-install network downloads.",
+    "Verify the pinned Stable Diffusion checkpoint SHA-256 against the downloaded bytes and perform a small-resolution CPU-only inference test on the target AMD Ryzen 7 4800U device before claiming image generation is ready.",
+    "Stable Diffusion 1.5 Open RAIL-M: implement an enforceable end-user agreement and affirmative acceptance for paragraph 5 / Attachment A restrictions, and package the complete license plus attribution notices before enabling checkpoint distribution."
+  ],
+  "portable_variants": [
+    {
+      "asset": "ComfyUI_windows_portable_nvidia.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    },
+    {
+      "asset": "ComfyUI_windows_portable_nvidia_cu126.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    },
+    {
+      "asset": "ComfyUI_windows_portable_amd.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    },
+    {
+      "asset": "ComfyUI_windows_portable_intel.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    }
+  ],
+  "known_components": [
+    {
+      "name": "ComfyUI",
+      "license": "GPL-3.0",
+      "evidence": "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
+      "status": "license_text_included_dependency_audit_pending"
+    },
+    {
+      "name": "7-Zip",
+      "license": "See upstream release license; do not assume a single SPDX identifier covers every component",
+      "evidence": "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt and corresponding source archive",
+      "status": "license_text_and_source_archive_included_exact_component_review_pending"
+    },
+    {
+      "name": "Ollama Windows amd64 standalone runtime",
+      "license": "MIT for Ollama project; bundled runtime dependencies require separate inventory",
+      "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Ollama-MIT-LICENSE.txt and exact release archive manifest",
+      "status": "runtime_release_digest_verified_dependency_audit_pending"
+    },
+    {
+      "name": "Qwen3 4B model",
+      "license": "Apache-2.0 as declared by Qwen3 upstream and Ollama model catalog",
+      "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt; Qwen3-MODEL-NOTICE.txt; exact Ollama manifest and blob SHA-256 inventory",
+      "status": "upstream_apache_2_0_license_confirmed_exact_ollama_payload_and_runtime_dependencies_pending"
+    }
+  ],
+  "policy": {
+    "no_unreviewed_model_payloads": true,
+    "approved_local_text_model_bundle": "qwen3:4b",
+    "local_ai_payload_included_in_full_offline_installer": true,
+    "public_distribution_blocked_until_approved": true,
+    "no_unverified_license_claims": true
+  },
+  "local_ai_payload": {
+    "runtime_asset": "ollama-windows-amd64.zip",
+    "runtime_version": null,
+    "runtime_sha256": null,
+    "runtime_audit_status": "not_started",
+    "model": "qwen3:4b",
+    "model_manifest_sha256": null,
+    "model_blob_inventory_status": "not_started",
+    "model_license": "Apache-2.0",
+    "model_license_review_status": "upstream_license_confirmed_exact_payload_digest_and_dependency_audit_pending",
+    "upstream_license_evidence": {
+      "model_repository": "Qwen/Qwen3-4B",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen3-4B",
+      "license": "Apache-2.0",
+      "ollama_model_page": "https://ollama.com/library/qwen3:4b",
+      "ollama_model_page_license": "Apache License Version 2.0",
+      "exact_ollama_manifest_sha256": null,
+      "review_note": "Upstream license identity is confirmed. This is not approval of the exact bundled Ollama conversion or its runtime dependencies; preserve the exact manifest, layer hashes, model attribution, and Apache-2.0 notice for each built payload.",
+      "exact_blob_hash_verification_implemented_in_builder": true,
+      "exact_blob_hashes_verified_for_current_release_payload": false
+    }
+  },
+  "image_model_candidates": [
+    {
+      "id": "comfy-org-sd15-fp16",
+      "name": "Stable Diffusion 1.5 FP16",
+      "publisher": "Comfy-Org",
+      "repository": "Comfy-Org/stable-diffusion-1.5",
+      "revision": "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f",
+      "asset": "v1-5-pruned-emaonly-fp16.safetensors",
+      "size_label": "约 2.13 GB；构建时必须取得精确字节数",
+      "sha256": "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916",
+      "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
+      "sha256_source": "Hugging Face pinned file page",
+      "license": "CreativeML Open RAIL-M",
+      "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+      "license_review_status": "restricted_license_terms_identified_user_agreement_and_acceptance_not_implemented",
+      "sha256_verified_locally": false,
+      "included_in_offline_bundle": false,
+      "hardware_status": "cpu_not_recommended",
+      "hardware_validation_status": "pending_target_device_test",
+      "use_restrictions_must_be_passed_to_users": true,
+      "distribution_approved": false,
+      "status": "candidate_only_not_downloaded",
+      "license_obligations": [
+        "Provide the complete CreativeML Open RAIL-M license to each recipient when redistributing the checkpoint.",
+        "Make paragraph 5 use-based restrictions and Attachment A enforceable in the user agreement governing model use/distribution.",
+        "Notify downstream recipients that the checkpoint and derivatives are subject to paragraph 5 restrictions.",
+        "Retain applicable copyright, patent, trademark, and attribution notices; do not imply upstream endorsement."
+      ],
+      "license_review_evidence": {
+        "license": "CreativeML Open RAIL-M dated August 22, 2022",
+        "source_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+        "key_sections": [
+          "4. Distribution and Redistribution",
+          "5. Use-based restrictions",
+          "Attachment A"
+        ],
+        "review_note": "The license grants reproduction/distribution subject to pass-through and use restrictions; it is not an unrestricted permissive license. No model redistribution approval is granted."
+      }
+    }
+  ]
+}

@@ -7,14 +7,14 @@ on:
     paths:
       - "apps/**"
       - "packages/**"
-      - "scripts/build-windows.ps1"
+      - "scripts/**"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
   pull_request:
     paths:
       - "apps/**"
       - "packages/**"
-      - "scripts/build-windows.ps1"
+      - "scripts/**"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
 
@@ -31,10 +31,58 @@ concurrency:
 jobs:
   build-installer:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate ComfyUI offline bundle builder syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          foreach ($script in @(
+            "scripts/prepare-comfyui-offline-bundle.ps1",
+            "scripts/install-comfyui-offline.ps1",
+            "scripts/create-comfyui-offline-installer.ps1",
+            "scripts/audit-comfyui-portable-dependencies.ps1",
+            "scripts/prepare-local-ai-offline-payload.ps1",
+            "scripts/install-local-ai-offline.ps1",
+            "scripts/install-local-engines-transaction.ps1",
+            "scripts/tests/test-local-ai-offline-install.ps1",
+            "scripts/tests/test-local-engines-transaction.ps1",
+            "scripts/tests/test-comfyui-portable-audit.ps1",
+            "scripts/tests/test-windows-uninstall-data-preservation.ps1"
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $script),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_ }
+              throw "PowerShell syntax validation failed: $script"
+            }
+            Write-Host "PowerShell syntax is valid: $script"
+          }
+
+      - name: Run local AI offline installer integration test
+        shell: pwsh
+        run: ./scripts/tests/test-local-ai-offline-install.ps1
+
+      - name: Run ComfyUI dependency audit integration test
+        shell: pwsh
+        run: ./scripts/tests/test-comfyui-portable-audit.ps1
+
+      - name: Run local engine transaction integration test
+        shell: pwsh
+        run: ./scripts/tests/test-local-engines-transaction.ps1
+
+      - name: Verify Windows uninstall preserves user data
+        shell: pwsh
+        run: ./scripts/tests/test-windows-uninstall-data-preservation.ps1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -214,94 +262,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish Windows installer to GitHub Releases
+      - name: Hold public release until the complete offline bundle is distributable
         if: github.ref == 'refs/heads/master'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = "Stop"
-          $version = "${{ steps.desktop-version.outputs.version }}"
-          $tag = "desktop-v$version"
-          $title = "AI漫剧制作大师 Windows $version"
-          $notes = @'
-          Windows 桌面安装包。
-
-          - 包含桌面启动器、本地 API 和 Web 前端。
-          - 包含 FFmpeg / FFprobe 媒体处理组件。
-          - 同时提供包含安装程序、中文 PDF 使用说明书和实际界面截图的本地测试 ZIP。
-          - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
-          '@
-
-          # Ensure the git tag exists before creating or resolving the Release.
-          $tagRef = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" 2>$null
-          if ($LASTEXITCODE -ne 0 -or !$tagRef) {
-            git tag $tag $env:GITHUB_SHA
-            if ($LASTEXITCODE -ne 0) { throw "创建版本 Git 标签失败：$tag" }
-            git push origin "refs/tags/$tag"
-            if ($LASTEXITCODE -ne 0) { throw "推送版本 Git 标签失败：$tag" }
-          }
-
-          # Resolve by listing releases instead of the tag lookup endpoint.
-          # GitHub can briefly return 404 for releases created in the same job.
-          $releaseList = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
-          if ($LASTEXITCODE -ne 0 -or !$releaseList) { throw "无法读取 GitHub Releases 列表。" }
-          $release = @($releaseList | ConvertFrom-Json | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1)[0]
-          if (!$release) {
-            $payload = @{
-              tag_name = $tag
-              target_commitish = $env:GITHUB_SHA
-              name = $title
-              body = $notes
-              draft = $true
-              prerelease = $false
-            } | ConvertTo-Json -Depth 5
-            $release = $payload | gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases" --input - | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or !$release.id) { throw "创建 GitHub Release 失败。" }
-          }
-          if (!$release.id) { throw "Release 信息缺少 ID，无法安全上传资产。" }
-
-          $releaseDir = Join-Path $PWD "apps/desktop/release"
-          $files = @(Get-ChildItem $releaseDir -File | Where-Object {
-            $_.Name -like "*Setup*.exe" -or
-            $_.Name -like "*Setup*.exe.sha256" -or
-            $_.Name -like "*测试包*.zip" -or
-            $_.Name -like "*测试包*.zip.sha256"
-          } | Sort-Object Name)
-          if ($files.Count -ne 4) { throw "预期上传 4 个发布文件，实际找到 $($files.Count) 个。" }
-
-          $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
-          if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
-          $assets = @($assetResponse | ConvertFrom-Json)
-          foreach ($file in $files) {
-            # GitHub normalizes non-ASCII release asset names to a dot in the API response.
-            # Compare the normalized name so retries replace the correct existing asset.
-            $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
-            $existingAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
-            if ($existingAsset) {
-              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($existingAsset.id)"
-              if ($LASTEXITCODE -ne 0) { throw "无法替换旧发布资产：$($file.Name)" }
-            }
-            Write-Host "Uploading $($file.Name)"
-            $encodedName = [uri]::EscapeDataString($file.Name)
-            Invoke-RestMethod -Method Post -Uri "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets?name=$encodedName" -Headers @{
-              Authorization = "Bearer $env:GH_TOKEN"
-              Accept = "application/vnd.github+json"
-              "X-GitHub-Api-Version" = "2022-11-28"
-            } -ContentType "application/octet-stream" -InFile $file.FullName | Out-Null
-          }
-
-          $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
-          if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法核对 Release 资产。" }
-          $assets = @($assetResponse | ConvertFrom-Json)
-          foreach ($file in $files) {
-            $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
-            $verifiedAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
-            if (!$verifiedAsset -or $verifiedAsset.state -ne "uploaded" -or $verifiedAsset.size -ne $file.Length) {
-              throw "Release 资产校验失败：$($file.Name)；API 名称：$expectedAssetName"
-            }
-          }
-
-          gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" -F draft=false -f make_latest=true
-          if ($LASTEXITCODE -ne 0) { throw "Release 资产核对通过，但发布草稿失败。" }
-          Write-Host "Release $tag published with $($files.Count) verified assets."
+          Write-Host "Public release is intentionally paused."
+          Write-Host "The standalone Setup.exe requires the adjacent ComfyUI-Payload folder."
+          Write-Host "Do not publish Setup.exe alone; publish only after the complete offline ZIP has a verified, size-compatible distribution host and all third-party license checks are complete."
+  # Run the expensive real upstream archive inventory only when explicitly
+  # requested by a one-time PR-body marker; no ComfyUI payload is modified.
+  # requested in the draft PR body. The marker is removed after the audit.
+  audit-comfyui-portable-dependencies:
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, '<!-- run-comfyui-portable-license-audit -->')
+    uses: ./.github/workflows/comfyui-portable-license-audit.yml
+    with:
+      release_tag: ''

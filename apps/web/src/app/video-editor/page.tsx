@@ -52,6 +52,12 @@ export default function VideoEditorPage() {
 
   useEffect(() => { void loadAll(); }, []);
 
+  useEffect(() => {
+    if (!jobs.some(job => job.status === "rendering")) return;
+    const timer = window.setInterval(() => { void loadAll(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [jobs]);
+
   async function uploadFiles(list: FileList | null) {
     if (!list?.length) return;
     setBusy(true);
@@ -203,7 +209,7 @@ export default function VideoEditorPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "剪辑执行失败");
-      setMessage(`视频导出完成：${data.output_path}`);
+      setMessage(data.message || `剪辑已进入后台渲染，统一任务编号：${data.task_id}`);
       await loadAll();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "剪辑失败");
@@ -369,6 +375,7 @@ export default function VideoEditorPage() {
                   <div className="flex flex-wrap gap-2">
                     {job.status === "awaiting_web_ai" && <button disabled={busy} onClick={() => void resumeWebHandoff(job)} className="rounded-lg border border-cyan-300/40 bg-cyan-900/40 px-4 py-2 text-cyan-100 disabled:opacity-40">恢复网页版 AI 交接</button>}
                     {job.status === "planned" && <button disabled={busy} onClick={() => void executeJob(job.id)} className="rounded-lg bg-indigo-600 px-5 py-2 disabled:opacity-40">执行剪辑并导出</button>}
+                    {job.status === "rendering" && <a href="/tasks" className="rounded-lg border border-cyan-300/30 px-4 py-2 text-cyan-200">查看实时渲染进度</a>}
                   </div>
                 </div>
                 {job.edit_plan && <div className="mt-4 space-y-2 text-sm">

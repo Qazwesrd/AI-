@@ -3,6 +3,20 @@
 import { useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+type LocalImageRuntimeLogs = { log_path: string; content: string; available: boolean; truncated?: boolean };
+
+type LocalImageRuntime = {
+  status: string;
+  installed?: boolean;
+  managed_by_application?: boolean;
+  process_id?: number | null;
+  runtime_mode?: string | null;
+  install_directory?: string;
+  checkpoint_count?: number;
+  message?: string;
+  hardware?: { reasons?: string[]; note?: string };
+};
+
 type ImageTask = { prompt_id: string; status: string; images?: Array<{ filename: string; subfolder: string; type: string }> };
 type TargetShot = { id: number; shot_number: number; scene_name: string; visual_description: string };
 type TargetEpisode = { id: number; episode_number: number; title: string; shots: TargetShot[] };
@@ -25,7 +39,7 @@ type ConsistencyResult = {
 function parseProfileLines(value: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const line of value.split(/\r?\n/)) {
-    const match = line.match(/^\\s*(\\d+)\\s*[=:：]\\s*(.+)\\s*$/);
+    const match = line.match(/^\s*(\d+)\s*[=:：]\s*(.+)\s*$/);
     if (match) result[match[1]] = match[2].trim();
   }
   return result;
@@ -42,7 +56,7 @@ function parseCostumeProfiles(value: string): Record<string, Record<string, stri
   const result: Record<string, Record<string, string>> = {};
   for (const line of value.split(/\r?\n/)) {
     const [characterId, variantId, ...description] = line.split("|");
-    if (/^\\d+$/.test((characterId || "").trim()) && /^[A-Za-z0-9_-]{1,40}$/.test((variantId || "").trim()) && description.join("|").trim()) {
+    if (/^\d+$/.test((characterId || "").trim()) && /^[A-Za-z0-9_-]{1,40}$/.test((variantId || "").trim()) && description.join("|").trim()) {
       const id = String(Number(characterId.trim()));
       result[id] ||= {};
       result[id][variantId.trim()] = description.join("|").trim();
@@ -64,7 +78,7 @@ function parseShotCostumes(value: string): Record<string, Record<string, string>
   const result: Record<string, Record<string, string>> = {};
   for (const line of value.split(/\r?\n/)) {
     const [shotId, characterId, variantId] = line.split("|").map((part) => part.trim());
-    if (/^\\d+$/.test(shotId || "") && /^\\d+$/.test(characterId || "") && /^[A-Za-z0-9_-]{1,40}$/.test(variantId || "")) {
+    if (/^\d+$/.test(shotId || "") && /^\d+$/.test(characterId || "") && /^[A-Za-z0-9_-]{1,40}$/.test(variantId || "")) {
       const id = String(Number(shotId));
       result[id] ||= {};
       result[id][String(Number(characterId))] = variantId;
@@ -86,7 +100,7 @@ function parseReferenceBindings(value: string): Record<string, number> {
   const result: Record<string, number> = {};
   for (const line of value.split(/\r?\n/)) {
     const [assetId, mediaId] = line.split("|").map((part) => part.trim());
-    if (/^\\d+$/.test(assetId || "") && /^\\d+$/.test(mediaId || "")) result[String(Number(assetId))] = Number(mediaId);
+    if (/^\d+$/.test(assetId || "") && /^\d+$/.test(mediaId || "")) result[String(Number(assetId))] = Number(mediaId);
   }
   return result;
 }
@@ -98,7 +112,17 @@ function formatReferenceBindings(value: unknown): string {
     .filter(Boolean).join("\n");
 }
 
-function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
+type ReferencePreflightResult = {
+  checked_reference_count: number;
+  references_ready: boolean;
+  reference_conditioning_ready: boolean;
+  references: Array<{ category: "characters" | "scenes" | "props"; label: string; asset_id: number; media_file_id: number; shot_ids: number[]; ready: boolean; reason?: string }>;
+  failures: Array<{ label: string; asset_id: number; reason: string }>;
+  comfyui?: { message?: string };
+  message?: string;
+};
+
+function StoryboardConsistencyPanel({ projectId, checkpoint, style, width, height, steps }: { projectId: string; checkpoint: string; style: (typeof styles)[number]; width: string; height: string; steps: string }) {
   const [visualStyle, setVisualStyle] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [characters, setCharacters] = useState("");
@@ -110,6 +134,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
   const [sceneRefs, setSceneRefs] = useState("");
   const [propRefs, setPropRefs] = useState("");
   const [result, setResult] = useState<ConsistencyResult | null>(null);
+  const [referencePreflight, setReferencePreflight] = useState<ReferencePreflightResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -182,6 +207,59 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     finally { setBusy(false); }
   }
 
+  async function runReferencePreflight() {
+    if (!projectId) return;
+    setBusy(true); setError(""); setNotice(""); setReferencePreflight(null);
+    try {
+      const response = await fetch(API + "/api/local-ai/images/projects/" + projectId + "/consistency/reference-preflight", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shot_ids: [] }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "参考图安全预检失败");
+      setReferencePreflight(data);
+      setNotice(data.message || "参考图安全预检完成。");
+    } catch (err) { setError(err instanceof Error ? err.message : "参考图安全预检失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function generateReferenceShot(shotId: number) {
+    if (!checkpoint) { setError("请先在页面上方选择本机已安装的图片模型。"); return; }
+    const accepted = window.confirm("确认使用镜头 #" + shotId + " 已上传的角色、场景和道具参考图，在本机 ComfyUI 开始生成？这会占用电脑显卡和内存。");
+    if (!accepted) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/projects/" + projectId + "/consistency/reference-generate", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shot_id: shotId, checkpoint, negative_prompt: negativePrompt, style,
+          width: Number(width), height: Number(height), steps: Number(steps), cfg: 7,
+          confirm_local_generation: true,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "参考图条件生图提交失败");
+      setNotice("镜头 #" + shotId + " 已提交到本机 ComfyUI，任务编号：" + data.prompt_id + "；统一任务记录 #" + data.history_id + "。可在任务中心刷新状态。生成仍在本机进行。");
+    } catch (err) { setError(err instanceof Error ? err.message : "参考图条件生图提交失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function uploadReference(reference: ReferencePreflightResult["references"][number]) {
+    if (!reference.ready) return;
+    const accepted = window.confirm("确认将这张" + reference.label + "参考图上传到本机 ComfyUI？\n\n只会上传到本机 127.0.0.1，不会发送到云端，也不会开始生成。");
+    if (!accepted) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/projects/" + projectId + "/consistency/reference-upload", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_id: reference.asset_id, media_file_id: reference.media_file_id, category: reference.category, confirm_local_upload: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本机参考图上传失败");
+      setNotice(reference.label + "素材 #" + reference.asset_id + " 已上传到本机 ComfyUI 输入目录；尚未开始生成。");
+    } catch (err) { setError(err instanceof Error ? err.message : "本机参考图上传失败"); }
+    finally { setBusy(false); }
+  }
+
   if (!projectId) return null;
   return <section className="space-y-4 rounded-2xl border border-violet-300/25 bg-violet-950/15 p-5">
     <div><h2 className="text-lg font-semibold">跨分镜角色、场景与道具一致性</h2>
@@ -226,6 +304,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     <div className="flex flex-wrap gap-2">
       <button type="button" onClick={() => void saveProfile()} disabled={busy} className="rounded-lg border border-violet-300/30 px-4 py-2 text-sm text-violet-100 disabled:opacity-40">{busy ? "处理中…" : "保存统一外观档案"}</button>
       <button type="button" onClick={() => void runPreflight(false)} disabled={busy} className="rounded-lg border border-white/20 px-4 py-2 text-sm disabled:opacity-40">批量检查一致性</button>
+      <button type="button" onClick={() => void runReferencePreflight()} disabled={busy} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">检查参考图与本机节点</button>
       <button type="button" onClick={() => void runPreflight(true)} disabled={busy} className="rounded-lg border border-emerald-300/30 px-4 py-2 text-sm text-emerald-100 disabled:opacity-40">应用到全部分镜提示词</button>
     </div>
     {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
@@ -243,7 +322,8 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
         <div className="mt-2 max-h-64 space-y-2 overflow-auto">{result.shots.map((shot) => <div key={shot.shot_id} className="rounded bg-black/20 p-2"><p className="font-medium">镜头 {shot.shot_number} · #{shot.shot_id}</p><pre className="mt-1 whitespace-pre-wrap break-words">{shot.prompt_preview || "尚无图片提示词或一致性规则"}</pre></div>)}</div>
       </details>
     </div>}
-    <p className="text-xs text-amber-200/80">参考图绑定目前用于素材管理和提示词标记，尚未直接作为图像条件输入 ComfyUI；真正的参考图生图需要本机安装兼容的 IP-Adapter 等节点，后续会增加兼容性检测，绝不自动下载节点或模型。</p>
+    {referencePreflight && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs"><p>已检查参考图 {referencePreflight.checked_reference_count} 张；文件与项目归属：{referencePreflight.references_ready ? "通过" : "未通过"}；ComfyUI 条件生图：{referencePreflight.reference_conditioning_ready ? "已具备节点和模型" : "尚未具备完整条件"}。</p>{referencePreflight.failures?.map((item, index: number) => <p key={index} className="text-amber-200">{item.label}素材 #{item.asset_id}：{item.reason}</p>)}{Array.from(new Set(referencePreflight.references?.flatMap((item) => item.ready ? item.shot_ids : []) || [])).map((shotId) => <div key={"shot-" + shotId} className="flex items-center justify-between gap-2 rounded bg-black/30 p-2"><span>镜头 #{shotId} · 使用该镜头全部已上传参考图</span><button type="button" disabled={busy || !checkpoint} onClick={() => void generateReferenceShot(shotId)} className="rounded border border-emerald-300/30 px-3 py-1.5 text-emerald-100 disabled:opacity-40">开始条件生图</button></div>)}{referencePreflight.references?.filter((item) => item.ready).map((item) => <div key={item.category + "-" + item.asset_id + "-" + item.media_file_id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-black/20 p-2"><span>{item.label}素材 #{item.asset_id} · 图片 #{item.media_file_id}</span><button type="button" disabled={busy} onClick={() => void uploadReference(item)} className="rounded border border-cyan-300/30 px-3 py-1.5 text-cyan-100 disabled:opacity-40">确认上传到本机 ComfyUI</button></div>)}<p className="text-white/50">{referencePreflight.comfyui?.message}</p><p className="text-white/40">预检不会上传图片；只有点击对应按钮并再次确认后才会上传到本机 ComfyUI，上传本身不会启动生成。</p></div>}
+    <p className="text-xs text-amber-200/80">已支持参考图文件安全与项目归属预检，以及本机 ComfyUI 节点/模型检测。预检不会上传图片；只有你点击“确认上传到本机 ComfyUI”后，图片才会复制到本机输入目录。IP-Adapter/CLIP Vision 节点或模型缺失时不会自动下载，条件生图会明确提示缺项。</p>
     <p className="text-xs text-white/40">本功能仅生成和保存本地提示词规则，不会调用云端 AI，也不会自动开始生图；ComfyUI 仍需用户单独确认生成。</p>
   </section>;
 }
@@ -483,13 +563,19 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
 
 export default function LocalImageStudioPage() {
   const [models, setModels] = useState<string[]>([]);
+  const [runtime, setRuntime] = useState<LocalImageRuntime | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeError, setRuntimeError] = useState("");
+  const [runtimeLogs, setRuntimeLogs] = useState<LocalImageRuntimeLogs | null>(null);
+  const [logsBusy, setLogsBusy] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [checkpoint, setCheckpoint] = useState("");
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("低质量、模糊、畸形肢体、多余手指、文字、水印");
   const [style, setStyle] = useState<(typeof styles)[number]>("国漫");
-  const [width, setWidth] = useState("768");
-  const [height, setHeight] = useState("768");
-  const [steps, setSteps] = useState("24");
+  const [width, setWidth] = useState("512");
+  const [height, setHeight] = useState("512");
+  const [steps, setSteps] = useState("16");
   const [seed, setSeed] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [task, setTask] = useState<ImageTask | null>(null);
@@ -514,6 +600,56 @@ export default function LocalImageStudioPage() {
   const [loadingVersions, setLoadingVersions] = useState<number | null>(null);
   const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
 
+  const refreshRuntime = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取本地引擎状态失败");
+      setRuntime(data as LocalImageRuntime);
+      setRuntimeError("");
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "读取本地引擎状态失败");
+    }
+  }, []);
+
+  async function loadRuntimeLogs() {
+    setLogsBusy(true);
+    setRuntimeError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime/logs`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "读取引擎日志失败");
+      setRuntimeLogs(data as LocalImageRuntimeLogs);
+      setLogsOpen(true);
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "读取引擎日志失败");
+    } finally {
+      setLogsBusy(false);
+    }
+  }
+
+  async function controlRuntime(action: "start" | "stop") {
+    setRuntimeBusy(true);
+    setRuntimeError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime/${action}`, { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || (action === "start" ? "启动本地引擎失败" : "停止本地引擎失败"));
+      if (action === "start") setRuntime((current) => ({ ...(current || {}), ...data, status: data.status || "starting" }));
+      await refreshRuntime();
+      if (action === "start") setMessage("已请求启动本地 ComfyUI。引擎完成健康检查后即可刷新模型列表；首次启动可能需要一些时间。");
+      else {
+        setModels([]);
+        setCheckpoint("");
+        setMessage("本地 ComfyUI 已停止。");
+      }
+    } catch (err) {
+      setRuntimeError(err instanceof Error ? err.message : "本地引擎操作失败");
+    } finally {
+      setRuntimeBusy(false);
+    }
+  }
+
   const refreshModels = useCallback(async () => {
     setChecking(true); setError("");
     try {
@@ -532,6 +668,12 @@ export default function LocalImageStudioPage() {
       setError(err instanceof Error ? err.message : "未连接本机 ComfyUI");
     } finally { setChecking(false); }
   }, []);
+
+  useEffect(() => {
+    void refreshRuntime();
+    const timer = window.setInterval(() => { void refreshRuntime(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [refreshRuntime]);
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
 
@@ -705,6 +847,47 @@ export default function LocalImageStudioPage() {
         <p className="mt-2 max-w-3xl text-sm leading-6 text-white/60">使用已安装并正在运行的 ComfyUI 和本地图片模型生成图片。所有生成请求只发送到本机 127.0.0.1:8188，不调用云端 API。</p>
       </header>
 
+      <section className="rounded-2xl border border-cyan-300/20 bg-cyan-950/15 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold">本地图片引擎</h2>
+            <p className="mt-1 text-sm text-white/55">引擎随完整离线安装套件部署在本机。不会自动启动、联网下载模型或切换云端服务。</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => void refreshRuntime()} disabled={runtimeBusy} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40">刷新状态</button>
+            {runtime?.status === "ready" ? (
+              runtime.managed_by_application ? <button type="button" onClick={() => void controlRuntime("stop")} disabled={runtimeBusy} className="rounded-lg border border-rose-300/30 px-3 py-2 text-sm text-rose-100 disabled:opacity-40">{runtimeBusy ? "处理中…" : "停止本地引擎"}</button> : <span className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/55">检测到外部引擎，本软件不会接管或停止</span>
+            ) : runtime?.status === "starting" ? (
+              <span className="rounded-lg border border-amber-300/30 px-3 py-2 text-xs text-amber-100">正在启动…</span>
+            ) : (
+              <button type="button" onClick={() => void controlRuntime("start")} disabled={runtimeBusy || !runtime?.installed} className="rounded-lg bg-cyan-200 px-3 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">{runtimeBusy ? "处理中…" : "启动本地引擎"}</button>
+            )}
+          </div>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg bg-black/20 p-3"><p className="text-xs text-white/45">引擎状态</p><p className="mt-1 text-sm font-medium">{runtime?.status === "ready" ? "运行正常" : runtime?.status === "starting" ? "启动中" : runtime?.status === "stopped" ? "已停止" : runtime?.status === "not_installed" ? "未安装" : runtime?.status === "failed" ? "启动失败" : runtime?.status || "检测中"}</p></div>
+          <div className="rounded-lg bg-black/20 p-3"><p className="text-xs text-white/45">运行模式</p><p className="mt-1 text-sm font-medium">{runtime?.runtime_mode === "cpu" ? "CPU 模式" : runtime?.runtime_mode === "gpu" ? "GPU 模式" : "尚未启动/未知"}</p></div>
+          <div className="rounded-lg bg-black/20 p-3"><p className="text-xs text-white/45">已发现模型</p><p className="mt-1 text-sm font-medium">{runtime?.checkpoint_count ?? models.length}</p></div>
+        </div>
+        {runtime?.message && <p className="mt-3 text-sm text-white/70">{runtime.message}</p>}
+        {runtime?.status === "not_installed" && <p className="mt-2 text-xs text-amber-200">当前没有发现引擎文件。请使用包含 ComfyUI-Payload 的完整离线安装套件重新安装；单独运行 Setup.exe 不包含引擎数据。</p>}
+        {runtime?.runtime_mode === "cpu" && <p className="mt-2 text-xs text-amber-200">当前使用 CPU 模式，生成速度会明显慢于受支持的独立 GPU。默认采用 512×512、16 步的轻量设置；如愿意等待，可手动提高分辨率和步数。不会假称集显获得 GPU 加速。</p>}
+        {runtime?.install_directory && <p className="mt-2 break-all text-xs text-white/40">安装位置：{runtime.install_directory}</p>}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => void loadRuntimeLogs()} disabled={logsBusy} className="rounded-lg border border-white/15 px-3 py-2 text-xs text-white/70 disabled:opacity-40">{logsBusy ? "读取中…" : "查看运行日志"}</button>
+          {runtimeLogs?.available && <span className="text-xs text-white/40">日志可用{runtimeLogs.truncated ? "（仅显示末尾部分）" : ""}</span>}
+        </div>
+        {logsOpen && runtimeLogs && <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-black/30 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-white/55">本机运行日志 · 最多读取末尾 128 KiB</p>
+            <button type="button" onClick={() => setLogsOpen(false)} className="text-xs text-white/50">收起</button>
+          </div>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-white/70">{runtimeLogs.available ? runtimeLogs.content || "日志文件目前为空。" : "尚未生成运行日志。请先启动本地引擎。"} </pre>
+          <p className="break-all text-[11px] text-white/35">{runtimeLogs.log_path}</p>
+        </div>}
+        {runtimeError && <p role="alert" className="mt-3 text-sm text-rose-200">{runtimeError}</p>}
+      </section>
+
       <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><h2 className="text-lg font-semibold">本地图片模型</h2><p className="mt-1 text-sm text-white/50">仅列出已安装的 checkpoint，不会自动下载。</p></div>
@@ -769,7 +952,7 @@ export default function LocalImageStudioPage() {
       </section>
 
 
-      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}
+      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} checkpoint={checkpoint} style={style} width={width} height={height} steps={steps} />}
       <StoryboardBatchImagePanel projects={targets} checkpoint={checkpoint} style={style} width={width} height={height} steps={steps} />\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
@@ -826,7 +1009,7 @@ export default function LocalImageStudioPage() {
           </div>;
         })}</div> : null}
       </section>}
-      <p className="text-xs leading-5 text-white/40">当前版本采用 ComfyUI 标准 checkpoint 文生图工作流。图片归档需要逐张点击确认；归档后会登记到本地素材库。ControlNet、LoRA、参考图和批量镜头生成将在后续阶段增加。若模型架构与标准 checkpoint 工作流不兼容，ComfyUI 会返回错误，不会尝试云端替代。</p>
+      <p className="text-xs leading-5 text-white/40">当前版本采用 ComfyUI 标准 checkpoint 文生图工作流；支持参考图预检、用户确认后上传到本机，以及最多 20 个镜头的批量排队。IP-Adapter/CLIP Vision 条件生图依赖本机已安装且兼容的节点和模型；ControlNet、LoRA 不会随安装包自动下载或配置。图片归档仍需逐张确认；若模型架构或节点工作流不兼容，ComfyUI 会返回错误，不会尝试云端替代。</p>
     </main>
   );
 }

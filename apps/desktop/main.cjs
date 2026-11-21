@@ -12,6 +12,11 @@ const WEB_PORT = 3000;
 let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
+let ollamaProcess = null;
+let ollamaRestartTimer = null;
+let ollamaRestartAttempts = 0;
+let ollamaRuntimeConfig = null;
+let ollamaStarting = false;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -179,14 +184,152 @@ function stopChild(child) {
   }
 }
 
-function stopServices() {
-  stopChild(webProcess);
-  stopChild(apiProcess);
-  webProcess = null;
-  apiProcess = null;
+function requestOllamaHealth(baseUrl) {
+  return new Promise((resolve) => {
+    const req = http.get(
+      `${baseUrl}/api/tags`,
+      { timeout: 2500 },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => body += chunk);
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            resolve(res.statusCode === 200 && Array.isArray(data.models) ? data : null);
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+  });
 }
 
-function startProductionServices({ startApi = true, startWeb = true } = {}) {
+function hasQwenModel(health) {
+  return Boolean(health && Array.isArray(health.models) && health.models.some(item =>
+    item && (item.name === "qwen3:4b" || item.model === "qwen3:4b")
+  ));
+}
+
+async function waitForOllama(baseUrl, timeout = 90000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (ollamaProcess && ollamaProcess.exitCode !== null) {
+      throw new Error("内置 Ollama 本地服务意外退出，请检查本地 AI 安装目录。");
+    }
+    const health = await requestOllamaHealth(baseUrl);
+    if (health) {
+      if (!hasQwenModel(health)) {
+        throw new Error("内置 Ollama 已启动，但没有检测到随软件安装的 Qwen3 4B 模型。");
+      }
+      return health;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error("内置 Ollama 本地服务启动超时。");
+}
+
+function scheduleOllamaRestart() {
+  if (quitting || !ollamaRuntimeConfig || ollamaRestartTimer) return;
+  if (ollamaRestartAttempts >= 3) {
+    dialog.showErrorBox(
+      "本地 AI 引擎暂时不可用",
+      "Ollama 本地服务多次意外退出，自动恢复仍未成功。请保存当前项目后重新启动 AI 漫剧制作大师。"
+    );
+    return;
+  }
+
+  const delays = [1000, 3000, 10000];
+  const delay = delays[ollamaRestartAttempts++];
+  ollamaRestartTimer = setTimeout(async () => {
+    ollamaRestartTimer = null;
+    if (quitting || !ollamaRuntimeConfig) return;
+    try {
+      await startBundledOllama(ollamaRuntimeConfig, 1);
+      ollamaRestartAttempts = 0;
+      console.log("[OLLAMA] 本地服务已自动恢复。");
+    } catch (error) {
+      console.error("[OLLAMA] 自动恢复失败：", error);
+      scheduleOllamaRestart();
+    }
+  }, delay);
+}
+
+async function startBundledOllama(config, maxAttempts = 3) {
+  ollamaRuntimeConfig = config;
+  ollamaStarting = true;
+  const delays = [1000, 3000, 8000];
+  try {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const portFree = await checkPort(config.port);
+      if (!portFree) {
+        const existing = await requestOllamaHealth(config.baseUrl);
+        if (hasQwenModel(existing)) return existing;
+        if (attempt === maxAttempts - 1) {
+          throw new Error("本地 AI 服务端口 11435 已被其他程序占用，且未检测到可用的 Qwen3 4B 服务。");
+        }
+        await new Promise(resolve => setTimeout(resolve, delays[attempt] || 3000));
+        continue;
+      }
+
+      const child = spawn(config.ollamaExe, ["serve"], {
+        cwd: config.ollamaRuntime,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          OLLAMA_MODELS: config.ollamaModels,
+          OLLAMA_HOST: config.host,
+          OLLAMA_KEEP_ALIVE: "5m",
+          OLLAMA_NUM_PARALLEL: "1",
+          OLLAMA_MAX_LOADED_MODELS: "1",
+          OLLAMA_NO_CLOUD: "1"
+        }
+      });
+      ollamaProcess = child;
+      logChild("OLLAMA", child);
+      child.once("exit", (code, signal) => {
+        if (quitting || ollamaStarting) return;
+        if (ollamaProcess === child) ollamaProcess = null;
+        console.error("[OLLAMA] 本地服务意外退出：", { code, signal });
+        scheduleOllamaRestart();
+      });
+
+      try {
+        const health = await waitForOllama(config.baseUrl, 90000);
+        ollamaRestartAttempts = 0;
+        return health;
+      } catch (error) {
+        stopChild(child);
+        if (ollamaProcess === child) ollamaProcess = null;
+        if (attempt === maxAttempts - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, delays[attempt] || 3000));
+      }
+    }
+    throw new Error("内置 Ollama 本地服务启动失败。");
+  } finally {
+    ollamaStarting = false;
+  }
+}
+
+function stopServices() {
+  if (ollamaRestartTimer) {
+    clearTimeout(ollamaRestartTimer);
+    ollamaRestartTimer = null;
+  }
+  ollamaRuntimeConfig = null;
+  ollamaRestartAttempts = 0;
+  stopChild(webProcess);
+  stopChild(apiProcess);
+  stopChild(ollamaProcess);
+  webProcess = null;
+  apiProcess = null;
+  ollamaProcess = null;
+}
+
+async function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
   const webServer = path.join(resources, "web", "server.js");
@@ -208,6 +351,31 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
     fs.mkdirSync(storageDir, { recursive: true });
   }
 
+  const ollamaRoot = path.join(app.getPath("home"), "AIComicStudio", "Ollama");
+  const ollamaRuntime = path.join(ollamaRoot, "runtime");
+  const ollamaExe = path.join(ollamaRuntime, "ollama.exe");
+  const ollamaModels = path.join(ollamaRoot, "models");
+  const modelManifestCandidates = [
+    path.join(ollamaModels, "manifests", "registry.ollama.ai", "library", "qwen3", "4b"),
+    path.join(ollamaModels, "manifests", "registry.ollama.com", "library", "qwen3", "4b")
+  ];
+  let ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+  if (fs.existsSync(ollamaExe) && fs.existsSync(ollamaModels) &&
+      modelManifestCandidates.some(file => fs.existsSync(file))) {
+    ollamaBaseUrl = "http://127.0.0.1:11435";
+    await startBundledOllama({
+      ollamaExe,
+      ollamaRuntime,
+      ollamaModels,
+      host: "127.0.0.1:11435",
+      port: 11435,
+      baseUrl: ollamaBaseUrl
+    }, 3);
+    process.env.OLLAMA_MODELS = ollamaModels;
+    process.env.PATH = ollamaRuntime + path.delimiter + process.env.PATH;
+  }
+  process.env.OLLAMA_BASE_URL = ollamaBaseUrl;
+
   if (startApi) {
     apiProcess = spawn(apiExe, [], {
       cwd: resources,
@@ -219,7 +387,11 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
         FFMPEG_PATH: ffmpeg,
-        FFPROBE_PATH: ffprobe
+        FFPROBE_PATH: ffprobe,
+        OLLAMA_BASE_URL: ollamaBaseUrl,
+        OLLAMA_NO_CLOUD: "1",
+        ...(process.env.OLLAMA_MODELS ? { OLLAMA_MODELS: process.env.OLLAMA_MODELS } : {}),
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {})
       }
     });
     logChild("API", apiProcess);
@@ -285,7 +457,7 @@ async function createWindow() {
       );
     }
 
-    startProductionServices({
+    await startProductionServices({
       startApi: apiPortFree,
       startWeb: webPortFree
     });
@@ -498,10 +670,66 @@ ipcMain.handle("ai-browser:fill-prompt", async (_event, payload = {}) => {
     target.dispatchEvent(new Event("change", { bubbles: true }));
     return { ok: true, length: text.length };
   }.toString() + ")(" + JSON.stringify(prompt) + ")";
-  const result = await browser.webContents.executeJavaScript(script);
+  let result = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    if (browser.isDestroyed() || browser.webContents.isDestroyed()) throw new Error("AI 网页已关闭，请重新打开");
+    const latestUrl = new URL(browser.webContents.getURL());
+    if (latestUrl.protocol !== "https:" || !allowedHosts.has(latestUrl.hostname)) {
+      throw new Error("AI 网页已跳转到未允许自动填入的站点，已停止操作");
+    }
+    result = await browser.webContents.executeJavaScript(script);
+    if (result && result.ok) break;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 600));
+  }
   if (!result || !result.ok) throw new Error((result && result.reason) || "自动填入失败，请手动粘贴交接包");
   return { filled: true, length: result.length, submitted: false };
 });
+ipcMain.handle("ai-browser:capture-text-result", async (_event, payload = {}) => {
+  const taskId = String(payload.taskId || "");
+  if (!/^task-[a-zA-Z0-9-]{5,110}$/.test(taskId)) throw new Error("无效的任务编号");
+  const entry = [...aiBrowserTasks.entries()].find(([, value]) => value === taskId);
+  if (!entry) throw new Error("找不到该任务对应的 AI 网页，请先打开任务网页");
+  const browser = aiBrowserWindows.get(entry[0]);
+  if (!browser || browser.isDestroyed() || browser.webContents.isDestroyed()) throw new Error("AI 网页已关闭，请重新打开");
+  const currentUrl = new URL(browser.webContents.getURL());
+  const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
+  if (currentUrl.protocol !== "https:" || !allowedHosts.has(currentUrl.hostname)) {
+    throw new Error("当前网页不在允许读取结果的 AI 网站范围内");
+  }
+  const script = "(" + function (host) {
+    const visible = (el) => {
+      const rect = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none";
+    };
+    const selectors = host.includes("chatgpt") || host.includes("openai")
+      ? ['[data-message-author-role="assistant"]']
+      : host.includes("deepseek")
+        ? [".ds-markdown", '[data-message-author-role="assistant"]']
+        : host.includes("doubao")
+          ? ['[data-testid*="message-content"]', '[class*="message-content"]', '[data-message-author-role="assistant"]']
+          : ['[data-message-author-role="assistant"]', '[data-testid*="message"]', 'main [class*="message"]'];
+    const candidates = [];
+    for (const selector of selectors) {
+      for (const element of document.querySelectorAll(selector)) {
+        if (!visible(element)) continue;
+        const role = (element.getAttribute("data-message-author-role") || element.getAttribute("data-role") || "").toLowerCase();
+        if (role && role !== "assistant" && !host.includes("doubao")) continue;
+        const text = (element.innerText || element.textContent || "").trim();
+        if (text.length >= 8 && !candidates.includes(text)) candidates.push(text);
+      }
+      if (candidates.length) break;
+    }
+    const text = candidates[candidates.length - 1] || "";
+    if (!text) return { ok: false, reason: "没有找到可读取的最新 AI 回复；请等待生成完成，或手动复制网页结果。" };
+    if (text.length > 50000) return { ok: false, reason: "网页回复超过 50000 字，请手动分段复制保存。" };
+    return { ok: true, text, length: text.length };
+  }.toString() + ")(" + JSON.stringify(currentUrl.hostname) + ")";
+  const result = await browser.webContents.executeJavaScript(script);
+  if (!result || !result.ok) throw new Error((result && result.reason) || "读取网页回复失败，请手动复制");
+  return { captured: true, text: result.text, length: result.length, saved: false };
+});
+
 ipcMain.handle("ai-browser:list-open-tasks", async () => {
   const allowedHosts = new Set(["chatgpt.com", "chat.openai.com", "chat.deepseek.com", "doubao.com", "www.doubao.com", "grok.com", "www.grok.com"]);
   const response = await fetch("http://127.0.0.1:8000/api/web-ai/tasks?limit=500");

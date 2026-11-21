@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.inspection import inspect as sa_inspect
 
 from app.database import get_db
+from app.services.cost_safety import require_cloud_ai_api_disabled
 from app.models.novel import Novel, Chapter
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAssetLink
 from app.models.visual import VisualAsset
@@ -312,6 +313,7 @@ def prompt_style_guidance(style: str) -> str:
 
 @router.post("/projects/{project_id}/plan-ai")
 def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = Depends(get_db)):
+    require_cloud_ai_api_disabled()
     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
     if not project:
         raise HTTPException(404, "剧本项目不存在")
@@ -516,6 +518,7 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
 
 @router.post("/episodes/{episode_id}/generate-ai")
 def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db: Session = Depends(get_db)):
+    require_cloud_ai_api_disabled()
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
