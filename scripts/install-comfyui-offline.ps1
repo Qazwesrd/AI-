@@ -213,8 +213,9 @@ $expectedAssetNames = @(
 )
 $manifestAssetItems = @($manifest.assets)
 $manifestAssetNames = @($manifestAssetItems | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+$assetDifferences = @(Compare-Object -ReferenceObject $expectedAssetNames -DifferenceObject $manifestAssetNames)
 if ($manifestAssetItems.Count -ne 4 -or $manifestAssetNames.Count -ne 4 -or
-    (Compare-Object $expectedAssetNames $manifestAssetNames).Count -gt 0) {
+    $assetDifferences.Count -gt 0) {
     throw "离线数据包缺少官方显卡运行包、包含重复项或包含未知文件。"
 }
 foreach ($manifestAsset in $manifestAssetItems) {
