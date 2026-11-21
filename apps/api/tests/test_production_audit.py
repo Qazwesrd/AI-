@@ -112,7 +112,13 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                     min_duration=90,
                     max_duration=150,
                 )
-                db.add_all([chapter, project])
+                foreign_project = StoryProject(
+                    novel_id=novel.id,
+                    name="另一个项目",
+                    min_duration=90,
+                    max_duration=150,
+                )
+                db.add_all([chapter, project, foreign_project])
                 db.flush()
                 episode = EpisodePlan(
                     project_id=project.id,
@@ -157,6 +163,17 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                             "rendered_output": True,
                         },
                     ),
+                    MediaFile(
+                        name="episode_1_foreign_project.mp4",
+                        category="video",
+                        file_path=str(video),
+                        file_size=video.stat().st_size,
+                        metadata_json={
+                            "project_id": foreign_project.id,
+                            "episode_id": episode.id,
+                            "rendered_output": True,
+                        },
+                    ),
                 ])
                 db.commit()
 
@@ -174,6 +191,11 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                 self.assertEqual(report["summary"]["shots_with_video"], 1)
                 self.assertEqual(report["summary"]["shots_missing_video"], 0)
                 self.assertEqual(report["summary"]["shots_with_image"], 1)
+                self.assertEqual(
+                    report["episodes"][0]["final_video_files"],
+                    ["episode_1_final.mp4"],
+                    "另一个项目的媒体文件不得冒充当前项目的最终成片",
+                )
             finally:
                 db.close()
                 engine.dispose()
