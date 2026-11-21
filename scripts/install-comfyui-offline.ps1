@@ -129,7 +129,8 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
                 break
             }
         }
-        if ([System.IO.Path]::IsPathRooted($normalized) -or
+        if ($normalized.Length -gt 240 -or $parts.Count -gt 64 -or
+            [System.IO.Path]::IsPathRooted($normalized) -or
             $normalized -match "^[A-Za-z]:" -or
             $normalized.StartsWith("\") -or
             $parts -contains ".." -or
