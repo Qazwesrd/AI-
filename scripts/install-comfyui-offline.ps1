@@ -4,15 +4,18 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
     [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-ComfyUI-install.log")
+    [object[]]$DetectedAdapters
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+$transcriptStarted = $false
 try {
     $logDirectory = Split-Path -Parent ([System.IO.Path]::GetFullPath($LogPath))
     if ($logDirectory) { New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null }
-    Start-Transcript -LiteralPath $LogPath -Append -ErrorAction Stop | Out-Null
+    Start-Transcript -Path $LogPath -Append -ErrorAction Stop | Out-Null
+    $transcriptStarted = $true
 } catch {
     Write-Warning "无法创建 ComfyUI 安装日志：$($_.Exception.Message)"
 }
@@ -249,7 +252,11 @@ if (!$tool -or $tool.source -ne $expectedToolUrl -or
     throw "7-Zip 解压工具来源或 SHA-256 校验失败。"
 }
 
-$adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
+if ($PSBoundParameters.ContainsKey("DetectedAdapters")) {
+    $adapters = @($DetectedAdapters)
+} else {
+    $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
+}
 $selection = Select-ComfyAsset $adapters
 $asset = $manifest.assets | Where-Object { $_.name -eq $selection.name } | Select-Object -First 1
 if (!$asset -or $asset.verified -ne $true) { throw "离线数据包缺少所需显卡运行包：$($selection.name)" }
@@ -268,7 +275,26 @@ if ((Get-Sha256 $archivePath) -ne ([string]$asset.sha256).ToLowerInvariant()) {
 $archiveInfo = Get-ArchiveEntries $sevenZip $archivePath
 $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
 if (Test-Path -LiteralPath $installFullPath) {
-    throw "检测到已有 ComfyUI 目录。为防止覆盖你现有的模型、插件或配置，安装已停止；请先完整备份并将旧目录移到其他位置后再运行安装程序。"
+    $existingMain = Join-Path $installFullPath "ComfyUI\main.py"
+    $existingPython = Join-Path $installFullPath "python_embeded\python.exe"
+    if ((Test-Path -LiteralPath $existingMain -PathType Leaf) -and
+        (Test-Path -LiteralPath $existingPython -PathType Leaf)) {
+        $existingVersion = "未知版本"
+        $existingRuntimeManifest = Join-Path $installFullPath "runtime-manifest.json"
+        if (Test-Path -LiteralPath $existingRuntimeManifest -PathType Leaf) {
+            try {
+                $existingState = Get-Content -LiteralPath $existingRuntimeManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($existingState.comfyui_version) { $existingVersion = [string]$existingState.comfyui_version }
+            } catch {}
+        }
+        Write-Host "检测到已有 ComfyUI $existingVersion。为保护现有模型、插件和配置，本次保留现有引擎，不覆盖或删除任何文件。"
+        if ($transcriptStarted) {
+            Stop-Transcript | Out-Null
+            $transcriptStarted = $false
+        }
+        return
+    }
+    throw "检测到已有 ComfyUI 目录但结构不完整。为保护用户数据，安装已停止；请先备份该目录再修复。"
 }
 $installDrive = [System.IO.Path]::GetPathRoot($installFullPath)
 $driveInfo = [System.IO.DriveInfo]::new($installDrive)
@@ -330,6 +356,21 @@ try {
     )
     Set-Content -LiteralPath $cpuLauncher -Value $cpuLauncherContent -Encoding ASCII
 
+    $runtimeManifest = @{
+        schema_version = 1
+        comfyui_version = $manifest.comfyui_version
+        selected_asset = $selection.name
+        archive_sha256 = ([string]$asset.sha256).ToLowerInvariant()
+        gpu_vendor = $selection.vendor
+        detected_gpu = $selection.detected_gpu
+        runtime_mode = $selection.runtime_mode
+        selection_reason = $selection.selection_reason
+        installed_utc = [DateTime]::UtcNow.ToString("o")
+        distribution_approved = $false
+    }
+    $runtimeManifest | ConvertTo-Json -Depth 5 |
+        Set-Content -LiteralPath (Join-Path $installFullPath "runtime-manifest.json") -Encoding UTF8
+
     Write-Host "ComfyUI 引擎已部署到：$installFullPath"
     if ($selection.runtime_mode -eq "cpu") {
         Write-Host "当前设备将使用 CPU 模式；首次图片生成可能较慢。"
@@ -338,4 +379,8 @@ try {
     Write-Host "图片生成模型未包含在安装包内，也没有下载任何模型。"
 } finally {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($transcriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+        $transcriptStarted = $false
+    }
 }
