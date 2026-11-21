@@ -224,7 +224,7 @@ function StoryboardConsistencyPanel({ projectId, checkpoint, style, width, heigh
       });
       const data = await response.json();
       if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : data.detail?.message || "参考图条件生图提交失败");
-      setNotice("镜头 #" + shotId + " 已提交到本机 ComfyUI，任务编号：" + data.prompt_id + "。生成仍在本机进行。");
+      setNotice("镜头 #" + shotId + " 已提交到本机 ComfyUI，任务编号：" + data.prompt_id + "；统一任务记录 #" + data.history_id + "。可在任务中心刷新状态。生成仍在本机进行。");
     } catch (err) { setError(err instanceof Error ? err.message : "参考图条件生图提交失败"); }
     finally { setBusy(false); }
   }
