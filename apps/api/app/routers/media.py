@@ -1442,6 +1442,7 @@ def generate_episode_voice_track(
         raise HTTPException(400, "所选服务商用途不支持语音合成，请选择文本或语音服务商")
     generated = {}
     speech_durations = {}
+    dialogue_line_timings = {}
     failures = []
     warnings = []
     blocked_shots = set()
@@ -1642,6 +1643,14 @@ def generate_episode_voice_track(
         generated[shot.id] = shot_audio
         speech_durations[shot.id] = combined_duration
         segmented_audio[shot.id] = len(segment_paths)
+        dialogue_line_timings[shot.id] = [
+            {
+                "text": segment.text.strip(),
+                "speaker_character_id": segment.speaker_character_id,
+                "duration_seconds": segment_durations[index],
+            }
+            for index, segment in enumerate(segments)
+        ]
 
     handled_shots = set()
     for prior in prior_tasks:
@@ -1889,6 +1898,18 @@ def generate_episode_voice_track(
             "-filter_complex", ";".join(filters), "-map", "[aout]",
             "-c:a", "libmp3lame", "-q:a", "3", str(track_path),
         ])
+        timeline_record = db.query(EpisodeEditTimeline).filter(
+            EpisodeEditTimeline.episode_id == episode_id
+        ).first()
+        saved_timeline = timeline_record.edit_data if timeline_record and isinstance(timeline_record.edit_data, dict) else {}
+        subtitle_cues = build_dialogue_subtitle_cues(
+            shots=shots,
+            shot_order=saved_timeline.get("shot_order") or [shot.id for shot in shots],
+            clip_durations=clip_durations,
+            speech_durations=speech_durations,
+            dialogue_line_timings=dialogue_line_timings,
+            transitions=saved_timeline.get("transitions") or [],
+        )
         task = MediaTask(
             task_type="episode_speech_track", provider=data.provider, model=data.model,
             status="completed", prompt=f"第{episode.episode_number}集对白配音",
@@ -1896,6 +1917,7 @@ def generate_episode_voice_track(
             request_data={"episode_id": episode_id, "voice": data.voice,
                           "voice_by_character_id": data.voice_by_character_id,
                           "segmented_shots": segmented_audio,
+                          "subtitle_cues": subtitle_cues,
                           "shot_count": len(generated), "aligned_to_storyboard": True},
         )
         db.add(task)
@@ -1912,6 +1934,7 @@ def generate_episode_voice_track(
         "voice_track": str(track_path), "generated_shots": len(generated),
         "generated_dialogue_segments": sum(segmented_audio.values()),
         "segmented_shots": len(segmented_audio),
+        "subtitle_cues": subtitle_cues,
         "failures": failures, "warnings": warnings,
         "message": f"已生成并按分镜时长合成对白语音轨，成功 {len(generated)} 个镜头，拆分对白 {sum(segmented_audio.values())} 句，失败 {len(failures)} 个，提醒 {len(warnings)} 条。",
     }
@@ -2410,6 +2433,67 @@ class EpisodeTimelineInput(BaseModel):
     subtitle_cues: Optional[list[EpisodeSubtitleCueInput]] = None
 
 
+
+def build_dialogue_subtitle_cues(
+    shots, shot_order, clip_durations, speech_durations,
+    dialogue_line_timings, transitions,
+):
+    """Build approximate line-level subtitle timing from probed TTS durations.
+
+    The generated cue boundaries follow concatenated speech segment durations and
+    the same atempo ratio used by the dialogue-track renderer. Word-level alignment
+    is not inferred; users can still adjust every cue manually.
+    """
+    shot_by_id = {shot.id: shot for shot in shots}
+    ordered_ids = list(shot_order or [shot.id for shot in shots])
+    if len(ordered_ids) != len(shot_by_id) or set(ordered_ids) != set(shot_by_id):
+        ordered_ids = [shot.id for shot in shots]
+    transition_by_shot = {
+        item.get("after_shot_id"): item
+        for item in transitions
+        if isinstance(item, dict)
+        and item.get("transition") in ("fade", "dissolve")
+    }
+    cues = []
+    elapsed = 0.0
+    for shot_id in ordered_ids:
+        shot = shot_by_id[shot_id]
+        target_duration = max(
+            1.0,
+            float(clip_durations.get(shot_id, shot.duration_seconds or 5)),
+        )
+        speech_duration = max(0.0, float(speech_durations.get(shot_id, 0.0)))
+        if speech_duration <= 0:
+            lines = []
+        else:
+            lines = dialogue_line_timings.get(shot_id) or [{
+                "text": (shot.dialogue or "").strip(),
+                "speaker_character_id": None,
+                "duration_seconds": speech_duration,
+            }]
+        ratio = speech_duration / target_duration if target_duration > 0 else 1.0
+        tempo_factor = round(min(1.5, max(1.0, ratio)), 4) if ratio > 1.02 else 1.0
+        line_elapsed = elapsed
+        shot_end = elapsed + target_duration
+        for line in lines:
+            text_value = str(line.get("text") or "").strip()
+            line_duration = max(0.0, float(line.get("duration_seconds") or 0.0)) / tempo_factor
+            cue_end = min(shot_end, line_elapsed + line_duration)
+            if text_value and cue_end > line_elapsed:
+                cues.append({
+                    "start": round(line_elapsed, 3),
+                    "end": round(cue_end, 3),
+                    "text": text_value,
+                })
+            line_elapsed = cue_end
+            if line_elapsed >= shot_end:
+                break
+        transition = transition_by_shot.get(shot_id) or {}
+        overlap = max(0.0, float(transition.get("duration_seconds") or 0.0))
+        elapsed += max(0.0, target_duration - overlap)
+    return cues
+
+
 def _timeline_episode_shots(db, episode_id):
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
@@ -2447,11 +2531,23 @@ def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
         VisualAsset.category.in_(("characters", "character")),
         VisualAsset.confirmed == True,
     ).all() if character_ids else []
+    latest_speech_track = db.query(MediaTask).filter(
+        MediaTask.task_type == "episode_speech_track"
+    ).order_by(MediaTask.id.desc()).all()
+    generated_subtitle_cues = []
+    for speech_task in latest_speech_track:
+        speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
+        if speech_meta.get("episode_id") == episode_id:
+            candidate = speech_meta.get("subtitle_cues")
+            if isinstance(candidate, list):
+                generated_subtitle_cues = candidate
+            break
     return {
         "episode_id": episode.id,
         "episode_title": episode.title,
         "version": record.version if record else 0,
         "timeline": data,
+        "generated_subtitle_cues": generated_subtitle_cues,
         "characters": [{"id": item.id, "name": item.name} for item in characters],
         "shots": [{
             "id": shot.id, "shot_number": shot.shot_number,

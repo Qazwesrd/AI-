@@ -81,6 +81,7 @@ export default function EpisodeReadinessPage() {
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
+  const [generatedSubtitleCues, setGeneratedSubtitleCues] = useState<{ start: number; end: number; text: string }[]>([]);
   const [timelineVersion, setTimelineVersion] = useState(0);
   const [timelineBusy, setTimelineBusy] = useState(false);
   const [episodeCharacters, setEpisodeCharacters] = useState<EpisodeCharacter[]>([]);
@@ -109,6 +110,7 @@ export default function EpisodeReadinessPage() {
       saved.subtitle_margin_v = saved.subtitle_margin_v ?? 60;
       setEpisodeCharacters(Array.isArray(data.characters) ? data.characters : []);
       setEpisodeShots(Array.isArray(data.shots) ? data.shots : []);
+      setGeneratedSubtitleCues(Array.isArray(data.generated_subtitle_cues) ? data.generated_subtitle_cues : []);
       if (saved.subtitle_cues === undefined || saved.subtitle_cues === null) {
         const shotById = new Map<number, { id: number; duration_seconds?: number; dialogue?: string }>(
           (data.shots || []).map((shot: { id: number; duration_seconds?: number; dialogue?: string }) => [shot.id, shot] as const)
@@ -246,6 +248,7 @@ export default function EpisodeReadinessPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "对白配音生成失败");
+      setGeneratedSubtitleCues(Array.isArray(data.subtitle_cues) ? data.subtitle_cues : []);
       const voicePath = data.voice_track as string | undefined;
       if (voicePath) {
         const voiceName = voicePath.split(/[\\/]/).pop() || "分集对白配音";
@@ -637,8 +640,27 @@ export default function EpisodeReadinessPage() {
                     <div>
                       <h3 className="font-semibold">对白字幕时间轴</h3>
                       <p className="mt-1 text-xs text-white/45">可调整每条字幕的开始/结束时间和文本；保存后由本地 FFmpeg 生成 SRT。</p>
+                      {generatedSubtitleCues.length > 0 && (
+                        <p className="mt-1 text-xs text-emerald-200">已根据实际逐句配音时长计算 {generatedSubtitleCues.length} 条字幕建议；尚未覆盖当前字幕。</p>
+                      )}
                     </div>
-                    <button type="button" onClick={() => setTimeline({ ...timeline, subtitle_cues: [...(timeline.subtitle_cues || []), { start: 0, end: 2, text: "" }] })} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">添加字幕</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={!generatedSubtitleCues.length}
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            "将用最新配音的实际音频时长替换当前字幕时间轴吗？当前手动字幕会被替换；取消则保留原字幕不变。"
+                          );
+                          if (confirmed) {
+                            setTimeline({ ...timeline, subtitle_cues: generatedSubtitleCues.map(cue => ({ ...cue })) });
+                            setMessage("已应用按实际配音时长计算的字幕建议；你仍可逐条手动微调。");
+                          }
+                        }}
+                        className="rounded-lg border border-emerald-300/30 px-3 py-2 text-xs text-emerald-100 disabled:opacity-40"
+                      >应用配音时间</button>
+                      <button type="button" onClick={() => setTimeline({ ...timeline, subtitle_cues: [...(timeline.subtitle_cues || []), { start: 0, end: 2, text: "" }] })} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">添加字幕</button>
+                    </div>
                   </div>
                   <div className="mt-4 rounded-lg border border-white/10 p-3">
                     <label className="flex items-center gap-2 text-sm">
