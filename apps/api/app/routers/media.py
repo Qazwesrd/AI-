@@ -1123,7 +1123,15 @@ def render_episode_from_shots(
             output, expected_duration=total_video_duration,
             duration_tolerance=2.0, require_audio=True,
         )
-        os.replace(output, final_output)
+        render_task_id = getattr(_EPISODE_RENDER_CONTEXT, "task_id", None)
+        if render_task_id is not None:
+            with _EPISODE_RENDER_LOCK:
+                render_runtime = _EPISODE_RENDER_RUNTIME.get(render_task_id)
+                if not render_runtime or render_runtime["cancel"].is_set():
+                    raise FFmpegCancelledError("用户在成片发布前请求停止合成")
+                os.replace(output, final_output)
+        else:
+            os.replace(output, final_output)
         output = final_output
         db.add(MediaFile(
             name=output.name, category="video", file_path=str(output),
@@ -1282,8 +1290,8 @@ def _run_episode_render_job(task_id, episode_id, output_name, music_path, music_
             episode_id, output_name=output_name,
             music_path=music_path, music_volume=music_volume, db=db,
         )
-        if runtime["cancel"].is_set():
-            raise FFmpegCancelledError("用户请求停止分集视频合成")
+        # Successful atomic publication is the point of no return: a late stop
+        # request must not relabel a valid, already-published episode as cancelled.
         task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
         task.status = "completed"
         task.result_path = result.get("output")
