@@ -76,7 +76,7 @@ try {
     Write-Utf8 $payloadManifestPath ($manifest | ConvertTo-Json -Depth 8)
     $payloadManifestHash = Hash $payloadManifestPath
 
-    $bundleComfyui = Join-Path $bundle "ComfyUI-Payload"
+    $bundleComfyui = Join-Path $temp "ComfyUI-Payload"
     New-Item -ItemType Directory -Path $bundleComfyui -Force | Out-Null
     $bundleManifest = @{
         distribution_approved = $false
