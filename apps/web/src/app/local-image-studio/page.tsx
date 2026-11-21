@@ -354,7 +354,7 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   const shots = episode?.shots || [];
   async function refreshHistory() {
     if (!projectId || !episodeId) { setHistory([]); return; }
-    const response = await fetch(\`\${API}/api/local-ai/images/batch/history?project_id=\${projectId}&episode_id=\${episodeId}&limit=100\`, { cache: "no-store" });
+    const response = await fetch(`${API}/api/local-ai/images/batch/history?project_id=${projectId}&episode_id=${episodeId}&limit=100`, { cache: "no-store" });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
     setHistory(Array.isArray(data.tasks) ? data.tasks : []);
@@ -363,7 +363,7 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   useEffect(() => {
     if (!projectId || !episodeId) { setHistory([]); return; }
     let active = true;
-    fetch(\`\${API}/api/local-ai/images/batch/history?project_id=\${projectId}&episode_id=\${episodeId}&limit=100\`, { cache: "no-store" })
+    fetch(`${API}/api/local-ai/images/batch/history?project_id=${projectId}&episode_id=${episodeId}&limit=100`, { cache: "no-store" })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
