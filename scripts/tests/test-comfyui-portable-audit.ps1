@@ -204,6 +204,26 @@ try {
     }
     Write-Utf8 (Join-Path $noticesRoot "comfyui-portable-dependency-audit.json") ($bundleAuditRegister | ConvertTo-Json -Depth 8)
 
+    $inventoryPath = Join-Path $noticesRoot "comfyui-portable-dependency-inventory.json"
+    $validInventoryText = Get-Content -LiteralPath $inventoryPath -Raw -Encoding UTF8
+    $tamperedInventory = $report
+    $tamperedInventory.portable_variants[0].sha256 = "0" * 64
+    Write-Utf8 $inventoryPath ($tamperedInventory | ConvertTo-Json -Depth 12)
+    $tamperedInventoryRejected = $false
+    try {
+        & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters @()
+    } catch {
+        if ($_.Exception.Message -match "依赖清点报告与资产 SHA-256") {
+            $tamperedInventoryRejected = $true
+        } else {
+            throw
+        }
+    }
+    if (!$tamperedInventoryRejected) {
+        throw "安装器未能阻止 SHA-256 被篡改的依赖清点报告。"
+    }
+    Write-Utf8 $inventoryPath $validInventoryText
+
     $detectedAdapters = @([pscustomobject]@{
         Name = "AMD Radeon(TM) Graphics"
         PNPDeviceID = "PCI\VEN_1002&DEV_1636"
