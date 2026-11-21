@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 import zipfile
@@ -161,7 +162,18 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     self.assertIn("project-data.json", names)
                     self.assertIn("manifest.json", names)
                     self.assertEqual(len([name for name in names if name.startswith("files/")]), 3)
-                    payload = json.loads(archive.read("project-data.json"))
+                    project_data_bytes = archive.read("project-data.json")
+                    payload = json.loads(project_data_bytes)
+                    manifest_data = json.loads(archive.read("manifest.json"))
+                    self.assertEqual(
+                        manifest_data["project_data_sha256"],
+                        hashlib.sha256(project_data_bytes).hexdigest(),
+                    )
+                    for file_record in manifest_data["files"]:
+                        self.assertEqual(
+                            file_record["sha256"],
+                            hashlib.sha256(archive.read(file_record["archive_path"])).hexdigest(),
+                        )
                     self.assertEqual(payload["project"]["name"], "测试漫剧项目")
                     self.assertIsNone(payload["project"]["settings"]["api_key"])
                     self.assertIsNone(payload["records"]["media_files"][0]["metadata_json"]["access_token"])
