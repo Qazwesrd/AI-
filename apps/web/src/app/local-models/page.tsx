@@ -32,6 +32,7 @@ type ModelItem = {
 
 type RuntimeModel = { name: string; size_bytes?: number | null };
 type Runtime = { status: string; models: RuntimeModel[]; message: string };
+type InstallerInfo = { engine_status: string; model: string; model_size_bytes: number; required_free_bytes: number; free_bytes: number | null; enough_space: boolean; installed: boolean | null; download_source: string; license: string; license_url: string; job: { status: string; stage: string; percent: number; completed_bytes: number; total_bytes: number; error?: string | null } };
 
 type Catalog = {
   items: ModelItem[];
@@ -72,7 +73,7 @@ export default function LocalModelsPage() {
   const [modelRole, setModelRole] = useState("all_rounder");
   const [modelStyle, setModelStyle] = useState("国漫");
   const [modelInstructions, setModelInstructions] = useState("");
-  const [creatingModel, setCreatingModel] = useState(false);
+  const [creatingModel, setCreatingModel] = useState(false);\n  const [installerInfo, setInstallerInfo] = useState<InstallerInfo | null>(null);\n  const [installingBaseModel, setInstallingBaseModel] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -90,7 +91,7 @@ export default function LocalModelsPage() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); }, [refresh]);
+  const refreshInstaller = useCallback(async () => {\n    try {\n      const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });\n      const result = await response.json();\n      if (!response.ok) throw new Error(result.detail || "无法读取模型安装状态");\n      setInstallerInfo(result);\n    } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }\n  }, []);\n\n  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); }, [refresh, refreshInstaller]);\n\n  useEffect(() => {\n    if (!installerInfo || !["downloading", "verifying"].includes(installerInfo.job.status)) return;\n    const timer = window.setInterval(async () => {\n      try {\n        const response = await fetch(`${API}/api/local-ai/model-installer/status`, { cache: "no-store" });\n        const result = await response.json();\n        if (response.ok) setInstallerInfo(current => current ? { ...current, job: result } : current);\n        if (["success", "failed", "cancelled"].includes(result.status)) {\n          window.clearInterval(timer); setInstallingBaseModel(false); void refreshRuntime(); void refreshInstaller();\n        }\n      } catch { /* transient polling errors are retried on the next tick */ }\n    }, 1200);\n    return () => window.clearInterval(timer);\n  }, [installerInfo?.job.status, refreshInstaller]);
 
   const refreshRuntime = async () => {
     try {
@@ -102,6 +103,32 @@ export default function LocalModelsPage() {
     } catch (err) {
       setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });
     }
+  };
+
+  const startBaseModelInstall = async () => {
+    if (!installerInfo?.enough_space || installerInfo.installed) return;
+    if (!window.confirm("即将从 Ollama 官方模型库下载 Qwen3 4B（约 2.5 GB）。需要至少 6 GiB 可用磁盘空间，并会消耗网络流量；模型本身不收 API 费用。请先阅读模型许可证。是否继续？")) return;
+    setInstallingBaseModel(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/model-installer/start`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "qwen3:4b", confirm_download: true }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "模型下载启动失败");
+      setMessage(result.status === "already_installed" ? "Qwen3 4B 已安装。" : "已开始下载 Qwen3 4B。下载期间可以查看实时进度。");
+      await refreshInstaller();
+    } catch (err) { setInstallingBaseModel(false); setError(err instanceof Error ? err.message : "模型下载启动失败"); }
+  };
+
+  const cancelBaseModelInstall = async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/model-installer/cancel`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "取消下载失败");
+      setMessage("已发送取消请求；Ollama 支持后续继续下载。");
+      await refreshInstaller();
+    } catch (err) { setError(err instanceof Error ? err.message : "取消下载失败"); }
   };
 
   const createSpecializedModel = async () => {
@@ -184,6 +211,43 @@ export default function LocalModelsPage() {
             本页面不会联网、下载、启动、删除或修改模型文件，也不会调用云端 API。不会产生模型服务费或下载流量费用。
             本地运行仍会使用电脑硬件和电力。许可证信息需要你自行查阅官方来源，软件不会把用户填写的状态当作法律核验结果。
           </p>
+        </section>
+
+        <section className="rounded-2xl border border-cyan-300/25 bg-slate-950/70 p-5">
+          <h2 className="text-xl font-semibold">一键安装本地创作模型</h2>
+          <p className="mt-2 text-sm leading-6 text-white/60">推荐文字模型：Qwen3 4B（Q4_K_M，约 2.5 GB）。用于小说理解、剧本、人物设定、剧情分析、分镜和图片提示词；它本身不生成图片、视频或配音。</p>
+          {installerInfo ? (
+            <div className="mt-4 space-y-3">
+              <div className="grid gap-2 text-sm md:grid-cols-3">
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-white/45">模型大小</div><div className="mt-1 font-semibold">{size(installerInfo.model_size_bytes)}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-white/45">磁盘预留要求</div><div className="mt-1 font-semibold">{size(installerInfo.required_free_bytes)}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-white/45">当前可用空间</div><div className="mt-1 font-semibold">{size(installerInfo.free_bytes)}</div></div>
+              </div>
+              <div className="rounded-xl bg-white/[0.04] p-3 text-sm">
+                <div>本地 Ollama：{installerInfo.engine_status === "ready" ? "已运行" : "未运行"}</div>
+                <div className="mt-1">模型状态：{installerInfo.installed ? "已安装" : installerInfo.installed === false ? "尚未安装" : "暂时无法检测"}</div>
+                <div className="mt-1 break-all text-xs text-white/45">模型目录：{installerInfo.model ? "Ollama 默认模型目录或 OLLAMA_MODELS 设置目录" : "未知"}</div>
+                <div className="mt-2 text-xs text-white/50">许可证：{installerInfo.license} · <a className="text-cyan-200 underline" href={installerInfo.license_url} target="_blank" rel="noreferrer">查看模型许可证</a></div>
+                <div className="mt-1 text-xs text-white/50">来源：<a className="text-cyan-200 underline" href={installerInfo.download_source} target="_blank" rel="noreferrer">Ollama 官方模型库</a></div>
+              </div>
+              {["downloading", "verifying"].includes(installerInfo.job.status) && (
+                <div className="rounded-xl border border-cyan-300/20 p-3">
+                  <div className="flex justify-between gap-3 text-sm"><span>{installerInfo.job.stage}</span><span>{installerInfo.job.percent}%</span></div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${installerInfo.job.percent}%` }} /></div>
+                  <div className="mt-1 text-xs text-white/45">{size(installerInfo.job.completed_bytes)} / {size(installerInfo.job.total_bytes)}</div>
+                  <button type="button" onClick={() => void cancelBaseModelInstall()} className="mt-3 rounded-lg border border-rose-300/30 px-3 py-2 text-sm text-rose-100">取消下载</button>
+                </div>
+              )}
+              {installerInfo.job.status === "failed" && <p className="text-sm text-rose-200">{installerInfo.job.error || "下载失败，可重试。"}</p>}
+              {installerInfo.job.status === "success" && <p className="text-sm text-emerald-200">模型下载并通过本机模型清单核验。可前往本地创作工作台测试。</p>}
+              <button type="button" disabled={installerInfo.engine_status !== "ready" || !installerInfo.enough_space || installerInfo.installed === true || ["downloading", "verifying"].includes(installerInfo.job.status) || installingBaseModel} onClick={() => void startBaseModelInstall()} className="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
+                {installerInfo.installed ? "模型已安装" : installingBaseModel ? "正在准备…" : "确认并下载 Qwen3 4B"}
+              </button>
+              {installerInfo.engine_status !== "ready" && <p className="text-xs text-amber-100/80">尚未检测到 Ollama。当前步骤只负责安装模型，Ollama 运行引擎的自动安装将在后续安装向导阶段接入；请勿从不明网站下载运行环境。</p>}
+              {!installerInfo.enough_space && <p className="text-xs text-amber-100/80">可用空间不足，暂不能下载。至少需要 6 GiB 可用空间。</p>}
+            </div>
+          ) : <p className="mt-3 text-sm text-white/50">正在检查本地引擎和磁盘空间…</p>}
+          <p className="mt-3 text-xs leading-5 text-white/45">下载需联网并消耗网络流量；不收取模型 API 费用。下载操作仅在你点击确认后开始。不会登录云端、不会调用云端模型，也不会自动购买或充值。首次下载完成后，模型可在本机离线运行。</p>
         </section>
 
         {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
