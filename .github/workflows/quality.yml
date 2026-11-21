@@ -34,6 +34,28 @@ jobs:
           assert all(item["inventory_status"] != "approved" for item in variants)
           print("ComfyUI third-party dependency audit is correctly blocked pending review.")
           PY
+      - name: Validate ComfyUI dependency inventory tool safeguards
+        run: |
+          from pathlib import Path
+
+          script = Path("scripts/audit-comfyui-portable-dependencies.ps1").read_text(encoding="utf-8")
+          required = [
+              "7zr.exe",
+              "l -slt",
+              "METADATA",
+              "PKG-INFO",
+              "license_review_status = \"pending\"",
+              "inventory_status = \"inventory_generated_review_pending\"",
+              "distribution_approved = $false",
+              "MaximumEvidenceFiles",
+              "MaximumMetadataBytes",
+              "MaximumLicenseBytes",
+              "finally {",
+              "Remove-Item -LiteralPath $temporaryRoot",
+          ]
+          missing = [item for item in required if item not in script]
+          assert not missing, f"Dependency inventory safety checks missing: {missing}"
+          print("ComfyUI dependency inventory tool safeguards are present.")
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
