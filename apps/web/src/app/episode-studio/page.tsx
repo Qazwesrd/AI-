@@ -81,7 +81,7 @@ export default function EpisodeReadinessPage() {
   const [auditBusy, setAuditBusy] = useState(false);
   const [productionAudit, setProductionAudit] = useState<{
     status: string;
-    summary: { chapter_count: number; covered_chapter_count: number; episode_count: number; shot_count: number; shots_with_video: number; shots_missing_video: number; shots_with_image: number; dialogue_shot_count: number; blocker_count: number; warning_count: number };
+    summary: { chapter_count: number; covered_chapter_count: number; chapter_coverage_ratio: number; episode_count: number; visual_asset_count: number; shot_count: number; shots_with_video: number; shots_missing_video: number; shots_with_image: number; dialogue_shot_count: number; blocker_count: number; warning_count: number };
     issues: { severity: string; code: string; message: string; episode_id: number | null; shot_id: number | null }[];
     limitations: string[];
     message: string;
@@ -549,8 +549,9 @@ export default function EpisodeReadinessPage() {
                 </span>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-                <p>原著章节：{productionAudit.summary.covered_chapter_count}/{productionAudit.summary.chapter_count}</p>
+                <p>原著覆盖：{Math.round(productionAudit.summary.chapter_coverage_ratio * 100)}%（{productionAudit.summary.covered_chapter_count}/{productionAudit.summary.chapter_count}）</p>
                 <p>分集：{productionAudit.summary.episode_count}</p>
+                <p>视觉素材：{productionAudit.summary.visual_asset_count}</p>
                 <p>分镜：{productionAudit.summary.shot_count}</p>
                 <p>已关联视频：{productionAudit.summary.shots_with_video}/{productionAudit.summary.shot_count}</p>
                 <p>已关联图片：{productionAudit.summary.shots_with_image}</p>
