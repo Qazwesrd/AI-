@@ -309,6 +309,7 @@ def list_unified_tasks(
     items = []
     for task in media_rows:
         meta = task.request_data if isinstance(task.request_data, dict) else {}
+        result_data = task.result_data if isinstance(task.result_data, dict) else {}
         kind = task.task_type or "media"
         raw_episode_id = meta.get("episode_id")
         try:
@@ -340,7 +341,7 @@ def list_unified_tasks(
             "context": f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
                 f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
             ),
-            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path),
+            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path) or bool(result_data.get("images")),
             "created_at": _iso(task.created_at), "updated_at": _iso(task.updated_at),
             "can_open": True,
         })
