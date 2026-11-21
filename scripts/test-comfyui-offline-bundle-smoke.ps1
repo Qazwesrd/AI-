@@ -58,6 +58,7 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $tempRoot "Setup.exe.sha256"), "$setupHash  Setup.exe")
 
     Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $stream = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::CreateNew)
     try {
         $archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $true)
