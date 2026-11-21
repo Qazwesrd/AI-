@@ -76,8 +76,12 @@ def build_production_readiness_report(project_id: int, db: Session):
     media_files = db.query(MediaFile).filter(MediaFile.id.in_(media_ids or [-1])).all()
     media_by_id = {item.id: item for item in media_files}
     shot_ids = {item.id for item in shots}
-    media_tasks = db.query(MediaTask).filter(MediaTask.task_type == "storyboard_video").all()
+    media_tasks = db.query(MediaTask).filter(
+        MediaTask.task_type.in_(["storyboard_video", "episode_speech_track"])
+    ).all()
     video_tasks_by_shot = {}
+    speech_tracks_by_episode = {}
+    episode_id_set = set(episode_ids)
     for task in media_tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
         try:
@@ -85,8 +89,10 @@ def build_production_readiness_report(project_id: int, db: Session):
             task_shot_id = int(metadata.get("shot_id") or 0)
         except (TypeError, ValueError):
             continue
-        if task_episode_id in set(episode_ids) and task_shot_id in shot_ids:
+        if task.task_type == "storyboard_video" and task_episode_id in episode_id_set and task_shot_id in shot_ids:
             video_tasks_by_shot.setdefault(task_shot_id, []).append(task)
+        elif task.task_type == "episode_speech_track" and task_episode_id in episode_id_set:
+            speech_tracks_by_episode.setdefault(task_episode_id, []).append(task)
     links_by_shot = {}
     for link in media_links:
         links_by_shot.setdefault(link.shot_id, []).append(link)
@@ -224,12 +230,30 @@ def build_production_readiness_report(project_id: int, db: Session):
     timeline_summary = []
     for episode in episodes:
         timeline = timeline_by_episode.get(episode.id)
+        speech_task = next((
+            task for task in speech_tracks_by_episode.get(episode.id, [])
+            if task.status == "completed" and task.result_path and _local_file_state(task.result_path)["exists"]
+        ), None)
+        episode_has_dialogue = any(
+            (shot.dialogue or "").strip() for shot in shots_by_episode.get(episode.id, [])
+        )
         if not timeline:
-            if any((shot.dialogue or "").strip() for shot in shots_by_episode.get(episode.id, [])):
+            if episode_has_dialogue:
                 add_issue("warning", "episode_timeline_missing", f"第 {episode.episode_number} 集尚未建立剪辑时间轴", episode.id)
+                if not speech_task:
+                    add_issue("warning", "episode_voice_track_missing", f"第 {episode.episode_number} 集有对白，但没有可读取的配音轨", episode.id)
+            timeline_summary.append({
+                "episode_id": episode.id,
+                "voice_track_available": bool(speech_task),
+                "music_track_available": False,
+                "sound_effect_track_count": 0,
+                "subtitle_cue_count": len((speech_task.request_data or {}).get("subtitle_cues") or []) if speech_task and isinstance(speech_task.request_data, dict) else 0,
+            })
             continue
         data = timeline.edit_data if isinstance(timeline.edit_data, dict) else {}
         voice_state = _local_file_state(data.get("voice_path"))
+        if not voice_state["exists"] and speech_task:
+            voice_state = _local_file_state(speech_task.result_path)
         music_state = _local_file_state(data.get("music_path"))
         effect_tracks = data.get("sound_effect_tracks") if isinstance(data.get("sound_effect_tracks"), list) else []
         valid_effects = 0
@@ -242,9 +266,8 @@ def build_production_readiness_report(project_id: int, db: Session):
             else:
                 add_issue("warning", "sound_effect_file_missing", f"第 {episode.episode_number} 集有音效轨道无法读取", episode.id)
         subtitle_cues = data.get("subtitle_cues") if isinstance(data.get("subtitle_cues"), list) else []
-        episode_has_dialogue = any(
-            (shot.dialogue or "").strip() for shot in shots_by_episode.get(episode.id, [])
-        )
+        if not subtitle_cues and speech_task and isinstance(speech_task.request_data, dict):
+            subtitle_cues = speech_task.request_data.get("subtitle_cues") or []
         if episode_has_dialogue and not voice_state["exists"]:
             add_issue("warning", "episode_voice_track_missing", f"第 {episode.episode_number} 集有对白，但没有可读取的独立配音轨", episode.id)
         if episode_has_dialogue and not subtitle_cues:
