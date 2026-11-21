@@ -524,6 +524,87 @@ def get_local_image_batch_status(data: LocalImageBatchStatusInput, db: Session =
         "history_updated": True,
     }
 
+@router.get("/model-library")
+def inspect_local_image_model_library():
+    """Read installed checkpoint metadata from the fixed local ComfyUI directory.
+
+    This endpoint is read-only: it never downloads, hashes multi-GB weights,
+    extracts archives, or starts an image-generation workflow.
+    """
+    import shutil
+
+    from app.routers.local_image_runtime import _install_root, _runtime_mode, assess_image_hardware
+    from app.routers.system import _get_hardware_profile
+
+    install_root = _install_root()
+    checkpoint_dir = install_root / "ComfyUI" / "models" / "checkpoints"
+    hardware = {}
+    try:
+        hardware = _get_hardware_profile() or {}
+    except Exception:
+        hardware = {}
+    hardware_assessment = assess_image_hardware(hardware)
+    runtime_mode, adapter_name = _runtime_mode()
+
+    disk_root = install_root
+    while not disk_root.exists() and disk_root != disk_root.parent:
+        disk_root = disk_root.parent
+    try:
+        free_disk_bytes = shutil.disk_usage(disk_root).free
+    except OSError:
+        free_disk_bytes = None
+
+    installed = install_root.is_dir()
+    models = []
+    if checkpoint_dir.is_dir() and not checkpoint_dir.is_symlink():
+        try:
+            entries = sorted(checkpoint_dir.iterdir(), key=lambda item: item.name.casefold())
+        except OSError:
+            entries = []
+        for entry in entries[:500]:
+            if entry.is_symlink() or not entry.is_file() or entry.suffix.lower() not in {".safetensors", ".ckpt", ".pt", ".pth"}:
+                continue
+            try:
+                stat = entry.stat()
+            except OSError:
+                continue
+            if stat.st_size < 1:
+                continue
+            models.append({
+                "name": entry.name,
+                "format": entry.suffix.lower().lstrip("."),
+                "size_bytes": stat.st_size,
+                "modified_at": int(stat.st_mtime),
+                "compatibility": "manual_check" if runtime_mode == "cpu" else "unverified",
+                "compatibility_note": (
+                    "当前设备按 CPU 模式运行；模型文件大小不能代表实际内存需求，需结合模型架构、分辨率和系统内存评估。"
+                    if runtime_mode == "cpu"
+                    else "已识别运行模式，但尚未验证该模型架构与显存需求；不能仅凭文件存在判定兼容。"
+                ),
+            })
+
+    return {
+        "status": "ready" if installed else "engine_not_installed",
+        "engine_installed": installed,
+        "directory": str(checkpoint_dir),
+        "models": models,
+        "model_count": len(models),
+        "free_disk_bytes": free_disk_bytes,
+        "ram_bytes": hardware_assessment.get("ram_bytes"),
+        "vram_bytes": hardware_assessment.get("vram_bytes"),
+        "gpu_level": hardware_assessment.get("gpu_level"),
+        "runtime_mode": runtime_mode,
+        "adapter_name": adapter_name,
+        "hardware_notes": hardware_assessment.get("reasons", []),
+        "hardware_note": hardware_assessment.get("note"),
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "installation_started": False,
+        "note": "这里只读取本机模型文件名、格式和文件大小，不计算大型权重的 SHA-256，也不下载或安装模型。下载目录和兼容性预览将在后续阶段接入经过核验的官方模型清单。",
+    }
+
+
 @router.get("/models")
 def list_local_image_models():
     object_info = _local_request("/object_info/CheckpointLoaderSimple")
