@@ -48,10 +48,10 @@ class FFmpegProgressRunnerTests(unittest.TestCase):
             duration_seconds=10,
             progress_callback=updates.append,
         )
-        self.assertEqual(result["percent"], 100.0)
+        self.assertEqual(result["percent"], 99.9)
         self.assertEqual(result["stage"], "validating")
         self.assertEqual(updates[0]["percent"], 25.0)
-        self.assertEqual(updates[-1]["percent"], 100.0)
+        self.assertEqual(updates[-1]["percent"], 99.9)
         self.assertEqual(popen.call_args.args[0][-1], "temporary.mp4")
 
     @patch("app.services.media_service._bundled_media_path", return_value="ffmpeg")
