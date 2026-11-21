@@ -29,14 +29,11 @@ $OutputZip = [System.IO.Path]::GetFullPath($OutputZip)
 $outputDirectory = Split-Path -Parent $OutputZip
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
-if (Test-Path -LiteralPath $OutputZip) {
+if ((Test-Path -LiteralPath $OutputZip) -or (Test-Path -LiteralPath "$OutputZip.sha256")) {
     if (-not $Force) {
-        throw "输出文件已存在：$OutputZip。若确认覆盖，请添加 -Force 参数。"
+        throw "输出 ZIP 或其 SHA-256 校验文件已存在：$OutputZip。为保护已有离线套件，不会自动删除；若确认重新制作，请添加 -Force 参数。"
     }
-    Remove-Item -LiteralPath $OutputZip -Force
-}
-if (Test-Path -LiteralPath "$OutputZip.sha256") {
-    Remove-Item -LiteralPath "$OutputZip.sha256" -Force
+    Remove-Item -LiteralPath $OutputZip, "$OutputZip.sha256" -Force -ErrorAction SilentlyContinue
 }
 
 if ([string]::IsNullOrWhiteSpace($SetupExe)) {
