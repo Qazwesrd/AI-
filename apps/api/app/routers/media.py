@@ -3180,6 +3180,20 @@ def build_dialogue_subtitle_cues(
     return cues
 
 
+def _media_file_belongs_to_project(media_record, project_id):
+    """Reject media explicitly owned by another project; allow legacy shared-library rows."""
+    metadata = media_record.metadata_json if isinstance(media_record.metadata_json, dict) else {}
+    owner = metadata.get("project_id")
+    if owner in (None, "", 0, "0"):
+        return True
+    if isinstance(owner, bool):
+        return False
+    try:
+        return int(owner) == int(project_id)
+    except (TypeError, ValueError):
+        return False
+
+
 def _timeline_episode_shots(db, episode_id):
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
@@ -3306,6 +3320,8 @@ def save_episode_edit_timeline(
             ).first()
             if not audio_record:
                 raise HTTPException(422, f"{label}必须来自本地音频素材库")
+            if not _media_file_belongs_to_project(audio_record, episode.project_id):
+                raise HTTPException(422, f"{label}属于其他项目，不能跨项目引用")
             audio_info = probe_media(audio_path)
             if not any(stream.get("codec_type") == "audio" for stream in audio_info.get("streams", [])):
                 raise HTTPException(422, f"{label}文件不包含可用音轨")
