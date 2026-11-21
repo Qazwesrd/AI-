@@ -10,7 +10,8 @@ param(
     [int]$MaximumEntries = 200000,
     [int]$MaximumEvidenceFiles = 20000,
     [long]$MaximumMetadataBytes = 2MB,
-    [long]$MaximumLicenseBytes = 4MB
+    [long]$MaximumLicenseBytes = 4MB,
+    [long]$MaximumTotalEvidenceBytes = 100MB
 )
 
 $ErrorActionPreference = "Stop"
@@ -134,7 +135,7 @@ $SevenZipPath = [System.IO.Path]::GetFullPath($SevenZipPath)
 if ($ArchivePaths.Count -lt 1 -or $ArchivePaths.Count -gt 4) {
     throw "请提供 1 到 4 个官方 ComfyUI Windows portable 归档。"
 }
-if ($MaximumEntries -lt 1 -or $MaximumEvidenceFiles -lt 1 -or $MaximumMetadataBytes -lt 1 -or $MaximumLicenseBytes -lt 1) {
+if ($MaximumEntries -lt 1 -or $MaximumEvidenceFiles -lt 1 -or $MaximumMetadataBytes -lt 1 -or $MaximumLicenseBytes -lt 1 -or $MaximumTotalEvidenceBytes -lt 1) {
     throw "安全限制参数必须为正数。"
 }
 
@@ -177,6 +178,7 @@ try {
         $evidence = New-Object System.Collections.Generic.List[object]
         $runtimeFiles = New-Object System.Collections.Generic.List[string]
         $evidenceCount = 0
+        $totalEvidenceBytes = 0L
 
         foreach ($entry in $entries) {
             if ($entry.IsFolder) { continue }
@@ -194,6 +196,16 @@ try {
                 throw "证据文件数量超过安全上限 $MaximumEvidenceFiles：$($archive.Asset)"
             }
             $maxBytes = if ($isMetadata) { $MaximumMetadataBytes } else { $MaximumLicenseBytes }
+            if (($totalEvidenceBytes + $entry.Size) -gt $MaximumTotalEvidenceBytes) {
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $entry.Size
+                    extraction_status = "skipped_total_evidence_limit"
+                    reason = "Archive evidence extraction total exceeds configured limit."
+                })
+                continue
+            }
             if ($entry.Size -gt $maxBytes) {
                 $evidence.Add([pscustomobject]@{
                     archive_path = $entry.Path
@@ -207,6 +219,19 @@ try {
 
             $destination = Join-Path $variantRoot ([Guid]::NewGuid().ToString("N"))
             $extractedPath = Get-ExtractedEvidence -Tool $SevenZipPath -Archive $archive.Path -EntryPath $entry.Path -Destination $destination -MaximumBytes $maxBytes
+            $actualEvidenceBytes = (Get-Item -LiteralPath $extractedPath).Length
+            if (($totalEvidenceBytes + $actualEvidenceBytes) -gt $MaximumTotalEvidenceBytes) {
+                Remove-Item -LiteralPath $extractedPath -Force
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $actualEvidenceBytes
+                    extraction_status = "skipped_total_evidence_limit"
+                    reason = "Extracted evidence exceeds configured total limit."
+                })
+                continue
+            }
+            $totalEvidenceBytes += $actualEvidenceBytes
             $evidence.Add([pscustomobject]@{
                 archive_path = $entry.Path
                 file_name = $leaf
@@ -238,7 +263,9 @@ try {
             release_tag = $ReleaseTag
             inventory_status = "inventory_generated_review_pending"
             total_file_entries = @($entries | Where-Object { !$_.IsFolder }).Count
+            extracted_evidence_bytes = $totalEvidenceBytes
             python_package_count = $components.Count
+            evidence_extraction_limit_bytes = $MaximumTotalEvidenceBytes
             components = @($components)
             runtime_files = @($runtimeFiles | Sort-Object -Unique)
             evidence_files = @($evidence)
