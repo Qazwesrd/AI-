@@ -12,6 +12,7 @@ const WEB_PORT = 3000;
 let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
+let ollamaProcess = null;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -179,14 +180,61 @@ function stopChild(child) {
   }
 }
 
+function requestOllamaHealth(baseUrl) {
+  return new Promise((resolve) => {
+    const req = http.get(
+      `${baseUrl}/api/tags`,
+      { timeout: 2500 },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => body += chunk);
+        res.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            resolve(res.statusCode === 200 && Array.isArray(data.models) ? data : null);
+          } catch {
+            resolve(null);
+          }
+        });
+      }
+    );
+    req.on("error", () => resolve(null));
+    req.on("timeout", () => { req.destroy(); resolve(null); });
+  });
+}
+
+async function waitForOllama(baseUrl, timeout = 90000) {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (ollamaProcess && ollamaProcess.exitCode !== null) {
+      throw new Error("内置 Ollama 本地服务意外退出，请检查本地 AI 安装目录。");
+    }
+    const health = await requestOllamaHealth(baseUrl);
+    if (health) {
+      const hasBundledModel = health.models.some(item =>
+        item && (item.name === "qwen3:4b" || item.model === "qwen3:4b")
+      );
+      if (!hasBundledModel) {
+        throw new Error("内置 Ollama 已启动，但没有检测到随软件安装的 Qwen3 4B 模型。");
+      }
+      return health;
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error("内置 Ollama 本地服务启动超时。");
+}
+
 function stopServices() {
   stopChild(webProcess);
   stopChild(apiProcess);
+  stopChild(ollamaProcess);
   webProcess = null;
   apiProcess = null;
+  ollamaProcess = null;
 }
 
-function startProductionServices({ startApi = true, startWeb = true } = {}) {
+async function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
   const webServer = path.join(resources, "web", "server.js");
@@ -208,6 +256,43 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
     fs.mkdirSync(storageDir, { recursive: true });
   }
 
+  const ollamaRoot = path.join(app.getPath("home"), "AIComicStudio", "Ollama");
+  const ollamaRuntime = path.join(ollamaRoot, "runtime");
+  const ollamaExe = path.join(ollamaRuntime, "ollama.exe");
+  const ollamaModels = path.join(ollamaRoot, "models");
+  const modelManifestCandidates = [
+    path.join(ollamaModels, "manifests", "registry.ollama.ai", "library", "qwen3", "4b"),
+    path.join(ollamaModels, "manifests", "registry.ollama.com", "library", "qwen3", "4b")
+  ];
+  let ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
+  if (fs.existsSync(ollamaExe) && fs.existsSync(ollamaModels) &&
+      modelManifestCandidates.some(file => fs.existsSync(file))) {
+    ollamaBaseUrl = "http://127.0.0.1:11435";
+    const ollamaPortFree = await checkPort(11435);
+    if (ollamaPortFree) {
+      ollamaProcess = spawn(ollamaExe, ["serve"], {
+        cwd: ollamaRuntime,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          OLLAMA_MODELS: ollamaModels,
+          OLLAMA_HOST: "127.0.0.1:11435",
+          OLLAMA_KEEP_ALIVE: "5m"
+        }
+      });
+      logChild("OLLAMA", ollamaProcess);
+    } else {
+      const existingOllama = await requestOllamaHealth(ollamaBaseUrl);
+      if (!existingOllama) {
+        throw new Error("本地 AI 服务端口 11435 已被其他程序占用，软件不会结束或覆盖其他程序。");
+      }
+    }
+    await waitForOllama(ollamaBaseUrl);
+    process.env.OLLAMA_MODELS = ollamaModels;
+    process.env.PATH = ollamaRuntime + path.delimiter + process.env.PATH;
+  }
+  process.env.OLLAMA_BASE_URL = ollamaBaseUrl;
+
   if (startApi) {
     apiProcess = spawn(apiExe, [], {
       cwd: resources,
@@ -219,7 +304,10 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
         FFMPEG_PATH: ffmpeg,
-        FFPROBE_PATH: ffprobe
+        FFPROBE_PATH: ffprobe,
+        OLLAMA_BASE_URL: ollamaBaseUrl,
+        ...(process.env.OLLAMA_MODELS ? { OLLAMA_MODELS: process.env.OLLAMA_MODELS } : {}),
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {})
       }
     });
     logChild("API", apiProcess);
@@ -285,7 +373,7 @@ async function createWindow() {
       );
     }
 
-    startProductionServices({
+    await startProductionServices({
       startApi: apiPortFree,
       startWeb: webPortFree
     });
