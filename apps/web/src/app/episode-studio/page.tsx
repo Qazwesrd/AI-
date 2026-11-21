@@ -372,8 +372,30 @@ export default function EpisodeReadinessPage() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "检查失败");
       setReport(data);
-      setMessage(data.message);
       await loadTimeline(id, data as Readiness);
+      const recentResponse = await fetch(`${API}/api/media/video/episodes/${id}/render/jobs/latest`);
+      if (recentResponse.ok) {
+        const recentPayload = await recentResponse.json();
+        const recent = recentPayload.task;
+        if (recent) {
+          setEpisodeRenderJob(recent);
+          if (recent.status === "completed" && recent.result) {
+            setRenderResult(recent.result);
+            setMessage("已恢复显示本集最近一次已完成的成片记录。");
+          } else if (recent.status === "interrupted_unknown") {
+            setMessage("发现上次合成因软件关闭或进程中断而未完成。已保留部分输出供检查，不会自动重新合成；确认后可手动重新创建任务。");
+          } else if (["queued", "processing"].includes(recent.status)) {
+            setMessage("已找到本机后台合成任务，正在恢复读取进度……");
+          } else {
+            setMessage(data.message);
+          }
+        } else {
+          setEpisodeRenderJob(null);
+          setMessage(data.message);
+        }
+      } else {
+        setMessage(data.message);
+      }
     } catch (error) {
       setReport(null);
       setMessage(error instanceof Error ? error.message : "检查失败");
