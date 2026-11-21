@@ -2,6 +2,12 @@ name: Windows desktop installer
 
 on:
   workflow_dispatch:
+    inputs:
+      build_comfyui_offline_bundle:
+        description: "额外构建包含四种显卡 ComfyUI 引擎的完整离线 ZIP（约 7.3 GiB）"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths:
@@ -35,6 +41,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Validate ComfyUI offline bundle builder syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD "scripts/prepare-comfyui-offline-bundle.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; throw "ComfyUI offline bundle script syntax validation failed." }
+          Write-Host "ComfyUI offline bundle builder syntax is valid."
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -177,6 +196,31 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-windows.ps1
+
+      - name: Build complete offline ComfyUI bundle
+        if: github.event_name == 'workflow_dispatch' && inputs.build_comfyui_offline_bundle == true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Join-Path $PWD "apps/desktop/release"
+          $installers = @(Get-ChildItem $release -File -Filter "*Setup*.exe")
+          if ($installers.Count -ne 1) { throw "Expected exactly one Setup.exe; found $($installers.Count)." }
+          $output = Join-Path $release "AI漫剧制作大师-完整离线安装套件.zip"
+          ./scripts/prepare-comfyui-offline-bundle.ps1 -SetupExe $installers[0].FullName -OutputZip $output
+          if (!(Test-Path $output) -or (Get-Item $output).Length -lt 7GB) { throw "Full offline bundle is missing or unexpectedly small." }
+          Write-Host "The complete offline bundle was created and SHA-256 verified."
+
+      - name: Upload complete offline ComfyUI bundle for internal validation
+        if: github.event_name == 'workflow_dispatch' && inputs.build_comfyui_offline_bundle == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-ComfyUI-Full-Offline-Bundle
+          path: |
+            apps/desktop/release/AI漫剧制作大师-完整离线安装套件.zip
+            apps/desktop/release/AI漫剧制作大师-完整离线安装套件.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
 
       - name: Verify installer and write SHA-256 checksum
         shell: pwsh
