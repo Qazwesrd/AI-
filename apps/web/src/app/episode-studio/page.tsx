@@ -77,6 +77,7 @@ export default function EpisodeReadinessPage() {
   const [episodeId, setEpisodeId] = useState("");
   const [projectId, setProjectId] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
+  const [archiveBusy, setArchiveBusy] = useState(false);
   const [batchReport, setBatchReport] = useState<{
     project_id: number; project_title: string;
     summary: { episodes: number; ready_episodes: number; incomplete_episodes: number; total_shots: number; ready_shots: number; missing_shots: number; processing_shots: number; broken_shots: number; scan_errors: number };
@@ -361,6 +362,45 @@ export default function EpisodeReadinessPage() {
     }
   }
 
+  async function exportProjectArchive() {
+    const id = Number(projectId);
+    if (!Number.isInteger(id) || id <= 0) {
+      setMessage("请输入有效的项目 ID（正整数）。");
+      return;
+    }
+    if (!window.confirm("将导出该项目的小说正文、分集、剧本、分镜、角色/场景/道具资料，以及已关联的本地图片、视频和音频文件。归档仅在本机生成，不会上传。确认导出？")) return;
+    setArchiveBusy(true);
+    setMessage("正在整理项目资料、校验关联素材并生成项目归档……");
+    try {
+      const response = await fetch(`${API}/api/story/projects/${id}/export`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || "项目归档导出失败");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+      const filename = match
+        ? decodeURIComponent(match[1] || match[2])
+        : `AI漫剧制作大师-项目${id}-归档.zip`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+      const included = response.headers.get("X-Project-Archive-Files") || "0";
+      const missing = response.headers.get("X-Project-Archive-Missing") || "0";
+      setMessage(`项目归档已生成并开始保存：包含 ${included} 个素材文件；缺失引用 ${missing} 个（详情见归档清单）。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "项目归档导出失败");
+    } finally {
+      setArchiveBusy(false);
+    }
+  }
+
   async function replaceShot(shotId: number) {
     const file = replacement[shotId];
     if (!file || !report) {
@@ -481,6 +521,7 @@ export default function EpisodeReadinessPage() {
           <div className="flex flex-wrap gap-3">
             <input value={projectId} onChange={event => setProjectId(event.target.value)} inputMode="numeric" placeholder="输入项目 ID，例如 1" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-3" />
             <button disabled={batchBusy} onClick={() => void checkProjectQuality()} className="rounded-lg border border-cyan-300/40 bg-cyan-900/40 px-5 py-3 font-semibold text-cyan-100 disabled:opacity-50">{batchBusy ? "批量扫描中…" : "扫描项目全部分集"}</button>
+            <button disabled={archiveBusy || batchBusy} onClick={() => void exportProjectArchive()} className="rounded-lg border border-violet-300/40 bg-violet-900/40 px-5 py-3 font-semibold text-violet-100 disabled:opacity-50">{archiveBusy ? "正在生成项目包…" : "导出完整项目包"}</button>
           </div>
           {batchReport && (
             <div className="mt-4 space-y-3">
