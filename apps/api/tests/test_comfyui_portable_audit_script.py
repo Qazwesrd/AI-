@@ -71,6 +71,9 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn(r"/^\d+$/", page)
         self.assertNotIn(r"\\s", page)
         self.assertNotIn(r"\\d", page)
+        self.assertIn('const [width, setWidth] = useState("512")', page)
+        self.assertIn('const [height, setHeight] = useState("512")', page)
+        self.assertIn('const [steps, setSteps] = useState("16")', page)
 
     def test_comfyui_installer_records_runtime_and_preserves_existing_install(self):
         installer_path = REPO_ROOT / "scripts" / "install-comfyui-offline.ps1"
