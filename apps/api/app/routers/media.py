@@ -966,7 +966,7 @@ def render_episode_from_shots(
             ).first()
             if not voice_record:
                 raise HTTPException(422, "对白配音必须来自本地音频素材库")
-            if not _media_file_belongs_to_project(voice_record, episode.project_id):
+            if not _media_file_belongs_to_project(voice_record, episode.project_id, episode.id):
                 raise HTTPException(422, "对白配音属于其他项目，不能跨项目引用")
         else:
             for speech_task in speech_tasks:
@@ -983,7 +983,7 @@ def render_episode_from_shots(
                         MediaFile.file_path == str(speech_path),
                     ).first()
                     if speech_record and not _media_file_belongs_to_project(
-                        speech_record, episode.project_id
+                        speech_record, episode.project_id, episode.id
                     ):
                         continue
                     break
@@ -998,7 +998,7 @@ def render_episode_from_shots(
             ).first()
             if not music_record:
                 raise HTTPException(422, "背景音乐必须先上传并登记到本地音频素材库")
-            if not _media_file_belongs_to_project(music_record, episode.project_id):
+            if not _media_file_belongs_to_project(music_record, episode.project_id, episode.id):
                 raise HTTPException(422, "背景音乐属于其他项目，不能跨项目引用")
             music_info = probe_media(music)
             if not any(stream.get("codec_type") == "audio" for stream in music_info.get("streams", [])):
@@ -1016,7 +1016,7 @@ def render_episode_from_shots(
             ).first()
             if not effect_record:
                 raise HTTPException(422, "音效必须来自本地音频素材库")
-            if not _media_file_belongs_to_project(effect_record, episode.project_id):
+            if not _media_file_belongs_to_project(effect_record, episode.project_id, episode.id):
                 raise HTTPException(422, "音效属于其他项目，不能跨项目引用")
             effect_info = probe_media(effect_path)
             if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
@@ -3261,18 +3261,28 @@ def build_dialogue_subtitle_cues(
     return cues
 
 
-def _media_file_belongs_to_project(media_record, project_id):
-    """Reject media explicitly owned by another project; allow legacy shared-library rows."""
+def _media_file_belongs_to_project(media_record, project_id, episode_id=None):
+    """Reject media explicitly owned by another project or episode; allow legacy shared rows."""
     metadata = media_record.metadata_json if isinstance(media_record.metadata_json, dict) else {}
-    owner = metadata.get("project_id")
-    if owner in (None, "", 0, "0"):
-        return True
-    if isinstance(owner, bool):
-        return False
-    try:
-        return int(owner) == int(project_id)
-    except (TypeError, ValueError):
-        return False
+    owner_project = metadata.get("project_id")
+    owner_episode = metadata.get("episode_id")
+    if owner_project not in (None, "", 0, "0"):
+        if isinstance(owner_project, bool):
+            return False
+        try:
+            if int(owner_project) != int(project_id):
+                return False
+        except (TypeError, ValueError):
+            return False
+    if episode_id is not None and owner_episode not in (None, "", 0, "0"):
+        if isinstance(owner_episode, bool):
+            return False
+        try:
+            if int(owner_episode) != int(episode_id):
+                return False
+        except (TypeError, ValueError):
+            return False
+    return True
 
 
 def _timeline_episode_shots(db, episode_id):
@@ -3430,7 +3440,7 @@ def save_episode_edit_timeline(
             ).first()
             if not audio_record:
                 raise HTTPException(422, f"{label}必须来自本地音频素材库")
-            if not _media_file_belongs_to_project(audio_record, episode.project_id):
+            if not _media_file_belongs_to_project(audio_record, episode.project_id, episode.id):
                 raise HTTPException(422, f"{label}属于其他项目，不能跨项目引用")
             audio_info = probe_media(audio_path)
             if not any(stream.get("codec_type") == "audio" for stream in audio_info.get("streams", [])):
@@ -3443,7 +3453,7 @@ def save_episode_edit_timeline(
         ).first()
         if not effect_record:
             raise HTTPException(422, "音效必须来自本地音频素材库")
-        if not _media_file_belongs_to_project(effect_record, episode.project_id):
+        if not _media_file_belongs_to_project(effect_record, episode.project_id, episode.id):
             raise HTTPException(422, "音效属于其他项目，不能跨项目引用")
         effect_info = probe_media(effect_path)
         if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
