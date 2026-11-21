@@ -17,7 +17,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/local-ai/model-installer", tags=["本地模型安装"])
-OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 MODEL_NAME = "qwen3:4b"
 MODEL_SIZE_BYTES = 2_500_000_000
 REQUIRED_FREE_BYTES = 6 * 1024 ** 3
