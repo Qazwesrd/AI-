@@ -109,6 +109,32 @@ try {
         throw "离线安装测试失败：重复安装覆盖了用户数据。"
     }
 
+    $runtimeSourceV2 = Join-Path $temp "fake-runtime-v2"
+    New-Item -ItemType Directory -Path $runtimeSourceV2 -Force | Out-Null
+    Write-Utf8 (Join-Path $runtimeSourceV2 "ollama.exe") "mock ollama executable v2"
+    Compress-Archive -Path (Join-Path $runtimeSourceV2 "*") -DestinationPath $runtimeZip -CompressionLevel NoCompression -Force
+    $runtimeHashV2 = Hash $runtimeZip
+    $manifest.ollama.version = "v0.2.0"
+    $manifest.ollama.source = "https://github.com/ollama/ollama/releases/download/v0.2.0/ollama-windows-amd64.zip"
+    $manifest.ollama.size_bytes = (Get-Item $runtimeZip).Length
+    $manifest.ollama.sha256 = $runtimeHashV2
+    Write-Utf8 $payloadManifestPath ($manifest | ConvertTo-Json -Depth 8)
+    $payloadManifestHash = Hash $payloadManifestPath
+    $bundleManifest.local_ai.payload_manifest_sha256 = $payloadManifestHash
+    $bundleManifest.local_ai.runtime_sha256 = $runtimeHashV2
+    Write-Utf8 (Join-Path $bundleComfyui "manifest.json") ($bundleManifest | ConvertTo-Json -Depth 6)
+
+    & $installer -PayloadRoot $payload -InstallRoot $installRoot -LogPath $log
+    $installedState = Get-Content -LiteralPath (Join-Path $installRoot "install-manifest.json") -Raw | ConvertFrom-Json
+    if ($installedState.ollama_version -ne "v0.2.0" -or
+        (Get-Content -LiteralPath (Join-Path $installRoot "runtime\ollama.exe") -Raw) -ne "mock ollama executable v2") {
+        throw "离线升级测试失败：Ollama 运行环境未升级到新版本。"
+    }
+    if ((Get-Content -LiteralPath $sentinel -Raw) -ne "preserve me" -or
+        (Hash (Join-Path $installRoot "models\blobs\$blobName")) -ne $blobHash) {
+        throw "离线升级测试失败：升级覆盖了用户数据或原有模型 blob。"
+    }
+
     $tamperedPayload = Join-Path $temp "tampered-payload"
     Copy-Item -LiteralPath $payload -Destination $tamperedPayload -Recurse
     Write-Utf8 (Join-Path $tamperedPayload "models\blobs\$blobName") "tampered model blob"
@@ -123,7 +149,7 @@ try {
         throw "离线安装测试失败：未拒绝 SHA-256 不匹配的模型文件。"
     }
 
-    Write-Host "本地 AI 离线安装集成测试通过：安装、重复安装数据保护、篡改文件拒绝。"
+    Write-Host "本地 AI 离线安装集成测试通过：首次安装、重复安装、运行环境升级、模型/用户数据保护、篡改文件拒绝。"
 }
 finally {
     if (Test-Path -LiteralPath $temp) {
