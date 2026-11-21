@@ -635,6 +635,10 @@ def _run_download_task(task_id, asset, version, install_root):
         if task is None:
             return
         cancel_event = task["cancel_event"]
+        if cancel_event.is_set():
+            task["status"] = "cancelled"
+            _DOWNLOAD_THREADS.pop(task_id, None)
+            return
         task["status"] = "downloading"
 
     def update(progress):
