@@ -116,6 +116,23 @@ def build_txt2img_workflow(payload: LocalImageGenerateInput, seed: int):
     }
 
 
+@router.get("/models")
+def list_local_image_models():
+    object_info = _local_request("/object_info/CheckpointLoaderSimple")
+    checkpoints = _checkpoint_names(object_info)
+    return {
+        "engine": "ComfyUI",
+        "status": "ready",
+        "base_url": COMFYUI_BASE_URL,
+        "models": checkpoints,
+        "model_count": len(checkpoints),
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "cloud_fallback": False,
+    }
+
+
 @router.post("/generate")
 def generate_local_image(payload: LocalImageGenerateInput):
     if not payload.confirm_local_generation:
