@@ -57,6 +57,11 @@ class ProjectArchiveExportTests(unittest.TestCase):
             music.write_bytes(b"fake-audio-content")
             video = storage / "shot.mp4"
             video.write_bytes(b"fake-video-content")
+            comfy_install = root / "comfy-install"
+            comfy_output = comfy_install / "ComfyUI" / "output"
+            comfy_output.mkdir(parents=True)
+            generated_image = comfy_output / "shot-generated.png"
+            generated_image.write_bytes(b"comfyui-generated-image")
             outside = root / "outside-secret.txt"
             outside.write_text("not included", encoding="utf-8")
 
@@ -143,6 +148,14 @@ class ProjectArchiveExportTests(unittest.TestCase):
                         request_data={"episode_id": episode.id, "shot_id": shot.id},
                         result_path=str(video),
                     ),
+                    MediaTask(
+                        task_type="local_image_batch",
+                        provider="comfyui-local",
+                        status="completed",
+                        remote_task_id="a" * 32,
+                        request_data={"project_id": project.id, "episode_id": episode.id, "shot_id": shot.id},
+                        result_data={"images": [{"filename": generated_image.name, "subfolder": "", "type": "output"}]},
+                    ),
                     ImageTask(
                         asset_id=asset.id,
                         prompt="角色参考图",
@@ -159,20 +172,23 @@ class ProjectArchiveExportTests(unittest.TestCase):
                         raise FileNotFoundError(raw)
                     return candidate
 
-                with patch.object(project_exports, "safe_storage_file", side_effect=safe_file):
+                with (
+                    patch.object(project_exports, "safe_storage_file", side_effect=safe_file),
+                    patch("app.routers.local_image_runtime._install_root", return_value=comfy_install),
+                ):
                     archive_path, manifest = project_exports.build_project_archive(
                         project.id, db, export_dir=root / "exports"
                     )
 
                 self.assertTrue(archive_path.is_file())
-                self.assertEqual(manifest["file_count"], 3)
+                self.assertEqual(manifest["file_count"], 4)
                 self.assertEqual(manifest["missing_file_count"], 1)
                 with zipfile.ZipFile(archive_path, "r") as archive:
                     self.assertIsNone(archive.testzip())
                     names = set(archive.namelist())
                     self.assertIn("project-data.json", names)
                     self.assertIn("manifest.json", names)
-                    self.assertEqual(len([name for name in names if name.startswith("files/")]), 3)
+                    self.assertEqual(len([name for name in names if name.startswith("files/")]), 4)
                     project_data_bytes = archive.read("project-data.json")
                     payload = json.loads(project_data_bytes)
                     manifest_data = json.loads(archive.read("manifest.json"))
@@ -188,8 +204,10 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     self.assertEqual(payload["project"]["name"], "测试漫剧项目")
                     self.assertIsNone(payload["project"]["settings"]["api_key"])
                     self.assertIsNone(payload["records"]["media_files"][0]["metadata_json"]["access_token"])
-                    self.assertEqual(len(payload["records"]["media_tasks"]), 1)
+                    self.assertEqual(len(payload["records"]["media_tasks"]), 2)
                     self.assertTrue(payload["records"]["media_tasks"][0]["result_path"].startswith("files/"))
+                    self.assertEqual(len(payload["generated_local_images"]), 1)
+                    self.assertTrue(payload["generated_local_images"][0]["archive_path"].startswith("files/"))
                     self.assertTrue(any(
                         item["metadata_json"].get("rendered_output") is True
                         for item in payload["records"]["media_files"]
