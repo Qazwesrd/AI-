@@ -7,6 +7,7 @@ type ImageTask = { prompt_id: string; status: string; images?: Array<{ filename:
 type TargetShot = { id: number; shot_number: number; scene_name: string; visual_description: string };
 type TargetEpisode = { id: number; episode_number: number; title: string; shots: TargetShot[] };
 type TargetProject = { id: number; name: string; episodes: TargetEpisode[] };
+type ShotImage = { link_id: number; media_file_id: number; name: string; mime_type: string | null; file_size: number; download_url: string };
 const styles = ["国漫", "仿真人", "3D漫", "2D漫"] as const;
 
 export default function LocalImageStudioPage() {
@@ -31,6 +32,9 @@ export default function LocalImageStudioPage() {
   const [targetProjectId, setTargetProjectId] = useState("");
   const [targetEpisodeId, setTargetEpisodeId] = useState("");
   const [targetShotId, setTargetShotId] = useState("");
+  const [shotImages, setShotImages] = useState<ShotImage[]>([]);
+  const [shotImagesLoading, setShotImagesLoading] = useState(false);
+  const [unlinkingImage, setUnlinkingImage] = useState<number | null>(null);
 
   const refreshModels = useCallback(async () => {
     setChecking(true); setError("");
@@ -52,6 +56,35 @@ export default function LocalImageStudioPage() {
   }, []);
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
+
+
+  useEffect(() => {
+    if (!targetShotId) { setShotImages([]); return; }
+    let active = true;
+    setShotImagesLoading(true);
+    fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取分镜图片失败");
+        if (active) setShotImages(Array.isArray(data.images) ? data.images : []);
+      })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取分镜图片失败"); })
+      .finally(() => { if (active) setShotImagesLoading(false); });
+    return () => { active = false; };
+  }, [targetShotId]);
+
+  async function unlinkShotImage(linkId: number) {
+    if (!targetShotId) return;
+    setUnlinkingImage(linkId); setError("");
+    try {
+      const response = await fetch(API + "/api/local-ai/images/shots/" + targetShotId + "/media/" + linkId, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "解除图片关联失败");
+      setShotImages((current) => current.filter((item) => item.link_id !== linkId));
+      setMessage("已解除图片与分镜的关联；图片仍保留在本地素材库。");
+    } catch (err) { setError(err instanceof Error ? err.message : "解除图片关联失败"); }
+    finally { setUnlinkingImage(null); }
+  }
 
   async function generate() {
     if (!checkpoint) { setError("请先安装并选择一个 ComfyUI 图片模型。"); return; }
@@ -183,6 +216,25 @@ export default function LocalImageStudioPage() {
         </div>
         {targetProjectId && targetEpisodeId && targetShotId && <p className="mt-3 text-xs text-cyan-100">已选定关联目标；归档图片时会同时保存并关联到该镜头。</p>}
       </section>
+
+
+      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
+          <span className="text-xs text-white/50">{shotImages.length} 张</span>
+        </div>
+        {shotImagesLoading ? <p className="mt-3 text-sm text-white/50">正在读取图片…</p> : shotImages.length ? <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {shotImages.map((item) => <article key={item.link_id} className="overflow-hidden rounded-xl border border-white/10 bg-slate-900/70">
+            <img src={API + item.download_url} alt={item.name} loading="lazy" className="aspect-square w-full object-contain bg-black/30" />
+            <div className="space-y-2 p-3">
+              <p className="break-all text-xs text-white/70">{item.name}</p>
+              <p className="text-xs text-white/40">素材编号 #{item.media_file_id} · {(item.file_size / 1024 / 1024).toFixed(2)} MiB</p>
+              <button type="button" onClick={() => void unlinkShotImage(item.link_id)} disabled={unlinkingImage !== null} className="rounded-lg border border-rose-300/30 px-3 py-2 text-xs text-rose-100 disabled:opacity-40">{unlinkingImage === item.link_id ? "正在解除…" : "仅解除分镜关联"}</button>
+            </div>
+          </article>)}
+        </div> : <p className="mt-3 text-sm text-white/50">该分镜暂时没有关联图片。归档新图片时选择此镜头即可添加。</p>}
+        <p className="mt-3 text-xs text-white/40">解除关联不会删除素材库中的原图，也不会影响其他镜头使用该图片。</p>
+      </section>}
 
       {task && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">本地生成任务</h2><p className="mt-1 break-all text-xs text-white/50">任务编号：{task.prompt_id}</p></div><button type="button" onClick={() => void refreshTask()} disabled={checking} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40">{checking ? "查询中…" : "刷新任务状态"}</button></div>
