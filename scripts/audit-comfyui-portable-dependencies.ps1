@@ -73,7 +73,7 @@ function Get-ArchiveEntries {
         }
     }
 
-    if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive) {
+    if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive -and !$record.ContainsKey("Type")) {
         $entries.Add([pscustomobject]@{
             Path = [string]$record["Path"]
             Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
