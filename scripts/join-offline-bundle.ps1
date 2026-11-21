@@ -18,7 +18,7 @@ $expectedName = [IO.Path]::GetFileName([string]$manifest.archive_name)
 if ($expectedName -ne [string]$manifest.archive_name -or $expectedName -notmatch '\.zip$') { throw "清单中的 ZIP 文件名无效。" }
 $tempOutput = "$OutputPath.$([guid]::NewGuid().ToString('N')).partial"
 $total = [long]0
-$output = [IO.File]::Open($tempOutput, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+$outputStream = [IO.File]::Open($tempOutput, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
 try {
     foreach ($part in $parts) {
         $name = [string]$part.name
@@ -29,17 +29,17 @@ try {
         if ([long]$file.Length -ne [long]$part.size_bytes -or [long]$part.size_bytes -le 0 -or [string]$part.sha256 -notmatch '^[0-9a-f]{64}$') { throw "分卷大小或清单校验值无效：$name" }
         $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($hash -ne [string]$part.sha256) { throw "分卷校验失败：$name。请重新下载该分卷。" }
-        $input = [IO.File]::OpenRead($path)
-        try { $input.CopyTo($output, 4MB) } finally { $input.Dispose() }
+        $partInputStream = [IO.File]::OpenRead($path)
+        try { $partInputStream.CopyTo($outputStream, 4MB) } finally { $partInputStream.Dispose() }
         $total += [long]$file.Length
         Write-Host "已验证并合并：$name"
     }
-    $output.Flush($true)
+    $outputStream.Flush($true)
 } catch {
-    $output.Dispose()
+    $outputStream.Dispose()
     Remove-Item -LiteralPath $tempOutput -Force -ErrorAction SilentlyContinue
     throw
-} finally { $output.Dispose() }
+} finally { $outputStream.Dispose() }
 if ($total -ne [long]$manifest.archive_size_bytes) {
     Remove-Item -LiteralPath $tempOutput -Force -ErrorAction SilentlyContinue
     throw "分卷总大小与完整 ZIP 声明不一致。"
