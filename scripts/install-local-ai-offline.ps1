@@ -90,6 +90,18 @@ try {
         $manifest.cloud_features_disabled -ne $true) {
         throw "本地 AI 模型名称、云端策略或许可证登记信息不符合当前内部验证策略。"
     }
+    try {
+        $totalRamBytes = [long](Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory
+        if ($totalRamBytes -lt 8GB) {
+            Write-Warning "当前设备内存低于 8 GiB，Qwen3 4B 可能无法稳定运行。"
+        } elseif ($totalRamBytes -lt 16GB) {
+            Write-Warning "当前设备内存低于 16 GiB，已将 Ollama 并发和同时驻留模型数限制为 1，以降低内存占用。"
+        } else {
+            Write-Host ("检测到系统内存 {0:N1} GiB；Qwen3 4B 将以单模型、单并发模式运行。" -f ($totalRamBytes / 1GB))
+        }
+    } catch {
+        Write-Warning "无法读取系统内存信息；仍会使用单模型、单并发的保守配置。"
+    }
     if ($manifest.ollama.version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$') {
         throw "Ollama 运行环境版本标记无效。"
     }
