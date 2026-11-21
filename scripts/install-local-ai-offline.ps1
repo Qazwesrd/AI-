@@ -99,10 +99,9 @@ foreach ($notice in @($manifest.notices)) {
 $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
 if (Test-Path -LiteralPath $installFullPath) {
     $existingOllama = Join-Path $installFullPath "runtime\ollama.exe"
-    $existingManifest = Join-Path $installFullPath "models\manifests\registry.ollama.ai\library\qwen3\4b"
-    $existingManifestAlt = Join-Path $installFullPath "models\manifests\registry.ollama.com\library\qwen3\4b"
+    $existingManifest = Resolve-SafeRelativePath $installFullPath ([string]$manifest.model.manifest_path)
     if ((Test-Path -LiteralPath $existingOllama -PathType Leaf) -and
-        ((Test-Path -LiteralPath $existingManifest -PathType Leaf) -or (Test-Path -LiteralPath $existingManifestAlt -PathType Leaf))) {
+        (Test-Path -LiteralPath $existingManifest -PathType Leaf)) {
         Write-Host "检测到已有本地 Ollama 运行环境和 Qwen3 模型，为保护已有模型及配置，本次不覆盖。"
         exit 0
     }
@@ -131,7 +130,10 @@ try {
     }
     $runtimeSourceRoot = $ollamaExe.Directory.FullName
     Move-Item -LiteralPath $runtimeSourceRoot -Destination $runtimeRoot
-    Copy-Item -LiteralPath (Join-Path $payload "models") -Destination $modelsRoot -Recurse
+    New-Item -ItemType Directory -Path $modelsRoot -Force | Out-Null
+    foreach ($modelItem in Get-ChildItem -LiteralPath (Join-Path $payload "models") -Force) {
+        Copy-Item -LiteralPath $modelItem.FullName -Destination $modelsRoot -Recurse
+    }
 
     foreach ($file in $modelFiles) {
         $relative = [string]$file.path
