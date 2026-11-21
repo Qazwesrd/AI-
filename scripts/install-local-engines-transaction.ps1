@@ -22,7 +22,7 @@ if ([string]::IsNullOrWhiteSpace($ComfyInstallerPath)) {
     $ComfyInstallerPath = Join-Path $scriptRoot "install-comfyui-offline.ps1"
 }
 if ([string]::IsNullOrWhiteSpace($LocalAIInstallerPath)) {
-    $LocalAIInstallerPath = Join-Path $scriptRoot "install-local-ai-offline.ps1"
+    $LocalAIInstallerPath = Join-Path $LocalAIPayloadRoot "install-local-ai-offline.ps1"
 }
 
 foreach ($requiredPath in @($ComfyPayloadRoot, $LocalAIPayloadRoot, $ComfyInstallerPath, $LocalAIInstallerPath)) {
