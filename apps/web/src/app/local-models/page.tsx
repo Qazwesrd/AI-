@@ -30,7 +30,10 @@ type ModelItem = {
   };
 };
 
-type RuntimeModel = { name: string; size_bytes?: number | null };\ntype Runtime = { status: string; models: RuntimeModel[]; message: string };\n\ntype Catalog = {
+type RuntimeModel = { name: string; size_bytes?: number | null };
+type Runtime = { status: string; models: RuntimeModel[]; message: string };
+
+type Catalog = {
   items: ModelItem[];
   total: number;
   directory: string;
@@ -62,7 +65,14 @@ export default function LocalModelsPage() {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");\n  const [runtime, setRuntime] = useState<Runtime | null>(null);\n  const [baseModel, setBaseModel] = useState("");\n  const [newModelName, setNewModelName] = useState("comic-writer");\n  const [modelRole, setModelRole] = useState("all_rounder");\n  const [modelStyle, setModelStyle] = useState("国漫");\n  const [modelInstructions, setModelInstructions] = useState("");\n  const [creatingModel, setCreatingModel] = useState(false);
+  const [message, setMessage] = useState("");
+  const [runtime, setRuntime] = useState<Runtime | null>(null);
+  const [baseModel, setBaseModel] = useState("");
+  const [newModelName, setNewModelName] = useState("comic-writer");
+  const [modelRole, setModelRole] = useState("all_rounder");
+  const [modelStyle, setModelStyle] = useState("国漫");
+  const [modelInstructions, setModelInstructions] = useState("");
+  const [creatingModel, setCreatingModel] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -80,7 +90,37 @@ export default function LocalModelsPage() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); }, [refresh]);\n\n  const refreshRuntime = async () => {\n    try {\n      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });\n      const result = await response.json();\n      if (!response.ok) throw new Error(result.detail || "无法检测本地 Ollama");\n      setRuntime(result);\n      setBaseModel((current) => current || result.models?.[0]?.name || "");\n    } catch (err) {\n      setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });\n    }\n  };\n\n  const createSpecializedModel = async () => {\n    if (!baseModel || !newModelName.trim()) return;\n    if (!window.confirm("将使用已安装的基础模型，在本机创建一个新的专用模型。不会下载模型或调用云端服务。继续吗？")) return;\n    setCreatingModel(true); setError(""); setMessage("");\n    try {\n      const response = await fetch(`${API}/api/local-ai/models/create`, {\n        method: "POST", headers: { "Content-Type": "application/json" },\n        body: JSON.stringify({ base_model: baseModel, name: newModelName, role: modelRole, style: modelStyle, instructions: modelInstructions }),\n      });\n      const result = await response.json();\n      if (!response.ok) throw new Error(result.detail || "专用模型创建失败");\n      setMessage(`专用模型 ${result.model} 已在本机创建。刷新模型列表即可选择使用。`);\n      setNewModelName("");\n      await refreshRuntime();\n    } catch (err) { setError(err instanceof Error ? err.message : "专用模型创建失败"); }\n    finally { setCreatingModel(false); }\n  };
+  useEffect(() => { void refresh(); void refreshRuntime(); }, [refresh]);
+
+  const refreshRuntime = async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "无法检测本地 Ollama");
+      setRuntime(result);
+      setBaseModel((current) => current || result.models?.[0]?.name || "");
+    } catch (err) {
+      setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });
+    }
+  };
+
+  const createSpecializedModel = async () => {
+    if (!baseModel || !newModelName.trim()) return;
+    if (!window.confirm("将使用已安装的基础模型，在本机创建一个新的专用模型。不会下载模型或调用云端服务。继续吗？")) return;
+    setCreatingModel(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/models/create`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ base_model: baseModel, name: newModelName, role: modelRole, style: modelStyle, instructions: modelInstructions }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "专用模型创建失败");
+      setMessage(`专用模型 ${result.model} 已在本机创建。刷新模型列表即可选择使用。`);
+      setNewModelName("");
+      await refreshRuntime();
+    } catch (err) { setError(err instanceof Error ? err.message : "专用模型创建失败"); }
+    finally { setCreatingModel(false); }
+  };
 
   const chooseModel = (item: ModelItem) => {
     setSelected(item.name);
@@ -191,7 +231,8 @@ export default function LocalModelsPage() {
           </button>
           <p className="mt-2 text-xs leading-5 text-white/45">创建过程可能占用 CPU、内存和磁盘空间；复用基础模型但会生成额外模型配置/数据。不会覆盖同名模型，创建前会再次确认。模型能力取决于基础模型本身，不等同于从零训练。</p>
         </section>
-\n        {catalog && (
+
+        {catalog && (
           <>
             <section className="rounded-2xl border border-purple-300/20 bg-slate-950/65 p-5">
               <div className="flex flex-wrap items-center justify-between gap-3">
