@@ -17,7 +17,9 @@
     "Inventory every dependency and redistribution notice in the exact Ollama Windows amd64 standalone runtime release.",
     "Record the exact Qwen3 4B Ollama manifest digest and verify every referenced model blob SHA-256.",
     "Review the Qwen3 model license and attribution for the exact model revision, and retain the upstream license and model notice.",
-    "Confirm the combined offline installer includes the correct runtime, model store, and third-party notices without relying on post-install network downloads."
+    "Confirm the combined offline installer includes the correct runtime, model store, and third-party notices without relying on post-install network downloads.",
+    "Review the exact Stable Diffusion 1.5 FP16 checkpoint revision and CreativeML Open RAIL-M redistribution/use restrictions; include the complete license and pass-through restrictions before bundling it for third parties.",
+    "Verify the pinned Stable Diffusion checkpoint SHA-256 against the downloaded bytes and perform a small-resolution CPU-only inference test on the target AMD Ryzen 7 4800U device before claiming image generation is ready."
   ],
   "portable_variants": [
     {
@@ -92,5 +94,29 @@
     "model_blob_inventory_status": "not_started",
     "model_license": "Apache-2.0",
     "model_license_review_status": "pending"
-  }
+  },
+  "image_model_candidates": [
+    {
+      "id": "comfy-org-sd15-fp16",
+      "name": "Stable Diffusion 1.5 FP16",
+      "publisher": "Comfy-Org",
+      "repository": "Comfy-Org/stable-diffusion-1.5",
+      "revision": "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f",
+      "asset": "v1-5-pruned-emaonly-fp16.safetensors",
+      "size_label": "约 2.13 GB；构建时必须取得精确字节数",
+      "sha256": "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916",
+      "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
+      "sha256_source": "Hugging Face pinned file page",
+      "license": "CreativeML Open RAIL-M",
+      "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+      "license_review_status": "pending",
+      "sha256_verified_locally": false,
+      "included_in_offline_bundle": false,
+      "hardware_status": "cpu_not_recommended",
+      "hardware_validation_status": "pending_target_device_test",
+      "use_restrictions_must_be_passed_to_users": true,
+      "distribution_approved": false,
+      "status": "candidate_only_not_downloaded"
+    }
+  ]
 }
