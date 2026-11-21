@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 from app.database import get_db, ROOT_DIR
+from app.services.cost_safety import STRICT_ZERO_COST_MODE, require_cloud_ai_api_disabled
 from app.models.studio import (
     StudioResource, AIProviderConfig, AIRuntimeSetting,
     AIUsageLog, MediaAsset
