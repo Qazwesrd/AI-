@@ -183,5 +183,6 @@ class StoryboardImageLinkTests(unittest.TestCase):
         data = LocalImageArchiveInput(filename="frame.png", shot_id=11)
         self.assertEqual(data.shot_id, 11)
 
-\nif __name__ == "__main__":
+
+if __name__ == "__main__":
     unittest.main()
