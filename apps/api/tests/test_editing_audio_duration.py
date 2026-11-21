@@ -15,6 +15,7 @@ class EditingAudioDurationTests(unittest.TestCase):
             video_dir.mkdir()
             edit_dir.mkdir()
             final_calls = []
+            concat_contents = []
 
             def fake_ffmpeg(args, **kwargs):
                 target = Path(args[-1])
@@ -22,6 +23,8 @@ class EditingAudioDurationTests(unittest.TestCase):
                 target.write_bytes(b"x" * 2048)
                 if target.name.endswith(".partial.mp4"):
                     final_calls.append(list(args))
+                    concat_path = Path(args[args.index("-i") + 1])
+                    concat_contents.append(concat_path.read_text(encoding="utf-8"))
 
             def fake_probe(path):
                 return {"streams": (
@@ -53,6 +56,9 @@ class EditingAudioDurationTests(unittest.TestCase):
             self.assertTrue(Path(output).is_file())
             self.assertEqual(size, 2048)
             self.assertEqual(len(final_calls), 1)
+            self.assertEqual(len(concat_contents), 1)
+            self.assertTrue(concat_contents[0].endswith("\n"))
+            self.assertNotIn("\\n", concat_contents[0])
             args = final_calls[0]
             self.assertNotIn("-shortest", args)
             self.assertIn("-t", args)
