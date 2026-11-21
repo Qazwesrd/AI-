@@ -33,8 +33,8 @@ def recommend_official_asset(vendor: str, gpu_name: str | None = None, architect
     if vendor == "NVIDIA":
         label = (gpu_name or "").lower()
         # Official portable guidance reserves cu126 for GTX 10-series and older.
-        if re.search(r"(gtx\\s*([0-9]{3,4})|geforce\\s*([0-9]{3,4}))", label):
-            match = re.search(r"(?:gtx|geforce)\\s*([0-9]{3,4})", label)
+        if re.search(r"(gtx\s*([0-9]{3,4})|geforce\s*([0-9]{3,4}))", label):
+            match = re.search(r"(?:gtx|geforce)\s*([0-9]{3,4})", label)
             if match and int(match.group(1)) < 2000:
                 return "ComfyUI_windows_portable_nvidia_cu126.7z"
         return "ComfyUI_windows_portable_nvidia.7z"
