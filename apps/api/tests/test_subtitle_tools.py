@@ -6,8 +6,10 @@ from unittest.mock import Mock, patch
 from fastapi import HTTPException
 
 from app.routers.subtitle_tools import (
+    LocalTranslateInput,
     LocalVoiceInput,
     create_local_subtitle_voice,
+    translate_subtitles_locally,
     list_local_subtitle_voices,
     parse_srt,
     render_srt,
@@ -48,6 +50,73 @@ class SubtitleToolsTests(unittest.TestCase):
             parse_srt("not a subtitle")
         with self.assertRaises(ValueError):
             parse_srt("1\n00:00:02,000 --> 00:00:01,000\nWrong")
+
+    def test_local_subtitle_translation_requires_explicit_confirmation(self):
+        with self.assertRaises(HTTPException) as raised:
+            translate_subtitles_locally(
+                LocalTranslateInput(subtitle_path="captions.srt", model="qwen3:4b", target_language="zh", confirm_local_generation=False),
+                db=Mock(),
+            )
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_local_subtitle_translation_preserves_timecodes_and_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "captions.srt"
+            source.write_text("source", encoding="utf-8")
+            db = Mock()
+            model_response = {"response": '{"translations":[{"id":1,"text":"你好"},{"id":2,"text":"世界"}]}'}
+            with (
+                patch("app.routers.subtitle_tools.SUBTITLE_DIR", root),
+                patch("app.routers.subtitle_tools.safe_storage_file", return_value=source),
+                patch("app.routers.subtitle_tools._read_text", return_value="srt"),
+                patch("app.routers.subtitle_tools.parse_srt", return_value=[
+                    {"index": 1, "start": 1.0, "end": 2.0, "text": "Hello"},
+                    {"index": 2, "start": 3.0, "end": 4.0, "text": "World"},
+                ]),
+                patch("app.routers.subtitle_tools._installed_models", return_value=[{"name": "qwen3:4b"}]),
+                patch("app.routers.subtitle_tools._ollama_request", return_value=model_response) as ollama,
+            ):
+                result = translate_subtitles_locally(
+                    LocalTranslateInput(
+                        subtitle_path=str(source), model="qwen3:4b",
+                        target_language="zh", confirm_local_generation=True,
+                    ),
+                    db=db,
+                )
+                saved = Path(result["path"]).read_text(encoding="utf-8-sig")
+            self.assertTrue(result["success"])
+            self.assertTrue(result["timecodes_preserved"])
+            self.assertFalse(result["network_used"])
+            self.assertFalse(result["paid_api_used"])
+            self.assertIn("00:00:01,000 --> 00:00:02,000", saved)
+            self.assertIn("00:00:03,000 --> 00:00:04,000", saved)
+            self.assertLess(saved.index("你好"), saved.index("世界"))
+            ollama.assert_called_once()
+            db.add.assert_called()
+            db.commit.assert_called_once()
+
+    def test_local_subtitle_translation_rejects_uninstalled_model(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary) / "captions.srt"
+            source.write_text("source", encoding="utf-8")
+            with (
+                patch("app.routers.subtitle_tools.safe_storage_file", return_value=source),
+                patch("app.routers.subtitle_tools._read_text", return_value="srt"),
+                patch("app.routers.subtitle_tools.parse_srt", return_value=[
+                    {"index": 1, "start": 0.0, "end": 1.0, "text": "Hello"}
+                ]),
+                patch("app.routers.subtitle_tools._installed_models", return_value=[]),
+            ):
+                with self.assertRaises(HTTPException) as raised:
+                    translate_subtitles_locally(
+                        LocalTranslateInput(
+                            subtitle_path=str(source), model="qwen3:4b",
+                            target_language="zh", confirm_local_generation=True,
+                        ),
+                        db=Mock(),
+                    )
+            self.assertEqual(raised.exception.status_code, 404)
 
     def test_local_voice_requires_explicit_confirmation(self):
         with self.assertRaises(HTTPException) as raised:
