@@ -328,6 +328,7 @@ try {
             model = $localAIManifest.model.name
             model_manifest_path = "LocalAI-Payload/$($localAIManifest.model.manifest_path)"
             model_manifest_sha256 = $localAIManifest.model.manifest_sha256
+            cloud_features_disabled = $localAIManifest.cloud_features_disabled
             license = $localAIManifest.model.license
             license_review_status = "pending"
             distribution_approved = $false
