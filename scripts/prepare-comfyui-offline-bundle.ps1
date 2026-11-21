@@ -293,6 +293,9 @@ try {
             $singleReport.release_tag -ne $release.tag_name -or @($singleReport.portable_variants).Count -ne 1) {
             throw "ComfyUI 官方资产依赖清点报告无效或意外批准了分发：$($asset.name)"
         }
+        $singleVariant = @($singleReport.portable_variants)[0]
+        $singleVariant.archive_path = "ComfyUI-Payload/$($asset.name)"
+        $singleReport.portable_variants = @($singleVariant)
         $inventoryReports += $singleReport
         Remove-Item -LiteralPath $assetTempPath, $reportTempPath -Force
     }
