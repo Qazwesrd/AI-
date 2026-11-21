@@ -92,6 +92,7 @@ export default function LocalModelsPage() {
   const [runtimeInstallStatus, setRuntimeInstallStatus] = useState<OllamaRuntimeStatus | null>(null);
   const [runtimeInstallProgress, setRuntimeInstallProgress] = useState<OllamaInstallProgress | null>(null);
   const [installingRuntime, setInstallingRuntime] = useState(false);
+  const [hasDesktopInstaller, setHasDesktopInstaller] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -123,6 +124,7 @@ export default function LocalModelsPage() {
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
     if (!desktop) return;
+    setHasDesktopInstaller(true);
     let mounted = true;
     void desktop.getStatus().then(result => { if (mounted) setRuntimeInstallStatus(result); }).catch(() => {});
     const unsubscribe = desktop.onProgress(progress => {
