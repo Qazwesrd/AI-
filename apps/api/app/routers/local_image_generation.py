@@ -1171,6 +1171,13 @@ def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], p
     }
 
 
+class ReferenceImageUploadInput(BaseModel):
+    asset_id: int = Field(ge=1)
+    media_file_id: int = Field(ge=1)
+    category: Literal["characters", "scenes", "props"]
+    confirm_local_upload: bool = False
+
+
 class ReferenceConditioningPreflightInput(BaseModel):
     shot_ids: list[int] = Field(default_factory=list, max_length=200)
 
@@ -1204,6 +1211,117 @@ def _inspect_reference_media_file(media: MediaFile):
     if media.mime_type and media.mime_type not in (mime, "application/octet-stream"):
         return {"ready": False, "reason": "图片文件内容与素材库 MIME 类型不一致"}
     return {"ready": True, "mime_type": mime, "size": size, "local_path_validated": True}
+
+
+def _upload_reference_to_local_comfyui(media: MediaFile, project_id: int, category: str, asset_id: int):
+    validation = _inspect_reference_media_file(media)
+    if not validation["ready"]:
+        raise HTTPException(400, validation["reason"])
+    path = Path(media.file_path).resolve(strict=True)
+    suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[validation["mime_type"]]
+    filename = f"ref_p{project_id}_{category}_{asset_id}_{uuid.uuid4().hex}{suffix}"
+    subfolder = f"ai_comic_references/p{project_id}"
+    boundary = "----AIComicStudio" + uuid.uuid4().hex
+    fields = [
+        ("type", "input"),
+        ("subfolder", subfolder),
+        ("overwrite", "false"),
+    ]
+    chunks = []
+    for name, value in fields:
+        chunks.extend([
+            f"--{boundary}\\r\\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"\\r\\n\\r\\n'.encode(),
+            value.encode("utf-8") + b"\\r\\n",
+        ])
+    chunks.extend([
+        f"--{boundary}\\r\\n".encode(),
+        f'Content-Disposition: form-data; name="image"; filename="{filename}"\\r\\n'.encode(),
+        f'Content-Type: {validation["mime_type"]}\\r\\n\\r\\n'.encode(),
+    ])
+    with path.open("rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+    chunks.append(f"\\r\\n--{boundary}--\\r\\n".encode())
+    body = b"".join(chunks)
+    request = Request(
+        COMFYUI_BASE_URL + "/upload/image",
+        data=body,
+        headers={"Accept": "application/json", "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with OPENER.open(request, timeout=30.0) as response:
+            raw = response.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            raise HTTPException(502, "ComfyUI 上传响应超过安全上限")
+        result = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read(1200).decode("utf-8", errors="replace")
+        raise HTTPException(502, f"本机 ComfyUI 图片上传失败（HTTP {exc.code}）：{detail}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, "无法连接本机 ComfyUI；图片未确认上传成功") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, "ComfyUI 上传响应格式无效") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("name"), str):
+        raise HTTPException(502, "ComfyUI 未返回有效的参考图文件名")
+    return {
+        "name": result["name"],
+        "subfolder": result.get("subfolder", subfolder),
+        "type": result.get("type", "input"),
+        "mime_type": validation["mime_type"],
+        "size": validation["size"],
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-upload")
+def upload_project_reference_image(
+    project_id: int,
+    data: ReferenceImageUploadInput,
+    db: Session = Depends(get_db),
+):
+    if not data.confirm_local_upload:
+        raise HTTPException(400, "上传参考图到本机 ComfyUI 前，必须明确确认。")
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    profile = _get_visual_consistency(project)
+    field_name = {
+        "characters": "character_reference_images",
+        "scenes": "scene_reference_images",
+        "props": "prop_reference_images",
+    }[data.category]
+    bindings = profile.get(field_name, {})
+    if not isinstance(bindings, dict) or str(data.asset_id) not in bindings or int(bindings[str(data.asset_id)]) != data.media_file_id:
+        raise HTTPException(400, "这张图片尚未绑定到指定角色、场景或道具")
+    linked = db.query(StoryAssetLink).filter(
+        StoryAssetLink.project_id == project.id,
+        StoryAssetLink.asset_id == data.asset_id,
+    ).first()
+    asset = db.query(VisualAsset).filter(VisualAsset.id == data.asset_id).first()
+    if linked is None or asset is None:
+        raise HTTPException(404, "指定素材不属于当前漫剧项目")
+    media = db.query(MediaFile).filter(
+        MediaFile.id == data.media_file_id,
+        MediaFile.category == "image",
+    ).first()
+    if media is None:
+        raise HTTPException(404, "绑定的本地图片素材不存在")
+    uploaded = _upload_reference_to_local_comfyui(media, project.id, data.category, data.asset_id)
+    return {
+        "project_id": project.id,
+        "asset_id": data.asset_id,
+        "media_file_id": media.id,
+        "category": data.category,
+        "comfyui_image": uploaded,
+        "local_only": True,
+        "user_confirmed": True,
+        "generation_started": False,
+        "message": "参考图已由你确认上传到本机 ComfyUI 输入目录；尚未启动图片生成。",
+    }
 
 
 @router.post("/projects/{project_id}/consistency/reference-preflight")
