@@ -9,8 +9,12 @@ type Tool = { id: string; name: string; category: ToolCategory; url: string; not
 type ResultFile = { id: number; filename: string; size: number; downloadUrl: string; classification?: string; classificationStatus?: string; classificationReason?: string; visualAssetId?: number | null };
 type Task = {
   id: string;
+  projectId?: number;
   novelId?: number;
   chapterId?: number;
+  characterId?: number;
+  sceneId?: number;
+  sourceText?: string;
   title: string;
   category: ToolCategory;
   toolId: string;
@@ -526,7 +530,7 @@ export default function AIToolsPage() {
     }
   }
 
-  function saveResult(task: Task) {
+  async function saveResult(task: Task) {
     let normalizedResultUrl = "";
     if (resultUrl.trim()) {
       try {
@@ -541,11 +545,38 @@ export default function AIToolsPage() {
         return;
       }
     }
-    setTasks((current) => current.map((item) => item.id === task.id
-      ? { ...item, status: "completed", resultText, resultUrl: normalizedResultUrl }
-      : item));
-    setActiveTaskId(null);
-    setNotice("结果已保存到本机任务记录。图片和视频文件请先从 AI 网站下载，再到素材库导入。");
+    const updated = {
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      toolId: task.toolId,
+      status: "completed",
+      prompt: task.prompt,
+      sourceText: task.sourceText || "",
+      resultText,
+      resultUrl: normalizedResultUrl,
+      projectId: task.projectId ?? null,
+      novelId: task.novelId ?? null,
+      chapterId: task.chapterId ?? null,
+      characterId: task.characterId ?? null,
+      sceneId: task.sceneId ?? null,
+    };
+    try {
+      const response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || "任务结果保存失败");
+      setTasks((current) => current.map((item) => item.id === task.id
+        ? { ...item, status: "completed", resultText, resultUrl: normalizedResultUrl }
+        : item));
+      setActiveTaskId(null);
+      setNotice("结果已保存到本机数据库和任务记录。图片、视频和音频文件请从网页下载后导入素材库。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "结果保存失败，请检查本地 API。");
+    }
   }
 
 
@@ -797,7 +828,7 @@ export default function AIToolsPage() {
                       </label>
                       <div className="flex flex-wrap gap-2">
                         <button onClick={() => void captureWebResult(task)} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-xs text-cyan-100">从网页读取最新回答</button>
-                        <button onClick={() => saveResult(task)} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold hover:bg-emerald-600">检查后保存结果</button>
+                        <button onClick={() => void saveResult(task)} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold hover:bg-emerald-600">检查后保存结果</button>
                         <button onClick={() => setActiveTaskId(null)} className="rounded-lg border border-white/15 px-4 py-2 text-xs">取消</button>
                       </div>
                     </div>
