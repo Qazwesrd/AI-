@@ -81,7 +81,7 @@ export default function EpisodeReadinessPage() {
   const [auditBusy, setAuditBusy] = useState(false);
   const [productionAudit, setProductionAudit] = useState<{
     status: string;
-    summary: { chapter_count: number; covered_chapter_count: number; chapter_coverage_ratio: number; episode_count: number; visual_asset_count: number; shot_count: number; shots_with_video: number; shots_missing_video: number; shots_with_image: number; dialogue_shot_count: number; blocker_count: number; warning_count: number };
+    summary: { chapter_count: number; covered_chapter_count: number; chapter_coverage_ratio: number; episode_count: number; visual_asset_count: number; shot_count: number; shots_with_video: number; final_rendered_episode_count: number; shots_missing_video: number; shots_with_image: number; dialogue_shot_count: number; blocker_count: number; warning_count: number };
     issues: { severity: string; code: string; message: string; episode_id: number | null; shot_id: number | null }[];
     limitations: string[];
     message: string;
@@ -557,6 +557,7 @@ export default function EpisodeReadinessPage() {
                 <p>视觉素材：{productionAudit.summary.visual_asset_count}</p>
                 <p>分镜：{productionAudit.summary.shot_count}</p>
                 <p>已关联视频：{productionAudit.summary.shots_with_video}/{productionAudit.summary.shot_count}</p>
+                <p>已完成成片：{productionAudit.summary.final_rendered_episode_count}/{productionAudit.summary.episode_count} 集</p>
                 <p>已关联图片：{productionAudit.summary.shots_with_image}</p>
                 <p>对白镜头：{productionAudit.summary.dialogue_shot_count}</p>
                 <p className="text-rose-200">阻断项：{productionAudit.summary.blocker_count}</p>
