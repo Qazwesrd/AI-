@@ -435,6 +435,7 @@ try {
         "LocalAI-Payload/install-local-ai-offline.ps1",
         "LocalAI-Payload/THIRD_PARTY_NOTICES/Ollama-MIT-LICENSE.txt",
         "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt",
+        "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-MODEL-NOTICE.txt",
         "ComfyUI-Payload/install-comfyui-offline.ps1",
         "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1",
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
