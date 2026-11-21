@@ -139,6 +139,7 @@ try {
     }
 
     $modelLayers = @()
+    $licenseLayerVerified = $false
     foreach ($descriptor in $descriptors) {
         $digestMatch = [regex]::Match([string]$descriptor.digest, '^sha256:([0-9a-fA-F]{64})$')
         if (!$digestMatch.Success -or [long]$descriptor.size -le 0) {
@@ -158,6 +159,7 @@ try {
             if ($licenseLayerText -notmatch "Apache License" -or $licenseLayerText -notmatch "Version 2.0") {
                 throw "qwen3:4b 模型自身许可证层未能确认 Apache-2.0：$digest"
             }
+            $licenseLayerVerified = $true
         }
         $modelLayers += @{
             digest = "sha256:$digest"
@@ -165,6 +167,10 @@ try {
             media_type = [string]$descriptor.mediaType
             file_name = "sha256-$digest"
         }
+    }
+
+    if (!$licenseLayerVerified) {
+        throw "qwen3:4b 模型 manifest 未包含可核验的 Apache-2.0 许可证层。"
     }
 
     if ($server -and !$server.HasExited) {
