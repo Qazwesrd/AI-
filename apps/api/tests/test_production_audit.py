@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models.media import MediaTask
+from app.models.media import MediaFile, MediaTask
 from app.models.novel import Chapter, Novel
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject
 from app.routers.production_audit import (
@@ -128,12 +128,25 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                 )
                 db.add(shot)
                 db.flush()
-                db.add(MediaTask(
-                    task_type="storyboard_video",
-                    status="completed",
-                    request_data={"episode_id": episode.id, "shot_id": shot.id},
-                    result_path=str(video),
-                ))
+                db.add_all([
+                    MediaTask(
+                        task_type="storyboard_video",
+                        status="completed",
+                        request_data={"episode_id": episode.id, "shot_id": shot.id},
+                        result_path=str(video),
+                    ),
+                    MediaFile(
+                        name="episode_1_final.mp4",
+                        category="video",
+                        file_path=str(video),
+                        file_size=video.stat().st_size,
+                        metadata_json={
+                            "project_id": project.id,
+                            "episode_id": episode.id,
+                            "rendered_output": True,
+                        },
+                    ),
+                ])
                 db.commit()
 
                 def safe_file(raw):
