@@ -66,7 +66,15 @@ type ComfyUIReadiness = {
   engine_disk_reserve_bytes: number; optional_model_disk_reserve_bytes: number;
   recommended_total_reserve_bytes: number; blockers: string[]; warnings: string[];
   install_target: string; note: string;
-  gpu_adapters?: { name: string; vendor: string; vram_bytes: number | null; recommended_asset: string | null; vram_note: string }[];
+  gpu_adapters?: {
+    status: string;
+    network_used: boolean;
+    adapters: {
+      name: string; vendor: string; vram_bytes: number | null;
+      recommended_asset: string | null; runtime_mode: string;
+      runtime_note: string; vram_note: string;
+    }[];
+  };
 };
 
 
@@ -596,11 +604,14 @@ export default function LocalModelsPage() {
               <p className="mt-2 break-all text-xs text-white/45">规划安装位置：{comfyReadiness.install_target}</p>
               {comfyReadiness.gpu_adapters && <div className="mt-3 border-t border-white/10 pt-3">
                 <p className="text-xs font-semibold text-white/65">本机显卡识别结果（只读）</p>
-                {comfyReadiness.gpu_adapters.length ? comfyReadiness.gpu_adapters.map((adapter,index) => <div key={index} className="mt-2 rounded-lg bg-black/20 p-2">
+                {comfyReadiness.gpu_adapters.status !== "detected" && <p className="mt-2 text-xs text-amber-100/70">显卡检测状态：{comfyReadiness.gpu_adapters.status}。未读取到适配器信息不代表电脑没有显卡；安装前需要人工确认。</p>}
+                {comfyReadiness.gpu_adapters.adapters.length ? comfyReadiness.gpu_adapters.adapters.map((adapter,index) => <div key={index} className="mt-2 rounded-lg bg-black/20 p-2">
                   <p className="break-all">{adapter.name} · {adapter.vendor}</p>
-                  <p className="mt-1 text-xs text-white/55">建议安装包：{adapter.recommended_asset || "暂无法自动判断，请人工选择"}</p>
+                  <p className="mt-1 text-xs text-white/55">建议安装包：{adapter.recommended_asset || "暂无法自动判断，请人工确认"}</p>
+                  <p className="mt-1 text-xs text-white/55">运行方式：{adapter.runtime_mode === "cpu" ? "CPU 模式（速度较慢）" : "GPU 加速候选（仍需实机验证）"}</p>
+                  <p className="mt-1 text-xs text-white/45">{adapter.runtime_note}</p>
                   <p className="mt-1 text-xs text-white/40">{adapter.vram_note}</p>
-                </div>) : <p className="mt-2 text-xs text-amber-100/70">未读取到显示适配器信息，不能据此判断没有显卡；安装包需人工确认。</p>}
+                </div>) : <p className="mt-2 text-xs text-amber-100/70">没有可展示的显卡条目；安装器不会猜测显卡型号或擅自选择加速包。</p>}
               </div>}
             </div>
             <p className="mt-2 text-xs leading-5 text-white/45">{comfyReadiness.note}</p>
