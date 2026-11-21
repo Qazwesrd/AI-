@@ -404,8 +404,8 @@ def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends
 
 @router.get("/batch/history")
 def list_local_image_batch_history(
-    project_id: int = Field(ge=1),
-    episode_id: int = Field(ge=1),
+    project_id: int,
+    episode_id: int,
     limit: int = 100,
     db: Session = Depends(get_db),
 ):
