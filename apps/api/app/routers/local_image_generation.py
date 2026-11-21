@@ -1742,7 +1742,14 @@ def generate_reference_conditioned_shot(
     task_record.remote_task_id = prompt_id
     task_record.status = "queued"
     task_record.result_data = {"prompt_id": prompt_id, "images": []}
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            500,
+            f"ComfyUI 已接受任务（编号 {prompt_id}），但本地任务状态更新失败。请先在本机 ComfyUI 队列核实，禁止重复提交。",
+        ) from exc
     return {
         "success": True,
         "engine": "ComfyUI",
