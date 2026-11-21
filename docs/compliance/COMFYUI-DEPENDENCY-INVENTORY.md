@@ -30,8 +30,8 @@ You may pass only the variants actually available; every supplied archive must u
 ## Safety and limitations
 
 - The tool does not download archives or execute their contents.
-- It lists archive entries first and enforces entry-count, evidence-count, and per-file extraction-size limits.
-- It rejects absolute and parent-traversal evidence paths and extracts evidence files into isolated temporary folders.
+- It consumes the 7-Zip listing incrementally with a bounded line count, then enforces entry-count, evidence-count, and per-file extraction-size limits.
+- It rejects absolute and parent-traversal evidence paths, refuses symbolic/hard-link evidence files, disables 7-Zip wildcard expansion for evidence extraction, and extracts evidence files into isolated temporary folders.
 - It parses Python package `Name`, `Version`, license fields, license classifiers, and project URLs from `METADATA` or `PKG-INFO`.
 - It flags likely PyTorch, CUDA, ROCm, Intel XPU, and math-runtime files for human follow-up.
 - The report is an automated inventory, not a legal opinion. A metadata `License` field is not proof of redistribution permission.
