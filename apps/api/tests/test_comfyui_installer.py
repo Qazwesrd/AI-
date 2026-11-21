@@ -1,7 +1,7 @@
 import unittest
 
 from app.routers.comfyui_installer import (
-    GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install,
+    GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,
 )
 
 
@@ -37,6 +37,56 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertEqual(result["recommended_total_reserve_bytes"], 23 * GIB)
         self.assertFalse(result["network_used"])
 
+
+
+    def test_release_catalog_only_accepts_official_assets_and_urls(self):
+        payload = {
+            "tag_name": "v-test",
+            "published_at": "2026-11-21T00:00:00Z",
+            "assets": [
+                {
+                    "name": "ComfyUI_windows_portable_nvidia.7z",
+                    "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/ComfyUI_windows_portable_nvidia.7z",
+                    "size": 123456,
+                    "digest": "sha256:" + "a" * 64,
+                },
+                {
+                    "name": "ComfyUI_windows_portable_amd.7z",
+                    "browser_download_url": "https://evil.example/file.7z",
+                    "size": 999,
+                },
+                {
+                    "name": "malicious.exe",
+                    "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/malicious.exe",
+                    "size": 100,
+                },
+            ],
+        }
+        result = parse_official_release(payload)
+        self.assertEqual(result["version"], "v-test")
+        self.assertEqual(len(result["assets"]), 1)
+        self.assertEqual(result["assets"][0]["size_bytes"], 123456)
+        self.assertEqual(result["assets"][0]["sha256"], "a" * 64)
+        self.assertFalse(result["download_started"])
+        self.assertFalse(result["installation_started"])
+
+    def test_release_catalog_handles_missing_digest_without_claiming_verified(self):
+        payload = {
+            "tag_name": "v-test",
+            "assets": [{
+                "name": "ComfyUI_windows_portable_intel.7z",
+                "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/ComfyUI_windows_portable_intel.7z",
+                "size": 500,
+            }],
+        }
+        result = parse_official_release(payload)
+        self.assertEqual(len(result["assets"]), 1)
+        self.assertFalse(result["assets"][0]["digest_available"])
+        self.assertIsNone(result["assets"][0]["sha256"])
+
+    def test_release_catalog_rejects_invalid_release_payload(self):
+        with self.assertRaises(ValueError):
+            parse_official_release({"assets": []})
 
 if __name__ == "__main__":
     unittest.main()
