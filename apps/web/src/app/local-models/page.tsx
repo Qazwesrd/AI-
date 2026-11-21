@@ -268,7 +268,12 @@ export default function LocalModelsPage() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "模型下载启动失败");
-      setMessage(result.status === "already_installed" ? "Qwen3 4B 已安装。" : "已开始下载 Qwen3 4B。下载期间可以查看实时进度。");
+      if (result.status === "already_installed") {
+        setInstallingBaseModel(false);
+        setMessage("Qwen3 4B 已安装，无需重复下载。");
+      } else {
+        setMessage("已开始下载 Qwen3 4B。下载期间可以查看实时进度。");
+      }
       await refreshInstaller();
     } catch (err) { setInstallingBaseModel(false); setError(err instanceof Error ? err.message : "模型下载启动失败"); }
   };
