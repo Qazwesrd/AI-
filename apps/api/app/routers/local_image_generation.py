@@ -562,7 +562,7 @@ def list_local_image_batch_history(
     if project is None or episode is None:
         raise HTTPException(404, "项目或分集不存在，或分集不属于所选项目。")
     records = db.query(MediaTask).filter(
-        MediaTask.task_type == "local_image_batch",
+        MediaTask.task_type.in_(("local_image_batch", "local_image_reference")),
         MediaTask.provider == "comfyui-local",
     ).order_by(MediaTask.created_at.desc(), MediaTask.id.desc()).limit(1000).all()
     items = []
@@ -606,7 +606,7 @@ def get_local_image_batch_status(data: LocalImageBatchStatusInput, db: Session =
     results = []
     for task in data.tasks:
         record = db.query(MediaTask).filter(
-            MediaTask.task_type == "local_image_batch",
+            MediaTask.task_type.in_(("local_image_batch", "local_image_reference")),
             MediaTask.provider == "comfyui-local",
             MediaTask.remote_task_id == task.prompt_id,
         ).first()
