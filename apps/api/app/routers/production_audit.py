@@ -90,12 +90,21 @@ def build_production_readiness_report(project_id: int, db: Session):
         metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
         try:
             media_episode_id = int(metadata.get("episode_id") or 0)
+            metadata_project_id = int(metadata.get("project_id") or 0)
         except (TypeError, ValueError):
             media_episode_id = 0
+            metadata_project_id = 0
+        # MediaFile is a global table. Never let an explicitly foreign project
+        # claim an episode's final render, even if its metadata reuses this ID.
+        belongs_to_project = metadata_project_id in {0, project.id}
         for episode_id in episode_ids:
             category = (media.category or "").lower()
-            is_episode_video = category in {"video", "视频"} and (
-                (metadata.get("rendered_output") is True and media_episode_id == episode_id)
+            is_episode_video = belongs_to_project and category in {"video", "视频"} and (
+                (
+                    metadata.get("rendered_output") is True
+                    and metadata_project_id == project.id
+                    and media_episode_id == episode_id
+                )
                 or (
                     not metadata.get("shot_id")
                     and (media.name or "").startswith(f"episode_{episode_id}_")
