@@ -13,6 +13,7 @@ from app.models.story import EpisodePlan, StoryboardShot, StoryProject
 from app.routers.production_audit import (
     _as_int_ids,
     build_production_readiness_report,
+    audit_episode_video_quality,
 )
 
 
@@ -218,6 +219,71 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                     report["episodes"][0]["final_video_files"],
                     ["episode_1_final.mp4"],
                     "另一个项目的媒体文件不得冒充当前项目的最终成片",
+                )
+            finally:
+                db.close()
+                engine.dispose()
+
+    def test_episode_video_quality_excludes_foreign_project_media(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            video = root / "episode.mp4"
+            video.write_bytes(b"video")
+            engine = create_engine(f"sqlite:///{root / 'quality.db'}")
+            Base.metadata.create_all(engine)
+            db = Session(engine)
+            try:
+                novel = Novel(title="原著")
+                db.add(novel)
+                db.flush()
+                project = StoryProject(novel_id=novel.id, name="当前项目")
+                foreign_project = StoryProject(novel_id=novel.id, name="其他项目")
+                db.add_all([project, foreign_project])
+                db.flush()
+                episode = EpisodePlan(
+                    project_id=project.id,
+                    episode_number=1,
+                    title="第一集",
+                    source_chapter_ids=[],
+                    screenplay="正式剧本",
+                    duration_seconds=120,
+                )
+                db.add(episode)
+                db.flush()
+                db.add_all([
+                    MediaFile(
+                        name="episode_1_current.mp4",
+                        category="video",
+                        file_path=str(video),
+                        metadata_json={
+                            "project_id": project.id,
+                            "episode_id": episode.id,
+                            "rendered_output": True,
+                        },
+                    ),
+                    MediaFile(
+                        name="episode_1_foreign.mp4",
+                        category="video",
+                        file_path=str(video),
+                        metadata_json={
+                            "project_id": foreign_project.id,
+                            "episode_id": episode.id,
+                            "rendered_output": True,
+                        },
+                    ),
+                ])
+                db.commit()
+                with (
+                    patch("app.routers.production_audit.safe_storage_file", return_value=video),
+                    patch("app.routers.production_audit._probe_final_video", return_value={
+                        "status": "ready", "issues": [], "probe": {"duration_seconds": 120},
+                    }),
+                ):
+                    report = audit_episode_video_quality(project.id, episode.id, db)
+                self.assertEqual(report["status"], "ready")
+                self.assertEqual(
+                    [item["file_name"] for item in report["files"]],
+                    ["episode_1_current.mp4"],
                 )
             finally:
                 db.close()
