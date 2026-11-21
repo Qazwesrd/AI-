@@ -646,6 +646,9 @@ def _consistency_prompt_for_shot(shot: StoryboardShot, profile: dict):
     style = str(profile.get("visual_style", "")).strip()
     if style:
         sections.append("【全项目统一画风】" + style)
+    negative = str(profile.get("negative_prompt", "")).strip()
+    if negative:
+        sections.append("【全项目统一避免项】" + negative)
     characters = profile.get("character_profiles", {})
     if isinstance(characters, dict):
         for asset_id in shot.character_ids if isinstance(shot.character_ids, list) else []:
