@@ -13,6 +13,10 @@ let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
 let ollamaProcess = null;
+let ollamaRestartTimer = null;
+let ollamaRestartAttempts = 0;
+let ollamaRuntimeConfig = null;
+let ollamaStarting = false;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -204,6 +208,12 @@ function requestOllamaHealth(baseUrl) {
   });
 }
 
+function hasQwenModel(health) {
+  return Boolean(health && Array.isArray(health.models) && health.models.some(item =>
+    item && (item.name === "qwen3:4b" || item.model === "qwen3:4b")
+  ));
+}
+
 async function waitForOllama(baseUrl, timeout = 90000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
@@ -212,10 +222,7 @@ async function waitForOllama(baseUrl, timeout = 90000) {
     }
     const health = await requestOllamaHealth(baseUrl);
     if (health) {
-      const hasBundledModel = health.models.some(item =>
-        item && (item.name === "qwen3:4b" || item.model === "qwen3:4b")
-      );
-      if (!hasBundledModel) {
+      if (!hasQwenModel(health)) {
         throw new Error("内置 Ollama 已启动，但没有检测到随软件安装的 Qwen3 4B 模型。");
       }
       return health;
@@ -225,7 +232,95 @@ async function waitForOllama(baseUrl, timeout = 90000) {
   throw new Error("内置 Ollama 本地服务启动超时。");
 }
 
+function scheduleOllamaRestart() {
+  if (quitting || !ollamaRuntimeConfig || ollamaRestartTimer) return;
+  if (ollamaRestartAttempts >= 3) {
+    dialog.showErrorBox(
+      "本地 AI 引擎暂时不可用",
+      "Ollama 本地服务多次意外退出，自动恢复仍未成功。请保存当前项目后重新启动 AI 漫剧制作大师。"
+    );
+    return;
+  }
+
+  const delays = [1000, 3000, 10000];
+  const delay = delays[ollamaRestartAttempts++];
+  ollamaRestartTimer = setTimeout(async () => {
+    ollamaRestartTimer = null;
+    if (quitting || !ollamaRuntimeConfig) return;
+    try {
+      await startBundledOllama(ollamaRuntimeConfig, 1);
+      ollamaRestartAttempts = 0;
+      console.log("[OLLAMA] 本地服务已自动恢复。");
+    } catch (error) {
+      console.error("[OLLAMA] 自动恢复失败：", error);
+      scheduleOllamaRestart();
+    }
+  }, delay);
+}
+
+async function startBundledOllama(config, maxAttempts = 3) {
+  ollamaRuntimeConfig = config;
+  ollamaStarting = true;
+  const delays = [1000, 3000, 8000];
+  try {
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const portFree = await checkPort(config.port);
+      if (!portFree) {
+        const existing = await requestOllamaHealth(config.baseUrl);
+        if (hasQwenModel(existing)) return existing;
+        if (attempt === maxAttempts - 1) {
+          throw new Error("本地 AI 服务端口 11435 已被其他程序占用，且未检测到可用的 Qwen3 4B 服务。");
+        }
+        await new Promise(resolve => setTimeout(resolve, delays[attempt] || 3000));
+        continue;
+      }
+
+      const child = spawn(config.ollamaExe, ["serve"], {
+        cwd: config.ollamaRuntime,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          OLLAMA_MODELS: config.ollamaModels,
+          OLLAMA_HOST: config.host,
+          OLLAMA_KEEP_ALIVE: "5m",
+          OLLAMA_NUM_PARALLEL: "1",
+          OLLAMA_MAX_LOADED_MODELS: "1",
+          OLLAMA_NO_CLOUD: "1"
+        }
+      });
+      ollamaProcess = child;
+      logChild("OLLAMA", child);
+      child.once("exit", (code, signal) => {
+        if (quitting || ollamaStarting) return;
+        if (ollamaProcess === child) ollamaProcess = null;
+        console.error("[OLLAMA] 本地服务意外退出：", { code, signal });
+        scheduleOllamaRestart();
+      });
+
+      try {
+        const health = await waitForOllama(config.baseUrl, 90000);
+        ollamaRestartAttempts = 0;
+        return health;
+      } catch (error) {
+        stopChild(child);
+        if (ollamaProcess === child) ollamaProcess = null;
+        if (attempt === maxAttempts - 1) throw error;
+        await new Promise(resolve => setTimeout(resolve, delays[attempt] || 3000));
+      }
+    }
+    throw new Error("内置 Ollama 本地服务启动失败。");
+  } finally {
+    ollamaStarting = false;
+  }
+}
+
 function stopServices() {
+  if (ollamaRestartTimer) {
+    clearTimeout(ollamaRestartTimer);
+    ollamaRestartTimer = null;
+  }
+  ollamaRuntimeConfig = null;
+  ollamaRestartAttempts = 0;
   stopChild(webProcess);
   stopChild(apiProcess);
   stopChild(ollamaProcess);
@@ -268,27 +363,14 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
   if (fs.existsSync(ollamaExe) && fs.existsSync(ollamaModels) &&
       modelManifestCandidates.some(file => fs.existsSync(file))) {
     ollamaBaseUrl = "http://127.0.0.1:11435";
-    const ollamaPortFree = await checkPort(11435);
-    if (ollamaPortFree) {
-      ollamaProcess = spawn(ollamaExe, ["serve"], {
-        cwd: ollamaRuntime,
-        windowsHide: true,
-        env: {
-          ...process.env,
-          OLLAMA_MODELS: ollamaModels,
-          OLLAMA_HOST: "127.0.0.1:11435",
-          OLLAMA_KEEP_ALIVE: "5m",
-          OLLAMA_NO_CLOUD: "1"
-        }
-      });
-      logChild("OLLAMA", ollamaProcess);
-    } else {
-      const existingOllama = await requestOllamaHealth(ollamaBaseUrl);
-      if (!existingOllama) {
-        throw new Error("本地 AI 服务端口 11435 已被其他程序占用，软件不会结束或覆盖其他程序。");
-      }
-    }
-    await waitForOllama(ollamaBaseUrl);
+    await startBundledOllama({
+      ollamaExe,
+      ollamaRuntime,
+      ollamaModels,
+      host: "127.0.0.1:11435",
+      port: 11435,
+      baseUrl: ollamaBaseUrl
+    }, 3);
     process.env.OLLAMA_MODELS = ollamaModels;
     process.env.PATH = ollamaRuntime + path.delimiter + process.env.PATH;
   }
