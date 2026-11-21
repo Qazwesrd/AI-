@@ -12,6 +12,13 @@ type Diagnostic = {
   storage: { path: string; disk: { status: string; free_bytes: number; total_bytes: number; message: string } };
   media_tools: { ffmpeg: { status: string; path?: string | null; message: string }; ffprobe: { status: string; path?: string | null; message: string } };
   local_ai: { mode: string; network_used: boolean; auto_downloaded: boolean; note: string; tools: { id: string; name: string; purpose: string; status: string; executable?: string | null; install_hint: string }[] };
+  hardware: {
+    cpu: { logical_cores?: number | null; architecture?: string | null; processor?: string | null };
+    memory: { total_bytes?: number | null; total_gib?: number | null };
+    gpu: { status: string; vendor?: string | null; name?: string | null; vram_bytes?: number | null; note: string };
+    model_sizing: { tier: string; label: string; ram_gib?: number | null; vram_gib?: number | null; caution: string };
+    network_used: boolean; note: string;
+  };
   ai_permissions: { network_enabled: boolean; paid_api_allowed: boolean; note: string };
   tasks: { active_leases: number; queued_tasks: number };
   warnings: string[];
@@ -112,6 +119,36 @@ export default function SystemDiagnosticsPage() {
               <a href="/tasks" className="mt-4 inline-flex text-sm text-cyan-200 underline">打开统一任务中心</a>
             </div>
           </section>
+          <section className={panel}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold">电脑硬件与本地模型建议</h2>
+              <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200">只读检测 · 不联网</span>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                <div className="text-xs text-white/50">处理器</div>
+                <div className="mt-2 text-lg font-semibold">{data.hardware.cpu.logical_cores ?? "未知"} 个逻辑核心</div>
+                <p className="mt-1 break-all text-xs text-white/50">{data.hardware.cpu.processor || data.hardware.cpu.architecture || "未能读取型号"}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                <div className="text-xs text-white/50">物理内存</div>
+                <div className="mt-2 text-lg font-semibold">{data.hardware.memory.total_gib !== null && data.hardware.memory.total_gib !== undefined ? `${data.hardware.memory.total_gib} GB` : "未知"}</div>
+                <p className="mt-1 text-xs text-white/50">系统报告的总内存</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                <div className="text-xs text-white/50">显卡 / 显存</div>
+                <div className="mt-2 text-lg font-semibold">{data.hardware.gpu.name || (data.hardware.gpu.status === "not_detected" ? "未检测到 NVIDIA 工具" : "暂不可用")}</div>
+                <p className="mt-1 text-xs text-white/50">{data.hardware.gpu.vram_bytes ? `${size(data.hardware.gpu.vram_bytes)} 显存` : "显存信息未知"}</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-400/5 p-4">
+              <div className="text-xs text-cyan-100/70">本地模型规格初步建议</div>
+              <div className="mt-2 text-lg font-semibold">{data.hardware.model_sizing.label}</div>
+              <p className="mt-2 text-xs leading-5 text-white/55">{data.hardware.model_sizing.caution}</p>
+              <p className="mt-2 text-xs text-white/45">{data.hardware.gpu.note} {data.hardware.note}</p>
+            </div>
+          </section>
+
           <section className={panel}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="font-semibold">本地 AI 引擎检测</h2>
