@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
@@ -14,6 +15,7 @@ from app.routers.subtitle_tools import (
     parse_srt,
     render_srt,
     format_time,
+    _subtitle_ownership,
 )
 
 
@@ -51,6 +53,28 @@ class SubtitleToolsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_srt("1\n00:00:02,000 --> 00:00:01,000\nWrong")
 
+    def test_subtitle_ownership_is_inherited_from_registered_track(self):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = SimpleNamespace(
+            project_id=17,
+            episode_id=23,
+        )
+        self.assertEqual(
+            _subtitle_ownership(db, Path("/managed/subtitles/episode.srt")),
+            (17, 23),
+        )
+
+    def test_subtitle_ownership_falls_back_to_media_metadata(self):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [
+            None,
+            SimpleNamespace(metadata_json={"project_id": "17", "episode_id": "23"}),
+        ]
+        self.assertEqual(
+            _subtitle_ownership(db, Path("/managed/subtitles/imported.srt")),
+            (17, 23),
+        )
+
     def test_local_subtitle_translation_requires_explicit_confirmation(self):
         with self.assertRaises(HTTPException) as raised:
             translate_subtitles_locally(
@@ -68,6 +92,7 @@ class SubtitleToolsTests(unittest.TestCase):
             model_response = {"response": '{"translations":[{"id":1,"text":"你好"},{"id":2,"text":"世界"}]}'}
             with (
                 patch("app.routers.subtitle_tools.SUBTITLE_DIR", root),
+                patch("app.routers.subtitle_tools._subtitle_ownership", return_value=(None, None)),
                 patch("app.routers.subtitle_tools.safe_storage_file", return_value=source),
                 patch("app.routers.subtitle_tools._read_text", return_value="srt"),
                 patch("app.routers.subtitle_tools.parse_srt", return_value=[
@@ -102,6 +127,7 @@ class SubtitleToolsTests(unittest.TestCase):
             source.write_text("source", encoding="utf-8")
             with (
                 patch("app.routers.subtitle_tools.safe_storage_file", return_value=source),
+                patch("app.routers.subtitle_tools._subtitle_ownership", return_value=(None, None)),
                 patch("app.routers.subtitle_tools._read_text", return_value="srt"),
                 patch("app.routers.subtitle_tools.parse_srt", return_value=[
                     {"index": 1, "start": 0.0, "end": 1.0, "text": "Hello"}
@@ -150,6 +176,7 @@ class SubtitleToolsTests(unittest.TestCase):
                 Path(command[-1]).write_bytes(b"mp3-output")
             with (
                 patch("app.routers.subtitle_tools.AUDIO_DIR", root),
+                patch("app.routers.subtitle_tools._subtitle_ownership", return_value=(None, None)),
                 patch("app.routers.subtitle_tools.safe_storage_file", return_value=source),
                 patch("app.routers.subtitle_tools._read_text", return_value="srt"),
                 patch("app.routers.subtitle_tools.parse_srt", return_value=[
