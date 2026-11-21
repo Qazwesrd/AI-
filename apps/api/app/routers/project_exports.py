@@ -179,11 +179,17 @@ def _collect_project_records(db: Session, project: StoryProject):
             media_project_id = int(metadata.get("project_id") or 0)
         except (TypeError, ValueError):
             media_episode_id = media_shot_id = media_project_id = 0
+        legacy_final_render = (
+            (media.category or "").lower() in {"video", "视频"}
+            and not metadata.get("shot_id")
+            and any((media.name or "").startswith(f"episode_{episode_id}_") for episode_id in episode_id_set)
+        )
         if (
             media.id in media_ids
             or media_episode_id in episode_id_set
             or media_shot_id in shot_ids
             or media_project_id == project.id
+            or legacy_final_render
         ):
             media_files.append(media)
     all_media_tasks = db.query(MediaTask).all()
