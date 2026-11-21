@@ -53,7 +53,7 @@ class LocalAIRuntimeTests(unittest.TestCase):
             return_value=[{"name": "qwen2.5:3b"}],
         ), patch(
             "app.routers.local_ai_runtime._ollama_request",
-            return_value={"response": "本机运行成功"},
+            side_effect=[{"models": [{"name": "qwen2.5:3b"}]}, {"response": "本机运行成功"}],
         ) as request:
             result = test_local_model(LocalModelTestInput(model="qwen2.5:3b"))
         self.assertEqual(result["status"], "success")
