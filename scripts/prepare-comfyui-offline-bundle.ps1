@@ -319,7 +319,7 @@ try {
             intel = "Intel Arc only: ComfyUI_windows_portable_intel.7z"
             unknown = "stop-installation-no-network-fallback"
         }
-        model_policy = "ComfyUI image-generation checkpoints remain optional and are not included; the approved local text model qwen3:4b and its Ollama runtime are included in LocalAI-Payload for offline installation."
+        model_policy = "ComfyUI image-generation checkpoints remain optional and are not included; the selected local text model qwen3:4b and its Ollama runtime are included in LocalAI-Payload for offline installation. Model redistribution review remains pending."
         local_ai = @{
             runtime_version = $localAIManifest.ollama.version
             runtime_asset = "LocalAI-Payload/ollama-windows-amd64.zip"
