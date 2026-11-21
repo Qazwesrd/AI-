@@ -49,6 +49,13 @@ type HardwareReadiness = {
 };
 type OllamaRuntimeStatus = { installed: boolean; status: string; freeBytes: number | null; requiredFreeBytes: number; enoughSpace: boolean; installDirectory: string };
 type OllamaInstallProgress = { status: string; stage: string; percent?: number | null; receivedBytes?: number; totalBytes?: number; message: string };
+type ImageModelLibrary = {
+  status: string; engine_installed: boolean; directory: string;
+  models: { name: string; format: string; size_bytes: number; modified_at: number; compatibility: string; compatibility_note: string }[];
+  model_count: number; free_disk_bytes: number | null; ram_bytes: number | null; vram_bytes: number | null;
+  gpu_level: string | null; runtime_mode: string; adapter_name: string;
+  hardware_notes: string[]; hardware_note: string | null; note: string;
+};
 type ComfyUIReadiness = {
   status: string; can_install_engine: boolean; hardware_profile: string;
   ram_bytes: number | null; vram_bytes: number | null; free_disk_bytes: number | null;
@@ -127,6 +134,8 @@ export default function LocalModelsPage() {
   const [showImageRuntimeLogs, setShowImageRuntimeLogs] = useState(false);
   const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
+  const [imageModelLibrary, setImageModelLibrary] = useState<ImageModelLibrary | null>(null);
+  const [checkingImageModelLibrary, setCheckingImageModelLibrary] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -215,6 +224,20 @@ export default function LocalModelsPage() {
     }
   }, []);
 
+  const refreshImageModelLibrary = useCallback(async () => {
+    setCheckingImageModelLibrary(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/model-library`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取本地图片模型目录失败");
+      setImageModelLibrary(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取本地图片模型目录失败");
+    } finally {
+      setCheckingImageModelLibrary(false);
+    }
+  }, []);
+
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -224,7 +247,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); void refreshImageModelLibrary(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness, refreshImageModelLibrary]);
   useEffect(() => {
     if (imageRuntime?.status !== "starting") return;
     const timer = window.setInterval(() => { void refreshImageRuntime(); }, 1800);
@@ -552,6 +575,33 @@ export default function LocalModelsPage() {
               <p className="mt-2 text-xs text-white/45">当前页面只进行硬件和磁盘只读评估；不会启动下载或安装。完整离线安装包仍需通过构建、安装器集成和许可证审查后才能发布。</p>
             </div>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-cyan-300/25 bg-slate-950/70 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">图片模型库与兼容性检查</h2>
+              <p className="mt-1 text-sm leading-6 text-white/55">只扫描本机 ComfyUI 的 checkpoints 目录，显示已安装模型及硬件运行模式；不会联网、下载、计算大型模型哈希或安装文件。</p>
+            </div>
+            <button type="button" disabled={checkingImageModelLibrary} onClick={() => void refreshImageModelLibrary()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingImageModelLibrary ? "扫描中…" : "刷新模型目录"}</button>
+          </div>
+          {imageModelLibrary ? <>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已发现模型</div><div className="mt-1 font-semibold">{imageModelLibrary.model_count} 个</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">运行模式</div><div className="mt-1 font-semibold">{imageModelLibrary.runtime_mode === "cpu" ? "CPU 模式" : "GPU 模式"}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">目标磁盘可用空间</div><div className="mt-1 font-semibold">{size(imageModelLibrary.free_disk_bytes)}</div></div>
+            </div>
+            <p className="mt-3 break-all text-xs text-white/45">模型目录：{imageModelLibrary.directory}</p>
+            <p className="mt-1 text-xs text-white/55">显卡：{imageModelLibrary.adapter_name || "未确认"} · 内存：{size(imageModelLibrary.ram_bytes)} · 显存：{size(imageModelLibrary.vram_bytes)}</p>
+            {imageModelLibrary.hardware_notes.map((note,index)=><p key={index} className="mt-2 text-xs text-amber-100/75">• {note}</p>)}
+            {imageModelLibrary.models.length ? <div className="mt-3 space-y-2">
+              {imageModelLibrary.models.map(model=><div key={model.name} className="rounded-xl bg-white/[0.04] p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2"><span className="break-all text-sm font-semibold">{model.name}</span><span className="text-xs text-white/55">{model.format.toUpperCase()} · {size(model.size_bytes)}</span></div>
+                <p className="mt-1 text-xs text-white/45">{model.compatibility_note}</p>
+              </div>)}
+            </div> : <p className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm text-white/55">{imageModelLibrary.engine_installed ? "尚未发现已安装的 checkpoint 模型。此处不会自动下载。" : "尚未安装 ComfyUI 引擎，因此暂时没有本地模型目录可扫描。"}</p>}
+            <p className="mt-3 text-xs leading-5 text-white/45">{imageModelLibrary.note}</p>
+          </> : <p className="mt-3 text-sm text-white/50">正在读取本机图片模型目录…</p>}
         </section>
 
         {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
