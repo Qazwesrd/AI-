@@ -140,6 +140,19 @@ class LocalImageRuntimeTests(unittest.TestCase):
         finally:
             runtime._COMFYUI_PROCESS = old_process
 
+    def test_api_shutdown_cleans_up_only_the_owned_process(self):
+        fake = FakeProcess()
+        old_process = runtime._COMFYUI_PROCESS
+        try:
+            runtime._COMFYUI_PROCESS = fake
+            with patch("app.routers.local_image_runtime._close_log_handle"):
+                runtime.shutdown_managed_comfyui()
+            self.assertTrue(fake.terminated)
+            self.assertFalse(fake.killed)
+            self.assertIsNone(runtime._COMFYUI_PROCESS)
+        finally:
+            runtime._COMFYUI_PROCESS = old_process
+
 
 if __name__ == "__main__":
     unittest.main()
