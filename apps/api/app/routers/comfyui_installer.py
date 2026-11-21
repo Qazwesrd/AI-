@@ -5,6 +5,7 @@ hardware and storage constraints before the user chooses an installation plan.
 """
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
