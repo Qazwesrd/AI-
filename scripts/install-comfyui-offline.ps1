@@ -46,16 +46,12 @@ function Select-ComfyAsset($Adapters) {
                 selection_reason = "GTX 10 系列及更旧型号，使用官方 cu126 运行包"
             }
         }
-        $rtx = [regex]::Match($model, "(?i)RTX\s*A?\s*([0-9]{4})")
-        if ($rtx.Success -and [int]$rtx.Groups[1].Value -ge 2000) {
-            return @{
-                name = "ComfyUI_windows_portable_nvidia.7z"
-                detected_gpu = $model
-                vendor = "NVIDIA"
-                selection_reason = "RTX 20 系列及更新型号，使用官方标准运行包"
-            }
+        return @{
+            name = "ComfyUI_windows_portable_nvidia.7z"
+            detected_gpu = $model
+            vendor = "NVIDIA"
+            selection_reason = "除 GTX 10 系列及更旧型号外，使用官方标准 NVIDIA 运行包"
         }
-        throw "检测到 NVIDIA 显卡，但型号不在官方便携包明确支持范围内（例如 GTX 16 系列）。为避免错误选择 CUDA 版本，安装已停止。"
     }
 
     $amd = @($recognized | Where-Object Vendor -eq "AMD")
