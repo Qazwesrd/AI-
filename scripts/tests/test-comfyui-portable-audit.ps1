@@ -188,6 +188,21 @@ try {
     }
     Write-Utf8 (Join-Path $payloadRoot "manifest.json") ($bundleManifest | ConvertTo-Json -Depth 8)
     Write-Utf8 (Join-Path $noticesRoot "comfyui-portable-dependency-inventory.json") ($report | ConvertTo-Json -Depth 12)
+    $bundleAuditRegister = @{
+        audit_status = "pending"
+        distribution_approved = $false
+        portable_variants = @()
+    }
+    foreach ($name in $assetNames) {
+        $assetPath = Join-Path $payloadRoot $name
+        $bundleAuditRegister.portable_variants += @{
+            asset = $name
+            inventory_status = "inventory_generated_review_pending"
+            sha256 = Get-Sha256 $assetPath
+            release_tag = $fixtureComfyVersion
+        }
+    }
+    Write-Utf8 (Join-Path $noticesRoot "comfyui-portable-dependency-audit.json") ($bundleAuditRegister | ConvertTo-Json -Depth 8)
 
     $detectedAdapters = @([pscustomobject]@{
         Name = "AMD Radeon(TM) Graphics"
