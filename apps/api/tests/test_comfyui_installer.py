@@ -7,6 +7,18 @@ from app.routers.comfyui_installer import (
 
 
 class ComfyUIInstallReadinessTests(unittest.TestCase):
+    def test_offline_installer_accepts_only_internal_validation_manifest(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        prepare = (root / "scripts" / "prepare-comfyui-offline-bundle.ps1").read_text(encoding="utf-8")
+        install = (root / "scripts" / "install-comfyui-offline.ps1").read_text(encoding="utf-8")
+        bundle_type = "complete-offline-comfyui-engine-internal-validation-only"
+        distribution_status = "blocked-pending-third-party-dependency-audit"
+        self.assertIn(f'bundle_type = "{bundle_type}"', prepare)
+        self.assertIn(f'$manifest.bundle_type -ne "{bundle_type}"', install)
+        self.assertIn(f'$manifest.distribution_status -ne "{distribution_status}"', install)
+        self.assertIn('$manifest.distribution_approved -ne $false', install)
+
     def test_low_disk_blocks_engine_install(self):
         result = assess_comfyui_install(
             {"memory": {"total_bytes": 32 * GIB}, "gpu": {"vram_bytes": 8 * GIB}},
