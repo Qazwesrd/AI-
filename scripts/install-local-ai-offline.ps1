@@ -3,7 +3,8 @@ param(
     [string]$PayloadRoot,
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
-    [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-Ollama-install.log")
+    [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-Ollama-install.log"),
+    [switch]$ValidateOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -189,6 +190,12 @@ try {
         if (!(Test-Path -LiteralPath $noticePath -PathType Leaf)) {
             throw "本地 AI 离线载荷缺少许可证/NOTICE 文件：$notice"
         }
+    }
+
+    if ($ValidateOnly) {
+        [void](Get-ZipExpandedSize $runtimeZip)
+        Write-Host "本地 AI 离线载荷预检通过：Ollama ZIP、Qwen3 manifest、全部模型 blob、SHA-256 和许可证文件均已验证。"
+        return
     }
 
     $installFullPath = [System.IO.Path]::GetFullPath($InstallRoot)
