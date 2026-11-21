@@ -19,6 +19,7 @@ type Diagnostic = {
     model_sizing: { tier: string; label: string; ram_gib?: number | null; vram_gib?: number | null; caution: string };
     network_used: boolean; note: string;
   };
+  local_models: { directory: string; directory_exists: boolean; status: string; count: number; total_bytes: number; truncated?: boolean; files: { name: string; format: string; size_bytes: number }[]; note: string };
   ai_permissions: { network_enabled: boolean; paid_api_allowed: boolean; note: string };
   tasks: { active_leases: number; queued_tasks: number };
   warnings: string[];
@@ -147,6 +148,32 @@ export default function SystemDiagnosticsPage() {
               <p className="mt-2 text-xs leading-5 text-white/55">{data.hardware.model_sizing.caution}</p>
               <p className="mt-2 text-xs text-white/45">{data.hardware.gpu.note} {data.hardware.note}</p>
             </div>
+          </section>
+
+          <section className={panel}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold">本地模型文件库</h2>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">{data.local_models.count} 个模型文件</span>
+            </div>
+            <p className="mt-2 break-all text-xs text-white/45">扫描目录：{data.local_models.directory}</p>
+            <p className="mt-2 text-sm text-white/65">已识别文件总大小：{size(data.local_models.total_bytes)}</p>
+            {data.local_models.files.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {data.local_models.files.map((file) => (
+                  <div key={file.name} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/[0.04] px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="break-all text-sm">{file.name}</div>
+                      <div className="text-xs text-white/40">{file.format.toUpperCase()}</div>
+                    </div>
+                    <span className="text-xs text-white/60">{size(file.size_bytes)}</span>
+                  </div>
+                ))}
+                {data.local_models.truncated && <p className="text-xs text-amber-200">文件较多，仅显示前 100 个。</p>}
+              </div>
+            ) : (
+              <p className="mt-3 rounded-lg bg-white/[0.04] p-3 text-sm text-white/55">目前没有发现模型文件。以后可以把已取得的模型文件放入上方目录，软件会在这里识别。</p>
+            )}
+            <p className="mt-3 text-xs leading-5 text-white/45">{data.local_models.note}</p>
           </section>
 
           <section className={panel}>
