@@ -11,6 +11,7 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         for marker in (
             "Get-ArchiveEntries", "Get-ExtractedEvidence", "Get-FileHash",
             "MaximumEntries", "MaximumEvidenceFiles", "MaximumMetadataBytes",
+            "maximumListingLines", "System.Collections.Generic.List[string]",
             "MaximumLicenseBytes", "MaximumTotalEvidenceBytes", "skipped_total_evidence_limit", "license_review_status = \"pending\"",
             "distribution_approved = $false", "audit_status = \"pending\"",
             "runtime_files", "finally", "Remove-Item -LiteralPath $temporaryRoot",
