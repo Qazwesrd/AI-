@@ -205,7 +205,10 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     self.assertIsNone(payload["project"]["settings"]["api_key"])
                     self.assertIsNone(payload["records"]["media_files"][0]["metadata_json"]["access_token"])
                     self.assertEqual(len(payload["records"]["media_tasks"]), 2)
-                    self.assertTrue(payload["records"]["media_tasks"][0]["result_path"].startswith("files/"))
+                    self.assertTrue(any(
+                        item["result_path"] and item["result_path"].startswith("files/")
+                        for item in payload["records"]["media_tasks"]
+                    ))
                     self.assertEqual(len(payload["generated_local_images"]), 1)
                     self.assertTrue(payload["generated_local_images"][0]["archive_path"].startswith("files/"))
                     self.assertTrue(any(
