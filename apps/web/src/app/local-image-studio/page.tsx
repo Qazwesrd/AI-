@@ -24,7 +24,7 @@ type ConsistencyResult = {
 
 function parseProfileLines(value: string): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const line of value.split(/\\r?\\n/)) {
+  for (const line of value.split(/\r?\n/)) {
     const match = line.match(/^\\s*(\\d+)\\s*[=:：]\\s*(.+)\\s*$/);
     if (match) result[match[1]] = match[2].trim();
   }
@@ -35,12 +35,12 @@ function formatProfileLines(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   return Object.entries(value as Record<string, unknown>)
     .map(([id, description]) => typeof description === "string" ? `${id}：${description}` : "")
-    .filter(Boolean).join("\\n");
+    .filter(Boolean).join("\n");
 }
 
 function parseCostumeProfiles(value: string): Record<string, Record<string, string>> {
   const result: Record<string, Record<string, string>> = {};
-  for (const line of value.split(/\\r?\\n/)) {
+  for (const line of value.split(/\r?\n/)) {
     const [characterId, variantId, ...description] = line.split("|");
     if (/^\\d+$/.test((characterId || "").trim()) && /^[A-Za-z0-9_-]{1,40}$/.test((variantId || "").trim()) && description.join("|").trim()) {
       const id = String(Number(characterId.trim()));
@@ -57,12 +57,12 @@ function formatCostumeProfiles(value: unknown): string {
     variants && typeof variants === "object" && !Array.isArray(variants)
       ? Object.entries(variants as Record<string, unknown>).map(([variantId, description]) =>
           typeof description === "string" ? `${characterId}|${variantId}|${description}` : "")
-      : []).filter(Boolean).join("\\n");
+      : []).filter(Boolean).join("\n");
 }
 
 function parseShotCostumes(value: string): Record<string, Record<string, string>> {
   const result: Record<string, Record<string, string>> = {};
-  for (const line of value.split(/\\r?\\n/)) {
+  for (const line of value.split(/\r?\n/)) {
     const [shotId, characterId, variantId] = line.split("|").map((part) => part.trim());
     if (/^\\d+$/.test(shotId || "") && /^\\d+$/.test(characterId || "") && /^[A-Za-z0-9_-]{1,40}$/.test(variantId || "")) {
       const id = String(Number(shotId));
@@ -79,12 +79,12 @@ function formatShotCostumes(value: unknown): string {
     assignments && typeof assignments === "object" && !Array.isArray(assignments)
       ? Object.entries(assignments as Record<string, unknown>).map(([characterId, variantId]) =>
           typeof variantId === "string" ? `${shotId}|${characterId}|${variantId}` : "")
-      : []).filter(Boolean).join("\\n");
+      : []).filter(Boolean).join("\n");
 }
 
 function parseReferenceBindings(value: string): Record<string, number> {
   const result: Record<string, number> = {};
-  for (const line of value.split(/\\r?\\n/)) {
+  for (const line of value.split(/\r?\n/)) {
     const [assetId, mediaId] = line.split("|").map((part) => part.trim());
     if (/^\\d+$/.test(assetId || "") && /^\\d+$/.test(mediaId || "")) result[String(Number(assetId))] = Number(mediaId);
   }
@@ -95,7 +95,7 @@ function formatReferenceBindings(value: unknown): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   return Object.entries(value as Record<string, unknown>)
     .map(([assetId, mediaId]) => typeof mediaId === "number" ? `${assetId}|${mediaId}` : "")
-    .filter(Boolean).join("\\n");
+    .filter(Boolean).join("\n");
 }
 
 function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
@@ -194,7 +194,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     </label>
     <div className="grid gap-3 md:grid-cols-3">
       <label className="block text-sm text-white/70">角色外观档案
-        <textarea value={characters} onChange={(event) => setCharacters(event.target.value)} rows={5} placeholder={"每行一条：素材编号：固定外观描述\\n例如：12：银色长发，蓝色眼睛，白金圣衣"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+        <textarea value={characters} onChange={(event) => setCharacters(event.target.value)} rows={5} placeholder={"每行一条：素材编号：固定外观描述\n例如：12：银色长发，蓝色眼睛，白金圣衣"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
       <label className="block text-sm text-white/70">场景外观档案
         <textarea value={scenes} onChange={(event) => setScenes(event.target.value)} rows={5} placeholder={"每行一条：场景素材编号：固定场景描述"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
@@ -205,10 +205,10 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     </div>
     <div className="grid gap-3 md:grid-cols-2">
       <label className="block text-sm text-white/70">圣衣/服装版本档案
-        <textarea value={costumes} onChange={(event) => setCostumes(event.target.value)} rows={5} placeholder={"每行：角色编号|版本编号|外观描述\\n例如：12|gold_cloth|金色黄金圣衣，胸甲与肩甲细节固定"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+        <textarea value={costumes} onChange={(event) => setCostumes(event.target.value)} rows={5} placeholder={"每行：角色编号|版本编号|外观描述\n例如：12|gold_cloth|金色黄金圣衣，胸甲与肩甲细节固定"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
       <label className="block text-sm text-white/70">分镜指定服装版本
-        <textarea value={shotCostumes} onChange={(event) => setShotCostumes(event.target.value)} rows={5} placeholder={"每行：分镜编号|角色编号|版本编号\\n例如：205|12|gold_cloth"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+        <textarea value={shotCostumes} onChange={(event) => setShotCostumes(event.target.value)} rows={5} placeholder={"每行：分镜编号|角色编号|版本编号\n例如：205|12|gold_cloth"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
       </label>
     </div>
     <div className="grid gap-3 md:grid-cols-3">
