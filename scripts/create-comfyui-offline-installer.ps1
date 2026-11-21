@@ -3,7 +3,8 @@ param(
     [string]$SetupExe,
     [string]$OutputZip,
     [switch]$SkipBuild,
-    [switch]$Force
+    [switch]$Force,
+    [long]$PartSizeBytes = 1800000000
 )
 
 $ErrorActionPreference = "Stop"
@@ -101,10 +102,30 @@ if (!(Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
     throw "ZIP SHA-256 校验文件缺失。"
 }
 
+$splitScript = Join-Path $PSScriptRoot "split-offline-bundle.ps1"
+if (!(Test-Path -LiteralPath $splitScript -PathType Leaf)) {
+    throw "缺少离线套件分卷脚本：$splitScript"
+}
+Write-Host "正在把完整离线 ZIP 拆分为低于 2 GB 的下载分卷，并生成逐卷 SHA-256 清单。"
+& $splitScript -InputZip $OutputZip -PartSizeBytes $PartSizeBytes
+$partsManifest = "$OutputZip.parts.json"
+$joinerTool = Join-Path $outputDirectory "AI漫剧制作大师-离线套件合并工具.ps1"
+if (!(Test-Path -LiteralPath $partsManifest -PathType Leaf) -or !(Test-Path -LiteralPath $joinerTool -PathType Leaf)) {
+    throw "分卷清单或自动合并工具缺失，拒绝报告套件准备完成。"
+}
+$partFiles = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$([IO.Path]::GetFileName($OutputZip)).part*")
+if ($partFiles.Count -lt 1 -or @($partFiles | Where-Object { $_.Length -gt 1900000000 }).Count -gt 0) {
+    throw "离线套件分卷数量或单卷大小校验失败。"
+}
+
 Write-Host ""
 Write-Host "完整离线安装套件制作完成："
 Write-Host $OutputZip
 Write-Host ("文件大小：{0:N2} GiB" -f ($zip.Length / 1GB))
 Write-Host "SHA-256："
 Get-Content -LiteralPath $checksumPath
-Write-Host "下一步：将 ZIP 完整解压，再双击其中的 Setup.exe。不要单独移动 Setup.exe。"
+Write-Host ("分卷数量：{0}" -f $partFiles.Count)
+Write-Host ("分卷清单：{0}" -f $partsManifest)
+Write-Host ("合并工具：{0}" -f $joinerTool)
+Write-Host "分发时上传全部 .part 分卷、.parts.json 清单和合并工具；完整 ZIP 本身不要作为单个 Release 附件上传。"
+Write-Host "用户下载全部文件后，运行合并工具并选择 .parts.json 清单；校验通过后再解压 ZIP 并运行 Setup.exe。"
