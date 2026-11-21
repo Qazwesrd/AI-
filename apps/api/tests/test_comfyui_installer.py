@@ -85,7 +85,13 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
                     "digest": "sha256:not-a-real-digest",
                 },
                 {
-                    "name": "ComfyUI_windows_portable_nvidia_arm64.7z",\n                    "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/ComfyUI_windows_portable_nvidia_arm64.7z",\n                    "size": 456,\n                    "digest": "sha256:" + "b" * 64,\n                },\n                {\n                    "name": "malicious.exe",
+                    "name": "ComfyUI_windows_portable_nvidia_arm64.7z",
+                    "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/ComfyUI_windows_portable_nvidia_arm64.7z",
+                    "size": 456,
+                    "digest": "sha256:" + "b" * 64,
+                },
+                {
+                    "name": "malicious.exe",
                     "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/malicious.exe",
                     "size": 100,
                 },
