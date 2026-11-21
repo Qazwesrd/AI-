@@ -12,15 +12,15 @@ Run in PowerShell after obtaining the official portable archives and the matchin
 
 ```powershell
 $archives = @(
-  "D:\\ComfyUI\\ComfyUI_windows_portable_nvidia.7z",
-  "D:\\ComfyUI\\ComfyUI_windows_portable_nvidia_cu126.7z",
-  "D:\\ComfyUI\\ComfyUI_windows_portable_amd.7z",
-  "D:\\ComfyUI\\ComfyUI_windows_portable_intel.7z"
+  "D:\ComfyUI\ComfyUI_windows_portable_nvidia.7z",
+  "D:\ComfyUI\ComfyUI_windows_portable_nvidia_cu126.7z",
+  "D:\ComfyUI\ComfyUI_windows_portable_amd.7z",
+  "D:\ComfyUI\ComfyUI_windows_portable_intel.7z"
 )
 
-.\\scripts\\audit-comfyui-portable-dependencies.ps1 `
-  -SevenZipPath "D:\\ComfyUI\\7zr.exe" `
-  -OutputPath "D:\\ComfyUI\\dependency-inventory.json" `
+.\scripts\audit-comfyui-portable-dependencies.ps1 `
+  -SevenZipPath "D:\ComfyUI\7zr.exe" `
+  -OutputPath "D:\ComfyUI\dependency-inventory.json" `
   -ReleaseTag "PUT-THE-VERIFIED-COMFYUI-RELEASE-TAG-HERE" `
   -ArchivePaths $archives
 ```
