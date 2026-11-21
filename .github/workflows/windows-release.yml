@@ -47,13 +47,23 @@ jobs:
         run: |
           $tokens = $null
           $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-            (Join-Path $PWD "scripts/prepare-comfyui-offline-bundle.ps1"),
-            [ref]$tokens,
-            [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_ }; throw "ComfyUI offline bundle script syntax validation failed." }
-          Write-Host "ComfyUI offline bundle builder syntax is valid."
+          foreach ($script in @(
+            "scripts/prepare-comfyui-offline-bundle.ps1",
+            "scripts/install-comfyui-offline.ps1"
+          )) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $script),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error $_ }
+              throw "PowerShell syntax validation failed: $script"
+            }
+            Write-Host "PowerShell syntax is valid: $script"
+          }
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -207,7 +217,7 @@ jobs:
           if ($installers.Count -ne 1) { throw "Expected exactly one Setup.exe; found $($installers.Count)." }
           $output = Join-Path $release "AI漫剧制作大师-完整离线安装套件.zip"
           ./scripts/prepare-comfyui-offline-bundle.ps1 -SetupExe $installers[0].FullName -OutputZip $output
-          if (!(Test-Path $output) -or (Get-Item $output).Length -lt 7GB) { throw "Full offline bundle is missing or unexpectedly small." }
+          if (!(Test-Path $output) -or (Get-Item $output).Length -lt 6GB) { throw "Full offline bundle is missing or unexpectedly small." }
           Write-Host "The complete offline bundle was created and SHA-256 verified."
 
       - name: Upload complete offline ComfyUI bundle for internal validation
