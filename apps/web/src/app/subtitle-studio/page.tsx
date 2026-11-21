@@ -71,7 +71,8 @@ export default function SubtitleStudioPage() {
             <a className="rounded-lg border border-purple-300/30 px-3 py-2" href="/video-editor">返回 AI 视频剪辑中心</a>
             <button onClick={() => void loadFiles()} className="rounded-lg border border-purple-300/30 px-3 py-2">刷新素材库</button>
           </div>
-        </header>
+        <p className="mt-3 text-xs text-white/55">严格零费用模式：云端字幕翻译与 TTS API 已拦截。可通过网页 AI 工具手动准备翻译内容，再导入字幕；本页的本地字幕格式处理与 FFmpeg 烧录仍可使用。</p>
+      </header>
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">素材与 AI 设置</h2>
@@ -118,12 +119,12 @@ export default function SubtitleStudioPage() {
           <select value={language} onChange={e => setLanguage(e.target.value)} className="mt-2 w-full max-w-md rounded-lg border border-white/15 bg-black/30 p-3">
             <option value="zh">翻译为简体中文</option><option value="en">Translate to English</option><option value="zh-en">中英双语（每条两行）</option>
           </select>
-          <button disabled={busy || !subtitlePath || !model.trim()} onClick={() => void run(subtitlePath,"/api/subtitle-tools/translate",{provider,model,target_language:language,confirm_paid:confirmPaid},d=>setSubtitlePath(d.path))} className="mt-4 rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-40">翻译并保存新字幕</button>
+          <a href="/ai-tools" className="mt-4 inline-flex rounded-xl border border-purple-300/30 bg-purple-950/40 px-5 py-3 font-semibold text-purple-100">前往网页 AI 工具准备字幕翻译</a>
           <p className="mt-2 text-xs text-white/45">原字幕不会被覆盖；系统会校验翻译条数和编号，保持原开始/结束时间及顺序。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">多语言逐句配音</h2>
-          <button disabled={busy || !subtitlePath || !voiceModel.trim()} onClick={() => void run(subtitlePath,"/api/subtitle-tools/voice",{provider,model:voiceModel,voice,confirm_paid:confirmPaid},d=>setMessage(d.message))} className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold disabled:opacity-40">生成配音并按时间轴合成</button>
+          <button type="button" disabled title="严格零费用模式已拦截云端 TTS；本地离线 TTS 尚待接入。" className="rounded-xl border border-indigo-300/20 bg-indigo-950/30 px-5 py-3 font-semibold text-indigo-100/60 cursor-not-allowed">本地离线配音引擎待接入</button>
           <p className="mt-2 text-xs text-white/45">每条字幕单独生成语音，并按字幕起止时间定位；若台词过长、需要超过 2 倍语速才能放入时间窗，系统会停止而不是直接截断台词。重复任务会优先复用已有结果，避免重复调用。</p>
         </section>
         <section className={panel}>
