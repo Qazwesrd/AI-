@@ -115,6 +115,22 @@ class UnifiedTaskStatusTests(unittest.TestCase):
             control_unified_task("media", 4, "cancel", db=object())
         self.assertEqual(raised.exception.status_code, 409)
 
+    def test_unified_local_render_refresh_returns_saved_progress_without_provider_call(self):
+        task = Mock(
+            task_type="local_render",
+            status="processing",
+            result_data={"progress": {"percent": 54.5, "stage": "rendering"}},
+            result_path="",
+            error=None,
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        result = control_unified_task("media", 91, "refresh", db=db)
+        self.assertEqual(result["status"], "processing")
+        self.assertEqual(result["progress"], 54.5)
+        self.assertEqual(result["stage"], "rendering")
+        self.assertFalse(result["result_available"])
+
     def test_analysis_retry_requires_explicit_provider_reconciliation(self):
         job = Mock(
             status="interrupted_unknown",
