@@ -132,6 +132,14 @@ try {
         }
         $modelBytes += [long]$file.size_bytes
     }
+    $payloadModelsRoot = Join-Path $payload "models"
+    $actualModelPaths = @(Get-ChildItem -LiteralPath $payloadModelsRoot -File -Recurse -Force | ForEach-Object {
+        "models/" + $_.FullName.Substring($payloadModelsRoot.Length).TrimStart("\", "/").Replace("\", "/")
+    } | Sort-Object)
+    $expectedModelPaths = @($modelFiles | ForEach-Object { [string]$_.path } | Sort-Object)
+    if (@(Compare-Object -ReferenceObject $actualModelPaths -DifferenceObject $expectedModelPaths).Count -gt 0) {
+        throw "本地 AI 模型目录包含未登记或缺失的文件，拒绝安装。"
+    }
 
     $modelManifestPath = Resolve-SafeRelativePath $payload ([string]$manifest.model.manifest_path)
     if (!(Test-Path -LiteralPath $modelManifestPath -PathType Leaf) -or
