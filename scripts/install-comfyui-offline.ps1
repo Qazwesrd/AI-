@@ -16,7 +16,7 @@ function Get-GpuVendor($Adapter) {
     $pnp = [string]$Adapter.PNPDeviceID
     $name = [string]$Adapter.Name
     if ($pnp -match "VEN_10DE" -or $name -match "(?i)NVIDIA|GeForce|Quadro") { return "NVIDIA" }
-    if ($pnp -match "VEN_1002|VEN_1022" -or $name -match "(?i)AMD|Radeon") { return "AMD" }
+    if ($pnp -match "VEN_1002" -or $name -match "(?i)AMD|Radeon") { return "AMD" }
     if ($pnp -match "VEN_8086" -or $name -match "(?i)Intel|Arc Graphics") { return "Intel" }
     return "unknown"
 }
@@ -37,7 +37,7 @@ function Select-ComfyAsset($Adapters) {
     $nvidia = @($recognized | Where-Object Vendor -eq "NVIDIA")
     if ($nvidia.Count -gt 0) {
         $model = $nvidia[0].Name
-        $match = [regex]::Match($model, "(?i)(?:GTX|GeForce)\s*([0-9]{3,4})")
+        $match = [regex]::Match($model, "(?i)GTX\s*([0-9]{3,4})")
         if ($match.Success -and [int]$match.Groups[1].Value -le 1099) {
             return @{
                 name = "ComfyUI_windows_portable_nvidia_cu126.7z"
