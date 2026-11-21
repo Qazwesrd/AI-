@@ -76,7 +76,7 @@ if (!(Test-Path -LiteralPath $localAIBuilder -PathType Leaf)) {
 $localAIPayloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-local-ai-payload-" + [Guid]::NewGuid().ToString("N"))
 try {
     Write-Host "第 2/3 步：下载并验证 Ollama 官方运行环境，准备 Qwen3 4B 本地模型离线载荷。"
-    Write-Host "此步骤会准备约 4 GiB 本地 AI 资源，并需要额外临时空间；不会安装到当前电脑。"
+    Write-Host "此步骤会准备约 4 GiB 本地 AI 资源。若临时盘与输出盘是同一磁盘，建议开始前至少预留 18 GiB 可用空间；不会安装到当前电脑。"
     & $localAIBuilder -OutputDirectory $localAIPayloadRoot
     if (!(Test-Path -LiteralPath (Join-Path $localAIPayloadRoot "manifest.json") -PathType Leaf)) {
         throw "本地 AI 离线载荷构建未生成有效 manifest。"
