@@ -2608,12 +2608,15 @@ def get_local_render_job(task_id: int, db: Session = Depends(get_db)):
     ).first()
     if not task:
         raise HTTPException(404, "本地渲染任务不存在")
-    if task.status == "processing":
+    if task.status in ("queued", "processing"):
         with _LOCAL_RENDER_LOCK:
             running_here = task_id in _LOCAL_RENDER_RUNTIME
         if not running_here:
             task.status = "interrupted_unknown"
-            task.error = "应用重启或执行进程丢失；已保留任务记录和部分输出，未自动重新渲染。请检查部分文件后手动新建任务。"
+            task.error = (
+                "应用重启或执行进程丢失；已保留任务记录和部分输出，未自动重新渲染。"
+                "请检查部分文件后手动新建任务。"
+            )
             task.updated_at = datetime.utcnow()
             db.commit()
     return {
