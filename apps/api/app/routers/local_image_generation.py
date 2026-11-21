@@ -35,6 +35,12 @@ STYLE_GUIDANCE = {
 }
 
 
+class LocalImageArchiveInput(BaseModel):
+    filename: str = Field(min_length=1, max_length=240)
+    subfolder: str = Field(default="", max_length=240)
+    type: Literal["output"] = "output"
+
+
 class LocalImageGenerateInput(BaseModel):
     checkpoint: str = Field(min_length=1, max_length=240)
     prompt: str = Field(min_length=3, max_length=6000)
@@ -221,7 +227,7 @@ def _safe_output_image(image: dict):
         or len(subfolder) > 240
         or (subfolder and (
             subfolder.startswith("/")
-            or "\\\\" in subfolder
+            or "\\" in subfolder
             or ":" in subfolder
             or "//" in subfolder
             or any(part in ("", ".", "..") for part in subfolder.split("/"))
@@ -266,18 +272,13 @@ def _download_comfyui_output(filename: str, subfolder: str):
 @router.post("/tasks/{prompt_id}/archive")
 def archive_local_image_task_output(
     prompt_id: str,
-    data: dict,
+    data: LocalImageArchiveInput,
     db: Session = Depends(get_db),
 ):
     """Archive one explicitly selected completed ComfyUI output into the local media library."""
     if not PROMPT_ID_RE.fullmatch(prompt_id):
         raise HTTPException(400, "任务编号格式无效")
-    filename = data.get("filename") if isinstance(data, dict) else None
-    subfolder = data.get("subfolder", "") if isinstance(data, dict) else ""
-    requested_type = data.get("type", "output") if isinstance(data, dict) else None
-    selected_filename, selected_subfolder, _ = _safe_output_image({
-        "filename": filename, "subfolder": subfolder, "type": requested_type,
-    })
+    selected_filename, selected_subfolder, _ = _safe_output_image(data.model_dump())
     history = _local_request("/history/" + prompt_id, timeout=5.0)
     item = history.get(prompt_id)
     if not isinstance(item, dict):
