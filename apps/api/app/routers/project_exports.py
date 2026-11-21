@@ -30,8 +30,7 @@ from app.models.story import (
     StoryboardShot,
     StoryProject,
 )
-from app.models.studio import ImageTask
-from app.models.visual import VisualAsset
+from app.models.visual import ImageTask, VisualAsset
 from app.services.media_service import safe_storage_file
 
 router = APIRouter(prefix="/api/story/projects", tags=["项目归档导出"])
