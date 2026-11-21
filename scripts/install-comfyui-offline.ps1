@@ -409,9 +409,14 @@ try {
     # From this point the destination belongs to this installation attempt. If any
     # post-move step fails, remove only this newly-created destination so a later
     # retry is not blocked by a half-installed directory.
-    $deploymentOwned = $true
+    $deploymentOwned = $false
     try {
+        # Claim ownership only after the directory move has succeeded. If another
+        # process creates the destination between the earlier existence check and
+        # this move, Move-Item must fail without granting this attempt permission
+        # to delete that concurrently-created directory.
         Move-Item -LiteralPath $portableRoot -Destination $installFullPath
+        $deploymentOwned = $true
 
         # Provide an explicit CPU launcher for integrated/unsupported GPU devices.
         # This follows the official ComfyUI portable CPU invocation and does not
