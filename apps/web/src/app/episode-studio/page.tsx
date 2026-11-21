@@ -104,6 +104,7 @@ export default function EpisodeReadinessPage() {
     task_id: number; status: string;
     progress?: { percent?: number; stage?: string; phase?: number; phase_count?: number };
     result?: { output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } };
+    partial_output?: string | null;
     error?: string;
   } | null>(null);
   const [syncReport, setSyncReport] = useState<{ status?: string; metadata_only?: boolean; audio_video_start_offset_seconds?: number | null; audio_video_duration_delta_seconds?: number | null; warnings?: string[]; note?: string } | null>(null);
@@ -708,6 +709,7 @@ export default function EpisodeReadinessPage() {
                     <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${Math.max(0, Math.min(100, episodeRenderJob.progress?.percent || 0))}%` }} />
                   </div>
                   {episodeRenderJob.error && <p className="mt-2 break-words text-xs text-rose-200">{episodeRenderJob.error}</p>}
+                  {episodeRenderJob.partial_output && <p className="mt-2 break-all text-xs text-amber-200">中断时保留的部分文件：{episodeRenderJob.partial_output}（未验证为可播放成片）</p>}
                 </div>
               )}
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
