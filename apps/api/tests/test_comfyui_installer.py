@@ -319,5 +319,103 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
             self.assertEqual(module._DOWNLOAD_TASKS[task_id]["status"], "cancelled")
             module._DOWNLOAD_TASKS.pop(task_id, None)
 
+
+    def test_download_task_history_persists_and_restores_interrupted_tasks(self):
+        import json
+        import tempfile
+        import threading
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.routers import comfyui_installer as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / ".installer_state" / "download_tasks.json"
+            task_id = "a" * 32
+            task = {
+                "task_id": task_id,
+                "status": "downloading",
+                "asset_name": "ComfyUI_windows_portable_nvidia.7z",
+                "version": "v-test",
+                "received_bytes": 40,
+                "total_bytes": 100,
+                "percent": 40,
+                "error": None,
+                "cancel_event": threading.Event(),
+            }
+            with patch.object(module, "_download_state_file", return_value=state_file):
+                with module._DOWNLOAD_TASKS_LOCK:
+                    module._DOWNLOAD_TASKS.clear()
+                    module._DOWNLOAD_TASKS[task_id] = task
+                    module._persist_download_tasks_locked()
+                saved = json.loads(state_file.read_text(encoding="utf-8"))
+                self.assertEqual(saved["schema_version"], 1)
+                self.assertNotIn("cancel_event", saved["tasks"][0])
+                with module._DOWNLOAD_TASKS_LOCK:
+                    module._DOWNLOAD_TASKS.clear()
+                module._restore_download_tasks()
+                with module._DOWNLOAD_TASKS_LOCK:
+                    restored = module._DOWNLOAD_TASKS[task_id]
+                    self.assertEqual(restored["status"], "interrupted")
+                    self.assertEqual(restored["received_bytes"], 40)
+                    self.assertIn("没有自动续传", restored["error"])
+                    module._DOWNLOAD_TASKS.clear()
+
+    def test_download_task_restore_keeps_verified_history_and_ignores_bad_records(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.routers import comfyui_installer as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_file = Path(tmp) / "download_tasks.json"
+            task_id = "b" * 32
+            state_file.write_text(json.dumps({
+                "schema_version": 1,
+                "tasks": [
+                    {
+                        "task_id": task_id,
+                        "status": "verified",
+                        "asset_name": "ComfyUI_windows_portable_amd.7z",
+                        "version": "v-test",
+                        "received_bytes": 100,
+                        "total_bytes": 100,
+                        "percent": 100,
+                        "error": None,
+                    },
+                    {"task_id": "../../bad", "status": "verified"},
+                ],
+            }), encoding="utf-8")
+            with patch.object(module, "_download_state_file", return_value=state_file):
+                with module._DOWNLOAD_TASKS_LOCK:
+                    module._DOWNLOAD_TASKS.clear()
+                module._restore_download_tasks()
+                with module._DOWNLOAD_TASKS_LOCK:
+                    self.assertEqual(list(module._DOWNLOAD_TASKS), [task_id])
+                    self.assertEqual(module._DOWNLOAD_TASKS[task_id]["status"], "verified")
+                    module._DOWNLOAD_TASKS.clear()
+
+    def test_download_task_state_rejects_symlinked_state_directory(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        from app.routers import comfyui_installer as module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            real_dir = base / "real"
+            real_dir.mkdir()
+            link_dir = base / ".installer_state"
+            try:
+                link_dir.symlink_to(real_dir, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlink creation is unavailable on this platform")
+            state_file = link_dir / "download_tasks.json"
+            with patch.object(module, "_download_state_file", return_value=state_file):
+                with self.assertRaises(OSError):
+                    with module._DOWNLOAD_TASKS_LOCK:
+                        module._DOWNLOAD_TASKS.clear()
+                        module._persist_download_tasks_locked()
+
 if __name__ == "__main__":
     unittest.main()
