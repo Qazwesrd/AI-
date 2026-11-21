@@ -174,7 +174,8 @@ try {
     foreach ($archivePath in $archivePaths) {
         Copy-Item -LiteralPath $archivePath -Destination $payloadRoot
     }
-    Copy-Item -LiteralPath $sevenZip -Destination $payloadRoot
+    $sevenZipPayload = Join-Path $payloadRoot "7zr.exe"
+    Copy-Item -LiteralPath $sevenZip -Destination $sevenZipPayload
     $comfyLicenseRelative = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
     $sevenZipLicenseRelative = "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt"
     $sevenZipSourceRelative = "THIRD_PARTY_NOTICES/7z-source-fixture.7z"
@@ -184,6 +185,7 @@ try {
     Write-Utf8 $sourceArchive "fixture 7-Zip source archive"
     $sourceHash = Get-Sha256 $sourceArchive
     $fixtureComfyVersion = "fixture-v1.0.0"
+    $fixtureSevenZipVersion = "fixture-7zip-v1.0.0"
     $manifestAssets = @()
     foreach ($name in $assetNames) {
         $assetPath = Join-Path $payloadRoot $name
@@ -206,16 +208,16 @@ try {
         assets = $manifestAssets
         license = @{ license_file = $comfyLicenseRelative }
         seven_zip = @{
-            version = $release.tag_name
+            version = $fixtureSevenZipVersion
             license_file = $sevenZipLicenseRelative
             source_archive = $sevenZipSourceRelative
             source_sha256 = $sourceHash
         }
         tools = @(@{
             name = "7zr.exe"
-            source = $asset.browser_download_url
-            sha256 = $expectedHash
-            size_bytes = [long]$asset.size
+            source = "https://github.com/ip7z/7zip/releases/download/$fixtureSevenZipVersion/7zr.exe"
+            sha256 = Get-Sha256 $sevenZip
+            size_bytes = [long](Get-Item -LiteralPath $sevenZip).Length
             verified = $true
         })
     }
