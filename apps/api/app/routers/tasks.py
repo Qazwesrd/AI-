@@ -540,9 +540,11 @@ def control_unified_task(
         return handler(task_id, db)
 
     if source == "media":
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if not task:
+            raise HTTPException(404, "媒体任务不存在")
         if action == "retry":
-            task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-            if not task or task.task_type not in ("speech", "episode_speech"):
+            if task.task_type not in ("speech", "episode_speech"):
                 raise HTTPException(409, "只有独立配音或分镜对白配音任务支持人工核实后重新生成")
             if task.status not in ("submission_unknown", "interrupted_unknown", "submitting"):
                 raise HTTPException(409, "只有提交结果不确定的配音任务需要人工核实")
@@ -571,7 +573,7 @@ def control_unified_task(
         if action != "refresh":
             raise HTTPException(
                 409,
-                "媒体任务暂不支持本地强制暂停或取消；视频请刷新远程状态，配音任务请走人工核实流程",
+                "媒体任务暂不支持本地强制暂停或取消；图片/视频任务请刷新状态，配音任务请走人工核实流程",
             )
         if task.task_type in ("local_image_batch", "local_image_reference"):
             metadata = task.request_data if isinstance(task.request_data, dict) else {}
