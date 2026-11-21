@@ -16,6 +16,7 @@ from app.models.story import (
     StoryProject,
 )
 from app.models.visual import ImageTask, VisualAsset
+from app.routers.project_exports import _safe_comfyui_output_file
 from app.services.media_service import safe_storage_file
 
 router = APIRouter(prefix="/api/story/projects", tags=["漫剧生产链路检查"])
@@ -102,9 +103,10 @@ def build_production_readiness_report(project_id: int, db: Session):
                     final_outputs_by_episode.setdefault(episode_id, []).append(media)
     shot_ids = {item.id for item in shots}
     media_tasks = db.query(MediaTask).filter(
-        MediaTask.task_type.in_(["storyboard_video", "episode_speech_track"])
+        MediaTask.task_type.in_(["storyboard_video", "episode_speech_track", "local_image_batch", "local_image_reference"])
     ).all()
     video_tasks_by_shot = {}
+    image_tasks_by_shot = {}
     speech_tracks_by_episode = {}
     episode_id_set = set(episode_ids)
     for task in media_tasks:
@@ -118,6 +120,8 @@ def build_production_readiness_report(project_id: int, db: Session):
             video_tasks_by_shot.setdefault(task_shot_id, []).append(task)
         elif task.task_type == "episode_speech_track" and task_episode_id in episode_id_set:
             speech_tracks_by_episode.setdefault(task_episode_id, []).append(task)
+        elif task.task_type in {"local_image_batch", "local_image_reference"} and task_episode_id in episode_id_set and task_shot_id in shot_ids:
+            image_tasks_by_shot.setdefault(task_shot_id, []).append(task)
     links_by_shot = {}
     for link in media_links:
         links_by_shot.setdefault(link.shot_id, []).append(link)
@@ -235,6 +239,18 @@ def build_production_readiness_report(project_id: int, db: Session):
                 for asset_id in referenced_asset_ids
                 for task in image_tasks_by_asset.get(asset_id, [])
             )
+        if not linked_image:
+            for image_task in image_tasks_by_shot.get(shot.id, []):
+                result_data = image_task.result_data if isinstance(image_task.result_data, dict) else {}
+                images = result_data.get("images") if isinstance(result_data.get("images"), list) else []
+                if image_task.status == "completed" and any(
+                    isinstance(image, dict)
+                    and image.get("type", "output") == "output"
+                    and _safe_comfyui_output_file(image.get("filename"), image.get("subfolder", "")) is not None
+                    for image in images
+                ):
+                    linked_image = True
+                    break
         for task in video_tasks_by_shot.get(shot.id, []):
             if task.status == "completed" and task.result_path:
                 task_file_state = _local_file_state(task.result_path)
