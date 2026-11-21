@@ -20,7 +20,7 @@ class StoryboardReferenceCostumeTests(unittest.TestCase):
 
     def test_invalid_costume_variant_identifier_is_rejected(self):
         with self.assertRaises(ValueError):
-            StoryboardConsistencyInput(costume_profiles={"1": {"黄金圣衣/版本": "金色圣衣"}})
+            StoryboardConsistencyInput(costume_profiles={"1": {"战斗服/版本": "红色战斗服"}})
 
     def test_prompt_contains_selected_costume_and_reference_asset(self):
         shot = StoryboardShot()
@@ -30,14 +30,14 @@ class StoryboardReferenceCostumeTests(unittest.TestCase):
         shot.scene_asset_id = 2
         shot.prop_ids = []
         profile = {
-            "costume_profiles": {"1": {"battle-suit": "金色黄金圣衣，胸甲和肩甲固定"}},
+            "costume_profiles": {"1": {"battle-suit": "红色战斗服，胸甲和肩甲固定"}},
             "shot_costume_variants": {"205": {"1": "battle-suit"}},
             "character_reference_images": {"1": 88},
             "scene_reference_images": {"2": 99},
         }
         prompt = _consistency_prompt_for_shot(shot, profile)
         self.assertIn("battle-suit", prompt)
-        self.assertIn("金色黄金圣衣", prompt)
+        self.assertIn("红色战斗服", prompt)
         self.assertIn("本地素材库图片 #88", prompt)
         self.assertIn("本地素材库图片 #99", prompt)
 
