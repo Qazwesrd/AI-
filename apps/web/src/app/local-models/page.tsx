@@ -366,7 +366,7 @@ export default function LocalModelsPage() {
         </section>
 
         <section className="rounded-2xl border border-cyan-300/25 bg-slate-950/70 p-5">
-          <h2 className="text-xl font-semibold">一键安装本地创作模型</h2>
+          <h2 className="text-xl font-semibold">一键安装本地 AI 运行环境与创作模型</h2>
           <p className="mt-2 text-sm leading-6 text-white/60">推荐文字模型：Qwen3 4B（Q4_K_M，约 2.5 GB）。用于小说理解、剧本、人物设定、剧情分析、分镜和图片提示词；它本身不生成图片、视频或配音。</p>
           {installerInfo ? (
             <div className="mt-4 space-y-3">
@@ -392,10 +392,15 @@ export default function LocalModelsPage() {
               )}
               {installerInfo.job.status === "failed" && <p className="text-sm text-rose-200">{installerInfo.job.error || "下载失败，可重试。"}</p>}
               {installerInfo.job.status === "success" && <p className="text-sm text-emerald-200">模型下载并通过本机模型清单核验。可前往本地创作工作台测试。</p>}
+              {installerInfo.engine_status !== "ready" && hasDesktopInstaller && (
+                <button type="button" disabled={installingRuntime} onClick={() => void installOllamaRuntime()} className="rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
+                  {installingRuntime ? "正在安装本地 AI 环境…" : "一键安装运行环境和 Qwen3 4B 模型"}
+                </button>
+              )}
               <button type="button" disabled={installerInfo.engine_status !== "ready" || !installerInfo.enough_space || installerInfo.installed === true || ["downloading", "verifying"].includes(installerInfo.job.status) || installingBaseModel} onClick={() => void startBaseModelInstall()} className="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
                 {installerInfo.installed ? "模型已安装" : installingBaseModel ? "正在准备…" : "确认并下载 Qwen3 4B"}
               </button>
-              {installerInfo.engine_status !== "ready" && <p className="text-xs text-amber-100/80">尚未检测到 Ollama。点击上方的一键安装即可先安装官方运行环境，再自动安装配套创作模型。</p>}
+              {installerInfo.engine_status !== "ready" && <p className="text-xs text-amber-100/80">{hasDesktopInstaller ? "尚未检测到 Ollama。点击绿色按钮，一次确认后会依次安装官方运行环境和 Qwen3 4B 模型。" : "尚未检测到 Ollama。请使用 Windows 桌面安装版的一键安装功能；当前环境不能自动安装运行环境。"}</p>}
               {!installerInfo.enough_space && <p className="text-xs text-amber-100/80">可用空间不足，暂不能下载。至少需要 6 GiB 可用空间。</p>}
             </div>
           ) : <p className="mt-3 text-sm text-white/50">正在检查本地引擎和磁盘空间…</p>}
