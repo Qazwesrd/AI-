@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.media import MediaFile
+from app.models.media import MediaFile, MediaTask
 from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
@@ -75,6 +75,18 @@ def build_production_readiness_report(project_id: int, db: Session):
     media_ids = sorted({item.media_file_id for item in media_links})
     media_files = db.query(MediaFile).filter(MediaFile.id.in_(media_ids or [-1])).all()
     media_by_id = {item.id: item for item in media_files}
+    shot_ids = {item.id for item in shots}
+    media_tasks = db.query(MediaTask).filter(MediaTask.task_type == "storyboard_video").all()
+    video_tasks_by_shot = {}
+    for task in media_tasks:
+        metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        try:
+            task_episode_id = int(metadata.get("episode_id") or 0)
+            task_shot_id = int(metadata.get("shot_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if task_episode_id in set(episode_ids) and task_shot_id in shot_ids:
+            video_tasks_by_shot.setdefault(task_shot_id, []).append(task)
     links_by_shot = {}
     for link in media_links:
         links_by_shot.setdefault(link.shot_id, []).append(link)
@@ -170,6 +182,15 @@ def build_production_readiness_report(project_id: int, db: Session):
 
         linked_video = False
         linked_image = False
+        for task in video_tasks_by_shot.get(shot.id, []):
+            if task.status == "completed" and task.result_path:
+                task_file_state = _local_file_state(task.result_path)
+                if task_file_state["exists"]:
+                    linked_video = True
+                else:
+                    add_issue("warning", "shot_video_task_file_missing", f"镜头 #{shot.shot_number} 的已完成视频任务文件无法读取", shot.episode_id, shot.id)
+            elif task.status not in {"failed", "cancelled", "submission_unknown"}:
+                add_issue("warning", "shot_video_task_pending", f"镜头 #{shot.shot_number} 仍有视频任务未完成（{task.status}）", shot.episode_id, shot.id)
         for link in links_by_shot.get(shot.id, []):
             media = media_by_id.get(link.media_file_id)
             if media is None:
