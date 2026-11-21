@@ -1,15 +1,24 @@
-"""Curated, read-only image checkpoint catalog for the local ComfyUI workflow.
+"""Curated image checkpoint catalog and safe, metadata-only download preflight.
 
-Entries are pinned to an upstream revision and include a publisher-provided SHA-256.
-This module never contacts the network, downloads weights, or installs models.
+The preflight makes one HTTPS HEAD request to a pinned Hugging Face URL. It
+never follows redirects, downloads bytes, reserves disk blocks, or installs
+weights. Download remains disabled until all independent gates pass.
 """
-from fastapi import APIRouter
+import shutil
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/local-ai/images/model-catalog", tags=["本地图片模型清单"])
 
-# The upstream file page reports a rounded display size (2.13 GB), so size_bytes
-# intentionally remains null. The SHA-256 and revision are taken from the
-# Hugging Face file page, not calculated locally or inferred from file size.
+GIB = 1024 ** 3
+DISK_SAFETY_MARGIN_BYTES = GIB
+MAX_MODEL_BYTES = 20 * GIB
+_METADATA_TIMEOUT_SECONDS = 12
+
+
 _CATALOG = [
     {
         "id": "comfy-org-sd15-fp16",
@@ -37,7 +46,6 @@ _CATALOG = [
         "download_eligible": False,
         "install_eligible": False,
         "eligibility_blockers": [
-            "尚未取得并核验精确文件字节数（Content-Length）。",
             "尚未在本机完成下载后 SHA-256 复核。",
             "CreativeML OpenRAIL-M 商用及内容限制尚待逐项审核。",
             "尚未在目标 CPU-only 设备上完成 ComfyUI 实机性能测试。",
@@ -46,9 +54,8 @@ _CATALOG = [
 ]
 
 
-@router.get("")
 def list_image_model_catalog():
-    """Return pinned model metadata only; never download or install weights."""
+    """Return pinned model metadata only."""
     return {
         "status": "preview_only",
         "models": [dict(item) for item in _CATALOG],
@@ -58,5 +65,123 @@ def list_image_model_catalog():
         "installation_started": False,
         "download_available": False,
         "install_available": False,
-        "note": "这是经来源整理的预览清单。下载和安装功能均未开放。候选条目明确标记 download_eligible=false、install_eligible=false；必须先取得精确 Content-Length、完成本机 SHA-256 复核、审核许可证并通过目标设备实机测试。",
+        "note": "清单只展示候选模型。下载前必须完成精确文件大小预检、SHA-256 本机复核、许可证审核和目标设备实机测试。",
+    }
+
+
+@router.get("")
+def get_image_model_catalog():
+    return list_image_model_catalog()
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Do not follow Hub redirects; signed CDN URLs are not needed for HEAD.""" 
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _parse_positive_int(value):
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _head_pinned_file_metadata(url, opener=None):
+    # The catalog is static and pinned; never accept a URL from the request.
+    if not isinstance(url, str) or not url.startswith(
+        "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/"
+    ):
+        raise ValueError("模型来源地址不在固定白名单中")
+    request = Request(
+        url,
+        method="HEAD",
+        headers={"Accept-Encoding": "identity", "User-Agent": "AIComicStudio-model-preflight/1.0"},
+    )
+    client = opener or build_opener(_NoRedirectHandler())
+    try:
+        response = client.open(request, timeout=_METADATA_TIMEOUT_SECONDS)
+    except HTTPError as exc:
+        # Hugging Face commonly returns 302 with x-linked-size metadata.
+        if 300 <= exc.code < 400:
+            response = exc
+        else:
+            raise ValueError(f"模型源站返回 HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise ValueError("无法连接模型官方源站，未开始下载") from exc
+
+    with response:
+        headers = response.headers
+        if headers.get("Content-Encoding", "identity").lower() not in {"", "identity"}:
+            raise ValueError("源站返回了压缩元数据，无法安全确认原始文件大小")
+        size = _parse_positive_int(headers.get("X-Linked-Size"))
+        if size is None:
+            size = _parse_positive_int(headers.get("Content-Length"))
+        if size is None:
+            raise ValueError("源站未提供可验证的精确文件大小；本次预检失败关闭")
+        if size > MAX_MODEL_BYTES:
+            raise ValueError("文件超过本软件当前允许预检的 20 GiB 上限")
+        return {
+            "http_status": getattr(response, "status", None) or getattr(response, "code", None),
+            "size_bytes": size,
+            "etag_present": bool(headers.get("X-Linked-Etag") or headers.get("ETag")),
+            "sha256_header_present": bool(headers.get("X-Linked-Sha256")),
+        }
+
+
+def _existing_disk_probe_path(target: Path) -> Path:
+    candidate = target
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    if not candidate.exists() or not candidate.is_dir():
+        raise OSError("无法定位模型目标磁盘")
+    return candidate
+
+
+def _preflight_disk_space(target: Path, size_bytes: int):
+    probe = _existing_disk_probe_path(target)
+    usage = shutil.disk_usage(probe)
+    required = size_bytes + DISK_SAFETY_MARGIN_BYTES
+    return {
+        "target_directory": str(target),
+        "disk_probe_directory": str(probe),
+        "free_bytes": usage.free,
+        "required_bytes": required,
+        "sufficient": usage.free >= required,
+        "safety_margin_bytes": DISK_SAFETY_MARGIN_BYTES,
+    }
+
+
+@router.post("/{model_id}/preflight")
+def preflight_image_model_download(model_id: str):
+    """Check exact upstream size and local free space; never download."""
+    item = next((entry for entry in _CATALOG if entry["id"] == model_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="清单中不存在该模型")
+    target = Path.home() / "AIComicStudio" / "ComfyUI" / "ComfyUI" / "models" / "checkpoints"
+    try:
+        metadata = _head_pinned_file_metadata(item["download_url"])
+        disk = _preflight_disk_space(target, metadata["size_bytes"])
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    blockers = list(item["eligibility_blockers"])
+    if not disk["sufficient"]:
+        blockers.insert(0, "目标磁盘可用空间不足（已额外预留 1 GiB 安全余量）。")
+    return {
+        "model_id": model_id,
+        "preflight_status": "passed" if disk["sufficient"] else "insufficient_disk_space",
+        "upstream_size_bytes": metadata["size_bytes"],
+        "upstream_size_gib": round(metadata["size_bytes"] / GIB, 3),
+        "etag_present": metadata["etag_present"],
+        "publisher_sha256": item["sha256"],
+        "publisher_sha256_verified_locally": False,
+        "disk": disk,
+        "eligibility_blockers": blockers,
+        "download_allowed": False,
+        "download_started": False,
+        "installation_allowed": False,
+        "installation_started": False,
+        "message": "预检只读取源站文件元数据并检查本地磁盘空间，不会下载、占用磁盘空间或安装模型。",
     }
