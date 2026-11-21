@@ -7,7 +7,7 @@ param(
     [string]$ReleaseTag,
     [Parameter(Mandatory = $true)]
     [string[]]$ArchivePaths,
-    [int]$MaximumEntries = 50000,
+    [int]$MaximumEntries = 100000,
     [int]$MaximumEvidenceFiles = 20000,
     [long]$MaximumMetadataBytes = 2MB,
     [long]$MaximumLicenseBytes = 4MB,
