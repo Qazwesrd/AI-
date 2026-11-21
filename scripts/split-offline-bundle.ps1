@@ -20,41 +20,41 @@ $joinerFull = [IO.Path]::GetFullPath($JoinerPath)
 $sourceFull = [IO.Path]::GetFullPath($InputZip)
 if ($manifestFull -eq $sourceFull -or $joinerFull -eq $sourceFull -or $manifestFull -eq $joinerFull) { throw "输出路径冲突。" }
 $parts = [Collections.Generic.List[object]]::new()
-$input = [IO.File]::OpenRead($InputZip)
+$sourceStream = [IO.File]::OpenRead($InputZip)
 try {
     $index = 0
-    while ($input.Position -lt $input.Length) {
+    while ($sourceStream.Position -lt $sourceStream.Length) {
         $index++
         if ($index -gt 1000) { throw "分卷数量超过安全上限。" }
         $name = "$baseName.part$('{0:D3}' -f $index)"
         $path = Join-Path $directory $name
         if (Test-Path -LiteralPath $path) { throw "分卷已存在，为保护已有文件取消：$path" }
-        $output = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $partStream = [IO.File]::Open($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
         $hasher = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
         $buffer = [byte[]]::new(4MB)
         [long]$written = 0
         try {
-            while ($written -lt $PartSizeBytes -and $input.Position -lt $input.Length) {
+            while ($written -lt $PartSizeBytes -and $sourceStream.Position -lt $sourceStream.Length) {
                 $want = [int][Math]::Min($buffer.Length, $PartSizeBytes - $written)
-                $read = $input.Read($buffer, 0, $want)
+                $read = $sourceStream.Read($buffer, 0, $want)
                 if ($read -le 0) { break }
-                $output.Write($buffer, 0, $read)
+                $partStream.Write($buffer, 0, $read)
                 $hasher.AppendData($buffer, 0, $read)
                 $written += $read
             }
             $hash = [Convert]::ToHexString($hasher.GetHashAndReset()).ToLowerInvariant()
         } catch {
-            $output.Dispose()
+            $partStream.Dispose()
             Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
             throw
         } finally {
             $hasher.Dispose()
-            $output.Dispose()
+            $partStream.Dispose()
         }
         $parts.Add(@{ name = $name; size_bytes = $written; sha256 = $hash })
         Write-Host ("已生成 {0}（{1:N2} MiB）" -f $name, ($written / 1MB))
     }
-} finally { $input.Dispose() }
+} finally { $sourceStream.Dispose() }
 $archiveHash = (Get-FileHash -LiteralPath $InputZip -Algorithm SHA256).Hash.ToLowerInvariant()
 $manifest = @{
     schema_version = 1
