@@ -311,6 +311,36 @@ def list_storyboard_image_targets(db: Session = Depends(get_db)):
     return {"projects": result}
 
 
+@router.get("/shots/{shot_id}/media")
+def list_shot_media(shot_id: int, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    links = db.query(StoryboardMediaLink).filter(
+        StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.project_id == shot.project_id,
+        StoryboardMediaLink.episode_id == shot.episode_id,
+    ).all()
+    result = []
+    for link in links:
+        media = db.query(MediaFile).filter(
+            MediaFile.id == link.media_file_id,
+            MediaFile.category == "image",
+        ).first()
+        if media is None:
+            continue
+        result.append({
+            "link_id": link.id,
+            "media_file_id": media.id,
+            "name": media.name,
+            "mime_type": media.mime_type,
+            "file_size": media.file_size,
+            "download_url": f"/api/media/files/{media.id}/download",
+            "created_at": link.created_at.isoformat() if link.created_at else None,
+        })
+    return {"shot_id": shot.id, "images": result}
+
+
 def _attach_media_to_shot(db: Session, media: MediaFile, shot_id: int):
     shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
     if shot is None:
