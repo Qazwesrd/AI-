@@ -229,26 +229,6 @@ export default function StoryboardPage() {
     }
   }
 
-  async function generateEpisodeScriptAI(episode: Episode) {
-    const approved = window.confirm("将调用已启用的文本 AI，根据本集原著生成影视剧本和对应分镜。若当前模型属于付费服务，可能产生 API 费用。是否继续？");
-    if (!approved) return;
-    setBusy(true);
-    try {
-      const result = await request(`/api/story/episodes/${episode.id}/generate-ai`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            confirm_paid: true,
-            prompt_style: promptStyle,
-            additional_instructions: additionalPromptInstructions,
-          }),
-      });
-      if (projectId) await loadProject(projectId);
-      await loadShots(episode.id);
-      setMessage(result.message || "AI剧本与分镜生成完成");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "AI生成失败");
-    } finally { setBusy(false); }
-  }
   async function loadEpisodeVideoTasks(id: number) {
     try { const rows = await request("/api/media/video/episodes/" + id + "/tasks"); setVideoTasks(rows); }
     catch (error) { setMessage(error instanceof Error ? error.message : "读取视频任务失败"); }
@@ -599,7 +579,7 @@ export default function StoryboardPage() {
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
+                <a href="/local-creator" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-3 py-1.5 text-xs text-cyan-100">前往本地 AI 生成剧本与分镜</a>
                 <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
                 <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
