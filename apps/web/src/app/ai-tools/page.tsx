@@ -438,6 +438,7 @@ export default function AIToolsPage() {
       const embedded = (window as Window & { aiBrowserDesktop?: {
         openTask?: (taskId: string, url: string) => Promise<{ opened: boolean }>;
         fillPrompt?: (taskId: string, prompt: string) => Promise<{ filled: boolean; length: number; submitted: boolean }>;
+        captureTextResult?: (taskId: string) => Promise<{ captured: boolean; text: string; length: number; saved: boolean }>;
       } }).aiBrowserDesktop;
       const desktop = (window as Window & { desktopAPI?: { openExternal?: (url: string) => Promise<boolean> } }).desktopAPI;
       await copyText(task.prompt);
@@ -495,6 +496,30 @@ export default function AIToolsPage() {
       setNotice("自定义 AI 工具已添加到本机配置。");
     } catch {
       setNotice("网址格式不正确，请输入完整的网址，例如 https://example.com。");
+    }
+  }
+
+  async function captureWebResult(task: Task) {
+    const embedded = (window as Window & {
+      aiBrowserDesktop?: {
+        captureTextResult?: (taskId: string) => Promise<{ captured: boolean; text: string; length: number; saved: boolean }>;
+      };
+    }).aiBrowserDesktop;
+    if (!embedded?.captureTextResult) {
+      setNotice("当前环境不支持自动读取网页回答，请手动复制到结果框。");
+      return;
+    }
+    try {
+      const captured = await embedded.captureTextResult(task.id);
+      if (!captured?.captured || !captured.text?.trim() || captured.saved) {
+        throw new Error("没有读取到可保存的网页回答。");
+      }
+      setResultText(captured.text);
+      setResultUrl("");
+      setActiveTaskId(task.id);
+      setNotice(`已读取网页最新回答（${captured.length} 字），尚未保存。请检查内容后点击“保存结果”。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "自动读取失败，请手动复制网页回答。");
     }
   }
 
@@ -768,7 +793,8 @@ export default function AIToolsPage() {
                         <input value={resultUrl} onChange={(event) => setResultUrl(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="https://..." />
                       </label>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => saveResult(task)} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold hover:bg-emerald-600">保存结果</button>
+                        <button onClick={() => void captureWebResult(task)} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-xs text-cyan-100">从网页读取最新回答</button>
+                        <button onClick={() => saveResult(task)} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold hover:bg-emerald-600">检查后保存结果</button>
                         <button onClick={() => setActiveTaskId(null)} className="rounded-lg border border-white/15 px-4 py-2 text-xs">取消</button>
                       </div>
                     </div>
@@ -782,9 +808,9 @@ export default function AIToolsPage() {
 
         <section className="grid gap-3 md:grid-cols-3">
           {[
-            ["网页由你控制", "本阶段通过系统默认浏览器打开 AI 网站，不读取网站密码、Cookie 或验证码。"],
+            ["网页由你控制", "支持站点在软件内嵌浏览器打开；不会读取网站密码、Cookie 或验证码。"],
             ["不自动触发付费", "打开网站不等于提交生成任务；复制提示词、提交生成和付费均由你确认。"],
-            ["结果可追溯", "任务提示词、工具名称、结果文字和链接保存在本机浏览器；下载文件由你导入素材库。"],
+            ["结果可追溯", "支持站点可读取当前最新回答供你检查后保存；下载文件按任务归档到本机素材库。"],
           ].map(([heading, description]) => <div key={heading} className="rounded-xl border border-white/10 bg-slate-950/50 p-4"><h3 className="text-sm font-semibold text-purple-100">{heading}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{description}</p></div>)}
         </section>
       </div>
