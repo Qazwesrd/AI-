@@ -167,13 +167,27 @@ def _collect_project_records(db: Session, project: StoryProject):
 
     media_ids = {link.media_file_id for link in media_links}
     media_ids.update(item.media_file_id for item in media_revisions)
-    media_files = db.query(MediaFile).filter(
-        MediaFile.id.in_(sorted(media_ids) or [-1])
-    ).all()
     shot_ids = {item.id for item in shots}
+    episode_id_set = set(episode_ids)
+    all_media_files = db.query(MediaFile).all()
+    media_files = []
+    for media in all_media_files:
+        metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+        try:
+            media_episode_id = int(metadata.get("episode_id") or 0)
+            media_shot_id = int(metadata.get("shot_id") or 0)
+            media_project_id = int(metadata.get("project_id") or 0)
+        except (TypeError, ValueError):
+            media_episode_id = media_shot_id = media_project_id = 0
+        if (
+            media.id in media_ids
+            or media_episode_id in episode_id_set
+            or media_shot_id in shot_ids
+            or media_project_id == project.id
+        ):
+            media_files.append(media)
     all_media_tasks = db.query(MediaTask).all()
     media_tasks = []
-    episode_id_set = set(episode_ids)
     for task in all_media_tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
         try:
