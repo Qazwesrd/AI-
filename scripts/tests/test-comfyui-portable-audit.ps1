@@ -23,6 +23,12 @@ $sevenZip = Join-Path $temp "7zr.exe"
 $fixtureRoot = Join-Path $temp "fixture"
 $comfyRoot = Join-Path $fixtureRoot "ComfyUI"
 $archive = Join-Path $temp "ComfyUI_windows_portable_amd.7z"
+$assetNames = @(
+    "ComfyUI_windows_portable_nvidia.7z",
+    "ComfyUI_windows_portable_nvidia_cu126.7z",
+    "ComfyUI_windows_portable_amd.7z",
+    "ComfyUI_windows_portable_intel.7z"
+)
 $reportPath = Join-Path $temp "audit-report.json"
 $bundleRoot = Join-Path $temp "installer-bundle"
 $payloadRoot = Join-Path $bundleRoot "ComfyUI-Payload"
@@ -84,8 +90,17 @@ try {
         Pop-Location
     }
 
+    $archivePaths = @()
+    foreach ($name in $assetNames) {
+        $archivePath = Join-Path $temp $name
+        if ($name -cne "ComfyUI_windows_portable_amd.7z") {
+            Copy-Item -LiteralPath $archive -Destination $archivePath
+        }
+        $archivePaths += $archivePath
+    }
+
     try {
-        & $auditScript -SevenZipPath $sevenZip -ArchivePaths @($archive) -ReleaseTag "fixture-v1.0.0" -OutputPath $reportPath
+        & $auditScript -SevenZipPath $sevenZip -ArchivePaths $archivePaths -ReleaseTag "fixture-v1.0.0" -OutputPath $reportPath
     } catch {
         Write-Host "ComfyUI audit diagnostic:"
         Write-Host ($_ | Format-List * -Force | Out-String)
@@ -100,25 +115,32 @@ try {
         $report.release_tag -ne "fixture-v1.0.0") {
         throw "依赖清点脚本错误地批准了未审核组件或记录了错误版本。"
     }
-    if ($report.portable_variants.Count -ne 1 -or
-        $report.portable_variants[0].asset -ne "ComfyUI_windows_portable_amd.7z" -or
-        $report.portable_variants[0].inventory_status -ne "inventory_generated_review_pending") {
-        throw "依赖清点脚本没有正确记录 portable 变体。"
+    $variants = @($report.portable_variants)
+    $reportNames = @($variants | ForEach-Object { [string]$_.asset } | Sort-Object -Unique)
+    $reportNameDifferences = @(Compare-Object -ReferenceObject $assetNames -DifferenceObject $reportNames)
+    if ($variants.Count -ne 4 -or $reportNames.Count -ne 4 -or $reportNameDifferences.Count -gt 0) {
+        throw "依赖清点报告没有覆盖四种官方 Portable 变体。"
     }
-    if ($report.portable_variants[0].python_package_count -ne 1 -or
-        $report.portable_variants[0].components[0].name -ne "audit-fixture-package" -or
-        $report.portable_variants[0].components[0].license_review_status -ne "pending") {
-        throw "依赖清点脚本没有正确提取 Python 包元数据或保持人工审核状态。"
-    }
-    if (@($report.portable_variants[0].runtime_files | Where-Object { $_ -match "cudart64_130\.dll$" }).Count -ne 1) {
-        throw "依赖清点脚本没有识别 CUDA 运行库文件。"
-    }
-    if (@($report.portable_variants[0].evidence_files | Where-Object { $_.extraction_status -eq "extracted" }).Count -lt 2) {
-        throw "依赖清点脚本没有实际提取 METADATA 和许可证证据。"
+    foreach ($variant in $variants) {
+        $variant.archive_path = "ComfyUI-Payload/$($variant.asset)"
+        if ($variant.inventory_status -ne "inventory_generated_review_pending" -or
+            $variant.python_package_count -ne 1 -or
+            $variant.components[0].name -ne "audit-fixture-package" -or
+            $variant.components[0].license_review_status -ne "pending") {
+            throw "依赖清点脚本没有正确提取 Python 包元数据或保持人工审核状态：$($variant.asset)"
+        }
+        if (@($variant.runtime_files | Where-Object { $_ -match "cudart64_130\.dll$" }).Count -ne 1) {
+            throw "依赖清点脚本没有识别 CUDA 运行库文件：$($variant.asset)"
+        }
+        if (@($variant.evidence_files | Where-Object { $_.extraction_status -eq "extracted" }).Count -lt 2) {
+            throw "依赖清点脚本没有实际提取 METADATA 和许可证证据：$($variant.asset)"
+        }
     }
 
     New-Item -ItemType Directory -Path $payloadRoot, $noticesRoot -Force | Out-Null
-    Copy-Item -LiteralPath $archive -Destination $payloadRoot
+    foreach ($archivePath in $archivePaths) {
+        Copy-Item -LiteralPath $archivePath -Destination $payloadRoot
+    }
     Copy-Item -LiteralPath $sevenZip -Destination $payloadRoot
     $comfyLicenseRelative = "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt"
     $sevenZipLicenseRelative = "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt"
@@ -128,30 +150,15 @@ try {
     $sourceArchive = Join-Path $bundleRoot ($sevenZipSourceRelative.Replace("/", "\"))
     Write-Utf8 $sourceArchive "fixture 7-Zip source archive"
     $sourceHash = Get-Sha256 $sourceArchive
-    $archiveHash = Get-Sha256 $archive
     $fixtureComfyVersion = "fixture-v1.0.0"
-
-    $assetNames = @(
-        "ComfyUI_windows_portable_nvidia.7z",
-        "ComfyUI_windows_portable_nvidia_cu126.7z",
-        "ComfyUI_windows_portable_amd.7z",
-        "ComfyUI_windows_portable_intel.7z"
-    )
     $manifestAssets = @()
     foreach ($name in $assetNames) {
-        $selected = ($name -ceq "ComfyUI_windows_portable_amd.7z")
-        if ($selected) {
-            $fixtureSize = [long](Get-Item -LiteralPath $archive).Length
-            $fixtureHash = $archiveHash
-        } else {
-            $fixtureSize = 1L
-            $fixtureHash = "0" * 64
-        }
+        $assetPath = Join-Path $payloadRoot $name
         $manifestAssets += @{
             name = $name
             source = "https://github.com/Comfy-Org/ComfyUI/releases/download/$fixtureComfyVersion/$name"
-            size_bytes = $fixtureSize
-            sha256 = $fixtureHash
+            size_bytes = [long](Get-Item -LiteralPath $assetPath).Length
+            sha256 = Get-Sha256 $assetPath
             verified = $true
         }
     }
@@ -162,6 +169,7 @@ try {
         distribution_approved = $false
         distribution_status = "blocked-pending-third-party-dependency-audit"
         comfyui_version = $fixtureComfyVersion
+        dependency_inventory_report = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json"
         assets = $manifestAssets
         license = @{ license_file = $comfyLicenseRelative }
         seven_zip = @{
@@ -179,6 +187,7 @@ try {
         })
     }
     Write-Utf8 (Join-Path $payloadRoot "manifest.json") ($bundleManifest | ConvertTo-Json -Depth 8)
+    Write-Utf8 (Join-Path $noticesRoot "comfyui-portable-dependency-inventory.json") ($report | ConvertTo-Json -Depth 12)
 
     $detectedAdapters = @([pscustomobject]@{
         Name = "AMD Radeon(TM) Graphics"
