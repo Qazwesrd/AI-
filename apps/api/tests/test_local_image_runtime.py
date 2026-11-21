@@ -132,6 +132,34 @@ class LocalImageRuntimeTests(unittest.TestCase):
             runtime._COMFYUI_RUNTIME_MODE = old_mode
             runtime._COMFYUI_STARTED_AT = old_started
 
+    def test_reap_exited_process_preserves_exit_code_and_closes_log(self):
+        class ExitedProcess:
+            returncode = 17
+
+            def poll(self):
+                return 17
+
+        old_process = runtime._COMFYUI_PROCESS
+        old_mode = runtime._COMFYUI_RUNTIME_MODE
+        old_started = runtime._COMFYUI_STARTED_AT
+        old_exit = runtime._COMFYUI_LAST_EXIT_CODE
+        try:
+            runtime._COMFYUI_PROCESS = ExitedProcess()
+            runtime._COMFYUI_RUNTIME_MODE = "cpu"
+            runtime._COMFYUI_STARTED_AT = 123
+            with patch("app.routers.local_image_runtime._close_log_handle") as close_log:
+                self.assertTrue(runtime._reap_exited_managed_process())
+                close_log.assert_called_once()
+            self.assertIsNone(runtime._COMFYUI_PROCESS)
+            self.assertIsNone(runtime._COMFYUI_RUNTIME_MODE)
+            self.assertIsNone(runtime._COMFYUI_STARTED_AT)
+            self.assertEqual(runtime._COMFYUI_LAST_EXIT_CODE, 17)
+        finally:
+            runtime._COMFYUI_PROCESS = old_process
+            runtime._COMFYUI_RUNTIME_MODE = old_mode
+            runtime._COMFYUI_STARTED_AT = old_started
+            runtime._COMFYUI_LAST_EXIT_CODE = old_exit
+
     def test_stop_refuses_to_touch_unmanaged_processes(self):
         old_process = runtime._COMFYUI_PROCESS
         try:
