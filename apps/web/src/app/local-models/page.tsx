@@ -225,6 +225,12 @@ export default function LocalModelsPage() {
   }, []);
 
   useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness]);
+  useEffect(() => {
+    if (imageRuntime?.status !== "starting") return;
+    const timer = window.setInterval(() => { void refreshImageRuntime(); }, 1800);
+    return () => window.clearInterval(timer);
+  }, [imageRuntime?.status, refreshImageRuntime]);
+
 
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
