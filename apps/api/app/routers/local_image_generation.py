@@ -31,6 +31,7 @@ class _BlockRedirects(HTTPRedirectHandler):
 OPENER = build_opener(ProxyHandler({}), _BlockRedirects())
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
+REFERENCE_NODE_TYPES = ("LoadImage", "CLIPVisionLoader", "IPAdapterUnifiedLoader", "IPAdapter", "IPAdapterAdvanced", "IPAdapterModelLoader", "PrepImageForClipVision")
 PROMPT_ID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 CHECKPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ /-]{0,239}$")
 STYLE_GUIDANCE = {
@@ -84,6 +85,7 @@ class LocalImageGenerateInput(BaseModel):
 
 def _local_request(path: str, payload: dict | None = None, timeout: float = 8.0):
     allowed = path in {"/system_stats", "/object_info/CheckpointLoaderSimple", "/prompt"}
+    allowed = allowed or bool(re.fullmatch(r"/object_info/(?:LoadImage|CLIPVisionLoader|IPAdapterUnifiedLoader|IPAdapter|IPAdapterAdvanced|IPAdapterModelLoader|PrepImageForClipVision)", path))
     allowed = allowed or bool(re.fullmatch(r"/history/[0-9a-fA-F-]{32,36}", path))
     if not allowed:
         raise ValueError("Unsupported local ComfyUI endpoint")
@@ -141,6 +143,76 @@ def build_txt2img_workflow(payload: LocalImageGenerateInput, seed: int):
         },
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
         "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "AI_Comic_Studio", "images": ["8", 0]}},
+    }
+
+
+
+
+def _node_input_choices(node_info: dict, input_name: str):
+    inputs = node_info.get("input") if isinstance(node_info, dict) else None
+    for section in ("required", "optional"):
+        section_data = inputs.get(section) if isinstance(inputs, dict) else None
+        spec = section_data.get(input_name) if isinstance(section_data, dict) else None
+        if isinstance(spec, list) and spec and isinstance(spec[0], list):
+            return [value for value in spec[0] if isinstance(value, str)]
+    return []
+
+
+@router.get("/reference-capabilities")
+def inspect_local_reference_capabilities():
+    """Inspect installed ComfyUI nodes without installing or running any workflow."""
+    nodes = {}
+    for node_type in REFERENCE_NODE_TYPES:
+        try:
+            info = _local_request("/object_info/" + node_type, timeout=4.0)
+        except HTTPException as exc:
+            if exc.status_code == 502:
+                nodes[node_type] = {"available": False, "reason": "节点不存在或 ComfyUI 未提供节点信息"}
+                continue
+            raise
+        node_info = info.get(node_type)
+        available = isinstance(node_info, dict)
+        nodes[node_type] = {
+            "available": available,
+            "input_names": sorted(
+                set((node_info.get("input", {}).get("required", {}) if available else {}).keys())
+                | set((node_info.get("input", {}).get("optional", {}) if available else {}).keys())
+            ),
+        } if available else {"available": False, "reason": "未安装该节点"}
+        if available and node_type in ("IPAdapterUnifiedLoader", "IPAdapterModelLoader"):
+            nodes[node_type]["adapter_models"] = _node_input_choices(node_info, "ipadapter_file")
+        if available and node_type == "CLIPVisionLoader":
+            nodes[node_type]["clip_vision_models"] = _node_input_choices(node_info, "clip_name")
+
+    has_load_image = nodes.get("LoadImage", {}).get("available", False)
+    has_clip_vision = nodes.get("CLIPVisionLoader", {}).get("available", False)
+    has_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) or nodes.get("IPAdapterModelLoader", {}).get("available", False)
+    has_apply = nodes.get("IPAdapter", {}).get("available", False) or nodes.get("IPAdapterAdvanced", {}).get("available", False)
+    adapter_models = nodes.get("IPAdapterUnifiedLoader", {}).get("adapter_models") or nodes.get("IPAdapterModelLoader", {}).get("adapter_models") or []
+    clip_models = nodes.get("CLIPVisionLoader", {}).get("clip_vision_models", [])
+    structural_ready = has_load_image and has_clip_vision and has_adapter and has_apply
+    model_ready = bool(adapter_models) and bool(clip_models)
+    return {
+        "engine": "ComfyUI",
+        "status": "ready",
+        "reference_nodes": nodes,
+        "reference_conditioning_nodes_ready": structural_ready,
+        "reference_conditioning_models_ready": model_ready,
+        "reference_conditioning_ready": structural_ready and model_ready,
+        "missing_node_types": [name for name, present in (
+            ("LoadImage", has_load_image), ("CLIPVisionLoader", has_clip_vision),
+            ("IPAdapterUnifiedLoader or IPAdapterModelLoader", has_adapter),
+            ("IPAdapter or IPAdapterAdvanced", has_apply),
+        ) if not present],
+        "missing_model_files": [name for name, present in (
+            ("IP-Adapter model", bool(adapter_models)), ("CLIP Vision model", bool(clip_models)),
+        ) if not present],
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "installed_anything": False,
+        "generation_started": False,
+        "message": "已检测到参考图条件生图所需节点和模型。" if structural_ready and model_ready else "已完成本机兼容性检查；缺少的节点或模型需要你自行确认安装，本程序不会自动下载。",
     }
 
 
