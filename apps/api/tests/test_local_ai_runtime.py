@@ -6,6 +6,8 @@ from fastapi import HTTPException
 from app.routers.local_ai_runtime import (
     LocalModelTestInput,
     LocalCreativeInput,
+    LocalSpecializedModelInput,
+    create_local_specialized_model,
     generate_local_creative_content,
     _installed_models,
     local_ai_runtime,

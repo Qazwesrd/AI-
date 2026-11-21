@@ -8,7 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地 AI 引擎"])
@@ -37,6 +37,24 @@ class LocalEpisodePackageInput(BaseModel):
     extra_requirements: str = Field(default="", max_length=3000)
 
 
+
+
+class LocalSpecializedModelInput(BaseModel):
+    base_model: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=64)
+    role: Literal["screenwriter", "storyboard_director", "character_designer", "prompt_artist", "all_rounder"] = "all_rounder"
+    style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
+    instructions: str = Field(default="", max_length=4000)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value):
+        normalized = value.strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,62}", normalized):
+            raise ValueError("模型名称只能使用 2-63 位小写英文字母、数字、点、下划线或连字符")
+        return normalized
+
+
 CREATIVE_TASKS = {
     "screenplay": "将素材改编为可拍摄的短剧剧本。输出场次、地点、时间、人物、动作、对白和必要的转场，不擅自改变核心剧情。",
     "character": "整理人物设定。输出姓名、身份、性格、外貌、服装、能力、人物关系、当前剧情阶段状态，区分原文事实与合理推测。",
@@ -48,7 +66,7 @@ CREATIVE_TASKS = {
 
 def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0):
     """Call a fixed localhost Ollama endpoint without honoring external proxies."""
-    if path not in {"/api/tags", "/api/generate"}:
+    if path not in {"/api/tags", "/api/generate", "/api/show", "/api/create"}:
         raise ValueError("Unsupported local Ollama endpoint")
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = Request(
@@ -202,6 +220,63 @@ def generate_local_creative_content(payload: LocalCreativeInput):
         "message": "本地生成完成。内容尚未自动保存，请检查后手动复制到对应创作模块。",
     }
 
+
+
+SPECIALIST_ROLES = {
+    "screenwriter": "你是专业中文漫剧编剧。负责忠于原著地改编剧情，输出场次、动作、对白、冲突和节奏。",
+    "storyboard_director": "你是专业分镜导演。逐镜输出镜号、时长、景别、机位、运镜、构图、动作、对白、音效和转场。",
+    "character_designer": "你是角色设定设计师。建立角色外貌、发型、服装、配色、体型、标志物和状态连续性档案。",
+    "prompt_artist": "你是视觉提示词设计师。输出可执行的图像提示词，明确主体、动作、场景、构图、光影和风格。",
+    "all_rounder": "你是全流程中文 AI 漫剧制作助手，擅长剧本、人物设定、剧情、分镜和图片提示词。",
+}
+
+
+@router.post("/models/create")
+def create_local_specialized_model(payload: LocalSpecializedModelInput):
+    """Create a derived Ollama model from an already-installed local base model."""
+    base_model = payload.base_model.strip()
+    if not MODEL_NAME_PATTERN.fullmatch(base_model):
+        raise HTTPException(400, "基础模型名称格式无效")
+    installed = {item["name"] for item in _installed_models()}
+    if base_model not in installed:
+        raise HTTPException(404, "基础模型尚未安装；本功能不会自动下载模型。")
+    if payload.name in installed:
+        raise HTTPException(409, "这个模型名称已经存在，请换一个名称，避免覆盖现有模型。")
+    system_prompt = (
+        "你是 AI 漫剧制作大师的本地专用模型。必须使用简体中文，输出结构清晰、可编辑。"
+        "严格区分原文事实、合理推断和待确认内容，不得编造原著事实。"
+        "角色外貌、发型、服装、配色、伤势、道具和场景必须跨镜头保持一致。"
+        "不能声称已生成图片、视频或保存文件。"
+        f"\n工作身份：{SPECIALIST_ROLES[payload.role]}"
+        f"\n默认视觉风格：{payload.style}。"
+        + (f"\n用户补充规则：{payload.instructions.strip()}" if payload.instructions.strip() else "")
+    )
+    safe_system_prompt = system_prompt.replace('"""', '""')
+    modelfile = (
+        f"FROM {base_model}\n"
+        f'SYSTEM """{safe_system_prompt}"""\n'
+        "PARAMETER temperature 0.35\n"
+        "PARAMETER num_ctx 8192\n"
+    )
+    result = _ollama_request(
+        "/api/create",
+        {"model": payload.name, "modelfile": modelfile, "stream": False},
+        timeout=600.0,
+    )
+    if not isinstance(result, dict) or result.get("status") != "success":
+        raise HTTPException(502, "Ollama 未确认专用模型创建成功；请刷新模型列表核实。")
+    return {
+        "status": "success",
+        "model": payload.name,
+        "base_model": base_model,
+        "role": payload.role,
+        "style": payload.style,
+        "network_used": False,
+        "downloaded": False,
+        "cloud_fallback": False,
+        "overwritten": False,
+        "message": "本地专用模型创建成功。它复用已安装基础模型，不会下载基础模型或调用云端服务。",
+    }
 
 def _bounded_continuity(items, max_chars: int = 8000):
     """Keep confirmed continuity context bounded before it reaches a local model."""
