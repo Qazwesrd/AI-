@@ -61,7 +61,7 @@ class ProjectArchiveExportTests(unittest.TestCase):
             music = storage / "music.wav"
             music.write_bytes(b"fake-audio-content")
             subtitle_file = storage / "episode.srt"
-            subtitle_file.write_text("1\\n00:00:00,000 --> 00:00:01,000\\n测试字幕\\n", encoding="utf-8")
+            subtitle_file.write_text("1\n00:00:00,000 --> 00:00:01,000\n测试字幕\n", encoding="utf-8")
             video = storage / "shot.mp4"
             video.write_bytes(b"fake-video-content")
             comfy_install = root / "comfy-install"
