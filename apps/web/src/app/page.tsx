@@ -208,41 +208,8 @@ export default function Home() {
             </p>
           </section>
 
-          {/* 一条主线完成创作 */}
-          <section className="glass rounded-2xl p-5 md:p-6 mb-9">
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-              <div>
-                <div className="text-xs tracking-widest text-purple-300 mb-1">SIMPLE CREATION FLOW</div>
-                <h2 className="text-xl font-bold text-white">按这 6 步完成一部漫剧</h2>
-                <p className="text-xs text-purple-200 mt-2">按顺序操作即可；每一步完成并确认后，再进入下一步。已有项目可从上次进度继续。</p>
-              </div>
-              <a href="/help" className="text-xs text-cyan-200 underline underline-offset-4">查看完整操作说明</a>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-              {[
-                ["01", "导入小说", "新建项目、导入 TXT / 文本并整理章节。", "/novels"],
-                ["02", "分析剧情", "提取人物、关系、场景、道具和世界观，检查后确认。", "/ai-analysis"],
-                ["03", "确认视觉素材", "制作并确认人物、场景、道具素材，保持形象一致。", "/visual-studio"],
-                ["04", "改编剧本与分镜", "规划分集、编写剧本、拆分镜头并关联素材。", "/storyboard"],
-                ["05", "生成与合成视频", "生成镜头视频、配音并合成本集成片。", "/media-studio"],
-                ["06", "质检与发布", "检查成片、准备封面文案，再手动创建发布任务。", "/publishing"]
-              ].map(([number, title, description, href]) => (
-                <a key={number} href={href} className="group rounded-xl border border-purple-400/20 bg-slate-950/35 p-4 transition-colors hover:border-purple-300/70 hover:bg-purple-950/40">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-purple-300/40 text-xs font-bold text-purple-200">{number}</span>
-                    <span className="font-semibold text-white">{title}</span>
-                    <span className="ml-auto text-purple-300 transition-transform group-hover:translate-x-1">→</span>
-                  </div>
-                  <p className="pl-11 text-xs leading-5 text-purple-200">{description}</p>
-                </a>
-              ))}
-            </div>
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs text-purple-200">
-              <div className="rounded-lg bg-purple-950/35 p-3">📌 <strong>先确认，再继续：</strong>AI 分析和素材建议需要人工检查。</div>
-              <div className="rounded-lg bg-purple-950/35 p-3">💰 <strong>费用由你决定：</strong>付费服务必须先核实价格并确认。</div>
-              <div className="rounded-lg bg-purple-950/35 p-3">🔒 <strong>不会擅自执行：</strong>不自动调用 AI、不自动充值、不自动发布。</div>
-            </div>
-          </section>
+          {/* 新手与专业模式快速开始 */}
+          <BeginnerQuickStart />
 
           {/* 四大功能卡片 */}
           <section className="feature-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5 gap-4 mb-9">
