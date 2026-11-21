@@ -175,7 +175,11 @@ try {
 
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     Copy-Item -LiteralPath $runtimeZip -Destination (Join-Path $output "ollama-windows-amd64.zip")
-    Copy-Item -LiteralPath $modelStore -Destination (Join-Path $output "models") -Recurse
+    $outputModels = Join-Path $output "models"
+    New-Item -ItemType Directory -Path $outputModels -Force | Out-Null
+    foreach ($modelItem in Get-ChildItem -LiteralPath $modelStore -Force) {
+        Copy-Item -LiteralPath $modelItem.FullName -Destination $outputModels -Recurse
+    }
 
     $noticeDir = Join-Path $output "THIRD_PARTY_NOTICES"
     New-Item -ItemType Directory -Path $noticeDir -Force | Out-Null
