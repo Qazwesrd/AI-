@@ -26,7 +26,7 @@ ALLOWED_ASSET_NAMES = {
 
 
 def recommend_official_asset(vendor: str, gpu_name: str | None = None, architecture: str | None = None):
-    """Return only a vendor/model combination covered by the official Windows portable guidance."""
+    """Select the official Windows portable by vendor; only legacy GTX 10 and older use cu126."""
     arch = (architecture or "").lower().replace("-", "").replace("_", "")
     if arch not in {"amd64", "x8664", "x64"}:
         return None
@@ -35,10 +35,7 @@ def recommend_official_asset(vendor: str, gpu_name: str | None = None, architect
         gtx = re.search(r"gtx\s*([0-9]{3,4})", label)
         if gtx and int(gtx.group(1)) <= 1099:
             return "ComfyUI_windows_portable_nvidia_cu126.7z"
-        rtx = re.search(r"rtx\s*(?:a)?\s*([0-9]{4})", label)
-        if rtx and int(rtx.group(1)) >= 2000:
-            return "ComfyUI_windows_portable_nvidia.7z"
-        return None
+        return "ComfyUI_windows_portable_nvidia.7z"
     if vendor == "AMD":
         if (
             re.search(r"rx\s*(?:6|7|9)[0-9]{3}", label)
