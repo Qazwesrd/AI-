@@ -1311,6 +1311,19 @@ def upload_project_reference_image(
     if media is None:
         raise HTTPException(404, "绑定的本地图片素材不存在")
     uploaded = _upload_reference_to_local_comfyui(media, project.id, data.category, data.asset_id)
+    settings = dict(project.settings) if isinstance(project.settings, dict) else {}
+    uploaded_refs = dict(settings.get("comfyui_reference_uploads", {})) if isinstance(settings.get("comfyui_reference_uploads", {}), dict) else {}
+    reference_key = f"{data.category}:{data.asset_id}:{media.id}"
+    uploaded_refs[reference_key] = {
+        **uploaded,
+        "asset_id": data.asset_id,
+        "media_file_id": media.id,
+        "category": data.category,
+    }
+    settings["comfyui_reference_uploads"] = uploaded_refs
+    project.settings = settings
+    db.add(project)
+    db.commit()
     return {
         "project_id": project.id,
         "asset_id": data.asset_id,
