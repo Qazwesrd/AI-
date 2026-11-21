@@ -3,12 +3,12 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 from app.models.media import MediaFile
-from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision
 from app.routers.local_image_generation import (
     LocalImageGenerateInput, _checkpoint_names, build_txt2img_workflow,
     generate_local_image, get_local_image_task, LocalImageArchiveInput,
     _safe_output_image, _download_comfyui_output, archive_local_image_task_output,
-    _attach_media_to_shot, _remove_media_link_from_shot,
+    _attach_media_to_shot, _remove_media_link_from_shot, _replace_shot_media,
 )
 
 
@@ -120,6 +120,12 @@ class _FakeQuery:
     def first(self):
         return self.rows.get(self.model)
 
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
     def all(self):
         value = self.rows.get(self.model, [])
         return value if isinstance(value, list) else ([value] if value else [])
@@ -197,6 +203,34 @@ class StoryboardImageLinkTests(unittest.TestCase):
         self.assertEqual(result["media_file_id"], 19)
         self.assertEqual(db.deleted, [link])
         self.assertTrue(db.committed)
+
+    def test_replace_keeps_link_and_records_old_and_new_versions(self):
+        link = StoryboardMediaLink()
+        link.id = 21
+        link.media_file_id = 19
+        replacement = MediaFile()
+        replacement.id = 20
+        db = _FakeDB({
+            StoryboardShot: self._rows()[StoryboardShot],
+            StoryboardMediaLink: link,
+            MediaFile: replacement,
+            StoryboardMediaRevision: [],
+        })
+        result = _replace_shot_media(db, 11, 21, 20)
+        self.assertTrue(result["replaced"])
+        self.assertEqual(link.media_file_id, 20)
+        revisions = [item for item in db.added if isinstance(item, StoryboardMediaRevision)]
+        self.assertEqual([(item.version_number, item.media_file_id) for item in revisions], [(1, 19), (2, 20)])
+        self.assertTrue(db.committed)
+
+    def test_replace_rejects_missing_library_image(self):
+        link = StoryboardMediaLink()
+        link.id = 21
+        link.media_file_id = 19
+        db = _FakeDB({StoryboardShot: self._rows()[StoryboardShot], StoryboardMediaLink: link, MediaFile: None})
+        with self.assertRaises(HTTPException) as caught:
+            _replace_shot_media(db, 11, 21, 404)
+        self.assertEqual(caught.exception.status_code, 404)
 
     def test_unlink_rejects_link_not_found(self):
         db = _FakeDB({StoryboardShot: self._rows()[StoryboardShot], StoryboardMediaLink: None})
