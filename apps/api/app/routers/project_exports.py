@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.database import DATA_ROOT, get_db
-from app.models.media import MediaFile
+from app.models.media import MediaFile, MediaTask
 from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
@@ -165,6 +165,20 @@ def _collect_project_records(db: Session, project: StoryProject):
     media_files = db.query(MediaFile).filter(
         MediaFile.id.in_(sorted(media_ids) or [-1])
     ).all()
+    shot_ids = {item.id for item in shots}
+    storyboard_tasks = db.query(MediaTask).filter(
+        MediaTask.task_type == "storyboard_video"
+    ).all()
+    media_tasks = []
+    for task in storyboard_tasks:
+        metadata = task.request_data if isinstance(task.request_data, dict) else {}
+        try:
+            task_episode_id = int(metadata.get("episode_id") or 0)
+            task_shot_id = int(metadata.get("shot_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if task_episode_id in set(episode_ids) and task_shot_id in shot_ids:
+            media_tasks.append(task)
     image_tasks = db.query(ImageTask).filter(
         ImageTask.asset_id.in_(sorted(asset_ids) or [-1])
     ).all()
@@ -182,6 +196,7 @@ def _collect_project_records(db: Session, project: StoryProject):
         "storyboard_media_links": media_links,
         "storyboard_media_revisions": media_revisions,
         "media_files": media_files,
+        "media_tasks": media_tasks,
         "episode_timelines": timelines,
         "image_tasks": image_tasks,
     }
@@ -203,6 +218,10 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
     for row in records["media_files"]:
         all_path_values.append(row.file_path or "")
         all_path_values.extend(_walk_path_values(row.metadata_json or {}))
+    for row in records["media_tasks"]:
+        all_path_values.append(row.result_path or "")
+        all_path_values.extend(_walk_path_values(row.request_data or {}))
+        all_path_values.extend(_walk_path_values(row.result_data or {}))
     for row in records["image_tasks"]:
         all_path_values.append(row.result_path or "")
     for row in records["episode_timelines"]:
