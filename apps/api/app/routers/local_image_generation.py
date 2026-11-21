@@ -31,6 +31,7 @@ class _BlockRedirects(HTTPRedirectHandler):
 OPENER = build_opener(ProxyHandler({}), _BlockRedirects())
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
+REFERENCE_NODE_TYPES = ("LoadImage", "CLIPVisionLoader", "IPAdapterUnifiedLoader", "IPAdapter", "IPAdapterAdvanced", "IPAdapterModelLoader", "PrepImageForClipVision")
 PROMPT_ID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 CHECKPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ /-]{0,239}$")
 STYLE_GUIDANCE = {
@@ -55,6 +56,53 @@ class StoryboardImageReuseInput(BaseModel):
 class StoryboardImageReplaceInput(BaseModel):
     media_file_id: int = Field(ge=1)
 
+
+
+
+
+
+class LocalImageBatchStatusItem(BaseModel):
+    shot_id: int = Field(ge=1)
+    shot_number: int = Field(ge=1)
+    prompt_id: str = Field(min_length=32, max_length=36)
+
+    @field_validator("prompt_id")
+    @classmethod
+    def validate_prompt_id(cls, value):
+        if not PROMPT_ID_RE.fullmatch(value):
+            raise ValueError("任务编号格式无效")
+        return value
+
+
+class LocalImageBatchStatusInput(BaseModel):
+    tasks: list[LocalImageBatchStatusItem] = Field(min_length=1, max_length=20)
+
+class LocalImageBatchInput(BaseModel):
+    project_id: int = Field(ge=1)
+    episode_id: int = Field(ge=1)
+    shot_ids: list[int] = Field(min_length=1, max_length=20)
+    checkpoint: str = Field(min_length=1, max_length=240)
+    style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
+    width: int = Field(default=768, ge=512, le=1536)
+    height: int = Field(default=768, ge=512, le=1536)
+    steps: int = Field(default=24, ge=1, le=40)
+    cfg: float = Field(default=7.0, ge=1.0, le=12.0)
+    confirm_local_generation: bool = False
+
+    @field_validator("shot_ids")
+    @classmethod
+    def validate_shot_ids(cls, value):
+        if len(value) != len(set(value)):
+            raise ValueError("分镜编号不能重复")
+        return value
+
+    @field_validator("checkpoint")
+    @classmethod
+    def validate_batch_checkpoint(cls, value):
+        value = value.strip()
+        if not CHECKPOINT_RE.fullmatch(value) or ".." in value or "//" in value or "\\\\" in value:
+            raise ValueError("图片模型名称格式无效")
+        return value
 
 class LocalImageGenerateInput(BaseModel):
     checkpoint: str = Field(min_length=1, max_length=240)
@@ -84,6 +132,7 @@ class LocalImageGenerateInput(BaseModel):
 
 def _local_request(path: str, payload: dict | None = None, timeout: float = 8.0):
     allowed = path in {"/system_stats", "/object_info/CheckpointLoaderSimple", "/prompt"}
+    allowed = allowed or bool(re.fullmatch(r"/object_info/(?:LoadImage|CLIPVisionLoader|IPAdapterUnifiedLoader|IPAdapter|IPAdapterAdvanced|IPAdapterModelLoader|PrepImageForClipVision)", path))
     allowed = allowed or bool(re.fullmatch(r"/history/[0-9a-fA-F-]{32,36}", path))
     if not allowed:
         raise ValueError("Unsupported local ComfyUI endpoint")
@@ -141,6 +190,234 @@ def build_txt2img_workflow(payload: LocalImageGenerateInput, seed: int):
         },
         "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["4", 2]}},
         "9": {"class_type": "SaveImage", "inputs": {"filename_prefix": "AI_Comic_Studio", "images": ["8", 0]}},
+    }
+
+
+
+
+def _node_input_choices(node_info: dict, input_name: str):
+    inputs = node_info.get("input") if isinstance(node_info, dict) else None
+    for section in ("required", "optional"):
+        section_data = inputs.get(section) if isinstance(inputs, dict) else None
+        spec = section_data.get(input_name) if isinstance(section_data, dict) else None
+        if isinstance(spec, list) and spec and isinstance(spec[0], list):
+            return [value for value in spec[0] if isinstance(value, str)]
+    return []
+
+
+@router.get("/reference-capabilities")
+def inspect_local_reference_capabilities():
+    """Inspect installed ComfyUI nodes without installing or running any workflow."""
+    nodes = {}
+    for node_type in REFERENCE_NODE_TYPES:
+        try:
+            info = _local_request("/object_info/" + node_type, timeout=4.0)
+        except HTTPException as exc:
+            if exc.status_code == 502:
+                nodes[node_type] = {"available": False, "reason": "节点不存在或 ComfyUI 未提供节点信息"}
+                continue
+            raise
+        node_info = info.get(node_type)
+        available = isinstance(node_info, dict)
+        nodes[node_type] = {
+            "available": available,
+            "input_names": sorted(
+                set((node_info.get("input", {}).get("required", {}) if available else {}).keys())
+                | set((node_info.get("input", {}).get("optional", {}) if available else {}).keys())
+            ),
+        } if available else {"available": False, "reason": "未安装该节点"}
+        if available and node_type in ("IPAdapterUnifiedLoader", "IPAdapterModelLoader"):
+            nodes[node_type]["adapter_models"] = _node_input_choices(node_info, "ipadapter_file")
+        if available and node_type == "CLIPVisionLoader":
+            nodes[node_type]["clip_vision_models"] = _node_input_choices(node_info, "clip_name")
+
+    has_load_image = nodes.get("LoadImage", {}).get("available", False)
+    has_clip_vision = nodes.get("CLIPVisionLoader", {}).get("available", False)
+    has_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) or nodes.get("IPAdapterModelLoader", {}).get("available", False)
+    has_apply = nodes.get("IPAdapter", {}).get("available", False) or nodes.get("IPAdapterAdvanced", {}).get("available", False)
+    adapter_models = nodes.get("IPAdapterUnifiedLoader", {}).get("adapter_models") or nodes.get("IPAdapterModelLoader", {}).get("adapter_models") or []
+    clip_models = nodes.get("CLIPVisionLoader", {}).get("clip_vision_models", [])
+    structural_ready = has_load_image and has_clip_vision and has_adapter and has_apply
+    model_ready = bool(adapter_models) and bool(clip_models)
+    return {
+        "engine": "ComfyUI",
+        "status": "ready",
+        "reference_nodes": nodes,
+        "reference_conditioning_nodes_ready": structural_ready,
+        "reference_conditioning_models_ready": model_ready,
+        "reference_conditioning_ready": structural_ready and model_ready,
+        "missing_node_types": [name for name, present in (
+            ("LoadImage", has_load_image), ("CLIPVisionLoader", has_clip_vision),
+            ("IPAdapterUnifiedLoader or IPAdapterModelLoader", has_adapter),
+            ("IPAdapter or IPAdapterAdvanced", has_apply),
+        ) if not present],
+        "missing_model_files": [name for name, present in (
+            ("IP-Adapter model", bool(adapter_models)), ("CLIP Vision model", bool(clip_models)),
+        ) if not present],
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "installed_anything": False,
+        "generation_started": False,
+        "message": "已检测到参考图条件生图所需节点和模型。" if structural_ready and model_ready else "已完成本机兼容性检查；缺少的节点或模型需要你自行确认安装，本程序不会自动下载。",
+    }
+
+
+
+
+def _prepare_batch_shots(data: LocalImageBatchInput, db: Session):
+    shots = db.query(StoryboardShot).filter(
+        StoryboardShot.project_id == data.project_id,
+        StoryboardShot.episode_id == data.episode_id,
+        StoryboardShot.id.in_(data.shot_ids),
+    ).all()
+    by_id = {shot.id: shot for shot in shots}
+    rows = []
+    missing = []
+    for shot_id in data.shot_ids:
+        shot = by_id.get(shot_id)
+        if shot is None:
+            missing.append({"shot_id": shot_id, "reason": "分镜不存在或不属于所选项目/分集"})
+            continue
+        prompt = (shot.image_prompt or "").strip()
+        if len(prompt) < 3:
+            missing.append({"shot_id": shot_id, "shot_number": shot.shot_number, "reason": "该分镜尚未填写图片提示词"})
+            continue
+        rows.append({
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "scene_name": shot.scene_name or "",
+            "prompt": prompt[:6000],
+        })
+    return rows, missing
+
+
+@router.post("/batch/preflight")
+def preflight_local_image_batch(data: LocalImageBatchInput, db: Session = Depends(get_db)):
+    rows, missing = _prepare_batch_shots(data, db)
+    return {
+        "project_id": data.project_id,
+        "episode_id": data.episode_id,
+        "requested_count": len(data.shot_ids),
+        "ready_count": len(rows),
+        "missing_count": len(missing),
+        "ready_shots": rows,
+        "missing_shots": missing,
+        "max_batch_size": 20,
+        "will_submit_to_local_queue": False,
+        "generation_started": False,
+        "message": "预检完成。此操作没有提交任务；确认后才会将合格分镜提交到本机 ComfyUI 队列。",
+    }
+
+
+@router.post("/batch/generate")
+def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends(get_db)):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "批量生成会连续占用本机 CPU/GPU；请明确确认后再提交。")
+    if data.width % 64 or data.height % 64:
+        raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
+    rows, missing = _prepare_batch_shots(data, db)
+    if not rows:
+        raise HTTPException(400, "所选分镜没有可生成的图片提示词；请先完成分镜提示词。")
+    object_info = _local_request("/object_info/CheckpointLoaderSimple")
+    if data.checkpoint not in _checkpoint_names(object_info):
+        raise HTTPException(404, "所选图片模型未安装在本机 ComfyUI 中；本程序不会自动下载模型。")
+    submitted = []
+    failed = []
+    for row in rows:
+        seed = uuid.uuid4().int % (2 ** 32)
+        payload = LocalImageGenerateInput(
+            checkpoint=data.checkpoint, prompt=row["prompt"], style=data.style,
+            width=data.width, height=data.height, steps=data.steps, cfg=data.cfg,
+            seed=seed, confirm_local_generation=True,
+        )
+        try:
+            result = _local_request("/prompt", {
+                "prompt": build_txt2img_workflow(payload, seed),
+                "client_id": str(uuid.uuid4()),
+            }, timeout=15.0)
+            prompt_id = result.get("prompt_id")
+            if not isinstance(prompt_id, str) or not PROMPT_ID_RE.fullmatch(prompt_id):
+                raise HTTPException(502, "ComfyUI 未返回有效任务编号")
+            submitted.append({
+                "shot_id": row["shot_id"], "shot_number": row["shot_number"],
+                "prompt_id": prompt_id, "seed": seed, "status": "queued",
+            })
+        except (HTTPException, ValueError) as exc:
+            failed.append({
+                "shot_id": row["shot_id"], "shot_number": row["shot_number"],
+                "reason": exc.detail if isinstance(exc, HTTPException) else str(exc),
+            })
+            break
+    return {
+        "success": bool(submitted),
+        "project_id": data.project_id,
+        "episode_id": data.episode_id,
+        "submitted_count": len(submitted),
+        "failed_count": len(failed),
+        "skipped_count": len(missing),
+        "tasks": submitted,
+        "failed_shots": failed,
+        "skipped_shots": missing,
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "paid_api_used": False,
+        "cloud_fallback": False,
+        "message": "已按分镜顺序提交到本机 ComfyUI 队列。请逐项检查任务状态并确认归档；未提交成功的任务不会自动重试。",
+    }
+
+
+
+
+@router.post("/batch/tasks")
+def get_local_image_batch_status(data: LocalImageBatchStatusInput):
+    results = []
+    for task in data.tasks:
+        try:
+            history = _local_request("/history/" + task.prompt_id, timeout=5.0)
+            item = history.get(task.prompt_id)
+            if not isinstance(item, dict):
+                status = "queued_or_running"
+                images = []
+            else:
+                status_info = item.get("status") if isinstance(item.get("status"), dict) else {}
+                status_text = status_info.get("status_str")
+                if status_info.get("completed") is True:
+                    status = "completed" if status_text in (None, "success") else "failed"
+                elif status_text in ("error", "failed"):
+                    status = "failed"
+                else:
+                    status = "running"
+                outputs = item.get("outputs") if isinstance(item.get("outputs"), dict) else {}
+                images = []
+                for output in outputs.values():
+                    if not isinstance(output, dict):
+                        continue
+                    for image in output.get("images", []) if isinstance(output.get("images"), list) else []:
+                        if isinstance(image, dict):
+                            filename = image.get("filename")
+                            subfolder = image.get("subfolder", "")
+                            if isinstance(filename, str) and filename and len(filename) <= 240 and ".." not in filename and "/" not in filename and "\\\\" not in filename and image.get("type", "output") == "output":
+                                images.append({"filename": filename, "subfolder": subfolder if isinstance(subfolder, str) else "", "type": "output"})
+            results.append({
+                "shot_id": task.shot_id, "shot_number": task.shot_number,
+                "prompt_id": task.prompt_id, "status": status, "images": images[:20],
+            })
+        except (HTTPException, ValueError) as exc:
+            results.append({
+                "shot_id": task.shot_id, "shot_number": task.shot_number,
+                "prompt_id": task.prompt_id, "status": "unavailable",
+                "error": exc.detail if isinstance(exc, HTTPException) else str(exc),
+                "images": [],
+            })
+    return {
+        "tasks": results,
+        "completed_count": sum(item["status"] == "completed" for item in results),
+        "running_count": sum(item["status"] in ("running", "queued_or_running") for item in results),
+        "failed_count": sum(item["status"] == "failed" for item in results),
+        "local_only": True,
+        "network_used": False,
     }
 
 

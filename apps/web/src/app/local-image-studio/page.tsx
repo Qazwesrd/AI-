@@ -152,6 +152,195 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
   </section>;
 }
 
+
+type ReferenceCapabilityResult = {
+  reference_conditioning_ready: boolean;
+  reference_conditioning_nodes_ready: boolean;
+  reference_conditioning_models_ready: boolean;
+  missing_node_types: string[];
+  missing_model_files: string[];
+  reference_nodes: Record<string, { available: boolean; input_names?: string[]; adapter_models?: string[]; clip_vision_models?: string[]; reason?: string }>;
+  message: string;
+};
+
+function ReferenceCapabilityPanel() {
+  const [result, setResult] = useState<ReferenceCapabilityResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function inspect() {
+    setChecking(true); setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/reference-capabilities`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "参考图兼容性检测失败");
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "参考图兼容性检测失败");
+    } finally { setChecking(false); }
+  }
+
+  return <section className="space-y-3 rounded-2xl border border-cyan-300/20 bg-cyan-950/10 p-5">
+    <div><h2 className="text-lg font-semibold">本机参考图生图兼容性</h2>
+      <p className="mt-1 text-sm text-white/55">检查 ComfyUI 是否已有 IP-Adapter、CLIP Vision、Load Image 节点及对应模型。检测只读取本机节点信息，不安装、不下载、不生成。</p></div>
+    <button type="button" onClick={() => void inspect()} disabled={checking} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">{checking ? "正在检测本机节点…" : "检测参考图生图环境"}</button>
+    {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
+    {result && <div className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-sm">{result.message}</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">节点条件</p><p className="mt-1 text-sm">{result.reference_conditioning_nodes_ready ? "已满足" : "未满足"}</p></div>
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">模型文件</p><p className="mt-1 text-sm">{result.reference_conditioning_models_ready ? "已发现" : "未发现完整组合"}</p></div>
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">整体状态</p><p className="mt-1 text-sm">{result.reference_conditioning_ready ? "可以进入工作流适配" : "需要补齐环境"}</p></div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {Object.entries(result.reference_nodes).map(([name, node]) => <div key={name} className="rounded-lg border border-white/10 p-2 text-xs">
+          <p className="flex items-center justify-between gap-2"><span className="font-medium">{name}</span><span className={node.available ? "text-emerald-300" : "text-amber-200"}>{node.available ? "已安装" : "未发现"}</span></p>
+          {node.adapter_models && <p className="mt-1 break-words text-white/50">IP-Adapter 模型：{node.adapter_models.length ? node.adapter_models.join("、") : "未发现"}</p>}
+          {node.clip_vision_models && <p className="mt-1 break-words text-white/50">CLIP Vision 模型：{node.clip_vision_models.length ? node.clip_vision_models.join("、") : "未发现"}</p>}
+        </div>)}
+      </div>
+      {result.missing_node_types.length > 0 && <p className="text-xs text-amber-200">缺少节点：{result.missing_node_types.join("、")}</p>}
+      {result.missing_model_files.length > 0 && <p className="text-xs text-amber-200">缺少模型：{result.missing_model_files.join("、")}</p>}
+      {result.reference_conditioning_ready && <p className="text-xs text-emerald-200">本机环境已具备基本组件；仍需对实际 ComfyUI 工作流的输入接口进行验证，不能仅凭节点存在就保证所有模型组合兼容。</p>}
+    </div>}
+  </section>;
+}
+
+
+
+type BatchPreflight = {
+  requested_count: number; ready_count: number; missing_count: number;
+  ready_shots: Array<{ shot_id: number; shot_number: number; scene_name: string; prompt: string }>;
+  missing_shots: Array<{ shot_id: number; shot_number?: number; reason: string }>;
+  message: string;
+};
+type BatchSubmitResult = {
+  submitted_count: number; skipped_count: number; failed_count: number;
+  tasks: Array<{ shot_id: number; shot_number: number; prompt_id: string; seed: number; status: string }>;
+  failed_shots: Array<{ shot_id: number; shot_number: number; reason: string }>;
+  skipped_shots: Array<{ shot_id: number; shot_number?: number; reason: string }>;
+  message: string;
+};
+
+function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height, steps }: {
+  projects: TargetProject[]; checkpoint: string; style: (typeof styles)[number];
+  width: string; height: string; steps: string;
+}) {
+  const [projectId, setProjectId] = useState("");
+  const [episodeId, setEpisodeId] = useState("");
+  const [selected, setSelected] = useState<number[]>([]);
+  const [preflight, setPreflight] = useState<BatchPreflight | null>(null);
+  const [result, setResult] = useState<BatchSubmitResult | null>(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const project = projects.find((item) => String(item.id) === projectId);
+  const episode = project?.episodes.find((item) => String(item.id) === episodeId);
+  const shots = episode?.shots || [];
+
+  function toggleShot(id: number) {
+    setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : current.length >= 20 ? current : [...current, id]);
+    setPreflight(null); setResult(null);
+  }
+
+  async function runPreflight() {
+    if (!projectId || !episodeId || !selected.length || !checkpoint) return;
+    setBusy(true); setError(""); setPreflight(null); setResult(null);
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/batch/preflight`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: Number(projectId), episode_id: Number(episodeId), shot_ids: selected, checkpoint, style, width: Number(width), height: Number(height), steps: Number(steps) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "批量预检失败");
+      setPreflight(data);
+    } catch (err) { setError(err instanceof Error ? err.message : "批量预检失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function refreshBatchStatus() {
+    if (!result?.tasks.length) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/batch/tasks`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tasks: result.tasks.map((task) => ({ shot_id: task.shot_id, shot_number: task.shot_number, prompt_id: task.prompt_id })) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "批量任务状态刷新失败");
+      setResult((current) => current ? { ...current, tasks: current.tasks.map((task) => {
+        const updated = data.tasks.find((item: { prompt_id: string }) => item.prompt_id === task.prompt_id);
+        return updated ? { ...task, status: updated.status } : task;
+      }) } : current);
+    } catch (err) { setError(err instanceof Error ? err.message : "批量任务状态刷新失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function submitBatch() {
+    if (!preflight?.ready_count || !confirmed) return;
+    setBusy(true); setError(""); setResult(null);
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/batch/generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: Number(projectId), episode_id: Number(episodeId), shot_ids: selected, checkpoint, style, width: Number(width), height: Number(height), steps: Number(steps), confirm_local_generation: true }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "批量任务提交失败");
+      setResult(data); setConfirmed(false);
+    } catch (err) { setError(err instanceof Error ? err.message : "批量任务提交失败；没有切换到云端。"); }
+    finally { setBusy(false); }
+  }
+
+  return <section className="space-y-4 rounded-2xl border border-fuchsia-300/20 bg-fuchsia-950/10 p-5">
+    <div><h2 className="text-lg font-semibold">分镜批量生图队列</h2>
+      <p className="mt-1 text-sm text-white/55">按分集选择最多 20 个分镜，先检查提示词，再由你确认后逐个提交到本机 ComfyUI。不会自动归档图片。</p></div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <label className="text-sm text-white/70">漫剧项目
+        <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setEpisodeId(""); setSelected([]); setPreflight(null); setResult(null); }} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3">
+          <option value="">选择项目</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+        </select>
+      </label>
+      <label className="text-sm text-white/70">分集
+        <select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setSelected([]); setPreflight(null); setResult(null); }} disabled={!projectId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 disabled:opacity-40">
+          <option value="">选择分集</option>{(project?.episodes || []).map((item) => <option key={item.id} value={item.id}>第{item.episode_number}集 · {item.title}</option>)}
+        </select>
+      </label>
+    </div>
+    {episode && <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm text-white/70">选择需要生成图片的分镜（已选 {selected.length}/20）</p>
+        <button type="button" onClick={() => { setSelected(shots.slice(0, 20).map((item) => item.id)); setPreflight(null); setResult(null); }} className="text-xs text-fuchsia-200">选择本集前 20 个</button>
+      </div>
+      <div className="max-h-64 space-y-1 overflow-auto rounded-xl border border-white/10 bg-black/20 p-2">
+        {shots.map((shot) => <label key={shot.id} className="flex cursor-pointer items-start gap-2 rounded-lg p-2 text-sm hover:bg-white/5">
+          <input type="checkbox" checked={selected.includes(shot.id)} onChange={() => toggleShot(shot.id)} disabled={!selected.includes(shot.id) && selected.length >= 20} className="mt-1" />
+          <span><span className="text-white/85">镜头 {shot.shot_number} · {shot.scene_name || "未命名场景"}</span><span className="mt-1 block text-xs text-white/45">{shot.visual_description || "暂无画面描述"}</span></span>
+        </label>)}
+        {!shots.length && <p className="p-3 text-sm text-white/45">本集还没有分镜。</p>}
+      </div>
+    </div>}
+    <button type="button" onClick={() => void runPreflight()} disabled={busy || !checkpoint || !projectId || !episodeId || !selected.length} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">{busy ? "处理中…" : "检查提示词与分镜归属"}</button>
+    {preflight && <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-sm">预检结果：可生成 {preflight.ready_count} 个，需补充或无权访问 {preflight.missing_count} 个。</p>
+      {preflight.ready_shots.map((shot) => <p key={shot.shot_id} className="text-xs text-emerald-200">镜头 {shot.shot_number}：提示词已就绪</p>)}
+      {preflight.missing_shots.map((shot) => <p key={shot.shot_id} className="text-xs text-amber-200">镜头 #{shot.shot_id}：{shot.reason}</p>)}
+      {preflight.ready_count > 0 && <div className="space-y-3 border-t border-white/10 pt-3">
+        <label className="flex items-start gap-2 text-sm text-amber-100"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1" />我确认将 {preflight.ready_count} 个分镜任务提交到本机 GPU 队列，可能持续占用显存、电力和时间。</label>
+        <button type="button" onClick={() => void submitBatch()} disabled={busy || !confirmed} className="rounded-lg bg-fuchsia-300 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-40">确认并提交批量生图</button>
+      </div>}
+    </div>}
+    {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
+    {result && <div className="space-y-2 rounded-xl border border-emerald-300/20 bg-emerald-950/15 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm">已提交 {result.submitted_count} 个任务；跳过 {result.skipped_count} 个；提交失败 {result.failed_count} 个。</p>
+        <button type="button" onClick={() => void refreshBatchStatus()} disabled={busy} className="rounded-lg border border-white/20 px-3 py-2 text-xs disabled:opacity-40">{busy ? "刷新中…" : "刷新全部任务状态"}</button>
+      </div>
+      {result.tasks.map((task) => <p key={task.prompt_id} className="break-all text-xs text-emerald-200">镜头 {task.shot_number} · {task.status === "completed" ? "已完成" : task.status === "failed" ? "失败" : task.status === "unavailable" ? "暂不可查询" : task.status === "running" ? "生成中" : "排队中"} · 任务 {task.prompt_id} · 种子 {task.seed}</p>)}
+      {result.failed_shots.map((item) => <p key={item.shot_id} className="text-xs text-rose-200">镜头 {item.shot_number}：{item.reason}</p>)}
+      {result.skipped_shots.map((item) => <p key={item.shot_id} className="text-xs text-amber-200">镜头 #{item.shot_id}：{item.reason}</p>)}
+    </div>}
+    <p className="text-xs text-white/40">批量提交最多 20 个镜头，ComfyUI 按提交顺序排队。每张图片仍需单独查看、确认归档；失败任务不会自动重试，也不会调用云端服务。</p>
+  </section>;
+}
+
 export default function LocalImageStudioPage() {
   const [models, setModels] = useState<string[]>([]);
   const [checkpoint, setCheckpoint] = useState("");
@@ -440,7 +629,8 @@ export default function LocalImageStudioPage() {
       </section>
 
 
-      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
+      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}
+      <StoryboardBatchImagePanel projects={targets} checkpoint={checkpoint} style={style} width={width} height={height} steps={steps} />\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
           <span className="text-xs text-white/50">{shotImages.length} 张</span>
