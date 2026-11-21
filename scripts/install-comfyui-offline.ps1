@@ -37,44 +37,58 @@ function Select-ComfyAsset($Adapters) {
     $nvidia = @($recognized | Where-Object Vendor -eq "NVIDIA")
     if ($nvidia.Count -gt 0) {
         $model = $nvidia[0].Name
-        $match = [regex]::Match($model, "(?i)GTX\s*([0-9]{3,4})")
-        if ($match.Success -and [int]$match.Groups[1].Value -le 1099) {
+        $gtx = [regex]::Match($model, "(?i)GTX\s*([0-9]{3,4})")
+        if ($gtx.Success -and [int]$gtx.Groups[1].Value -le 1099) {
             return @{
                 name = "ComfyUI_windows_portable_nvidia_cu126.7z"
                 detected_gpu = $model
                 vendor = "NVIDIA"
-                selection_reason = "GTX 10 系列及更旧 NVIDIA 显卡，使用官方 cu126 运行包"
+                selection_reason = "GTX 10 系列及更旧型号，使用官方 cu126 运行包"
             }
         }
-        return @{
-            name = "ComfyUI_windows_portable_nvidia.7z"
-            detected_gpu = $model
-            vendor = "NVIDIA"
-            selection_reason = "检测到 NVIDIA 显卡，使用官方标准运行包"
+        $rtx = [regex]::Match($model, "(?i)RTX\s*A?\s*([0-9]{4})")
+        if ($rtx.Success -and [int]$rtx.Groups[1].Value -ge 2000) {
+            return @{
+                name = "ComfyUI_windows_portable_nvidia.7z"
+                detected_gpu = $model
+                vendor = "NVIDIA"
+                selection_reason = "RTX 20 系列及更新型号，使用官方标准运行包"
+            }
         }
+        throw "检测到 NVIDIA 显卡，但型号不在官方便携包明确支持范围内（例如 GTX 16 系列）。为避免错误选择 CUDA 版本，安装已停止。"
     }
 
     $amd = @($recognized | Where-Object Vendor -eq "AMD")
     if ($amd.Count -gt 0) {
-        return @{
-            name = "ComfyUI_windows_portable_amd.7z"
-            detected_gpu = $amd[0].Name
-            vendor = "AMD"
-            selection_reason = "检测到 AMD 显卡，使用官方 AMD 运行包"
+        $model = $amd[0].Name
+        if ($model -match "(?i)RX\s*(?:6|7|9)[0-9]{3}" -or
+            $model -match "(?i)Ryzen AI Max" -or
+            $model -match "(?i)Radeon AI PRO R9700") {
+            return @{
+                name = "ComfyUI_windows_portable_amd.7z"
+                detected_gpu = $model
+                vendor = "AMD"
+                selection_reason = "检测到官方 Windows AMD 运行包支持的 GPU 系列"
+            }
         }
+        throw "检测到 AMD 显卡，但型号不在已核实的 Windows 运行包支持范围内。安装已停止，不会猜测或联网回退。"
     }
 
     $intel = @($recognized | Where-Object Vendor -eq "Intel")
     if ($intel.Count -gt 0) {
-        return @{
-            name = "ComfyUI_windows_portable_intel.7z"
-            detected_gpu = $intel[0].Name
-            vendor = "Intel"
-            selection_reason = "检测到 Intel 显卡，使用官方 Intel 运行包"
+        $model = $intel[0].Name
+        if ($model -match "(?i)\bArc\b") {
+            return @{
+                name = "ComfyUI_windows_portable_intel.7z"
+                detected_gpu = $model
+                vendor = "Intel"
+                selection_reason = "检测到 Intel Arc GPU，使用官方 Intel 运行包"
+            }
         }
+        throw "检测到 Intel 显卡，但当前官方 Windows XPU 运行包面向 Intel Arc；未识别到 Arc 型号，安装已停止。"
     }
 
-    throw "没有识别到受支持的 NVIDIA、AMD 或 Intel 显卡。安装已停止，不会猜测运行包，也不会联网下载。"
+    throw "没有识别到受支持的 NVIDIA、AMD 或 Intel GPU。安装已停止，不会猜测运行包，也不会联网下载。"
 }
 
 function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
