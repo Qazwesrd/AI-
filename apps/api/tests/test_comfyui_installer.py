@@ -63,7 +63,7 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIsNone(recommend_official_asset("NVIDIA", "NVIDIA GPU", "ARM64"))
         self.assertEqual(recommend_official_asset("AMD", "AMD Radeon RX 7900", "AMD64"), "ComfyUI_windows_portable_amd.7z")
         self.assertEqual(recommend_official_asset("Intel", "Intel Arc A770", "AMD64"), "ComfyUI_windows_portable_intel.7z")
-        self.assertIsNone(recommend_official_asset("Intel", "Intel UHD Graphics", "AMD64"))
+        self.assertEqual(recommend_official_asset("Intel", "Intel UHD Graphics", "AMD64"), "ComfyUI_windows_portable_intel.7z")
         integrated = parse_windows_video_adapters([{
             "Name": "AMD Radeon(TM) Graphics",
             "PNPDeviceID": "PCI\\\\VEN_1002&DEV_1636",
