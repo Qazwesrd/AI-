@@ -264,6 +264,11 @@ if ($auditRegister.audit_status -ne "pending" -or $auditRegister.distribution_ap
     throw "第三方依赖审查登记表状态无效；自动清点不能代替人工许可证审核。"
 }
 $registerVariants = @($auditRegister.portable_variants)
+$registerNames = @($registerVariants | ForEach-Object { [string]$_.asset } | Sort-Object -Unique)
+$registerDifferences = @(Compare-Object -ReferenceObject $expectedAssetNames -DifferenceObject $registerNames)
+if ($registerVariants.Count -ne 4 -or $registerNames.Count -ne 4 -or $registerDifferences.Count -gt 0) {
+    throw "第三方依赖审查登记表必须逐一覆盖四种官方 Portable 运行包。"
+}
 foreach ($variant in $inventoryVariants) {
     $registerEntry = @($registerVariants | Where-Object { $_.asset -ceq [string]$variant.asset })
     if ($registerEntry.Count -ne 1 -or
