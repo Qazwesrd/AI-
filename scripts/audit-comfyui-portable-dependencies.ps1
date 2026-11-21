@@ -140,7 +140,8 @@ function Get-ExtractedEvidence {
     $arguments = @("e", "-y", "-spd", "-o$Destination", $Archive, $EntryPath)
     $output = @(& $Tool @arguments 2>&1)
     if ($LASTEXITCODE -ne 0) {
-        throw "提取证据文件失败：$EntryPath；$($output -join ' ')"
+        $outputText = $output -join [string][char]32
+        throw "提取证据文件失败：$EntryPath；$outputText"
     }
     $extracted = Join-Path $Destination $leaf
     if (!(Test-Path -LiteralPath $extracted -PathType Leaf)) {
