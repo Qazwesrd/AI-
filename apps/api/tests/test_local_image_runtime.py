@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6,7 +7,8 @@ from fastapi import HTTPException
 
 import app.routers.local_image_runtime as runtime
 from app.routers.local_image_runtime import (
-    GIB, _build_runtime_command, _checkpoint_names, _local_json, assess_image_hardware,
+    GIB, MAX_LOG_BYTES, _build_runtime_command, _checkpoint_names, _local_json,
+    assess_image_hardware, local_image_runtime_logs,
 )
 
 
@@ -182,6 +184,24 @@ class LocalImageRuntimeTests(unittest.TestCase):
             self.assertIsNone(runtime._COMFYUI_PROCESS)
         finally:
             runtime._COMFYUI_PROCESS = old_process
+
+    def test_runtime_logs_report_missing_file_without_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(runtime, "_log_path", return_value=Path(directory) / "missing.log"):
+                result = local_image_runtime_logs()
+        self.assertFalse(result["available"])
+        self.assertEqual(result["content"], "")
+
+    def test_runtime_logs_read_only_the_bounded_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "comfyui.log"
+            path.write_bytes(b"A" * (MAX_LOG_BYTES + 37))
+            with patch.object(runtime, "_log_path", return_value=path):
+                result = local_image_runtime_logs()
+        self.assertTrue(result["available"])
+        self.assertTrue(result["truncated"])
+        self.assertEqual(len(result["content"]), MAX_LOG_BYTES)
+        self.assertEqual(result["content"], "A" * MAX_LOG_BYTES)
 
     def test_start_stop_and_log_endpoints_are_registered(self):
         paths = {route.path for route in runtime.router.routes}
