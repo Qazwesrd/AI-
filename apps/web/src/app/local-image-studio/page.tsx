@@ -231,17 +231,6 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
 
     {history.length > 0 && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/10 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">本地持久化任务历史（最近 {history.length} 条）</p>
-        <button type="button" onClick={() => void refreshHistory().catch((err) => setError(err instanceof Error ? err.message : "刷新历史失败"))} disabled={busy} className="rounded-lg border border-white/20 px-3 py-2 text-xs disabled:opacity-40">刷新历史</button>
-      </div>
-      {history.map((item) => <div key={item.history_id} className="rounded-lg bg-black/20 p-2 text-xs">
-        <div className="flex flex-wrap justify-between gap-2"><span>镜头 {item.shot_number} · {item.style} · {item.width}×{item.height}</span><span>{item.status === "completed" ? "已完成" : item.status === "failed" ? "失败" : item.status === "unavailable" ? "暂不可查询" : item.status === "running" ? "生成中" : "排队中"}</span></div>
-        <p className="mt-1 break-all text-white/50">任务 {item.prompt_id} · 种子 {item.seed} · {item.created_at ? new Date(item.created_at).toLocaleString() : "时间未知"}</p>
-        {item.images.length > 0 && <p className="mt-1 text-emerald-200">输出图片：{item.images.map((image) => image.filename).join("、")}</p>}
-        {item.error && <p className="mt-1 text-rose-200">{item.error}</p>}
-      </div>)}
-    </div>}
 
     {notice && <p className="text-sm text-emerald-200">{notice}</p>}
     {result && <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
