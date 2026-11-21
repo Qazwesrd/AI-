@@ -232,18 +232,79 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 database.STORAGE_DIR = root / "storage"
                 database.init_database()
                 database.init_database()
-                self.assertEqual(database.get_schema_version(), 1)
+                self.assertEqual(database.get_schema_version(), 2)
                 with sqlite_connection(db_path) as connection:
                     rows = connection.execute(
                         "SELECT version, name FROM schema_migrations ORDER BY version"
                     ).fetchall()
-                self.assertEqual(rows, [(1, "baseline_schema")])
+                self.assertEqual(rows, [
+                    (1, "baseline_schema"),
+                    (2, "subtitle_track_project_episode_ownership"),
+                ])
             finally:
                 test_engine.dispose()
                 database.engine = previous_engine
                 database.DATABASE_PATH = previous_path
                 database.STORAGE_DIR = previous_storage
 
+
+    def test_schema_v1_database_adds_subtitle_ownership_columns_and_records_v2(self):
+        with tempfile.TemporaryDirectory(prefix="comic-subtitle-ownership-migration-") as temp:
+            root = Path(temp)
+            db_path = root / "legacy-v1.db"
+            storage_path = root / "storage"
+            with sqlite_connection(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, name, applied_at) VALUES (1, 'baseline_schema', '2026-01-01T00:00:00Z')"
+                )
+                connection.execute(
+                    "CREATE TABLE subtitle_tracks (id INTEGER PRIMARY KEY, name VARCHAR(300) NOT NULL, file_path TEXT NOT NULL, format VARCHAR(20), language VARCHAR(30), created_at DATETIME)"
+                )
+                connection.execute(
+                    "INSERT INTO subtitle_tracks (id, name, file_path, format, language) VALUES (7, 'legacy', '/old/legacy.srt', 'srt', 'zh-CN')"
+                )
+
+            previous_engine = database.engine
+            previous_path = database.DATABASE_PATH
+            previous_storage = database.STORAGE_DIR
+            test_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
+                future=True,
+            )
+            try:
+                database.engine = test_engine
+                database.DATABASE_PATH = db_path
+                database.STORAGE_DIR = storage_path
+                self.assertTrue(database.init_database())
+                columns = {item["name"] for item in inspect(test_engine).get_columns("subtitle_tracks")}
+                self.assertIn("project_id", columns)
+                self.assertIn("episode_id", columns)
+                self.assertEqual(database.get_schema_version(), 2)
+                with sqlite_connection(db_path) as connection:
+                    self.assertEqual(
+                        connection.execute("SELECT name, file_path FROM subtitle_tracks WHERE id=7").fetchone(),
+                        ("legacy", "/old/legacy.srt"),
+                    )
+                    self.assertEqual(
+                        connection.execute("SELECT version, name FROM schema_migrations ORDER BY version").fetchall(),
+                        [(1, "baseline_schema"), (2, "subtitle_track_project_episode_ownership")],
+                    )
+                backups = list((storage_path / "backups" / "schema").glob("*.db"))
+                self.assertEqual(len(backups), 1)
+                with sqlite_connection(backups[0]) as backup:
+                    legacy_columns = {row[1] for row in backup.execute("PRAGMA table_info(subtitle_tracks)")}
+                    self.assertNotIn("project_id", legacy_columns)
+                    self.assertNotIn("episode_id", legacy_columns)
+            finally:
+                test_engine.dispose()
+                database.engine = previous_engine
+                database.DATABASE_PATH = previous_path
+                database.STORAGE_DIR = previous_storage
 
     def test_corrupt_rollback_snapshot_is_rejected_before_live_database_is_touched(self):
         with tempfile.TemporaryDirectory(prefix="comic-db-corrupt-rollback-") as temp:
