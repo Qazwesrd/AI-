@@ -239,8 +239,11 @@ $largestAssetBytes = [long](($manifestAssets | Measure-Object -Property size_byt
 # The largest archive is mirrored to temporary storage while its dependency inventory is generated.
 $estimatedBundleBytes = [long]$totalBytes + [long]$localAIPayloadBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + $largestAssetBytes + 1GB
 $target = [System.IO.Path]::GetFullPath($OutputZip)
-if (Test-Path -LiteralPath $target) {
-    throw "输出文件已存在：$target。为保护已有离线安装套件，底层打包脚本不会覆盖或删除它。若确认重新制作，请先通过 create-comfyui-offline-installer.ps1 -Force 明确删除旧包。"
+$checksumTarget = "$target.sha256"
+$stagingTarget = "$target.$([Guid]::NewGuid().ToString('N')).partial"
+$stagingChecksum = "$stagingTarget.sha256"
+if ((Test-Path -LiteralPath $target) -or (Test-Path -LiteralPath $checksumTarget)) {
+    throw "输出文件或 SHA-256 校验文件已存在：$target。为保护已有离线安装套件，底层打包脚本不会覆盖或删除它。若确认重新制作，请先通过 create-comfyui-offline-installer.ps1 -Force 明确删除旧包及其校验文件。"
 }
 $targetDir = Split-Path -Parent $target
 New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
@@ -268,7 +271,7 @@ $clientHandler = [System.Net.Http.HttpClientHandler]::new()
 $clientHandler.AllowAutoRedirect = $false
 $client = [System.Net.Http.HttpClient]::new($clientHandler)
 $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
-$stream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+$stream = [System.IO.File]::Open($stagingTarget, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
 $archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
 $inventoryTempRoot = $null
 try {
@@ -443,7 +446,7 @@ AI漫剧制作大师 - 完整离线安装套件（内部验证版）
     $archive.Dispose()
     $stream.Dispose()
     $client.Dispose()
-    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
+    if (Test-Path -LiteralPath $stagingTarget) { Remove-Item -LiteralPath $stagingTarget -Force }
     throw
 } finally {
     $archive.Dispose()
@@ -456,7 +459,7 @@ AI漫剧制作大师 - 完整离线安装套件（内部验证版）
 
 # Re-open the finished ZIP and verify its central directory, required entries,
 # lengths and SHA-256 values after packaging. This catches truncated/corrupt ZIP output.
-$verifyStream = [System.IO.File]::OpenRead($target)
+$verifyStream = [System.IO.File]::OpenRead($stagingTarget)
 $verifyArchive = $null
 try {
     $verifyArchive = [System.IO.Compression.ZipArchive]::new($verifyStream, [System.IO.Compression.ZipArchiveMode]::Read, $false)
@@ -554,14 +557,33 @@ try {
             throw "最终 ZIP 的依赖清点报告与主清单资产校验值不匹配：$($variant.asset)"
         }
     }
+} catch {
+    if (Test-Path -LiteralPath $stagingTarget) { Remove-Item -LiteralPath $stagingTarget -Force -ErrorAction SilentlyContinue }
+    throw
 } finally {
     if ($verifyArchive) { $verifyArchive.Dispose() }
     $verifyStream.Dispose()
 }
 
+# Publish only after the ZIP has passed its full read-back and SHA-256 checks.
+# The final paths are never exposed while the archive is still being written.
+$zipHash = (Get-FileHash -LiteralPath $stagingTarget -Algorithm SHA256).Hash
+$zipName = [System.IO.Path]::GetFileName($target)
+$checksumText = "$zipHash  $zipName" + [Environment]::NewLine
+[System.IO.File]::WriteAllText($stagingChecksum, $checksumText, [System.Text.Encoding]::ASCII)
+if ((Test-Path -LiteralPath $target) -or (Test-Path -LiteralPath $checksumTarget)) {
+    Remove-Item -LiteralPath $stagingTarget, $stagingChecksum -Force -ErrorAction SilentlyContinue
+    throw "发布前检测到目标 ZIP 或校验文件已出现；为保护已有文件，取消发布。"
+}
+[System.IO.File]::Move($stagingTarget, $target)
+try {
+    [System.IO.File]::Move($stagingChecksum, $checksumTarget)
+} catch {
+    Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stagingChecksum -Force -ErrorAction SilentlyContinue
+    throw
+}
 $zipItem = Get-Item -LiteralPath $target
-$zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-"$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
 Write-Host ("离线套件已生成：{0}" -f $target)
 Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
 Write-Host "ZIP SHA-256：$zipHash"
