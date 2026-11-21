@@ -79,6 +79,8 @@ class EpisodeRenderJobTests(unittest.TestCase):
             del media._EPISODE_RENDER_CONTEXT.duration_seconds
 
     def test_worker_persists_successful_result(self):
+        self.task.status = "queued"
+        self.db.commit()
         with patch.object(media, "SessionLocal", self.Session):
             with patch.object(media, "render_episode_from_shots", return_value={
                 "success": True, "episode_id": 12, "output": "storage/video/episode.mp4",
