@@ -30,6 +30,14 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         ):
             self.assertIn(asset, source)
 
+    def test_archive_listing_optional_fields_are_guarded(self):
+        source_path = REPO_ROOT / "scripts" / "audit-comfyui-portable-dependencies.ps1"
+        source = source_path.read_text(encoding="utf-8")
+        self.assertEqual(source.count('ContainsKey("Folder")'), 2)
+        self.assertEqual(source.count('ContainsKey("Attributes")'), 2)
+        self.assertNotIn('$record["Folder"] -eq "+"', source)
+        self.assertNotIn('[string]$record["Attributes"]', source)
+
 
 if __name__ == "__main__":
     unittest.main()
