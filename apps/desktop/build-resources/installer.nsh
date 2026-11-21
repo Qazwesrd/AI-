@@ -24,4 +24,22 @@ Unicode true
     Abort
 
   comfyui_payload_done:
+
+  IfFileExists "$EXEDIR\\LocalAI-Payload\\install-local-ai-offline.ps1" 0 localai_payload_missing
+  DetailPrint "正在部署内置 Ollama 本地运行环境和 Qwen3 4B 模型..."
+  ExecWait '"$SYSDIR\\WindowsPowerShell\\v1.0\\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$EXEDIR\\LocalAI-Payload\\install-local-ai-offline.ps1" -PayloadRoot "$EXEDIR\\LocalAI-Payload" -InstallRoot "$PROFILE\\AIComicStudio\\Ollama" -LogPath "$TEMP\\AIComicStudio-Ollama-install.log"' $0
+  IntCmp $0 0 localai_install_success localai_install_failed localai_install_failed
+
+  localai_install_failed:
+    MessageBox MB_ICONSTOP|MB_OK "本地 AI 运行环境或 Qwen3 4B 模型部署失败（错误代码：$0）。安装已停止。请检查磁盘空间和日志：$TEMP\\AIComicStudio-Ollama-install.log。"
+    Abort
+
+  localai_install_success:
+    Goto localai_payload_done
+
+  localai_payload_missing:
+    MessageBox MB_ICONSTOP|MB_OK "缺少 LocalAI-Payload 离线数据包。请完整解压整个安装 ZIP，再运行根目录中的 Setup.exe。不要单独移动 Setup.exe。"
+    Abort
+
+  localai_payload_done:
 !macroend
