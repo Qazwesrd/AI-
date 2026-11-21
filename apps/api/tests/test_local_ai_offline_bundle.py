@@ -29,6 +29,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         for marker in (
             "Resolve-SafeRelativePath",
             "distribution_approved -ne $false",
+            "payload_manifest_sha256 -ne $payloadManifestHash",
             "Get-Sha256",
             "Expand-Archive",
             "Move-Item -LiteralPath $stage",
@@ -51,6 +52,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             "LocalAI-Payload/ollama-windows-amd64.zip",
             "local_ai = @{",
             "license_review_status = \"pending\"",
+            "payload_manifest_sha256",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, packer)
