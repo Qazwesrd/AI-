@@ -56,21 +56,9 @@ type ComfyUIReadiness = {
   install_target: string; note: string;
   gpu_adapters?: { name: string; vendor: string; vram_bytes: number | null; recommended_asset: string | null; vram_note: string }[];
 };
-type ComfyUIReleaseCatalog = {
-  version: string; published_at: string; source: string;
-  assets: { name: string; download_url: string; size_bytes: number; sha256: string | null; digest_available: boolean }[];
-  download_started: boolean; installation_started: boolean; note: string;
-};
-type ComfyUIInstallPlan = {
-  status: string; version: string; asset_name: string; archive_size_bytes: number;
-  sha256: string; install_target: string; required_free_bytes: number; free_disk_bytes: number;
-  download_started: boolean; installation_started: boolean; network_used: boolean; note: string;
-};
-type ComfyUIDownloadTask = {
-  task_id: string; status: string; asset_name: string; version: string;
-  received_bytes: number; total_bytes: number; percent: number;
-  error: string | null; verified: boolean; installation_started: boolean;
-};
+
+
+
 declare global {
   interface Window {
     localAIInstallerDesktop?: {
@@ -134,14 +122,6 @@ export default function LocalModelsPage() {
   const [checkingImageRuntime, setCheckingImageRuntime] = useState(false);
   const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
-  const [comfyReleaseCatalog, setComfyReleaseCatalog] = useState<ComfyUIReleaseCatalog | null>(null);
-  const [loadingComfyReleaseCatalog, setLoadingComfyReleaseCatalog] = useState(false);
-  const [comfyInstallPlan, setComfyInstallPlan] = useState<ComfyUIInstallPlan | null>(null);
-  const [creatingComfyInstallPlan, setCreatingComfyInstallPlan] = useState(false);
-  const [comfyDownloadTask, setComfyDownloadTask] = useState<ComfyUIDownloadTask | null>(null);
-  const [comfyDownloadHistory, setComfyDownloadHistory] = useState<ComfyUIDownloadTask[]>([]);
-  const [startingComfyDownload, setStartingComfyDownload] = useState(false);
-  const [cancellingComfyDownload, setCancellingComfyDownload] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -201,123 +181,6 @@ export default function LocalModelsPage() {
     }
   }, []);
 
-  const loadComfyReleaseCatalog = useCallback(async () => {
-    if (!window.confirm("将连接 Comfy-Org 官方 GitHub，只读取最新 ComfyUI Windows 安装包的版本、文件大小和校验摘要，不会下载或安装文件。此操作会使用网络流量。是否继续？")) return;
-    setLoadingComfyReleaseCatalog(true);
-    setError("");
-    try {
-      const response = await fetch(`${API}/api/local-ai/comfyui-installer/release-catalog`, { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "读取官方 ComfyUI 版本信息失败");
-      setComfyReleaseCatalog(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "读取官方 ComfyUI 版本信息失败");
-    } finally {
-      setLoadingComfyReleaseCatalog(false);
-    }
-  }, []);
-
-
-  const createComfyInstallPlan = async (assetName: string) => {
-    if (!window.confirm(`将重新读取 Comfy-Org 官方发布信息，并检查安装包 ${assetName} 的 SHA-256 和目标磁盘空间。只生成安装计划，不会下载、解压或启动程序。是否继续？`)) return;
-    setCreatingComfyInstallPlan(true);
-    setComfyInstallPlan(null);
-    setError("");
-    try {
-      const response = await fetch(`${API}/api/local-ai/comfyui-installer/install-plan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asset_name: assetName, confirm_plan: true }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "生成 ComfyUI 安装计划失败");
-      setComfyInstallPlan(result);
-      setMessage("ComfyUI 安装计划已生成；尚未下载或安装任何文件。");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "生成 ComfyUI 安装计划失败");
-    } finally {
-      setCreatingComfyInstallPlan(false);
-    }
-  };
-
-  const startComfyDownload = async () => {
-    if (!comfyInstallPlan) return;
-    const accepted = window.confirm(
-      `即将从 Comfy-Org 官方下载 ${comfyInstallPlan.asset_name}（${size(comfyInstallPlan.archive_size_bytes)}）。
-将使用网络和磁盘空间；下载完成后会校验 SHA-256。此操作只下载并校验安装包，不会解压、安装、启动或下载模型。是否开始？`
-    );
-    if (!accepted) return;
-    setStartingComfyDownload(true);
-    setError("");
-    try {
-      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          confirm_download: true,
-          asset_name: comfyInstallPlan.asset_name,
-          version: comfyInstallPlan.version,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "启动 ComfyUI 下载失败");
-      setComfyDownloadTask(result);
-      void refreshComfyDownloadHistory();
-      setMessage("ComfyUI 官方安装包下载任务已启动；尚未安装或启动引擎。");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "启动 ComfyUI 下载失败");
-    } finally {
-      setStartingComfyDownload(false);
-    }
-  };
-
-  const refreshComfyDownloadHistory = useCallback(async () => {
-    try {
-      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/history`, { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "读取下载历史失败");
-      const tasks = Array.isArray(result.tasks) ? result.tasks as ComfyUIDownloadTask[] : [];
-      setComfyDownloadHistory(tasks);
-      setComfyDownloadTask((current) => current || tasks.find((task) => ["queued", "downloading", "cancelling"].includes(task.status)) || tasks[0] || null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "读取下载历史失败");
-    }
-  }, []);
-
-  const refreshComfyDownloadTask = useCallback(async (taskId: string) => {
-    try {
-      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/${encodeURIComponent(taskId)}`, { cache: "no-store" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "读取下载进度失败");
-      setComfyDownloadTask(result);
-      void refreshComfyDownloadHistory();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "读取下载进度失败");
-    }
-  }, [refreshComfyDownloadHistory]);
-
-  const cancelComfyDownload = async () => {
-    if (!comfyDownloadTask) return;
-    if (!window.confirm("确定取消 ComfyUI 安装包下载吗？未完成的临时文件会被清理。")) return;
-    setCancellingComfyDownload(true);
-    try {
-      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/${encodeURIComponent(comfyDownloadTask.task_id)}/cancel`, { method: "POST" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "取消下载失败");
-      setComfyDownloadTask(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "取消下载失败");
-    } finally {
-      setCancellingComfyDownload(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!comfyDownloadTask || !["queued", "downloading", "cancelling"].includes(comfyDownloadTask.status)) return;
-    const timer = window.setInterval(() => void refreshComfyDownloadTask(comfyDownloadTask.task_id), 1200);
-    return () => window.clearInterval(timer);
-  }, [comfyDownloadTask?.task_id, comfyDownloadTask?.status, refreshComfyDownloadTask]);
-
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -327,7 +190,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); void refreshComfyDownloadHistory(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness, refreshComfyDownloadHistory]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness]);
 
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
@@ -632,54 +495,13 @@ export default function LocalModelsPage() {
             <p className="mt-2 text-xs leading-5 text-white/45">{comfyReadiness.note}</p>
           </> : <p className="mt-3 text-sm text-white/55">正在评估 ComfyUI 安装条件…</p>}
           <div className="mt-4 border-t border-white/10 pt-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div><div className="font-semibold">官方安装包版本与下载量</div><p className="mt-1 text-xs text-white/45">需要你手动确认后才会查询官方版本信息；查询不会下载文件。</p></div>
-              <button type="button" disabled={loadingComfyReleaseCatalog} onClick={() => void loadComfyReleaseCatalog()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-40">{loadingComfyReleaseCatalog ? "正在读取官方信息…" : "查询官方版本和大小"}</button>
+            <div className="rounded-xl border border-cyan-300/20 bg-cyan-400/5 p-4 text-sm leading-6">
+              <p className="font-semibold text-cyan-100">正式版采用完整离线安装套件</p>
+              <p className="mt-2 text-white/65">ComfyUI 引擎将随安装套件一并提供。安装流程自动识别 NVIDIA、AMD、Intel 显卡，只部署匹配的运行环境；安装完成后不再单独联网下载 ComfyUI。</p>
+              <p className="mt-2 text-white/65">图片生成模型与引擎分开管理，不包含在引擎安装包内。下载模型前会显示来源、大小、磁盘需求并要求你明确确认。</p>
+              <p className="mt-2 text-xs text-white/45">当前页面只进行硬件和磁盘只读评估；不会启动下载或安装。完整离线安装包仍需通过构建、安装器集成和许可证审查后才能发布。</p>
             </div>
-            {comfyReleaseCatalog && <>
-              <p className="mt-3 text-sm">最新官方版本：<strong>{comfyReleaseCatalog.version}</strong></p>
-              <div className="mt-2 space-y-2">
-                {comfyReleaseCatalog.assets.map(asset => <div key={asset.name} className="rounded-lg bg-white/[0.04] p-3 text-sm">
-                  <div className="break-all font-medium">{asset.name}</div>
-                  <div className="mt-1 text-white/60">下载大小：{size(asset.size_bytes)} · SHA-256：{asset.digest_available ? "官方元数据已提供" : "官方未提供"}</div>
-                  {asset.sha256 && <div className="mt-1 break-all font-mono text-[11px] text-white/40">{asset.sha256}</div>}
-                  <button type="button" disabled={creatingComfyInstallPlan || !asset.digest_available} onClick={() => void createComfyInstallPlan(asset.name)} className="mt-3 rounded-lg border border-fuchsia-300/30 px-3 py-2 text-xs disabled:opacity-40">{creatingComfyInstallPlan ? "正在核对…" : asset.digest_available ? "核对并生成安装计划" : "缺少校验值，不能生成计划"}</button>
-                </div>)}
-                {comfyReleaseCatalog.assets.length === 0 && <p className="text-sm text-amber-100/75">官方最新版本暂未提供可识别的 Windows 安装包资源。</p>}
-              </div>
-              <p className="mt-2 text-xs leading-5 text-white/45">{comfyReleaseCatalog.note}</p>
-              {comfyInstallPlan && <div className="mt-3 rounded-xl border border-emerald-300/25 bg-emerald-400/5 p-3 text-sm">
-                <p className="font-semibold text-emerald-100">安装计划已生成（尚未下载）</p>
-                <p className="mt-2 break-all">版本：{comfyInstallPlan.version} · 安装包：{comfyInstallPlan.asset_name}</p>
-                <p className="mt-1">压缩包：{size(comfyInstallPlan.archive_size_bytes)} · 目标盘要求：{size(comfyInstallPlan.required_free_bytes)} · 当前可用：{size(comfyInstallPlan.free_disk_bytes)}</p>
-                <p className="mt-1 break-all text-xs text-white/55">SHA-256：{comfyInstallPlan.sha256}</p>
-                <p className="mt-1 break-all text-xs text-white/45">安装位置：{comfyInstallPlan.install_target}</p>
-                <p className="mt-2 text-xs text-white/55">{comfyInstallPlan.note}</p>
-              </div>}
-              {comfyInstallPlan && !comfyDownloadTask?.verified && <button type="button" disabled={startingComfyDownload || Boolean(comfyDownloadTask && ["queued", "downloading", "cancelling"].includes(comfyDownloadTask.status))} onClick={() => void startComfyDownload()} className="mt-3 rounded-lg border border-emerald-300/30 px-3 py-2 text-sm disabled:opacity-40">{startingComfyDownload ? "正在启动…" : "确认并下载官方安装包"}</button>}
-              {comfyDownloadHistory.length > 0 && <div className="mt-3 rounded-xl border border-white/10 p-3 text-sm">
-                <p className="font-semibold">本机下载任务记录</p>
-                <p className="mt-1 text-xs text-white/45">记录保存在本机。应用重启时未完成的任务会标记为“中断”，不会自动续传或重新下载。</p>
-                <div className="mt-2 space-y-2">
-                  {comfyDownloadHistory.slice().reverse().map((task) => <button key={task.task_id} type="button" onClick={() => setComfyDownloadTask(task)} className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left ${comfyDownloadTask?.task_id === task.task_id ? "border-cyan-300/40 bg-cyan-400/10" : "border-white/10 bg-white/[0.02]"}`}>
-                    <span className="min-w-0"><span className="block truncate">{task.asset_name}</span><span className="text-xs text-white/45">{task.version} · {size(task.received_bytes)} / {size(task.total_bytes)}</span></span>
-                    <span className="text-xs">{task.status === "verified" ? "校验通过" : task.status === "interrupted" ? "应用重启时中断" : task.status === "failed" ? "失败" : task.status === "cancelled" ? "已取消" : task.status === "downloading" ? "下载中" : task.status === "cancelling" ? "正在取消" : "等待中"}</span>
-                  </button>)}
-                </div>
-              </div>}
-              {comfyDownloadTask && <div className="mt-3 rounded-xl border border-cyan-300/25 bg-cyan-400/5 p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong>下载任务：{comfyDownloadTask.status === "verified" ? "校验通过" : comfyDownloadTask.status === "failed" ? "下载失败" : comfyDownloadTask.status === "cancelled" ? "已取消" : comfyDownloadTask.status === "interrupted" ? "应用重启时中断" : comfyDownloadTask.status === "cancelling" ? "正在取消…" : "下载中"}</strong>
-                  {["queued", "downloading"].includes(comfyDownloadTask.status) && <button type="button" disabled={cancellingComfyDownload} onClick={() => void cancelComfyDownload()} className="rounded-lg border border-rose-300/30 px-3 py-1.5 text-xs disabled:opacity-40">{cancellingComfyDownload ? "正在取消…" : "取消下载"}</button>}
-                </div>
-                <p className="mt-2">{size(comfyDownloadTask.received_bytes)} / {size(comfyDownloadTask.total_bytes)} · {comfyDownloadTask.percent}%</p>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${Math.max(0, Math.min(100, comfyDownloadTask.percent))}%` }} /></div>
-                {comfyDownloadTask.error && <p className="mt-2 text-rose-200">{comfyDownloadTask.error}</p>}
-                {comfyDownloadTask.verified && <p className="mt-2 text-emerald-200">SHA-256 校验成功。安装包已保存；尚未解压、安装或启动 ComfyUI。</p>}
-              </div>}
-            </>}
           </div>
-          <p className="mt-3 text-xs text-white/45">当前阶段不会自动下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
         </section>
 
         {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
