@@ -48,6 +48,13 @@ type HardwareReadiness = {
 };
 type OllamaRuntimeStatus = { installed: boolean; status: string; freeBytes: number | null; requiredFreeBytes: number; enoughSpace: boolean; installDirectory: string };
 type OllamaInstallProgress = { status: string; stage: string; percent?: number | null; receivedBytes?: number; totalBytes?: number; message: string };
+type ComfyUIReadiness = {
+  status: string; can_install_engine: boolean; hardware_profile: string;
+  ram_bytes: number | null; vram_bytes: number | null; free_disk_bytes: number | null;
+  engine_disk_reserve_bytes: number; optional_model_disk_reserve_bytes: number;
+  recommended_total_reserve_bytes: number; blockers: string[]; warnings: string[];
+  install_target: string; note: string;
+};
 declare global {
   interface Window {
     localAIInstallerDesktop?: {
@@ -109,6 +116,8 @@ export default function LocalModelsPage() {
   const [checkingHardware, setCheckingHardware] = useState(false);
   const [imageRuntime, setImageRuntime] = useState<LocalImageRuntime | null>(null);
   const [checkingImageRuntime, setCheckingImageRuntime] = useState(false);
+  const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
+  const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -154,6 +163,20 @@ export default function LocalModelsPage() {
     }
   }, []);
 
+  const refreshComfyReadiness = useCallback(async () => {
+    setCheckingComfyReadiness(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/readiness`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "ComfyUI 安装前检测失败");
+      setComfyReadiness(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ComfyUI 安装前检测失败");
+    } finally {
+      setCheckingComfyReadiness(false);
+    }
+  }, []);
+
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -163,7 +186,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness]);
 
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
@@ -423,7 +446,30 @@ export default function LocalModelsPage() {
         <section className="rounded-2xl border border-purple-300/25 bg-slate-950/70 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold">Qwen3 4B 硬件适配检测</h2>
+              <h2 className="text-xl font-semibold"<section className="rounded-2xl border border-fuchsia-300/25 bg-slate-950/70 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><h2 className="text-xl font-semibold">ComfyUI 安装准备评估</h2><p className="mt-1 text-sm leading-6 text-white/55">先检查电脑和磁盘条件。目前只做评估，不会下载或安装任何文件。</p></div>
+            <button type="button" disabled={checkingComfyReadiness} onClick={() => void refreshComfyReadiness()} className="rounded-lg border border-fuchsia-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingComfyReadiness ? "检测中…" : "重新评估"}</button>
+          </div>
+          {comfyReadiness ? <>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎空间预留</div><div className="mt-1 font-semibold">{size(comfyReadiness.engine_disk_reserve_bytes)}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">可选模型额外预留</div><div className="mt-1 font-semibold">{size(comfyReadiness.optional_model_disk_reserve_bytes)}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">目标磁盘可用空间</div><div className="mt-1 font-semibold">{size(comfyReadiness.free_disk_bytes)}</div></div>
+            </div>
+            <div className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm">
+              <p>初步结论：{comfyReadiness.status === "blocked" ? "暂不建议安装" : comfyReadiness.status === "needs_manual_check" ? "需要人工确认" : "可以进入后续安装方案评估"}</p>
+              <p className="mt-1 text-white/60">内存 {size(comfyReadiness.ram_bytes)} · 显存 {size(comfyReadiness.vram_bytes)} · 显卡档位 {comfyReadiness.hardware_profile}</p>
+              {comfyReadiness.blockers.map((item,index) => <p key={index} className="mt-2 text-rose-200">• {item}</p>)}
+              {comfyReadiness.warnings.map((item,index) => <p key={index} className="mt-2 text-amber-100/75">• {item}</p>)}
+              <p className="mt-2 break-all text-xs text-white/45">规划安装位置：{comfyReadiness.install_target}</p>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-white/45">{comfyReadiness.note}</p>
+          </> : <p className="mt-3 text-sm text-white/55">正在评估 ComfyUI 安装条件…</p>}
+          <p className="mt-3 text-xs text-white/45">当前阶段不会联网、下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
+        </section>
+
+        >Qwen3 4B 硬件适配检测</h2>
               <p className="mt-1 text-sm text-white/55">只读取系统信息和磁盘空间，不进行压力测试。</p>
             </div>
             <button type="button" disabled={checkingHardware} onClick={() => void refreshHardwareReadiness()} className="rounded-lg border border-purple-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingHardware ? "正在检测…" : "重新检测电脑"}</button>
