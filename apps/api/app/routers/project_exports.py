@@ -171,18 +171,18 @@ def _collect_project_records(db: Session, project: StoryProject):
         MediaFile.id.in_(sorted(media_ids) or [-1])
     ).all()
     shot_ids = {item.id for item in shots}
-    storyboard_tasks = db.query(MediaTask).filter(
-        MediaTask.task_type == "storyboard_video"
-    ).all()
+    all_media_tasks = db.query(MediaTask).all()
     media_tasks = []
-    for task in storyboard_tasks:
+    episode_id_set = set(episode_ids)
+    for task in all_media_tasks:
         metadata = task.request_data if isinstance(task.request_data, dict) else {}
         try:
             task_episode_id = int(metadata.get("episode_id") or 0)
             task_shot_id = int(metadata.get("shot_id") or 0)
+            task_project_id = int(metadata.get("project_id") or 0)
         except (TypeError, ValueError):
             continue
-        if task_episode_id in set(episode_ids) and task_shot_id in shot_ids:
+        if task_episode_id in episode_id_set or task_shot_id in shot_ids or task_project_id == project.id:
             media_tasks.append(task)
     image_tasks = db.query(ImageTask).filter(
         ImageTask.asset_id.in_(sorted(asset_ids) or [-1])
