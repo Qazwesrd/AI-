@@ -404,7 +404,7 @@ def list_story_project_exports(project_id: int, db: Session = Depends(get_db)):
             "modified_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
         }
         for path in sorted(EXPORT_DIR.glob(prefix + "*.zip"), key=lambda item: item.stat().st_mtime, reverse=True)
-        if path.is_file() and path.name.startswith(prefix)
+        if path.is_file() and not path.is_symlink() and path.name.startswith(prefix)
     ]
     return {"project_id": project_id, "items": items, "total": len(items)}
 
