@@ -12,6 +12,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate ComfyUI third-party audit gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("docs/compliance/comfyui-portable-dependency-audit.json")
+          audit = json.loads(path.read_text(encoding="utf-8"))
+          assert audit["schema_version"] == 1
+          assert audit["audit_status"] == "pending"
+          assert audit["distribution_approved"] is False
+          variants = audit["portable_variants"]
+          expected = {
+              "ComfyUI_windows_portable_nvidia.7z",
+              "ComfyUI_windows_portable_nvidia_cu126.7z",
+              "ComfyUI_windows_portable_amd.7z",
+              "ComfyUI_windows_portable_intel.7z",
+          }
+          assert {item["asset"] for item in variants} == expected
+          assert all(item["inventory_status"] != "approved" for item in variants)
+          print("ComfyUI third-party dependency audit is correctly blocked pending review.")
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
