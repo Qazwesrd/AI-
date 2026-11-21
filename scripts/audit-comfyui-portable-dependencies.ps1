@@ -7,7 +7,7 @@ param(
     [string]$ReleaseTag,
     [Parameter(Mandatory = $true)]
     [string[]]$ArchivePaths,
-    [int]$MaximumEntries = 200000,
+    [int]$MaximumEntries = 50000,
     [int]$MaximumEvidenceFiles = 20000,
     [long]$MaximumMetadataBytes = 2MB,
     [long]$MaximumLicenseBytes = 4MB,
@@ -30,7 +30,17 @@ $RuntimePattern = '(?i)(^|[/\\])(torch|torchvision|torchaudio)([/\\]|[-_.])|(^|[
 function Get-ArchiveEntries {
     param([string]$Tool, [string]$Archive, [int]$EntryLimit)
 
-    $listing = @(& $Tool l -slt $Archive 2>&1)
+    # Consume native output incrementally and cap listing lines before parsing.
+    # This prevents an unexpectedly huge archive directory listing from being
+    # materialized as one unbounded PowerShell array.
+    $maximumListingLines = ([long]$EntryLimit * 12) + 1000
+    $listing = New-Object System.Collections.Generic.List[string]
+    & $Tool l -slt $Archive 2>&1 | ForEach-Object {
+        if ($listing.Count -ge $maximumListingLines) {
+            throw "归档目录清单输出超过安全上限 $maximumListingLines 行：$Archive"
+        }
+        $listing.Add([string]$_)
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "7-Zip 无法读取归档目录：$Archive"
     }
