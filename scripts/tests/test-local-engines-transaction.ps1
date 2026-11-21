@@ -33,6 +33,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 if ($ValidateOnly) { return }
+if (Test-Path -LiteralPath $InstallRoot) { return }
 New-Item -ItemType Directory -Path (Join-Path $InstallRoot "ComfyUI"), (Join-Path $InstallRoot "python_embeded") -Force | Out-Null
 [System.IO.File]::WriteAllText((Join-Path $InstallRoot "ComfyUI\main.py"), "mock")
 [System.IO.File]::WriteAllText((Join-Path $InstallRoot "python_embeded\python.exe"), "mock")
@@ -77,7 +78,10 @@ New-Item -ItemType Directory -Path (Join-Path $InstallRoot "runtime") -Force | O
     $existingRoot = Join-Path $temp "scenario-existing"
     $existingComfy = Join-Path $existingRoot "ComfyUI"
     $existingLocal = Join-Path $existingRoot "Ollama"
-    New-Item -ItemType Directory -Path $existingComfy -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $existingComfy "ComfyUI"), (Join-Path $existingComfy "python_embeded") -Force | Out-Null
+    Write-Utf8 (Join-Path $existingComfy "ComfyUI\main.py") "existing-main"
+    Write-Utf8 (Join-Path $existingComfy "python_embeded\python.exe") "existing-python"
+    Write-Utf8 (Join-Path $existingComfy "runtime-manifest.json") '{"schema_version":1,"distribution_approved":false}'
     Write-Utf8 (Join-Path $existingComfy "user-models-sentinel.txt") "preserve-user-data"
     Write-Utf8 (Join-Path $localPayload "fail-install") "fail"
     $failed = $false
