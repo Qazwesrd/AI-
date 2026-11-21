@@ -343,8 +343,12 @@ def _run_video_edit_render_job(job_id: int, task_id: int, payload: dict):
         if task:
             task.status = "cancelled"
             task.error = str(exc)
-            task.result_data = {"progress": {"stage": "cancelled"},
-                                "video_edit_job_id": job_id}
+            task.result_data = {
+                "progress": {"stage": "cancelled"},
+                "video_edit_job_id": job_id,
+                "partial_output": getattr(exc, "partial_output", None),
+                "work_directory": getattr(exc, "work_directory", None),
+            }
         db.commit()
     except Exception as exc:
         db.rollback()
