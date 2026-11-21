@@ -24,7 +24,8 @@ from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
-    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video
+    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video,
+    scan_audio_video_sync
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
@@ -2368,6 +2369,16 @@ def validate_media_output(path: str, expected_duration: Optional[float] = None):
     except Exception as exc:
         raise HTTPException(422, "视频质量检查未通过：" + str(exc)[:1200]) from exc
 
+
+
+@router.get("/sync-check")
+def check_media_audio_video_sync(path: str):
+    """Compare audio/video stream timing metadata; does not infer lip sync."""
+    try:
+        file_path = safe_storage_file(path)
+        return scan_audio_video_sync(file_path)
+    except Exception as exc:
+        raise HTTPException(422, "音画同步检查失败：" + str(exc)[:1200]) from exc
 
 
 @router.get("/quality-scan")

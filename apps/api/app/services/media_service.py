@@ -237,6 +237,77 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
 
 
 
+
+def analyze_audio_video_sync(info, start_tolerance=0.25, duration_tolerance=0.5):
+    """Compare container stream timing metadata; this cannot verify visual lip sync."""
+    streams = info.get("streams") or []
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not video:
+        raise ValueError("文件中没有有效的视频流")
+
+    format_duration = (info.get("format") or {}).get("duration")
+
+    def number(value, fallback=0.0):
+        try:
+            return float(value) if value is not None else float(fallback)
+        except (TypeError, ValueError):
+            return float(fallback)
+
+    video_start = number(video.get("start_time"))
+    video_duration = number(video.get("duration"), format_duration or 0)
+    if video_duration <= 0:
+        video_duration = number(format_duration)
+    if video_duration <= 0:
+        raise ValueError("FFprobe 无法确认视频流时长")
+
+    warnings = []
+    audio_result = None
+    start_offset = None
+    duration_delta = None
+    if audio:
+        audio_start = number(audio.get("start_time"))
+        audio_duration = number(audio.get("duration"), format_duration or video_duration)
+        if audio_duration <= 0:
+            audio_duration = number(format_duration, video_duration)
+        start_offset = audio_start - video_start
+        duration_delta = audio_duration - video_duration
+        if abs(start_offset) > float(start_tolerance):
+            warnings.append(f"音轨与视频流起始时间相差 {start_offset:+.3f} 秒，请检查是否存在整体偏移")
+        if abs(duration_delta) > float(duration_tolerance):
+            warnings.append(f"音轨与视频流时长相差 {duration_delta:+.3f} 秒，请检查尾部音画是否错位")
+        audio_result = {"start_seconds": round(audio_start, 3), "duration_seconds": round(audio_duration, 3)}
+    else:
+        warnings.append("成片没有音轨，无法进行音画同步元数据比较")
+
+    return {
+        "scan_complete": True,
+        "metadata_only": True,
+        "status": "warning" if warnings else "ok",
+        "video": {"start_seconds": round(video_start, 3), "duration_seconds": round(video_duration, 3)},
+        "audio": audio_result,
+        "audio_video_start_offset_seconds": round(start_offset, 3) if start_offset is not None else None,
+        "audio_video_duration_delta_seconds": round(duration_delta, 3) if duration_delta is not None else None,
+        "start_tolerance_seconds": float(start_tolerance),
+        "duration_tolerance_seconds": float(duration_tolerance),
+        "warnings": warnings,
+        "note": "本检查只比较 FFprobe 音视频流的起始时间和时长，不能判断人物口型、对白内容或逐帧同步；请结合成片试听复核。",
+    }
+
+
+def scan_audio_video_sync(path, start_tolerance=0.25, duration_tolerance=0.5):
+    """Probe a local media file and compare audio/video stream timing metadata."""
+    file_path = Path(path)
+    if not file_path.is_file():
+        raise ValueError("待检测的视频文件不存在")
+    return analyze_audio_video_sync(
+        probe_media(file_path),
+        start_tolerance=start_tolerance,
+        duration_tolerance=duration_tolerance,
+    )
+
+
+
 def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, silence_noise="-50dB"):
     """Detect sustained black frames and digital silence; findings are advisory, not automatic failures."""
     file_path = Path(path)
