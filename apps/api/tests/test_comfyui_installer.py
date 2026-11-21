@@ -100,7 +100,8 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         }
         result = parse_official_release(payload)
         self.assertEqual(result["version"], "v-test")
-        self.assertEqual(len(result["assets"]), 2)
+        self.assertEqual(len(result["assets"]), 1)
+        self.assertEqual(result["assets"][0]["name"], "ComfyUI_windows_portable_nvidia.7z")
         self.assertEqual(result["assets"][0]["size_bytes"], 123456)
         self.assertEqual(result["assets"][0]["sha256"], "a" * 64)
         self.assertFalse(result["download_started"])
