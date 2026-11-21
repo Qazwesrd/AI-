@@ -224,6 +224,26 @@ try {
     }
     Write-Utf8 $inventoryPath $validInventoryText
 
+    $auditRegisterPath = Join-Path $noticesRoot "comfyui-portable-dependency-audit.json"
+    $validAuditRegisterText = Get-Content -LiteralPath $auditRegisterPath -Raw -Encoding UTF8
+    $tamperedAuditRegister = $validAuditRegisterText | ConvertFrom-Json
+    $tamperedAuditRegister.portable_variants[0].sha256 = "f" * 64
+    Write-Utf8 $auditRegisterPath ($tamperedAuditRegister | ConvertTo-Json -Depth 8)
+    $tamperedRegisterRejected = $false
+    try {
+        & $installScript -PayloadRoot $payloadRoot -InstallRoot $installRoot -LogPath $installLog -DetectedAdapters @()
+    } catch {
+        if ($_.Exception.Message -match "第三方审查登记表与依赖清点报告不匹配") {
+            $tamperedRegisterRejected = $true
+        } else {
+            throw
+        }
+    }
+    if (!$tamperedRegisterRejected) {
+        throw "安装器未能阻止被篡改的第三方审查登记表。"
+    }
+    Write-Utf8 $auditRegisterPath $validAuditRegisterText
+
     $detectedAdapters = @([pscustomobject]@{
         Name = "AMD Radeon(TM) Graphics"
         PNPDeviceID = "PCI\VEN_1002&DEV_1636"
