@@ -56,6 +56,12 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
                     "size": 999,
                 },
                 {
+                    "name": "ComfyUI_windows_portable_intel.7z",
+                    "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/ComfyUI_windows_portable_intel.7z.evil",
+                    "size": 100,
+                    "digest": "sha256:not-a-real-digest",
+                },
+                {
                     "name": "malicious.exe",
                     "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/malicious.exe",
                     "size": 100,
