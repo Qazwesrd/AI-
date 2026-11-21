@@ -153,6 +153,12 @@ class LocalImageRuntimeTests(unittest.TestCase):
         finally:
             runtime._COMFYUI_PROCESS = old_process
 
+    def test_start_stop_and_log_endpoints_are_registered(self):
+        paths = {route.path for route in runtime.router.routes}
+        self.assertIn("/api/local-ai/image-runtime/start", paths)
+        self.assertIn("/api/local-ai/image-runtime/stop", paths)
+        self.assertIn("/api/local-ai/image-runtime/logs", paths)
+
 
 if __name__ == "__main__":
     unittest.main()
