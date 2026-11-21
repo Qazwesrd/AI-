@@ -3,7 +3,9 @@ param(
     [string]$SetupExe,
     [Parameter(Mandatory = $true)]
     [string]$OutputZip,
-    [string]$ReleaseTag
+    [string]$ReleaseTag,
+    [Parameter(Mandatory = $true)]
+    [string]$LocalAIPayloadRoot
 )
 
 $ErrorActionPreference = "Stop"
@@ -156,6 +158,27 @@ Write-Warning "第三方依赖许可证审查尚未完成：本次离线套件�
 $setupItem = Get-Item -LiteralPath $SetupExe
 if ($setupItem.Length -lt 1MB) { throw "桌面安装程序大小异常。" }
 
+$LocalAIPayloadRoot = (Resolve-Path -LiteralPath $LocalAIPayloadRoot -ErrorAction Stop).Path
+$localAIManifestPath = Join-Path $LocalAIPayloadRoot "manifest.json"
+$localAIRuntimePath = Join-Path $LocalAIPayloadRoot "ollama-windows-amd64.zip"
+if (!(Test-Path -LiteralPath $localAIManifestPath -PathType Leaf) -or
+    !(Test-Path -LiteralPath $localAIRuntimePath -PathType Leaf) -or
+    !(Test-Path -LiteralPath (Join-Path $LocalAIPayloadRoot "models") -PathType Container)) {
+    throw "本地 AI 离线载荷不完整，缺少 manifest、Ollama 运行包或模型目录。"
+}
+$localAIManifest = Get-Content -LiteralPath $localAIManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($localAIManifest.bundle_type -ne "internal-offline-local-ai-runtime-and-model" -or
+    $localAIManifest.distribution_approved -ne $false -or
+    $localAIManifest.audit_status -ne "pending" -or
+    $localAIManifest.model.name -cne "qwen3:4b") {
+    throw "本地 AI 离线载荷的版本、模型或许可证审查门禁状态不匹配。"
+}
+$localAIPayloadFiles = @(Get-ChildItem -LiteralPath $LocalAIPayloadRoot -File -Recurse)
+if ($localAIPayloadFiles.Count -lt 4 -or $localAIPayloadFiles.Count -gt 1000) {
+    throw "本地 AI 离线载荷文件数量无效或超过安全上限。"
+}
+$localAIPayloadBytes = ($localAIPayloadFiles | Measure-Object -Property Length -Sum).Sum
+
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.Net.Http
 
@@ -203,7 +226,7 @@ foreach ($toolAsset in @($sevenZipTool, $sevenZipSource)) {
 }
 
 $totalBytes = ($manifestAssets | Measure-Object -Property size_bytes -Sum).Sum
-$estimatedBundleBytes = [long]$totalBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + 1GB
+$estimatedBundleBytes = [long]$totalBytes + [long]$localAIPayloadBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + 1GB
 $target = [System.IO.Path]::GetFullPath($OutputZip)
 if (Test-Path -LiteralPath $target) {
     throw "输出文件已存在：$target。为保护已有离线安装套件，底层打包脚本不会覆盖或删除它。若确认重新制作，请先通过 create-comfyui-offline-installer.ps1 -Force 明确删除旧包。"
@@ -217,13 +240,17 @@ if ($targetDriveInfo.AvailableFreeSpace -lt $estimatedBundleBytes) {
 }
 Write-Host ("ComfyUI 官方版本：{0}，四种 Windows x64 运行包总计 {1:N2} GiB。" -f $release.tag_name, ($totalBytes / 1GB))
 Write-Host ("7-Zip 解压工具版本：{0}。" -f $sevenZipRelease.tag_name)
-Write-Host "图片生成模型不包含在本套件中。"
+Write-Host ("本地 AI 载荷：Ollama {0} + {1}，共 {2:N2} GiB。" -f $localAIManifest.ollama.version, $localAIManifest.model.name, ($localAIPayloadBytes / 1GB))
+Write-Host "本地 AI 和 ComfyUI 模型/运行包均随 ZIP 提供；许可证审查未完成前仅供内部验证。"
 
 $installScript = Join-Path $PSScriptRoot "install-comfyui-offline.ps1"
 if (!(Test-Path -LiteralPath $installScript -PathType Leaf)) { throw "离线安装脚本不存在：$installScript" }
 
 $auditScript = Join-Path $PSScriptRoot "audit-comfyui-portable-dependencies.ps1"
 if (!(Test-Path -LiteralPath $auditScript -PathType Leaf)) { throw "依赖清点脚本不存在：$auditScript" }
+
+$localAIInstallScript = Join-Path $PSScriptRoot "install-local-ai-offline.ps1"
+if (!(Test-Path -LiteralPath $localAIInstallScript -PathType Leaf)) { throw "本地 AI 离线安装脚本不存在：$localAIInstallScript" }
 
 
 $clientHandler = [System.Net.Http.HttpClientHandler]::new()
@@ -242,6 +269,11 @@ try {
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
     Add-FileEntry $archive "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" $auditScript
     Add-FileEntry $archive "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json" $auditPath
+    Add-FileEntry $archive "LocalAI-Payload/install-local-ai-offline.ps1" $localAIInstallScript
+    foreach ($localAIFile in $localAIPayloadFiles) {
+        $relative = $localAIFile.FullName.Substring($LocalAIPayloadRoot.Length).TrimStart("\", "/").Replace("\", "/")
+        Add-FileEntry $archive ("LocalAI-Payload/" + $relative) $localAIFile.FullName
+    }
     $sevenZipSourceResult = Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest
 
     $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
@@ -287,7 +319,18 @@ try {
             intel = "Intel Arc only: ComfyUI_windows_portable_intel.7z"
             unknown = "stop-installation-no-network-fallback"
         }
-        model_policy = "Image-generation models are separate optional downloads and are not included or downloaded automatically."
+        model_policy = "ComfyUI image-generation checkpoints remain optional and are not included; the approved local text model qwen3:4b and its Ollama runtime are included in LocalAI-Payload for offline installation."
+        local_ai = @{
+            runtime_version = $localAIManifest.ollama.version
+            runtime_asset = "LocalAI-Payload/ollama-windows-amd64.zip"
+            runtime_sha256 = $localAIManifest.ollama.sha256
+            model = $localAIManifest.model.name
+            model_manifest_path = "LocalAI-Payload/$($localAIManifest.model.manifest_path)"
+            model_manifest_sha256 = $localAIManifest.model.manifest_sha256
+            license = $localAIManifest.model.license
+            license_review_status = "pending"
+            distribution_approved = $false
+        }
         assets = $manifestResults
         tools = @($toolResult)
         license = @{
@@ -312,17 +355,17 @@ try {
     $setupHash = (Get-FileHash -LiteralPath $setupItem.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     Add-TextEntry $archive "Setup.exe.sha256" "$setupHash  Setup.exe"
     Add-TextEntry $archive "安装说明.txt" @'
-AI漫剧制作大师 - ComfyUI 完整离线安装套件
+AI漫剧制作大师 - 完整离线安装套件（内部验证版）
 
 1. 解压本 ZIP。
 2. 双击根目录中的 Setup.exe。
-3. 解压完整 ZIP 约需 7 GiB 临时空间；安装引擎还需要额外空间，安装器会按所选运行包的实际解压体积自动检查。
-4. 安装程序会检测显卡，校验并仅部署匹配的一个 ComfyUI Windows x64 运行包。
-5. 安装过程不需要联网下载 ComfyUI；所有引擎运行包均已包含在本 ZIP 中。
-6. 图片生成模型不包含在本套件中；后续下载模型前必须显示来源、大小、磁盘空间并再次征求确认。
-7. 本套件面向 Windows x64。只对官方文档明确覆盖的 GPU 型号自动选择；不明确或不支持的型号会停止安装，不会猜测或联网回退。
-8. ComfyUI 采用 GPL-3.0；7-Zip 采用其上游许可证。详见 THIRD_PARTY_NOTICES。完整依赖许可证审查仍是正式公开分发前的必要关卡。
-9. 如需清点已取得的官方 Portable 包，可使用 ComfyUI-Payload\\audit-comfyui-portable-dependencies.ps1；具体参数见项目 docs/compliance/COMFYUI-DEPENDENCY-INVENTORY.md。清点报告不等于许可证批准。
+3. 完整 ZIP 预计约 11 GiB，解压和安装时还需要额外空间；安装器会分别检查 ComfyUI 和本地 AI 的磁盘空间。
+4. 安装程序会检测显卡，校验并部署匹配的一个 ComfyUI Windows x64 运行包；另会部署内置 Ollama 运行环境和 Qwen3 4B 文本模型。
+5. 安装时不需要联网下载 ComfyUI、Ollama 或 Qwen3 4B；上述运行环境和文本模型均已包含在 ZIP 中。
+6. 图片生成检查点不包含在本套件中；后续下载前必须显示来源、大小、磁盘空间并再次征求确认。
+7. 本套件面向 Windows x64。ComfyUI 只对官方文档明确覆盖的 GPU 型号启用加速；未确认的设备使用 CPU 模式或停止安装。
+8. ComfyUI、7-Zip、Ollama 和 Qwen3 及其依赖许可证均须逐项审核。审查完成前本套件仅供内部验证，不得公开或客户分发。
+9. ComfyUI 依赖清点工具位于 ComfyUI-Payload\\audit-comfyui-portable-dependencies.ps1；本地 AI 安装脚本位于 LocalAI-Payload\\install-local-ai-offline.ps1。自动清点不等于许可证批准。
 
 本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
 '@
@@ -360,6 +403,19 @@ try {
     $expectedEntries += @{ path = "ComfyUI-Payload/7zr.exe"; size = [long]$toolResult.size_bytes; sha256 = [string]$toolResult.sha256 }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"; size = [long]$sevenZipSourceResult.size_bytes; sha256 = [string]$sevenZipSourceResult.sha256 }
     $expectedEntries += @{ path = "Setup.exe"; size = [long]$setupItem.Length; sha256 = $setupHash }
+    foreach ($localAIFile in $localAIPayloadFiles) {
+        $relative = $localAIFile.FullName.Substring($LocalAIPayloadRoot.Length).TrimStart("\", "/").Replace("\", "/")
+        $expectedEntries += @{
+            path = "LocalAI-Payload/$relative"
+            size = [long]$localAIFile.Length
+            sha256 = (Get-FileHash -LiteralPath $localAIFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+    $expectedEntries += @{
+        path = "LocalAI-Payload/install-local-ai-offline.ps1"
+        size = (Get-Item -LiteralPath $localAIInstallScript).Length
+        sha256 = (Get-FileHash -LiteralPath $localAIInstallScript -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
 
     foreach ($expected in $expectedEntries) {
         $matches = @($verifyArchive.Entries | Where-Object { $_.FullName -ceq $expected.path })
@@ -374,6 +430,11 @@ try {
 
     foreach ($requiredName in @(
         "ComfyUI-Payload/manifest.json",
+        "LocalAI-Payload/manifest.json",
+        "LocalAI-Payload/ollama-windows-amd64.zip",
+        "LocalAI-Payload/install-local-ai-offline.ps1",
+        "LocalAI-Payload/THIRD_PARTY_NOTICES/Ollama-MIT-LICENSE.txt",
+        "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt",
         "ComfyUI-Payload/install-comfyui-offline.ps1",
         "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1",
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
