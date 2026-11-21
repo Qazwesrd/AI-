@@ -61,6 +61,11 @@ type ComfyUIReleaseCatalog = {
   assets: { name: string; download_url: string; size_bytes: number; sha256: string | null; digest_available: boolean }[];
   download_started: boolean; installation_started: boolean; note: string;
 };
+type ComfyUIInstallPlan = {
+  status: string; version: string; asset_name: string; archive_size_bytes: number;
+  sha256: string; install_target: string; required_free_bytes: number; free_disk_bytes: number;
+  download_started: boolean; installation_started: boolean; network_used: boolean; note: string;
+};
 declare global {
   interface Window {
     localAIInstallerDesktop?: {
@@ -126,6 +131,8 @@ export default function LocalModelsPage() {
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
   const [comfyReleaseCatalog, setComfyReleaseCatalog] = useState<ComfyUIReleaseCatalog | null>(null);
   const [loadingComfyReleaseCatalog, setLoadingComfyReleaseCatalog] = useState(false);
+  const [comfyInstallPlan, setComfyInstallPlan] = useState<ComfyUIInstallPlan | null>(null);
+  const [creatingComfyInstallPlan, setCreatingComfyInstallPlan] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -200,6 +207,29 @@ export default function LocalModelsPage() {
       setLoadingComfyReleaseCatalog(false);
     }
   }, []);
+
+
+  const createComfyInstallPlan = async (assetName: string) => {
+    if (!window.confirm(`将重新读取 Comfy-Org 官方发布信息，并检查安装包 ${assetName} 的 SHA-256 和目标磁盘空间。只生成安装计划，不会下载、解压或启动程序。是否继续？`)) return;
+    setCreatingComfyInstallPlan(true);
+    setComfyInstallPlan(null);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/install-plan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asset_name: assetName, confirm_plan: true }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "生成 ComfyUI 安装计划失败");
+      setComfyInstallPlan(result);
+      setMessage("ComfyUI 安装计划已生成；尚未下载或安装任何文件。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成 ComfyUI 安装计划失败");
+    } finally {
+      setCreatingComfyInstallPlan(false);
+    }
+  };
 
   const refreshInstaller = useCallback(async () => {
     try {
@@ -526,10 +556,19 @@ export default function LocalModelsPage() {
                   <div className="break-all font-medium">{asset.name}</div>
                   <div className="mt-1 text-white/60">下载大小：{size(asset.size_bytes)} · SHA-256：{asset.digest_available ? "官方元数据已提供" : "官方未提供"}</div>
                   {asset.sha256 && <div className="mt-1 break-all font-mono text-[11px] text-white/40">{asset.sha256}</div>}
+                  <button type="button" disabled={creatingComfyInstallPlan || !asset.digest_available} onClick={() => void createComfyInstallPlan(asset.name)} className="mt-3 rounded-lg border border-fuchsia-300/30 px-3 py-2 text-xs disabled:opacity-40">{creatingComfyInstallPlan ? "正在核对…" : asset.digest_available ? "核对并生成安装计划" : "缺少校验值，不能生成计划"}</button>
                 </div>)}
                 {comfyReleaseCatalog.assets.length === 0 && <p className="text-sm text-amber-100/75">官方最新版本暂未提供可识别的 Windows 安装包资源。</p>}
               </div>
               <p className="mt-2 text-xs leading-5 text-white/45">{comfyReleaseCatalog.note}</p>
+              {comfyInstallPlan && <div className="mt-3 rounded-xl border border-emerald-300/25 bg-emerald-400/5 p-3 text-sm">
+                <p className="font-semibold text-emerald-100">安装计划已生成（尚未下载）</p>
+                <p className="mt-2 break-all">版本：{comfyInstallPlan.version} · 安装包：{comfyInstallPlan.asset_name}</p>
+                <p className="mt-1">压缩包：{size(comfyInstallPlan.archive_size_bytes)} · 目标盘要求：{size(comfyInstallPlan.required_free_bytes)} · 当前可用：{size(comfyInstallPlan.free_disk_bytes)}</p>
+                <p className="mt-1 break-all text-xs text-white/55">SHA-256：{comfyInstallPlan.sha256}</p>
+                <p className="mt-1 break-all text-xs text-white/45">安装位置：{comfyInstallPlan.install_target}</p>
+                <p className="mt-2 text-xs text-white/55">{comfyInstallPlan.note}</p>
+              </div>}
             </>}
           </div>
           <p className="mt-3 text-xs text-white/45">当前阶段不会自动下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
