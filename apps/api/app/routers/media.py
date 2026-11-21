@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.cost_safety import require_cloud_ai_api_disabled
 from app.routers.story import ensure_project_source_current
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject, StoryAssetLink, EpisodeEditTimeline
@@ -123,6 +124,7 @@ def build_episode_video_filter(shot_ids, durations, transitions):
 
 
 def get_provider(db, provider_name, confirm_paid=False, check_paid=True):
+    require_cloud_ai_api_disabled()
     config = db.query(AIProviderConfig).filter(
         AIProviderConfig.provider == provider_name
     ).first()

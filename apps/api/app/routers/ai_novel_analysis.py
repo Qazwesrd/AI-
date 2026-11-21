@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.cost_safety import require_cloud_ai_api_disabled
 from app.models.novel import Novel, AnalysisItem, NovelAnalysisJob
 from app.models.studio import AIProviderConfig, AIUsageLog
 from app.routers.studio import runtime, decrypt_key
@@ -694,6 +695,7 @@ def analyze_novel_with_ai(
     payload: AIAnalysisInput,
     db: Session = Depends(get_db),
 ):
+    require_cloud_ai_api_disabled()
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
 
     if not novel:

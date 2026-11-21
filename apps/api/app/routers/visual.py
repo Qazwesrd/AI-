@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
 
 from app.database import get_db, ROOT_DIR, STORAGE_DIR
+from app.services.cost_safety import require_cloud_ai_api_disabled
 from app.models.visual import VisualAsset, ImageTask
 from app.models.novel import Novel, AnalysisItem
 from app.models.studio import AIProviderConfig, AIRuntimeSetting, AIUsageLog
@@ -342,9 +343,10 @@ def run_task(task_id: int, confirm_paid: bool = False, db: Session = Depends(get
     if task.status == "cancelled":
         raise HTTPException(409, "任务已取消，请先点击重试")
 
+    require_cloud_ai_api_disabled()
     runtime = get_runtime(db)
     if not runtime["network_enabled"]:
-        raise HTTPException(403, "网络调用总开关已关闭，请先到 AI 管理中心开启")
+        raise HTTPException(403, "网络调用总开关已关闭；严格零费用模式下不会调用云端服务")
     
     provider = db.query(AIProviderConfig).filter(
         AIProviderConfig.provider == task.provider
@@ -794,6 +796,7 @@ class TripoModelInput(BaseModel):
 
 
 def _tripo_provider(db, provider_name, confirm_paid, check_paid=True):
+    require_cloud_ai_api_disabled()
     runtime = get_runtime(db)
     if not runtime["network_enabled"]:
         raise HTTPException(403, "全局网络调用开关已关闭")
