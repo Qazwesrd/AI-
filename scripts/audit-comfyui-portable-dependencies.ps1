@@ -112,6 +112,46 @@ function Get-MetadataList {
         ForEach-Object { $_.Groups[1].Value.Trim() })
 }
 
+function Expand-ValidatedArchive {
+    param(
+        [string]$Tool,
+        [string]$Archive,
+        [object[]]$Entries,
+        [string]$Destination
+    )
+
+    # Validate every archive path and link before extracting the archive.
+    # Extract once: 7-Zip's per-file selector can behave differently for solid
+    # archives and may otherwise fall back to extracting every entry repeatedly.
+    $totalExpandedBytes = 0L
+    foreach ($entry in $Entries) {
+        $path = [string]$entry.Path
+        $normalized = $path.Replace("\\", "/")
+        $hasDrivePrefix = $path.Length -ge 2 -and [char]::IsLetter($path[0]) -and $path[1] -eq [char]58
+        $hasTraversal = @($normalized.Split("/") | Where-Object { $_ -eq ".." }).Count -gt 0
+        if ([string]::IsNullOrWhiteSpace($path) -or $normalized.StartsWith("/") -or $hasDrivePrefix -or $hasTraversal) {
+            throw "拒绝包含异常路径的 ComfyUI 归档：$path"
+        }
+        if ($entry.IsLink) {
+            throw "拒绝包含符号链接或硬链接的 ComfyUI 归档：$path"
+        }
+        if (!$entry.IsFolder) {
+            $totalExpandedBytes += [long]$entry.Size
+            if ($totalExpandedBytes -gt 2GB) {
+                throw "ComfyUI 归档解压总大小超过 2 GiB 安全上限：$Archive"
+            }
+        }
+    }
+
+    $null = New-Item -ItemType Directory -Path $Destination -Force
+    $arguments = @("x", "-y", "-sccUTF-8", "-o$Destination", $Archive)
+    $output = @(& $Tool @arguments 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        $outputText = [string]::Join(" ", [string[]]$output)
+        throw "解压已验证的 ComfyUI 归档失败：$Archive；$outputText"
+    }
+}
+
 function Get-ExtractedEvidence {
     param(
         [string]$Tool,
@@ -136,18 +176,8 @@ function Get-ExtractedEvidence {
 
     $leaf = [System.IO.Path]::GetFileName($EntryPath)
     if (!$leaf) { throw "归档证据文件名无效：$EntryPath" }
-    $null = New-Item -ItemType Directory -Path $Destination -Force
-    # Each evidence file gets a unique destination directory, so 7-Zip's
-    # e mode can safely flatten the archive path without collisions. Resolve
-    # the extracted file by its leaf name; do not assume x-mode path recreation,
-    # which differs across solid portable archives and 7-Zip builds.
-    $arguments = @("e", "-y", "-spd", "-o$Destination", $Archive, $EntryPath)
-    $output = @(& $Tool @arguments 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        $outputText = [string]::Join(" ", [string[]]$output)
-        throw "提取证据文件失败：$EntryPath；$outputText"
-    }
-    $extracted = Join-Path $Destination $leaf
+    $relativeEntryPath = $normalizedEntryPath.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+    $extracted = Join-Path $Destination $relativeEntryPath
     if (!(Test-Path -LiteralPath $extracted -PathType Leaf)) {
         $outputText = [string]::Join(" ", [string[]]$output)
         throw "7-Zip 未生成预期的证据文件：$EntryPath；7-Zip 输出：$outputText"
@@ -225,6 +255,8 @@ try {
         $evidenceCount = 0
         $totalEvidenceBytes = 0L
 
+        Expand-ValidatedArchive -Tool $SevenZipPath -Archive $archive.Path -Entries $entries -Destination $variantRoot
+
         foreach ($entry in $entries) {
             if ($entry.IsFolder) { continue }
             if ($entry.Path -match $RuntimePattern) {
@@ -265,8 +297,7 @@ try {
                 continue
             }
 
-            $destination = Join-Path $variantRoot ([Guid]::NewGuid().ToString("N"))
-            $extractedPath = Get-ExtractedEvidence -Tool $SevenZipPath -Archive $archive.Path -EntryPath $entry.Path -Destination $destination -MaximumBytes $maxBytes
+            $extractedPath = Get-ExtractedEvidence -Tool $SevenZipPath -Archive $archive.Path -EntryPath $entry.Path -Destination $variantRoot -MaximumBytes $maxBytes
             $actualEvidenceBytes = (Get-Item -LiteralPath $extractedPath).Length
             if (($totalEvidenceBytes + $actualEvidenceBytes) -gt $MaximumTotalEvidenceBytes) {
                 Remove-Item -LiteralPath $extractedPath -Force
