@@ -239,10 +239,11 @@ try {
         created_utc = [DateTime]::UtcNow.ToString("o")
         target_architecture = "windows-x64"
         gpu_selection = @{
-            nvidia = "ComfyUI_windows_portable_nvidia.7z"
-            nvidia_legacy_gtx10_and_older = "ComfyUI_windows_portable_nvidia_cu126.7z"
-            amd = "ComfyUI_windows_portable_amd.7z"
-            intel = "ComfyUI_windows_portable_intel.7z"
+            nvidia_current = "RTX 20 series and newer: ComfyUI_windows_portable_nvidia.7z"
+            nvidia_legacy = "GTX 10 series and older: ComfyUI_windows_portable_nvidia_cu126.7z"
+            nvidia_ambiguous = "GTX 16 series, MX, non-RTX Quadro, and unclassified models stop rather than guess"
+            amd = "RX 6000/7000/9000, Ryzen AI Max, and Radeon AI PRO R9700: ComfyUI_windows_portable_amd.7z"
+            intel = "Intel Arc only: ComfyUI_windows_portable_intel.7z"
             unknown = "stop-installation-no-network-fallback"
         }
         model_policy = "Image-generation models are separate optional downloads and are not included or downloaded automatically."
