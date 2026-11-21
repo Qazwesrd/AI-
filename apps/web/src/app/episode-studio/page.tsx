@@ -32,6 +32,15 @@ type EpisodeTimeline = {
   voice_path?: string | null;
   voice_name?: string | null;
   character_voice_profiles: Record<string, string>;
+  subtitle_burn_in: boolean;
+  subtitle_font_name: string;
+  subtitle_font_size: number;
+  subtitle_primary_color: string;
+  subtitle_outline_color: string;
+  subtitle_outline_width: number;
+  subtitle_background: boolean;
+  subtitle_alignment: 2 | 5 | 8;
+  subtitle_margin_v: number;
   voice_volume: number;
   original_volume: number;
   sound_effect_tracks: { path: string; name: string; start_seconds: number; volume: number }[];
@@ -83,6 +92,15 @@ export default function EpisodeReadinessPage() {
       if (!response.ok) throw new Error(data.detail || "读取剪辑时间轴失败");
       const saved = data.timeline as EpisodeTimeline;
       saved.character_voice_profiles = saved.character_voice_profiles || {};
+      saved.subtitle_burn_in = saved.subtitle_burn_in ?? true;
+      saved.subtitle_font_name = saved.subtitle_font_name || "Microsoft YaHei";
+      saved.subtitle_font_size = saved.subtitle_font_size || 36;
+      saved.subtitle_primary_color = saved.subtitle_primary_color || "#FFFFFF";
+      saved.subtitle_outline_color = saved.subtitle_outline_color || "#000000";
+      saved.subtitle_outline_width = saved.subtitle_outline_width ?? 2;
+      saved.subtitle_background = saved.subtitle_background ?? false;
+      saved.subtitle_alignment = saved.subtitle_alignment || 2;
+      saved.subtitle_margin_v = saved.subtitle_margin_v ?? 60;
       setEpisodeCharacters(Array.isArray(data.characters) ? data.characters : []);
       if (saved.subtitle_cues === undefined || saved.subtitle_cues === null) {
         const shotById = new Map<number, { id: number; duration_seconds?: number; dialogue?: string }>(
@@ -498,6 +516,44 @@ export default function EpisodeReadinessPage() {
                       <p className="mt-1 text-xs text-white/45">可调整每条字幕的开始/结束时间和文本；保存后由本地 FFmpeg 生成 SRT。</p>
                     </div>
                     <button type="button" onClick={() => setTimeline({ ...timeline, subtitle_cues: [...(timeline.subtitle_cues || []), { start: 0, end: 2, text: "" }] })} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">添加字幕</button>
+                  </div>
+                  <div className="mt-4 rounded-lg border border-white/10 p-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={timeline.subtitle_burn_in} onChange={event => setTimeline({ ...timeline, subtitle_burn_in: event.target.checked })} />
+                      将字幕直接烧录进最终 MP4（关闭则只生成独立 SRT 文件）
+                    </label>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="text-xs text-white/60">字体名称
+                        <input value={timeline.subtitle_font_name} maxLength={80} onChange={event => setTimeline({ ...timeline, subtitle_font_name: event.target.value })} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-3 py-2 text-white" />
+                      </label>
+                      <label className="text-xs text-white/60">字号：{timeline.subtitle_font_size}
+                        <input type="range" min="16" max="72" value={timeline.subtitle_font_size} onChange={event => setTimeline({ ...timeline, subtitle_font_size: Number(event.target.value) })} className="mt-2 w-full" />
+                      </label>
+                      <label className="text-xs text-white/60">字幕文字颜色
+                        <input type="color" value={timeline.subtitle_primary_color} onChange={event => setTimeline({ ...timeline, subtitle_primary_color: event.target.value })} className="mt-1 h-10 w-full rounded border border-white/15 bg-slate-900 p-1" />
+                      </label>
+                      <label className="text-xs text-white/60">描边颜色
+                        <input type="color" value={timeline.subtitle_outline_color} onChange={event => setTimeline({ ...timeline, subtitle_outline_color: event.target.value })} className="mt-1 h-10 w-full rounded border border-white/15 bg-slate-900 p-1" />
+                      </label>
+                      <label className="text-xs text-white/60">描边宽度：{timeline.subtitle_outline_width.toFixed(1)}
+                        <input type="range" min="0" max="8" step="0.5" value={timeline.subtitle_outline_width} onChange={event => setTimeline({ ...timeline, subtitle_outline_width: Number(event.target.value) })} className="mt-2 w-full" />
+                      </label>
+                      <label className="text-xs text-white/60">垂直边距：{timeline.subtitle_margin_v}
+                        <input type="range" min="0" max="200" value={timeline.subtitle_margin_v} onChange={event => setTimeline({ ...timeline, subtitle_margin_v: Number(event.target.value) })} className="mt-2 w-full" />
+                      </label>
+                      <label className="text-xs text-white/60">字幕位置
+                        <select value={timeline.subtitle_alignment} onChange={event => setTimeline({ ...timeline, subtitle_alignment: Number(event.target.value) as 2 | 5 | 8 })} className="mt-1 w-full rounded border border-white/15 bg-slate-900 px-3 py-2 text-white">
+                          <option value={2}>底部居中</option>
+                          <option value={5}>画面居中</option>
+                          <option value={8}>顶部居中</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2 self-end text-xs text-white/60">
+                        <input type="checkbox" checked={timeline.subtitle_background} onChange={event => setTimeline({ ...timeline, subtitle_background: event.target.checked })} />
+                        启用半透明字幕底板
+                      </label>
+                    </div>
+                    <p className="mt-2 text-xs text-white/40">建议使用系统已安装的字体；最终 MP4 会重新编码视频以烧录字幕，音频保持原轨。</p>
                   </div>
                   <div className="mt-3 space-y-3">
                     {(timeline.subtitle_cues || []).map((cue, index) => (
