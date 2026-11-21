@@ -803,6 +803,22 @@ def save_storyboard_consistency(project_id: int, data: StoryboardConsistencyInpu
     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
     if project is None:
         raise HTTPException(404, "漫剧项目不存在")
+    shot_costume_ids = {int(value) for value in data.shot_costume_variants}
+    if shot_costume_ids:
+        project_shots = db.query(StoryboardShot).filter(
+            StoryboardShot.project_id == project.id,
+            StoryboardShot.id.in_(shot_costume_ids),
+        ).all()
+        if {shot.id for shot in project_shots} != shot_costume_ids:
+            raise HTTPException(404, "服装版本指定中包含不属于当前项目的分镜")
+        for shot in project_shots:
+            assignments = data.shot_costume_variants.get(str(shot.id), {})
+            available_characters = {str(value) for value in shot.character_ids} if isinstance(shot.character_ids, list) else set()
+            for character_id, variant_id in assignments.items():
+                if character_id not in available_characters:
+                    raise HTTPException(400, f"分镜 #{shot.id} 未关联角色 #{character_id}，不能指定该角色的服装版本")
+                if variant_id not in data.costume_profiles.get(character_id, {}):
+                    raise HTTPException(400, f"角色 #{character_id} 没有版本 {variant_id} 的圣衣/服装档案")
     reference_ids = set(data.character_reference_images.values()) | set(data.scene_reference_images.values()) | set(data.prop_reference_images.values())
     if reference_ids:
         valid_ids = {row.id for row in db.query(MediaFile.id).filter(MediaFile.id.in_(reference_ids), MediaFile.category == "image").all()}
