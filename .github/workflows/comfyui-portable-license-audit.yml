@@ -10,6 +10,13 @@ on:
         required: false
         type: string
         default: ''
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Optional pinned ComfyUI release tag (blank means latest official release)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
