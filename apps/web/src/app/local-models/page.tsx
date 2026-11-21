@@ -137,7 +137,9 @@ export default function LocalModelsPage() {
   const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
   const [imageModelLibrary, setImageModelLibrary] = useState<ImageModelLibrary | null>(null);
-  const [checkingImageModelLibrary, setCheckingImageModelLibrary] = useState(false);\n  const [curatedImageCatalog, setCuratedImageCatalog] = useState<CuratedImageModelCatalog | null>(null);\n  const [checkingCuratedImageCatalog, setCheckingCuratedImageCatalog] = useState(false);
+  const [checkingImageModelLibrary, setCheckingImageModelLibrary] = useState(false);
+  const [curatedImageCatalog, setCuratedImageCatalog] = useState<CuratedImageModelCatalog | null>(null);
+  const [checkingCuratedImageCatalog, setCheckingCuratedImageCatalog] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
