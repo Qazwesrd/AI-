@@ -286,5 +286,38 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
                     opener=lambda request, timeout: Response(),
                 )
 
+
+    def test_download_task_public_view_hides_internal_cancel_event(self):
+        from app.routers.comfyui_installer import _public_download_task
+        import threading
+        task = {
+            "task_id": "abc123", "status": "downloading", "asset_name": "asset.7z",
+            "version": "v1", "received_bytes": 10, "total_bytes": 100,
+            "percent": 10, "error": None, "cancel_event": threading.Event(),
+        }
+        public = _public_download_task(task)
+        self.assertEqual(public["percent"], 10)
+        self.assertNotIn("cancel_event", public)
+        self.assertFalse(public["installation_started"])
+
+    def test_download_task_worker_records_cancelled_state(self):
+        import threading
+        from unittest.mock import patch
+        from app.routers import comfyui_installer as module
+        task_id = "cancel-task-test"
+        event = threading.Event()
+        event.set()
+        with module._DOWNLOAD_TASKS_LOCK:
+            module._DOWNLOAD_TASKS[task_id] = {
+                "task_id": task_id, "status": "queued", "asset_name": "a.7z",
+                "version": "v1", "received_bytes": 0, "total_bytes": 10,
+                "percent": 0, "error": None, "cancel_event": event,
+            }
+        with patch.object(module, "download_verified_official_asset", side_effect=module.DownloadCancelled()):
+            module._run_download_task(task_id, {}, "v1", "/tmp/ComfyUI")
+        with module._DOWNLOAD_TASKS_LOCK:
+            self.assertEqual(module._DOWNLOAD_TASKS[task_id]["status"], "cancelled")
+            module._DOWNLOAD_TASKS.pop(task_id, None)
+
 if __name__ == "__main__":
     unittest.main()
