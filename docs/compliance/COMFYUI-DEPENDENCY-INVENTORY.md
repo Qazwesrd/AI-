@@ -39,3 +39,17 @@ You may pass only the variants actually available; every supplied archive must u
 - Review exact component versions, license texts, notices, copyright, source-code obligations, redistribution conditions, and model licenses separately before any public/customer distribution.
 
 The central register `docs/compliance/comfyui-portable-dependency-audit.json` remains the release gate. Do not change its approval fields merely because an inventory report was generated.
+
+
+## Ollama and bundled Qwen3 4B local model
+
+The complete offline installer now prepares a separate `LocalAI-Payload` containing the official Ollama Windows amd64 standalone runtime and the pinned `qwen3:4b` model store.
+
+- `scripts/prepare-local-ai-offline-payload.ps1` downloads the official Ollama release asset and requires its GitHub SHA-256 digest.
+- It starts a temporary isolated Ollama service on loopback port 11435, pulls only `qwen3:4b`, and validates the model manifest and every referenced blob digest and size.
+- It requires the model manifest's Apache-2.0 license layer to be present and readable, and includes the Ollama MIT license, Apache-2.0 text, and a Qwen3 attribution notice.
+- `scripts/install-local-ai-offline.ps1` verifies the runtime archive, model manifest, model file hashes, and safe relative paths before installing. It does not download or contact a remote service.
+- The desktop app starts the bundled Ollama runtime on `127.0.0.1:11435` and configures the API to use that loopback endpoint. The development default remains `127.0.0.1:11434`.
+- Ollama's bundled transitive dependencies and the exact model revision still require manual license review. The central audit register remains `pending` and public/customer distribution remains blocked.
+
+The offline bundle includes the local text model, not the optional ComfyUI image-generation checkpoints. Image checkpoints remain separate user-confirmed downloads.
