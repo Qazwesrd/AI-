@@ -191,6 +191,17 @@ try {
     New-Item -ItemType Directory -Path $noticeDir -Force | Out-Null
     Save-OfficialText -Url "https://raw.githubusercontent.com/ollama/ollama/$($release.tag_name)/LICENSE" -Destination (Join-Path $noticeDir "Ollama-MIT-LICENSE.txt") -RequiredText "MIT License"
     Save-OfficialText -Url "https://www.apache.org/licenses/LICENSE-2.0.txt" -Destination (Join-Path $noticeDir "Qwen3-APACHE-2.0-LICENSE.txt") -RequiredText "Apache License"
+    @'
+Qwen3 model notice
+
+Model: qwen3:4b
+Upstream model family: Qwen3, developed by the Qwen team at Alibaba Cloud.
+Ollama model page: https://ollama.com/library/qwen3:4b
+Official Qwen3 project: https://github.com/QwenLM/Qwen3
+The Qwen3 project states that its open-weight models are licensed under Apache License 2.0.
+The exact Ollama model manifest and every referenced blob are recorded and SHA-256 verified in manifest.json.
+This notice is attribution and provenance information, not a legal opinion or a substitute for the complete model license.
+'@ | Set-Content -LiteralPath (Join-Path $noticeDir "Qwen3-MODEL-NOTICE.txt") -Encoding UTF8
 
     $modelManifestRelative = $modelManifestPath.Substring($modelStore.Length).TrimStart("\", "/").Replace("\", "/")
     $modelFiles = @()
@@ -230,7 +241,8 @@ try {
         }
         notices = @(
             "THIRD_PARTY_NOTICES/Ollama-MIT-LICENSE.txt",
-            "THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt"
+            "THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt",
+            "THIRD_PARTY_NOTICES/Qwen3-MODEL-NOTICE.txt"
         )
         model_runtime_mode = "Ollama selects its supported backend at runtime; no GPU acceleration is promised without a device-specific test."
         network_used_during_bundle_creation = $true
