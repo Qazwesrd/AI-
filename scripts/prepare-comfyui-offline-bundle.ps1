@@ -367,9 +367,25 @@ try {
     $verifyStream.Dispose()
 }
 
-$zipItem = Get-Item -LiteralPath $target
-$zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-"$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
-Write-Host ("离线套件已生成：{0}" -f $target)
-Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
-Write-Host "ZIP SHA-256：$zipHash"
+# Never leave a seemingly complete ZIP behind if post-write verification fails.
+try {
+    $zipItem = Get-Item -LiteralPath $target -ErrorAction Stop
+    if ($zipItem.Length -lt $estimatedBundleBytes - 512MB) {
+        throw "完整离线 ZIP 体积异常，低于按官方资产元数据计算的合理下限。"
+    }
+
+    $zipHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+    "$zipHash  $($zipItem.Name)" | Set-Content -LiteralPath "$target.sha256" -Encoding ascii
+    if (!(Test-Path -LiteralPath "$target.sha256" -PathType Leaf) -or
+        (Get-Content -LiteralPath "$target.sha256" -Raw) -notmatch ("(?i)^" + [regex]::Escape($zipHash) + "\\s+")) {
+        throw "完整离线 ZIP 的 SHA-256 清单写入或回读校验失败。"
+    }
+
+    Write-Host ("离线套件已生成：{0}" -f $target)
+    Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
+    Write-Host "ZIP SHA-256：$zipHash"
+} catch {
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath "$target.sha256") { Remove-Item -LiteralPath "$target.sha256" -Force -ErrorAction SilentlyContinue }
+    throw
+}
