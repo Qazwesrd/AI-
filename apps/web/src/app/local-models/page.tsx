@@ -58,7 +58,8 @@ type ImageModelLibrary = {
 };
 type CuratedImageModel = { id: string; name: string; publisher: string; repository: string; revision: string; filename: string; format: string; size_bytes: number | null; size_label: string; sha256: string; source_url: string; download_url: string; license: string; license_url: string; license_status: string; license_note: string; hardware_status: string; hardware_note: string; recommended_directory: string; sha256_source: string; sha256_verified: boolean; catalog_status: string };
 type CuratedImageModelCatalog = { status: string; models: CuratedImageModel[]; count: number; network_used: boolean; download_started: boolean; installation_started: boolean; note: string };
-\ntype ComfyUIReadiness = {
+
+type ComfyUIReadiness = {
   status: string; can_install_engine: boolean; hardware_profile: string;
   ram_bytes: number | null; vram_bytes: number | null; free_disk_bytes: number | null;
   engine_disk_reserve_bytes: number; optional_model_disk_reserve_bytes: number;
@@ -650,7 +651,8 @@ export default function LocalModelsPage() {
           <p className="mt-3 text-xs leading-5 text-white/45">{curatedImageCatalog?.note || "正在读取经过核验的候选模型…"}</p>
           <p className="mt-2 text-xs leading-5 text-white/45">SHA-256 尚未在本机下载后复核，精确文件字节数仍需从下载响应取得；两项完成前，安装流程必须保持关闭。当前 Ryzen 7 4800U 以 CPU 模式运行，该模型不作为快速生图推荐。</p>
         </section>
-\n        {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
+
+        {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
         {message && <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-emerald-100">{message}</div>}
 
 
