@@ -469,7 +469,23 @@ export default function LocalModelsPage() {
         <section className="rounded-2xl border border-purple-300/25 bg-slate-950/70 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-xl font-semibold"<section className="rounded-2xl border border-fuchsia-300/25 bg-slate-950/70 p-5">
+              <h2 className="text-xl font-semibold">Qwen3 4B 硬件适配检测</h2>
+              <p className="mt-1 text-sm text-white/55">只读取系统信息和磁盘空间，不进行压力测试。</p>
+            </div>
+            <button type="button" disabled={checkingHardware} onClick={() => void refreshHardwareReadiness()} className="rounded-lg border border-purple-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingHardware ? "正在检测…" : "重新检测电脑"}</button>
+          </div>
+          {hardwareReadiness && <>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">适配结论</div><div className="mt-1 font-semibold">{hardwareReadiness.label}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">系统内存</div><div className="mt-1 font-semibold">{size(hardwareReadiness.ram_bytes)}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">模型磁盘空间</div><div className="mt-1 font-semibold">{size(hardwareReadiness.free_disk_bytes)}</div></div>
+            </div>
+            <div className="mt-3 space-y-1 text-sm text-white/65">{hardwareReadiness.blockers.map((item,index)=><p key={index}>• {item}</p>)}{hardwareReadiness.reasons.map((item,index)=><p key={index}>• {item}</p>)}</div>
+            <p className="mt-2 text-xs text-white/45">{hardwareReadiness.note}</p>
+          </>}
+        </section>
+
+        <section className="rounded-2xl border border-fuchsia-300/25 bg-slate-950/70 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><h2 className="text-xl font-semibold">ComfyUI 安装准备评估</h2><p className="mt-1 text-sm leading-6 text-white/55">先检查电脑和磁盘条件。目前只做评估，不会下载或安装任何文件。</p></div>
             <button type="button" disabled={checkingComfyReadiness} onClick={() => void refreshComfyReadiness()} className="rounded-lg border border-fuchsia-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingComfyReadiness ? "检测中…" : "重新评估"}</button>
@@ -489,7 +505,7 @@ export default function LocalModelsPage() {
             </div>
             <p className="mt-2 text-xs leading-5 text-white/45">{comfyReadiness.note}</p>
           </> : <p className="mt-3 text-sm text-white/55">正在评估 ComfyUI 安装条件…</p>}
-<div className="mt-4 border-t border-white/10 pt-4">
+          <div className="mt-4 border-t border-white/10 pt-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div><div className="font-semibold">官方安装包版本与下载量</div><p className="mt-1 text-xs text-white/45">需要你手动确认后才会查询官方版本信息；查询不会下载文件。</p></div>
               <button type="button" disabled={loadingComfyReleaseCatalog} onClick={() => void loadComfyReleaseCatalog()} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-40">{loadingComfyReleaseCatalog ? "正在读取官方信息…" : "查询官方版本和大小"}</button>
@@ -507,23 +523,7 @@ export default function LocalModelsPage() {
               <p className="mt-2 text-xs leading-5 text-white/45">{comfyReleaseCatalog.note}</p>
             </>}
           </div>
-                    <p className="mt-3 text-xs text-white/45">当前阶段不会联网、下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
-        </section>
-
-        >Qwen3 4B 硬件适配检测</h2>
-              <p className="mt-1 text-sm text-white/55">只读取系统信息和磁盘空间，不进行压力测试。</p>
-            </div>
-            <button type="button" disabled={checkingHardware} onClick={() => void refreshHardwareReadiness()} className="rounded-lg border border-purple-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingHardware ? "正在检测…" : "重新检测电脑"}</button>
-          </div>
-          {hardwareReadiness && <>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">适配结论</div><div className="mt-1 font-semibold">{hardwareReadiness.label}</div></div>
-              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">系统内存</div><div className="mt-1 font-semibold">{size(hardwareReadiness.ram_bytes)}</div></div>
-              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">模型磁盘空间</div><div className="mt-1 font-semibold">{size(hardwareReadiness.free_disk_bytes)}</div></div>
-            </div>
-            <div className="mt-3 space-y-1 text-sm text-white/65">{hardwareReadiness.blockers.map((item,index)=><p key={index}>• {item}</p>)}{hardwareReadiness.reasons.map((item,index)=><p key={index}>• {item}</p>)}</div>
-            <p className="mt-2 text-xs text-white/45">{hardwareReadiness.note}</p>
-          </>}
+          <p className="mt-3 text-xs text-white/45">当前阶段不会自动下载、安装或启动引擎。实际安装前还会展示确定版本、官方来源、下载量、校验信息和目标磁盘要求，并再次征求确认。</p>
         </section>
 
         {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
