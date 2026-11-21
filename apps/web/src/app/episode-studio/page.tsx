@@ -86,6 +86,9 @@ export default function EpisodeReadinessPage() {
     limitations: string[];
     message: string;
   } | null>(null);
+  useEffect(() => {
+    setProductionAudit(null);
+  }, [projectId]);
   const [batchReport, setBatchReport] = useState<{
     project_id: number; project_title: string;
     summary: { episodes: number; ready_episodes: number; incomplete_episodes: number; total_shots: number; ready_shots: number; missing_shots: number; processing_shots: number; broken_shots: number; scan_errors: number };
