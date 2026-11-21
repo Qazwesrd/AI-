@@ -80,6 +80,7 @@ export default function EpisodeReadinessPage() {
   const [message, setMessage] = useState("");
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
+  const [syncReport, setSyncReport] = useState<{ status?: string; metadata_only?: boolean; audio_video_start_offset_seconds?: number | null; audio_video_duration_delta_seconds?: number | null; warnings?: string[]; note?: string } | null>(null);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
   const [generatedSubtitleCues, setGeneratedSubtitleCues] = useState<{ start: number; end: number; text: string }[]>([]);
   const [timelineVersion, setTimelineVersion] = useState(0);
@@ -366,6 +367,24 @@ export default function EpisodeReadinessPage() {
       await checkReadiness(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "合成失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkAudioVideoSync() {
+    if (!renderResult?.output) return;
+    setBusy(true);
+    setMessage("正在使用 FFprobe 检查成片音视频流的起始时间和时长……");
+    setSyncReport(null);
+    try {
+      const response = await fetch(API + "/api/media/sync-check?path=" + encodeURIComponent(renderResult.output));
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "音画同步检查失败");
+      setSyncReport(data);
+      setMessage(data.status === "ok" ? "音视频流时间元数据一致；仍建议试听并检查人物口型。" : "音画同步检查发现需要人工复核的项目。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "音画同步检查失败");
     } finally {
       setBusy(false);
     }
@@ -780,6 +799,19 @@ export default function EpisodeReadinessPage() {
             <p className="mt-2 break-all text-sm">{renderResult.output}</p>
             {renderResult.subtitle_path && <p className="mt-2 break-all text-xs text-white/55">字幕：{renderResult.subtitle_path}</p>}
             {renderResult.quality_report && <p className="mt-3 text-sm text-white/65">时长 {renderResult.quality_report.duration_seconds ?? "—"} 秒 · 分辨率 {renderResult.quality_report.width ?? "—"} × {renderResult.quality_report.height ?? "—"}</p>}
+            <button disabled={busy} onClick={() => void checkAudioVideoSync()} className="mt-4 rounded-lg border border-cyan-300/40 bg-cyan-900/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-50">检查音画同步</button>
+            {syncReport && (
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className={syncReport.status === "ok" ? "font-semibold text-emerald-300" : "font-semibold text-amber-300"}>
+                  {syncReport.status === "ok" ? "流时间元数据未发现明显偏差" : "发现需要复核的音画时间问题"}
+                </p>
+                <p className="mt-2 text-sm text-white/70">
+                  起始时间差：{syncReport.audio_video_start_offset_seconds ?? "无音轨"} 秒 · 时长差：{syncReport.audio_video_duration_delta_seconds ?? "无音轨"} 秒
+                </p>
+                {!!syncReport.warnings?.length && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-200">{syncReport.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+                <p className="mt-2 text-xs text-white/45">{syncReport.note}</p>
+              </div>
+            )}
           </section>
         )}
       </div>
