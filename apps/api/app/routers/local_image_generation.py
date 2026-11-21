@@ -197,7 +197,7 @@ def get_local_image_task(prompt_id: str):
                 continue
             filename = image.get("filename")
             subfolder = image.get("subfolder", "")
-            if isinstance(filename, str) and filename and len(filename) <= 240 and ".." not in filename and "/" not in filename and "\\" not in filename:
+            if isinstance(filename, str) and filename and len(filename) <= 240 and ".." not in filename and "/" not in filename and "\\" not in filename and image.get("type", "output") == "output":
                 images.append({
                     "node_id": str(node_id),
                     "filename": filename,
@@ -284,8 +284,8 @@ def archive_local_image_task_output(
     if not isinstance(item, dict):
         raise HTTPException(409, "图片任务尚未完成，暂时没有可归档的输出")
     status_info = item.get("status") if isinstance(item.get("status"), dict) else {}
-    if status_info.get("completed") is False:
-        raise HTTPException(409, "图片任务尚未完成，暂时不能归档")
+    if status_info.get("completed") is not True:
+        raise HTTPException(409, "ComfyUI 尚未明确报告任务完成，暂时不能归档")
     outputs = item.get("outputs") if isinstance(item.get("outputs"), dict) else {}
     valid_images = []
     for output in outputs.values():
