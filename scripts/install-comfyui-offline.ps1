@@ -3,7 +3,7 @@ param(
     [string]$PayloadRoot,
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
-    [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-ComfyUI-install.log")
+    [string]$LogPath = (Join-Path $env:TEMP "AIComicStudio-ComfyUI-install.log"),
     [object[]]$DetectedAdapters
 )
 
