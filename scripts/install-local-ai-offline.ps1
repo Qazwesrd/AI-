@@ -321,6 +321,8 @@ try {
             'set "OLLAMA_MODELS=%~dp0models"',
             'set "OLLAMA_HOST=127.0.0.1:11435"',
             'set "OLLAMA_NO_CLOUD=1"',
+        'set "OLLAMA_NUM_PARALLEL=1"',
+        'set "OLLAMA_MAX_LOADED_MODELS=1"',
             'cd /d "%~dp0runtime"',
             '"ollama.exe" serve',
             "endlocal"
