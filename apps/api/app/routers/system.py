@@ -45,6 +45,53 @@ def _check_binary(name):
         return {"status": "error", "path": None, "message": str(exc)[:500]}
 
 
+
+def _check_local_ai_tools():
+    """Detect optional local AI runtimes without starting processes or using the network."""
+    candidates = [
+        {
+            "id": "ollama",
+            "name": "Ollama",
+            "purpose": "本地文本模型运行环境",
+            "commands": ["ollama"],
+            "install_hint": "可从 Ollama 官方网站下载安装；安装和模型许可请自行核实。",
+        },
+        {
+            "id": "llama_cpp",
+            "name": "llama.cpp",
+            "purpose": "本地 GGUF 文本模型运行环境",
+            "commands": ["llama-cli", "main"],
+            "install_hint": "可选择官方开源项目的预编译版本；模型文件需单独准备。",
+        },
+        {
+            "id": "whisper_cpp",
+            "name": "whisper.cpp",
+            "purpose": "本地离线语音识别环境",
+            "commands": ["whisper-cli", "main"],
+            "install_hint": "可选择官方开源项目的预编译版本；语音模型文件需单独准备。",
+        },
+    ]
+    results = []
+    for item in candidates:
+        executable = next((shutil.which(command) for command in item["commands"] if shutil.which(command)), None)
+        results.append({
+            "id": item["id"],
+            "name": item["name"],
+            "purpose": item["purpose"],
+            "status": "installed" if executable else "not_detected",
+            "executable": executable,
+            "network_used": False,
+            "auto_downloaded": False,
+            "install_hint": item["install_hint"],
+        })
+    return {
+        "mode": "local_only_detection",
+        "network_used": False,
+        "auto_downloaded": False,
+        "tools": results,
+        "note": "仅检查电脑 PATH 中是否存在本地命令，不启动程序、不连接网络、不下载模型。检测到软件不代表已安装模型或可以立即生成内容。",
+    }
+
 def _health_status(checks):
     values = [item.get("status") for item in checks]
     if "error" in values:
