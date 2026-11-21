@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "product": "AI漫剧制作大师",
+  "component": "ComfyUI Windows portable offline payload",
+  "audit_status": "pending",
+  "distribution_approved": false,
+  "reviewed_at_utc": null,
+  "reviewer": null,
+  "release_blockers": [
+    "Inventory every file in each official Windows portable archive and identify bundled redistributable components.",
+    "Inventory embedded Python packages from dist-info METADATA, wheel metadata, and package license files.",
+    "Identify PyTorch, torchvision, torchaudio, CUDA/ROCm/XPU runtime libraries, and their separate license/notice obligations for each GPU variant.",
+    "Collect upstream license texts, copyright notices, attribution requirements, and source-offer/source-code obligations where applicable.",
+    "Review 7-Zip executable and source archive licensing for the exact selected release.",
+    "Check trademark, redistribution, export, and model-license issues separately from software package licenses.",
+    "Have the completed inventory and obligations reviewed before any public or customer distribution."
+  ],
+  "portable_variants": [
+    {
+      "asset": "ComfyUI_windows_portable_nvidia.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    },
+    {
+      "asset": "ComfyUI_windows_portable_nvidia_cu126.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    },
+    {
+      "asset": "ComfyUI_windows_portable_amd.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    },
+    {
+      "asset": "ComfyUI_windows_portable_intel.7z",
+      "inventory_status": "not_started",
+      "sha256": null,
+      "release_tag": null,
+      "components": []
+    }
+  ],
+  "known_components": [
+    {
+      "name": "ComfyUI",
+      "license": "GPL-3.0",
+      "evidence": "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
+      "status": "license_text_included_dependency_audit_pending"
+    },
+    {
+      "name": "7-Zip",
+      "license": "See upstream release license; do not assume a single SPDX identifier covers every component",
+      "evidence": "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt and corresponding source archive",
+      "status": "license_text_and_source_archive_included_exact_component_review_pending"
+    }
+  ],
+  "policy": {
+    "no_unverified_license_claims": true,
+    "no_model_download_or_inclusion_by_default": true,
+    "public_distribution_blocked_until_approved": true
+  }
+}
