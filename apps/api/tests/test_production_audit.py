@@ -87,6 +87,11 @@ class ProductionReadinessAuditTests(unittest.TestCase):
             root = Path(temporary)
             video = root / "shot.mp4"
             video.write_bytes(b"video")
+            comfy_install = root / "comfy-install"
+            comfy_output = comfy_install / "ComfyUI" / "output"
+            comfy_output.mkdir(parents=True)
+            generated_image = comfy_output / "shot.png"
+            generated_image.write_bytes(b"image")
             engine = create_engine(f"sqlite:///{root / 'ready.db'}")
             Base.metadata.create_all(engine)
             db = Session(engine)
@@ -135,6 +140,12 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                         request_data={"episode_id": episode.id, "shot_id": shot.id},
                         result_path=str(video),
                     ),
+                    MediaTask(
+                        task_type="local_image_batch",
+                        status="completed",
+                        request_data={"project_id": project.id, "episode_id": episode.id, "shot_id": shot.id},
+                        result_data={"images": [{"filename": generated_image.name, "subfolder": "", "type": "output"}]},
+                    ),
                     MediaFile(
                         name="episode_1_final.mp4",
                         category="video",
@@ -154,11 +165,15 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                         raise ValueError("not a managed test file")
                     return video
 
-                with patch("app.routers.production_audit.safe_storage_file", side_effect=safe_file):
+                with (
+                    patch("app.routers.production_audit.safe_storage_file", side_effect=safe_file),
+                    patch("app.routers.local_image_runtime._install_root", return_value=comfy_install),
+                ):
                     report = build_production_readiness_report(project.id, db)
                 self.assertEqual(report["status"], "ready")
                 self.assertEqual(report["summary"]["shots_with_video"], 1)
                 self.assertEqual(report["summary"]["shots_missing_video"], 0)
+                self.assertEqual(report["summary"]["shots_with_image"], 1)
             finally:
                 db.close()
                 engine.dispose()
