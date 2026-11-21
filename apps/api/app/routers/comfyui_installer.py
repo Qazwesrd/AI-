@@ -7,7 +7,9 @@ import json
 import re
 import shutil
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen\nfrom urllib.parse import urlsplit\nimport re
+from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+import re
 
 GITHUB_RELEASE_API = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
 MAX_RELEASE_METADATA_BYTES = 5 * 1024 * 1024
