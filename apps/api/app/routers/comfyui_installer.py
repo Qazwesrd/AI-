@@ -20,8 +20,29 @@ ALLOWED_ASSET_NAMES = {
     "ComfyUI_windows_portable_nvidia_cu126.7z",
     "ComfyUI_windows_portable_amd.7z",
     "ComfyUI_windows_portable_intel.7z",
+    "ComfyUI_windows_portable_nvidia_arm64.7z",
 }
 
+
+
+def recommend_official_asset(vendor: str, gpu_name: str | None = None, architecture: str | None = None):
+    """Return a conservative asset filename suggestion; unknown hardware stays manual."""
+    arch = (architecture or "").lower().replace("-", "").replace("_", "")
+    if vendor == "NVIDIA" and arch in {"arm64", "aarch64"}:
+        return "ComfyUI_windows_portable_nvidia_arm64.7z"
+    if vendor == "NVIDIA":
+        label = (gpu_name or "").lower()
+        # Official portable guidance reserves cu126 for GTX 10-series and older.
+        if re.search(r"(gtx\\s*([0-9]{3,4})|geforce\\s*([0-9]{3,4}))", label):
+            match = re.search(r"(?:gtx|geforce)\\s*([0-9]{3,4})", label)
+            if match and int(match.group(1)) < 2000:
+                return "ComfyUI_windows_portable_nvidia_cu126.7z"
+        return "ComfyUI_windows_portable_nvidia.7z"
+    if vendor == "AMD":
+        return "ComfyUI_windows_portable_amd.7z"
+    if vendor == "Intel":
+        return "ComfyUI_windows_portable_intel.7z"
+    return None
 
 def parse_official_release(payload: dict):
     if not isinstance(payload, dict) or not isinstance(payload.get("tag_name"), str):
