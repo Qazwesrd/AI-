@@ -276,6 +276,8 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         "file_count": len(file_entries),
         "total_file_bytes": total_bytes,
         "missing_file_count": len(missing_files),
+        "project_data_size_bytes": len(project_data_bytes),
+        "project_data_sha256": hashlib.sha256(project_data_bytes).hexdigest(),
         "missing_files": missing_files,
         "files": [
             {key: value for key, value in item.items() if key != "source_path"}
