@@ -175,6 +175,13 @@ if ($manifestAssetItems.Count -ne 4 -or $manifestAssetNames.Count -ne 4 -or
     (Compare-Object $expectedAssetNames $manifestAssetNames).Count -gt 0) {
     throw "离线数据包缺少官方显卡运行包、包含重复项或包含未知文件。"
 }
+foreach ($manifestAsset in $manifestAssetItems) {
+    $expectedUrl = "https://github.com/Comfy-Org/ComfyUI/releases/download/$($manifest.comfyui_version)/$($manifestAsset.name)"
+    if ($manifestAsset.verified -ne $true -or $manifestAsset.source -ne $expectedUrl -or
+        [string]$manifestAsset.sha256 -notmatch "^[0-9a-fA-F]{64}$" -or [long]$manifestAsset.size_bytes -le 0) {
+        throw "离线数据包包含未经验证或来源不正确的 ComfyUI 资产。"
+    }
+}
 $bundleRoot = Split-Path -Parent $payload
 $comfyLicensePath = Join-Path $bundleRoot ([string]$manifest.license.license_file)
 $sevenZipLicensePath = Join-Path $bundleRoot ([string]$manifest.seven_zip.license_file)
