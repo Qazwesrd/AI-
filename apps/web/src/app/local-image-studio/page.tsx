@@ -230,8 +230,6 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
     </div>
     {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
 
-    {history.length > 0 && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/10 p-3">
-
     {notice && <p className="text-sm text-emerald-200">{notice}</p>}
     {result && <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
       <p className="text-sm">检查了 {result.shot_count} 个分镜；缺失外观档案 {result.missing_profile_count} 项。</p>
@@ -350,6 +348,19 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
     setHistory(Array.isArray(data.tasks) ? data.tasks : []);
   }
 
+  useEffect(() => {
+    if (!projectId || !episodeId) { setHistory([]); return; }
+    let active = true;
+    fetch(API + "/api/local-ai/images/batch/history?project_id=" + projectId + "&episode_id=" + episodeId + "&limit=100", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
+        if (active) setHistory(Array.isArray(data.tasks) ? data.tasks : []);
+      })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取本地批量生图历史失败"); });
+    return () => { active = false; };
+  }, [projectId, episodeId]);
+
 
 
 
@@ -418,7 +429,7 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
         </select>
       </label>
       <label className="text-sm text-white/70">分集
-        <select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setSelected([]); setPreflight(null); setResult(null); setHistory([]); void refreshHistory(); }} disabled={!projectId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 disabled:opacity-40">
+        <select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setSelected([]); setPreflight(null); setResult(null); setHistory([]); }} disabled={!projectId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 disabled:opacity-40">
           <option value="">选择分集</option>{(project?.episodes || []).map((item) => <option key={item.id} value={item.id}>第{item.episode_number}集 · {item.title}</option>)}
         </select>
       </label>
