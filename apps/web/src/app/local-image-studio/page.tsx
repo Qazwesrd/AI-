@@ -236,6 +236,19 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
       </div>
       {history.map((item) => <div key={item.history_id} className="rounded-lg bg-black/20 p-2 text-xs">
         <div className="flex flex-wrap justify-between gap-2"><span>镜头 {item.shot_number} · {item.style} · {item.width}×{item.height}</span><span>{item.status === "completed" ? "已完成" : item.status === "failed" ? "失败" : item.status === "unavailable" ? "暂不可查询" : item.status === "running" ? "生成中" : "排队中"}</span></div>
+        <p className="mt-1 break-all text-white/50">任务 {item.prompt_id} · 种子 {item.seed} · {item.created_at || "时间未知"}</p>
+        {item.images.length > 0 && <p className="mt-1 text-emerald-200">输出图片：{item.images.map((image) => image.filename).join("、")}</p>}
+        {item.error && <p className="mt-1 text-rose-200">{item.error}</p>}
+      </div>)}
+    </div>}
+
+    {history.length > 0 && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/10 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">本地持久化任务历史（最近 {history.length} 条）</p>
+        <button type="button" onClick={() => void refreshHistory().catch((err) => setError(err instanceof Error ? err.message : "刷新历史失败"))} disabled={busy} className="rounded-lg border border-white/20 px-3 py-2 text-xs disabled:opacity-40">刷新历史</button>
+      </div>
+      {history.map((item) => <div key={item.history_id} className="rounded-lg bg-black/20 p-2 text-xs">
+        <div className="flex flex-wrap justify-between gap-2"><span>镜头 {item.shot_number} · {item.style} · {item.width}×{item.height}</span><span>{item.status === "completed" ? "已完成" : item.status === "failed" ? "失败" : item.status === "unavailable" ? "暂不可查询" : item.status === "running" ? "生成中" : "排队中"}</span></div>
         <p className="mt-1 break-all text-white/50">任务 {item.prompt_id} · 种子 {item.seed} · {item.created_at ? new Date(item.created_at).toLocaleString() : "时间未知"}</p>
         {item.images.length > 0 && <p className="mt-1 text-emerald-200">输出图片：{item.images.map((image) => image.filename).join("、")}</p>}
         {item.error && <p className="mt-1 text-rose-200">{item.error}</p>}
@@ -354,24 +367,13 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   const shots = episode?.shots || [];
   async function refreshHistory() {
     if (!projectId || !episodeId) { setHistory([]); return; }
-    const response = await fetch(`${API}/api/local-ai/images/batch/history?project_id=${projectId}&episode_id=${episodeId}&limit=100`, { cache: "no-store" });
+    const response = await fetch(API + "/api/local-ai/images/batch/history?project_id=" + projectId + "&episode_id=" + episodeId + "&limit=100", { cache: "no-store" });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
     setHistory(Array.isArray(data.tasks) ? data.tasks : []);
   }
 
-  useEffect(() => {
-    if (!projectId || !episodeId) { setHistory([]); return; }
-    let active = true;
-    fetch(`${API}/api/local-ai/images/batch/history?project_id=${projectId}&episode_id=${episodeId}&limit=100`, { cache: "no-store" })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
-        if (active) setHistory(Array.isArray(data.tasks) ? data.tasks : []);
-      })
-      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取本地批量生图历史失败"); });
-    return () => { active = false; };
-  }, [projectId, episodeId]);
+
 
 
   function toggleShot(id: number) {
@@ -434,12 +436,12 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
       <p className="mt-1 text-sm text-white/55">按分集选择最多 20 个分镜，先检查提示词，再由你确认后逐个提交到本机 ComfyUI。不会自动归档图片。</p></div>
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="text-sm text-white/70">漫剧项目
-        <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setEpisodeId(""); setSelected([]); setPreflight(null); setResult(null); }} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3">
+        <select value={projectId} onChange={(event) => { setProjectId(event.target.value); setEpisodeId(""); setSelected([]); setPreflight(null); setResult(null); setHistory([]); }} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3">
           <option value="">选择项目</option>{projects.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
         </select>
       </label>
       <label className="text-sm text-white/70">分集
-        <select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setSelected([]); setPreflight(null); setResult(null); }} disabled={!projectId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 disabled:opacity-40">
+        <select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); setSelected([]); setPreflight(null); setResult(null); setHistory([]); void refreshHistory(); }} disabled={!projectId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 disabled:opacity-40">
           <option value="">选择分集</option>{(project?.episodes || []).map((item) => <option key={item.id} value={item.id}>第{item.episode_number}集 · {item.title}</option>)}
         </select>
       </label>
