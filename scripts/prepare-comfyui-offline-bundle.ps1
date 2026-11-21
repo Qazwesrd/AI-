@@ -312,6 +312,7 @@ try {
     $inventoryReportPath = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json"
     Add-TextEntry $archive $inventoryReportPath ($inventoryBase | ConvertTo-Json -Depth 12)
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
+Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (Join-Path $PSScriptRoot "install-local-engines-transaction.ps1")
     Add-FileEntry $archive "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" $auditScript
 
     $bundleAuditRegister = Get-Content -LiteralPath $auditPath -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -477,6 +478,9 @@ try {
         }
     }
     $expectedEntries += @{ path = "ComfyUI-Payload/7zr.exe"; size = [long]$toolResult.size_bytes; sha256 = [string]$toolResult.sha256 }
+    $transactionInstaller = Join-Path $PSScriptRoot "install-local-engines-transaction.ps1"
+    if (!(Test-Path -LiteralPath $transactionInstaller -PathType Leaf)) { throw "整套本地引擎事务安装脚本不存在：$transactionInstaller" }
+    $expectedEntries += @{ path = "ComfyUI-Payload/install-local-engines-transaction.ps1"; size = (Get-Item -LiteralPath $transactionInstaller).Length; sha256 = (Get-FileHash -LiteralPath $transactionInstaller -Algorithm SHA256).Hash.ToLowerInvariant() }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"; size = [long]$sevenZipSourceResult.size_bytes; sha256 = [string]$sevenZipSourceResult.sha256 }
     $expectedEntries += @{ path = "Setup.exe"; size = [long]$setupItem.Length; sha256 = $setupHash }
     foreach ($localAIFile in $localAIPayloadFiles) {
@@ -513,6 +517,7 @@ try {
         "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt",
         "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-MODEL-NOTICE.txt",
         "ComfyUI-Payload/install-comfyui-offline.ps1",
+        "ComfyUI-Payload/install-local-engines-transaction.ps1",
         "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1",
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
         "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
