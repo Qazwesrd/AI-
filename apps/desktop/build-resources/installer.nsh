@@ -1,4 +1,4 @@
-!pragma codepage 65001
+Unicode true
 !macro customInstall
   IfFileExists "$PROFILE\AIComicStudio\ComfyUI\ComfyUI\main.py" comfyui_engine_exists 0
   IfFileExists "$EXEDIR\ComfyUI-Payload\install-comfyui-offline.ps1" 0 comfyui_payload_missing
