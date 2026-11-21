@@ -21,6 +21,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             'network_required_after_install = $false',
             '12GB',
             'Apache License',
+            'cloud_features_disabled = $true',
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
@@ -29,6 +30,10 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         source = (ROOT / "scripts" / "install-local-ai-offline.ps1").read_text(encoding="utf-8")
         for marker in (
             "Resolve-SafeRelativePath",
+            "Get-ZipExpandedSize",
+            "$modelDescriptors",
+            "$uniqueModelPaths",
+            "cloud_features_disabled -ne $true",
             "distribution_approved -ne $false",
             "payload_manifest_sha256 -ne $payloadManifestHash",
             "Get-Sha256",
