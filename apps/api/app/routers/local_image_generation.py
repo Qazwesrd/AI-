@@ -1696,14 +1696,58 @@ def generate_reference_conditioned_shot(
         workflow = build_reference_conditioned_workflow(payload, seed, object_infos, references)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-    result = _local_request("/prompt", {"prompt": workflow, "client_id": str(uuid.uuid4())}, timeout=15.0)
+    task_record = MediaTask(
+        task_type="local_image_reference",
+        provider="comfyui-local",
+        model=data.checkpoint,
+        status="submitting",
+        prompt=prompt_text[:6000],
+        request_data={
+            "project_id": project.id,
+            "episode_id": shot.episode_id,
+            "shot_id": shot.id,
+            "shot_number": shot.shot_number,
+            "reference_count": len(references),
+            "seed": seed,
+            "checkpoint": data.checkpoint,
+            "style": data.style,
+            "width": data.width,
+            "height": data.height,
+            "steps": data.steps,
+            "cfg": data.cfg,
+        },
+        result_data={"prompt_id": None, "images": []},
+    )
+    db.add(task_record)
+    try:
+        db.commit()
+        db.refresh(task_record)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, "本地任务记录保存失败；尚未向 ComfyUI 提交生成请求。") from exc
+
+    try:
+        result = _local_request("/prompt", {"prompt": workflow, "client_id": str(uuid.uuid4())}, timeout=15.0)
+    except HTTPException as exc:
+        task_record.status = "submission_unknown"
+        task_record.error = "ComfyUI 提交响应不确定，请先刷新本机队列核实；禁止自动重试。"
+        db.commit()
+        raise HTTPException(502, task_record.error) from exc
     prompt_id = result.get("prompt_id")
     if not isinstance(prompt_id, str) or not PROMPT_ID_RE.fullmatch(prompt_id):
-        raise HTTPException(502, "ComfyUI 未返回有效任务编号，无法确认任务已进入队列。")
+        task_record.status = "submission_unknown"
+        task_record.error = "ComfyUI 未返回有效任务编号；请检查本机队列，禁止自动重试。"
+        db.commit()
+        raise HTTPException(502, task_record.error)
+    task_record.remote_task_id = prompt_id
+    task_record.status = "queued"
+    task_record.result_data = {"prompt_id": prompt_id, "images": []}
+    db.commit()
     return {
         "success": True,
         "engine": "ComfyUI",
         "prompt_id": prompt_id,
+        "history_id": task_record.id,
         "seed": seed,
         "checkpoint": data.checkpoint,
         "shot_id": shot.id,
@@ -1714,7 +1758,8 @@ def generate_reference_conditioned_shot(
         "downloaded": False,
         "paid_api_used": False,
         "cloud_fallback": False,
-        "message": "参考图条件生图任务已提交到本机 ComfyUI 队列。",
+        "history_persisted": True,
+        "message": "参考图条件生图任务已提交到本机 ComfyUI，并已写入统一任务中心。",
     }
 
 
