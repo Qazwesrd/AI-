@@ -235,7 +235,9 @@ foreach ($toolAsset in @($sevenZipTool, $sevenZipSource)) {
 }
 
 $totalBytes = ($manifestAssets | Measure-Object -Property size_bytes -Sum).Sum
-$estimatedBundleBytes = [long]$totalBytes + [long]$localAIPayloadBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + 1GB
+$largestAssetBytes = [long](($manifestAssets | Measure-Object -Property size_bytes -Maximum).Maximum)
+# The largest archive is mirrored to temporary storage while its dependency inventory is generated.
+$estimatedBundleBytes = [long]$totalBytes + [long]$localAIPayloadBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + $largestAssetBytes + 1GB
 $target = [System.IO.Path]::GetFullPath($OutputZip)
 if (Test-Path -LiteralPath $target) {
     throw "输出文件已存在：$target。为保护已有离线安装套件，底层打包脚本不会覆盖或删除它。若确认重新制作，请先通过 create-comfyui-offline-installer.ps1 -Force 明确删除旧包。"
