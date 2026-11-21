@@ -3,7 +3,42 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.services.media_service import validate_rendered_video
+from app.services.media_service import analyze_audio_video_stream_sync, validate_rendered_video
+
+
+
+class AudioVideoStreamSyncTests(unittest.TestCase):
+    def test_reports_stream_boundary_drift(self):
+        report = analyze_audio_video_stream_sync([
+            {"codec_type": "video", "start_time": "0.000", "duration": "120.0"},
+            {"codec_type": "audio", "start_time": "0.180", "duration": "119.4"},
+        ])
+        self.assertEqual(report["status"], "drift_detected")
+        self.assertAlmostEqual(report["start_offset_seconds"], 0.18)
+        self.assertAlmostEqual(report["end_delta_seconds"], -0.42)
+
+    def test_reports_within_tolerance(self):
+        report = analyze_audio_video_stream_sync([
+            {"codec_type": "video", "start_time": "0.000", "duration": "120.0"},
+            {"codec_type": "audio", "start_time": "0.020", "duration": "120.1"},
+        ])
+        self.assertEqual(report["status"], "within_tolerance")
+
+    def test_missing_stream_timing_is_unavailable_not_guessed(self):
+        report = analyze_audio_video_stream_sync([
+            {"codec_type": "video", "start_time": "0.0"},
+            {"codec_type": "audio", "start_time": "0.0"},
+        ])
+        self.assertEqual(report["status"], "unavailable")
+        self.assertIsNone(report["end_delta_seconds"])
+
+    def test_supports_negative_codec_start_time(self):
+        report = analyze_audio_video_stream_sync([
+            {"codec_type": "video", "start_time": "0.0", "duration": "10.0"},
+            {"codec_type": "audio", "start_time": "-0.05", "duration": "10.05"},
+        ])
+        self.assertEqual(report["status"], "within_tolerance")
+        self.assertAlmostEqual(report["start_offset_seconds"], -0.05)
 
 
 class RenderedVideoValidationTests(unittest.TestCase):

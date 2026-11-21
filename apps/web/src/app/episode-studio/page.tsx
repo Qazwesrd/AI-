@@ -80,6 +80,14 @@ export default function EpisodeReadinessPage() {
   const [message, setMessage] = useState("");
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
+  const [qualityScanResult, setQualityScanResult] = useState<{
+    av_sync?: { status: string; start_offset_seconds?: number | null; end_delta_seconds?: number | null; reason?: string };
+    black_segments?: { start_seconds: number; end_seconds: number; duration_seconds: number }[];
+    silence_segments?: { start_seconds: number; end_seconds: number; duration_seconds: number }[];
+    warnings?: string[];
+    note?: string;
+  } | null>(null);
+  const [qualityScanBusy, setQualityScanBusy] = useState(false);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
   const [generatedSubtitleCues, setGeneratedSubtitleCues] = useState<{ start: number; end: number; text: string }[]>([]);
   const [timelineVersion, setTimelineVersion] = useState(0);
@@ -305,7 +313,7 @@ export default function EpisodeReadinessPage() {
     }
     setBusy(true);
     setMessage("正在逐镜头检查视频文件、视频流和时长……");
-    if (clearPreviousRender) setRenderResult(null);
+    if (clearPreviousRender) { setRenderResult(null); setQualityScanResult(null); }
     try {
       const response = await fetch(`${API}/api/media/video/episodes/${id}/render-readiness`);
       const data = await response.json();
@@ -346,6 +354,25 @@ export default function EpisodeReadinessPage() {
       setMessage(error instanceof Error ? error.message : "替换失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function scanRenderedQuality() {
+    if (!renderResult?.output) return;
+    if (!window.confirm("将使用本地 FFmpeg 对已生成成片进行深度扫描，检查持续黑屏、静音、音量及音视频流起止时间差。扫描可能需要一些时间；结果仅作提示，不会自动修改视频。是否继续？")) return;
+    setQualityScanBusy(true);
+    setMessage("正在本地扫描成片的黑屏、静音和音画时间边界……");
+    try {
+      const query = new URLSearchParams({ path: renderResult.output });
+      const response = await fetch(API + "/api/media/quality-scan?" + query.toString());
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "成片深度扫描失败");
+      setQualityScanResult(data);
+      setMessage("成片深度扫描完成。请结合黑屏、静音和音画时间差提示人工复核。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "成片深度扫描失败");
+    } finally {
+      setQualityScanBusy(false);
     }
   }
 
@@ -780,6 +807,19 @@ export default function EpisodeReadinessPage() {
             <p className="mt-2 break-all text-sm">{renderResult.output}</p>
             {renderResult.subtitle_path && <p className="mt-2 break-all text-xs text-white/55">字幕：{renderResult.subtitle_path}</p>}
             {renderResult.quality_report && <p className="mt-3 text-sm text-white/65">时长 {renderResult.quality_report.duration_seconds ?? "—"} 秒 · 分辨率 {renderResult.quality_report.width ?? "—"} × {renderResult.quality_report.height ?? "—"}</p>}
+            <button type="button" disabled={qualityScanBusy} onClick={() => void scanRenderedQuality()} className="mt-4 rounded-lg border border-cyan-300/40 bg-cyan-900/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">
+              {qualityScanBusy ? "正在深度扫描…" : "深度检查黑屏、静音与音画同步"}
+            </button>
+            {qualityScanResult && (
+              <div className="mt-4 space-y-2 rounded-xl border border-white/10 bg-black/20 p-4 text-sm">
+                <p className="font-semibold">音画时间边界：{qualityScanResult.av_sync?.status === "within_tolerance" ? "在提示阈值内" : qualityScanResult.av_sync?.status === "drift_detected" ? "发现时间差异" : "数据不足，无法判断"}</p>
+                {qualityScanResult.av_sync?.start_offset_seconds != null && <p>音频起始相对视频偏移：{qualityScanResult.av_sync.start_offset_seconds} 秒；结束位置差：{qualityScanResult.av_sync.end_delta_seconds} 秒</p>}
+                {qualityScanResult.av_sync?.reason && <p className="text-white/60">{qualityScanResult.av_sync.reason}</p>}
+                <p>持续黑屏：{qualityScanResult.black_segments?.length ?? 0} 段；持续静音：{qualityScanResult.silence_segments?.length ?? 0} 段</p>
+                {(qualityScanResult.warnings || []).map((warning, index) => <p key={index} className="text-amber-200">• {warning}</p>)}
+                <p className="text-xs text-white/40">{qualityScanResult.note} 音画同步仅比较流级起止时间，不等同于逐帧口型检测。</p>
+              </div>
+            )}
           </section>
         )}
       </div>

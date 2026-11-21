@@ -237,6 +237,68 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
 
 
 
+
+def analyze_audio_video_stream_sync(streams, start_tolerance=0.10, end_tolerance=0.25):
+    """Compare FFprobe audio/video stream start and end timestamps.
+
+    This is a stream-boundary diagnostic, not perceptual lip-sync analysis.
+    Missing stream timing metadata is reported as unavailable rather than guessed.
+    """
+    video = next((item for item in streams if item.get("codec_type") == "video"), None)
+    audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
+    if not video or not audio:
+        return {
+            "status": "unavailable",
+            "reason": "缺少视频流或音频流，无法比较音画时间边界",
+            "start_offset_seconds": None,
+            "end_delta_seconds": None,
+            "video_duration_seconds": None,
+            "audio_duration_seconds": None,
+        }
+
+    def number(value, allow_negative=False):
+        try:
+            result = float(value)
+            if abs(result) >= 86400 or (not allow_negative and result < 0):
+                return None
+            return result
+        except (TypeError, ValueError):
+            return None
+
+    video_start = number(video.get("start_time"), allow_negative=True)
+    audio_start = number(audio.get("start_time"), allow_negative=True)
+    video_duration = number(video.get("duration"))
+    audio_duration = number(audio.get("duration"))
+    if None in (video_start, audio_start, video_duration, audio_duration):
+        return {
+            "status": "unavailable",
+            "reason": "FFprobe 未提供完整的音视频流起始时间或时长",
+            "start_offset_seconds": None,
+            "end_delta_seconds": None,
+            "video_duration_seconds": video_duration,
+            "audio_duration_seconds": audio_duration,
+        }
+
+    start_offset = audio_start - video_start
+    video_end = video_start + video_duration
+    audio_end = audio_start + audio_duration
+    end_delta = audio_end - video_end
+    drifted = abs(start_offset) > start_tolerance or abs(end_delta) > end_tolerance
+    return {
+        "status": "drift_detected" if drifted else "within_tolerance",
+        "start_offset_seconds": round(start_offset, 3),
+        "end_delta_seconds": round(end_delta, 3),
+        "video_duration_seconds": round(video_duration, 3),
+        "audio_duration_seconds": round(audio_duration, 3),
+        "start_tolerance_seconds": float(start_tolerance),
+        "end_tolerance_seconds": float(end_tolerance),
+        "reason": (
+            "音视频流时间边界差异超过提示阈值，请试听并检查画面同步"
+            if drifted else "音视频流起止时间差在提示阈值内"
+        ),
+    }
+
+
 def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, silence_noise="-50dB"):
     """Detect sustained black frames and digital silence; findings are advisory, not automatic failures."""
     file_path = Path(path)
@@ -309,7 +371,16 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
                 "duration_seconds": round(float(match.group(3)), 3),
             })
 
+    av_sync = analyze_audio_video_stream_sync(streams)
     warnings = []
+    if av_sync["status"] == "drift_detected":
+        warnings.append(
+            "音画时间边界存在差异：起始偏移 "
+            + str(av_sync.get("start_offset_seconds"))
+            + " 秒，结束差值 "
+            + str(av_sync.get("end_delta_seconds"))
+            + " 秒；请人工试听和检查口型同步"
+        )
     if black_segments:
         warnings.append(f"检测到 {len(black_segments)} 段持续黑屏，请检查是否为转场或意外空镜")
     if silence_segments:
@@ -331,6 +402,7 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
         "silence_threshold_seconds": float(silence_min_duration),
         "silence_noise_threshold": silence_noise,
         "has_audio": bool(audio_stream),
+        "av_sync": av_sync,
         "audio_levels": audio_levels,
         "black_segments": black_segments,
         "silence_segments": silence_segments,
