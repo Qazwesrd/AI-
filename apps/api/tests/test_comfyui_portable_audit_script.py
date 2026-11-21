@@ -64,6 +64,14 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn("auditRegisterPath", installer)
         self.assertIn("registerVariants", installer)
 
+    def test_image_studio_profile_parsers_use_real_regex_tokens(self):
+        page_path = REPO_ROOT / "apps" / "web" / "src" / "app" / "local-image-studio" / "page.tsx"
+        page = page_path.read_text(encoding="utf-8")
+        self.assertIn(r"/^\s*(\d+)\s*[=:：]\s*(.+)\s*$/", page)
+        self.assertIn(r"/^\d+$/", page)
+        self.assertNotIn(r"\\s", page)
+        self.assertNotIn(r"\\d", page)
+
     def test_comfyui_installer_records_runtime_and_preserves_existing_install(self):
         installer_path = REPO_ROOT / "scripts" / "install-comfyui-offline.ps1"
         installer = installer_path.read_text(encoding="utf-8")
