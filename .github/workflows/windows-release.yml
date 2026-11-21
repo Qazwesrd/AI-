@@ -14,7 +14,7 @@ on:
     paths:
       - "apps/**"
       - "packages/**"
-      - "scripts/build-windows.ps1"
+      - "scripts/*.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
 
