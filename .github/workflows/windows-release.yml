@@ -60,6 +60,11 @@ jobs:
             Write-Host "PowerShell syntax is valid: $script"
           }
 
+      - name: Smoke-test synthetic ComfyUI offline bundle contract
+        shell: pwsh
+        run: |
+          ./scripts/test-comfyui-offline-bundle-smoke.ps1
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
