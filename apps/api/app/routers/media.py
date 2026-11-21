@@ -3333,6 +3333,8 @@ def save_episode_edit_timeline(
         ).first()
         if not effect_record:
             raise HTTPException(422, "音效必须来自本地音频素材库")
+        if not _media_file_belongs_to_project(effect_record, episode.project_id):
+            raise HTTPException(422, "音效属于其他项目，不能跨项目引用")
         effect_info = probe_media(effect_path)
         if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
             raise HTTPException(422, "音效文件不包含可用音轨")
