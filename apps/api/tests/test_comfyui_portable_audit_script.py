@@ -41,7 +41,9 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
         self.assertIn("Expand-ValidatedArchive", source)
         self.assertIn('"x", "-y", "-sccUTF-8"', source)
-        self.assertIn("2GB", source)
+        self.assertIn("10GB", source)
+        self.assertIn("$destinationDrive.AvailableFreeSpace", source)
+        self.assertIn("$totalExpandedBytes + 1GB", source)
         self.assertIn('$extracted = Join-Path $Destination $relativeEntryPath', source)
         evidence_function = source.split("function Get-ExtractedEvidence", 1)[1].split("if (!(Test-Path -LiteralPath $SevenZipPath", 1)[0]
         self.assertNotIn("$output", evidence_function)
