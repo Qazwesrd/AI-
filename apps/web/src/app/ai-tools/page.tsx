@@ -562,11 +562,24 @@ export default function AIToolsPage() {
       sceneId: task.sceneId ?? null,
     };
     try {
-      const response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id), {
+      let response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated),
       });
+      if (response.status === 404) {
+        response = await fetch(apiBase + "/api/web-ai/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated),
+        });
+      } else if (response.status === 409) {
+        response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id), {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated),
+        });
+      }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.detail || "任务结果保存失败");
       setTasks((current) => current.map((item) => item.id === task.id
