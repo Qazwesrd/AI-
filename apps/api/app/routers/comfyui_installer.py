@@ -390,15 +390,15 @@ def validate_archive_entries(entries):
             raise ValueError("压缩包目录项格式无效")
         raw_path = entry.get("path")
         size = entry.get("size")
-        if not isinstance(raw_path, str) or not raw_path or "\\x00" in raw_path:
+        if not isinstance(raw_path, str) or not raw_path or "\x00" in raw_path:
             raise ValueError("压缩包包含无效路径")
         # Check both path syntaxes because archives may be crafted for Windows.
         windows_path = __import__("pathlib").PureWindowsPath(raw_path)
-        normalized = raw_path.replace("\\\\", "/")
+        normalized = raw_path.replace("\\", "/")
         parts = normalized.split("/")
         if (
-            raw_path.startswith(("/", "\\\\"))
-            or windows_path.is_absolute()
+            raw_path.startswith(("/", "\\"))
+            or windows_path.is_absolute() or bool(windows_path.root)
             or windows_path.drive
             or any(part in {"", ".", ".."} for part in parts)
             or ":" in raw_path
