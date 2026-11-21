@@ -1,5 +1,7 @@
 import ctypes
+import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -126,6 +128,77 @@ def _physical_memory_bytes():
     return None
 
 
+def classify_display_adapter_vendor(name, pnp_device_id=None):
+    """Classify a Windows display adapter from its Plug-and-Play vendor ID."""
+    pnp = str(pnp_device_id or "").upper()
+    label = str(name or "")
+    if "VEN_10DE" in pnp or re.search(r"(?i)NVIDIA|GEFORCE|QUADRO", label):
+        return "NVIDIA"
+    if "VEN_1002" in pnp or re.search(r"(?i)AMD|RADEON", label):
+        return "AMD"
+    if "VEN_8086" in pnp or re.search(r"(?i)INTEL|ARC GRAPHICS", label):
+        return "Intel"
+    return "unknown"
+
+
+def _detect_windows_display_adapter():
+    """Read display adapter identity through local WMI; never trust AdapterRAM."""
+    if os.name != "nt":
+        return None
+    powershell = shutil.which("powershell.exe") or shutil.which("pwsh.exe")
+    if not powershell:
+        return None
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
+        "Get-CimInstance -ClassName Win32_VideoController | "
+        "Select-Object Name,PNPDeviceID | ConvertTo-Json -Compress"
+    )
+    try:
+        result = subprocess.run(
+            [powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, timeout=5, check=False,
+            encoding="utf-8", errors="replace",
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        payload = json.loads(result.stdout)
+        adapters = payload if isinstance(payload, list) else [payload]
+        for adapter in adapters:
+            if not isinstance(adapter, dict):
+                continue
+            name = str(adapter.get("Name") or "").strip()
+            if not name:
+                continue
+            vendor = classify_display_adapter_vendor(name, adapter.get("PNPDeviceID"))
+            if vendor == "unknown":
+                continue
+            return {
+                "status": "detected",
+                "vendor": vendor,
+                "name": name,
+                "vram_bytes": None,
+                "acceleration_status": "not_benchmarked",
+                "note": "显示适配器身份来自本机 WMI；不使用可能截断的 AdapterRAM，也未声称 GPU 推理已验证。",
+            }
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return None
+    return None
+
+
+def _detect_gpu_profile():
+    """Prefer local WMI identity for all vendors, then enrich NVIDIA with nvidia-smi."""
+    display = _detect_windows_display_adapter()
+    if display and display.get("vendor") == "NVIDIA":
+        nvidia = _detect_nvidia_gpu()
+        if nvidia.get("status") == "detected":
+            return {**display, **nvidia, "acceleration_status": "detected_not_benchmarked"}
+        return display
+    if display:
+        return display
+    return _detect_nvidia_gpu()
+
+
 def _detect_nvidia_gpu():
     """Read NVIDIA GPU metadata from nvidia-smi; never contacts a network service."""
     executable = shutil.which("nvidia-smi")
@@ -196,7 +269,7 @@ def _recommend_local_model_tier(ram_bytes, vram_bytes):
 
 def _get_hardware_profile():
     ram_bytes = _physical_memory_bytes()
-    gpu = _detect_nvidia_gpu()
+    gpu = _detect_gpu_profile()
     try:
         cpu_count = os.cpu_count()
     except Exception:
