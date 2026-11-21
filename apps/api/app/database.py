@@ -90,6 +90,30 @@ MODEL_MODULES = [
 ]
 
 
+def _assert_sqlite_connection_integrity(connection, label):
+    """Raise when a SQLite database fails its full integrity check."""
+    result = connection.execute("PRAGMA integrity_check").fetchone()
+    if not result or result[0] != "ok":
+        raise RuntimeError(f"{label}完整性检查失败：{result}")
+    return True
+
+
+def _assert_sqlite_integrity(path: Path, label):
+    """Validate a snapshot read-only before it is trusted for rollback."""
+    path = Path(path).resolve()
+    if not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError(f"{label}不存在或为空，拒绝继续")
+    uri = path.as_uri() + "?mode=ro"
+    connection = sqlite3.connect(uri, uri=True, timeout=30)
+    try:
+        _assert_sqlite_connection_integrity(connection, label)
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError(f"{label}不是有效的 SQLite 数据库：{exc}") from exc
+    finally:
+        connection.close()
+    return True
+
+
 def _backup_database_before_migration():
     if not DATABASE_PATH.exists() or DATABASE_PATH.stat().st_size == 0:
         return None
@@ -104,9 +128,20 @@ def _backup_database_before_migration():
     try:
         source.backup(destination)
         destination.commit()
-    finally:
+    except Exception:
         destination.close()
         source.close()
+        target.unlink(missing_ok=True)
+        raise
+    else:
+        destination.close()
+        source.close()
+
+    try:
+        _assert_sqlite_integrity(target, "迁移前备份")
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
 
     return target
 
@@ -116,6 +151,9 @@ def _restore_database_backup(backup_path: Path):
     """Restore a pre-migration SQLite snapshot without replacing an open Windows file."""
     if not backup_path or not Path(backup_path).is_file():
         raise RuntimeError("找不到迁移前数据库备份，无法自动回滚")
+
+    backup_path = Path(backup_path).resolve()
+    _assert_sqlite_integrity(backup_path, "迁移回滚备份")
 
     engine.dispose()
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -129,9 +167,7 @@ def _restore_database_backup(backup_path: Path):
         destination.execute("PRAGMA journal_mode=DELETE")
         source.backup(destination)
         destination.commit()
-        integrity = destination.execute("PRAGMA integrity_check").fetchone()
-        if not integrity or integrity[0] != "ok":
-            raise RuntimeError(f"恢复后的数据库完整性检查失败：{integrity}")
+        _assert_sqlite_connection_integrity(destination, "恢复后的数据库")
     finally:
         destination.close()
         source.close()
