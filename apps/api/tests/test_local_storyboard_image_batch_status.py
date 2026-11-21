@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
@@ -35,7 +35,9 @@ class LocalStoryboardImageBatchStatusTests(unittest.TestCase):
             return {third: {"status": {"completed": True, "status_str": "error"}, "outputs": {}}}
 
         with patch("app.routers.local_image_generation._local_request", side_effect=fake_request):
-            result = get_local_image_batch_status(data)
+            db = MagicMock()
+            db.query.return_value.filter.return_value.first.return_value = None
+            result = get_local_image_batch_status(data, db=db)
 
         self.assertEqual([item["status"] for item in result["tasks"]], ["completed", "queued_or_running", "failed"])
         self.assertEqual(result["completed_count"], 1)
