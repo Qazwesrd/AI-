@@ -123,5 +123,63 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_official_release({"assets": []})
 
+
+    def test_install_asset_requires_official_url_size_and_sha256(self):
+        from app.routers.comfyui_installer import validate_official_asset_for_install
+        asset = {
+            "name": "ComfyUI_windows_portable_nvidia.7z",
+            "download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v1/ComfyUI_windows_portable_nvidia.7z",
+            "size_bytes": 1024,
+            "sha256": "a" * 64,
+        }
+        self.assertEqual(validate_official_asset_for_install(asset, "v1")["sha256"], "a" * 64)
+        for changed in (
+            {**asset, "sha256": None},
+            {**asset, "download_url": "https://evil.example/file.7z"},
+            {**asset, "size_bytes": 0},
+            {**asset, "download_url": asset["download_url"] + "?redirect=1"},
+        ):
+            with self.assertRaises(ValueError):
+                validate_official_asset_for_install(changed, "v1")
+
+    def test_download_response_requires_exact_length_and_blocks_redirects(self):
+        from app.routers.comfyui_installer import validate_download_response
+        result = validate_download_response(200, {"Content-Length": "100"}, 100)
+        self.assertEqual(result["expected_response_bytes"], 100)
+        with self.assertRaises(ValueError):
+            validate_download_response(302, {"Location": "https://evil.example"}, 100)
+        with self.assertRaises(ValueError):
+            validate_download_response(200, {"Content-Length": "99"}, 100)
+
+    def test_resume_requires_matching_range_and_etag(self):
+        from app.routers.comfyui_installer import validate_download_response
+        result = validate_download_response(
+            206, {"Content-Range": "bytes 50-99/100", "Content-Length": "50", "ETag": '"v1"'},
+            100, resume_offset=50, expected_etag='"v1"',
+        )
+        self.assertTrue(result["resume_allowed"])
+        with self.assertRaises(ValueError):
+            validate_download_response(
+                206, {"Content-Range": "bytes 40-99/100", "ETag": '"v1"'},
+                100, resume_offset=50, expected_etag='"v1"',
+            )
+        with self.assertRaises(ValueError):
+            validate_download_response(
+                206, {"Content-Range": "bytes 50-99/100", "ETag": '"v2"'},
+                100, resume_offset=50, expected_etag='"v1"',
+            )
+
+    def test_archive_manifest_rejects_traversal_links_and_oversized_files(self):
+        from app.routers.comfyui_installer import validate_archive_entries
+        safe = validate_archive_entries([{"path": "ComfyUI/main.py", "size": 100}])
+        self.assertEqual(safe[0]["path"], "ComfyUI/main.py")
+        for entry in (
+            {"path": "../outside.txt", "size": 1},
+            {"path": "C:\\outside.txt", "size": 1},
+            {"path": "ComfyUI/link", "size": 1, "is_symlink": True},
+        ):
+            with self.assertRaises(ValueError):
+                validate_archive_entries([entry])
+
 if __name__ == "__main__":
     unittest.main()
