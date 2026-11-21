@@ -2,7 +2,7 @@ import unittest
 
 from app.routers.comfyui_installer import (
     GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,
-    classify_gpu_vendor, parse_windows_video_adapters, recommend_official_asset,
+    classify_gpu_vendor, parse_windows_video_adapters, recommend_official_asset, recommend_runtime_mode,
 )
 
 
@@ -64,7 +64,13 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertEqual(recommend_official_asset("AMD", "AMD Radeon RX 7900", "AMD64"), "ComfyUI_windows_portable_amd.7z")
         self.assertEqual(recommend_official_asset("Intel", "Intel Arc A770", "AMD64"), "ComfyUI_windows_portable_intel.7z")
         self.assertIsNone(recommend_official_asset("Intel", "Intel UHD Graphics", "AMD64"))
-        self.assertIsNone(recommend_official_asset("AMD", "AMD Radeon RX 580", "AMD64"))
+        self.assertEqual(recommend_official_asset("AMD", "AMD Radeon RX 580", "AMD64"), "ComfyUI_windows_portable_amd.7z")
+        self.assertEqual(recommend_runtime_mode("AMD", "AMD Radeon RX 580"), "cpu")
+        self.assertEqual(recommend_runtime_mode("AMD", "AMD Radeon RX 7900 XTX"), "gpu")
+        self.assertEqual(recommend_official_asset("AMD", "AMD Radeon Graphics", "AMD64"), "ComfyUI_windows_portable_amd.7z")
+        self.assertEqual(recommend_runtime_mode("AMD", "AMD Radeon Graphics"), "cpu")
+        self.assertEqual(recommend_runtime_mode("Intel", "Intel UHD Graphics"), "cpu")
+        self.assertEqual(recommend_runtime_mode("Intel", "Intel Arc A770"), "gpu")
         self.assertIsNone(recommend_official_asset("unknown", "Unknown GPU", "AMD64"))
 
     def test_release_catalog_only_accepts_official_assets_and_urls(self):
