@@ -119,6 +119,14 @@ def assess_image_hardware(hardware: dict):
     }
 
 
+def _build_runtime_command(python_exe: Path, main_py: Path, mode: str):
+    command = [str(python_exe), "-s", str(main_py)]
+    if mode == "cpu":
+        command.append("--cpu")
+    command.append("--windows-standalone-build")
+    return command
+
+
 def _runtime_mode():
     detected = detect_windows_video_adapters()
     adapters = detected.get("adapters") if isinstance(detected, dict) else []
@@ -250,10 +258,7 @@ def start_local_image_runtime():
         if python_exe.is_symlink() or main_py.is_symlink():
             raise HTTPException(status_code=400, detail="ComfyUI 启动文件不能是符号链接。")
         mode, adapter_name = _runtime_mode()
-        command = [str(python_exe), "-s", str(main_py)]
-        if mode == "cpu":
-            command.append("--cpu")
-        command.append("--windows-standalone-build")
+        command = _build_runtime_command(python_exe, main_py, mode)
         log_path = _log_path()
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
