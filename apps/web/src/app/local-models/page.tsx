@@ -66,6 +66,11 @@ type ComfyUIInstallPlan = {
   sha256: string; install_target: string; required_free_bytes: number; free_disk_bytes: number;
   download_started: boolean; installation_started: boolean; network_used: boolean; note: string;
 };
+type ComfyUIDownloadTask = {
+  task_id: string; status: string; asset_name: string; version: string;
+  received_bytes: number; total_bytes: number; percent: number;
+  error: string | null; verified: boolean; installation_started: boolean;
+};
 declare global {
   interface Window {
     localAIInstallerDesktop?: {
@@ -133,6 +138,9 @@ export default function LocalModelsPage() {
   const [loadingComfyReleaseCatalog, setLoadingComfyReleaseCatalog] = useState(false);
   const [comfyInstallPlan, setComfyInstallPlan] = useState<ComfyUIInstallPlan | null>(null);
   const [creatingComfyInstallPlan, setCreatingComfyInstallPlan] = useState(false);
+  const [comfyDownloadTask, setComfyDownloadTask] = useState<ComfyUIDownloadTask | null>(null);
+  const [startingComfyDownload, setStartingComfyDownload] = useState(false);
+  const [cancellingComfyDownload, setCancellingComfyDownload] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -230,6 +238,69 @@ export default function LocalModelsPage() {
       setCreatingComfyInstallPlan(false);
     }
   };
+
+  const startComfyDownload = async () => {
+    if (!comfyInstallPlan) return;
+    const accepted = window.confirm(
+      `即将从 Comfy-Org 官方下载 ${comfyInstallPlan.asset_name}（${size(comfyInstallPlan.archive_size_bytes)}）。
+将使用网络和磁盘空间；下载完成后会校验 SHA-256。此操作只下载并校验安装包，不会解压、安装、启动或下载模型。是否开始？`
+    );
+    if (!accepted) return;
+    setStartingComfyDownload(true);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          confirm_download: true,
+          asset_name: comfyInstallPlan.asset_name,
+          version: comfyInstallPlan.version,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "启动 ComfyUI 下载失败");
+      setComfyDownloadTask(result);
+      setMessage("ComfyUI 官方安装包下载任务已启动；尚未安装或启动引擎。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "启动 ComfyUI 下载失败");
+    } finally {
+      setStartingComfyDownload(false);
+    }
+  };
+
+  const refreshComfyDownloadTask = useCallback(async (taskId: string) => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/${encodeURIComponent(taskId)}`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取下载进度失败");
+      setComfyDownloadTask(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取下载进度失败");
+    }
+  }, []);
+
+  const cancelComfyDownload = async () => {
+    if (!comfyDownloadTask) return;
+    if (!window.confirm("确定取消 ComfyUI 安装包下载吗？未完成的临时文件会被清理。")) return;
+    setCancellingComfyDownload(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/${encodeURIComponent(comfyDownloadTask.task_id)}/cancel`, { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "取消下载失败");
+      setComfyDownloadTask(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取消下载失败");
+    } finally {
+      setCancellingComfyDownload(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!comfyDownloadTask || !["queued", "downloading", "cancelling"].includes(comfyDownloadTask.status)) return;
+    const timer = window.setInterval(() => void refreshComfyDownloadTask(comfyDownloadTask.task_id), 1200);
+    return () => window.clearInterval(timer);
+  }, [comfyDownloadTask?.task_id, comfyDownloadTask?.status, refreshComfyDownloadTask]);
 
   const refreshInstaller = useCallback(async () => {
     try {
@@ -568,6 +639,17 @@ export default function LocalModelsPage() {
                 <p className="mt-1 break-all text-xs text-white/55">SHA-256：{comfyInstallPlan.sha256}</p>
                 <p className="mt-1 break-all text-xs text-white/45">安装位置：{comfyInstallPlan.install_target}</p>
                 <p className="mt-2 text-xs text-white/55">{comfyInstallPlan.note}</p>
+              </div>}
+              {comfyInstallPlan && !comfyDownloadTask?.verified && <button type="button" disabled={startingComfyDownload || Boolean(comfyDownloadTask && ["queued", "downloading", "cancelling"].includes(comfyDownloadTask.status))} onClick={() => void startComfyDownload()} className="mt-3 rounded-lg border border-emerald-300/30 px-3 py-2 text-sm disabled:opacity-40">{startingComfyDownload ? "正在启动…" : "确认并下载官方安装包"}</button>}
+              {comfyDownloadTask && <div className="mt-3 rounded-xl border border-cyan-300/25 bg-cyan-400/5 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <strong>下载任务：{comfyDownloadTask.status === "verified" ? "校验通过" : comfyDownloadTask.status === "failed" ? "下载失败" : comfyDownloadTask.status === "cancelled" ? "已取消" : comfyDownloadTask.status === "cancelling" ? "正在取消…" : "下载中"}</strong>
+                  {["queued", "downloading"].includes(comfyDownloadTask.status) && <button type="button" disabled={cancellingComfyDownload} onClick={() => void cancelComfyDownload()} className="rounded-lg border border-rose-300/30 px-3 py-1.5 text-xs disabled:opacity-40">{cancellingComfyDownload ? "正在取消…" : "取消下载"}</button>}
+                </div>
+                <p className="mt-2">{size(comfyDownloadTask.received_bytes)} / {size(comfyDownloadTask.total_bytes)} · {comfyDownloadTask.percent}%</p>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-cyan-300 transition-all" style={{ width: `${Math.max(0, Math.min(100, comfyDownloadTask.percent))}%` }} /></div>
+                {comfyDownloadTask.error && <p className="mt-2 text-rose-200">{comfyDownloadTask.error}</p>}
+                {comfyDownloadTask.verified && <p className="mt-2 text-emerald-200">SHA-256 校验成功。安装包已保存；尚未解压、安装或启动 ComfyUI。</p>}
               </div>}
             </>}
           </div>
