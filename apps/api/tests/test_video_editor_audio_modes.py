@@ -116,12 +116,14 @@ class VideoEditorAudioModeTests(unittest.TestCase):
                 patch.object(editing_service, "EDIT_DIR", root / "edit"),
                 patch.object(editing_service, "VIDEO_DIR", root / "video"),
             ):
-                with self.assertRaises(FFmpegCancelledError):
+                with self.assertRaises(FFmpegCancelledError) as raised:
                     editing_service.execute_edit_plan(
                         {"segments": [{"file_path": str(source), "start": 0, "end": 2}],
                          "width": 1280, "height": 720},
                         cancel_event=cancel,
                     )
+                self.assertIsNone(raised.exception.partial_output)
+                self.assertTrue(Path(raised.exception.work_directory).is_dir())
 
 
 
