@@ -34,6 +34,13 @@ type RuntimeModel = { name: string; size_bytes?: number | null };
 type Runtime = { status: string; models: RuntimeModel[]; message: string };
 type InstallerInfo = { engine_status: string; model: string; model_size_bytes: number; required_free_bytes: number; free_bytes: number | null; enough_space: boolean; installed: boolean | null; download_source: string; license: string; license_url: string; job: { status: string; stage: string; percent: number; completed_bytes: number; total_bytes: number; error?: string | null } };
 
+type HardwareReadiness = {
+  model: string; status: string; label: string; free_disk_bytes: number | null;
+  ram_bytes: number | null; vram_bytes: number | null; logical_cores: number | null;
+  operating_system: { status: string; message: string; supported?: boolean | null };
+  reasons: string[]; blockers: string[]; note: string;
+  ollama_running: boolean; ollama_model_installed: boolean;
+};
 type OllamaRuntimeStatus = { installed: boolean; status: string; freeBytes: number | null; requiredFreeBytes: number; enoughSpace: boolean; installDirectory: string };
 type OllamaInstallProgress = { status: string; stage: string; percent?: number | null; receivedBytes?: number; totalBytes?: number; message: string };
 declare global {
@@ -93,6 +100,8 @@ export default function LocalModelsPage() {
   const [runtimeInstallProgress, setRuntimeInstallProgress] = useState<OllamaInstallProgress | null>(null);
   const [installingRuntime, setInstallingRuntime] = useState(false);
   const [hasDesktopInstaller, setHasDesktopInstaller] = useState(false);
+  const [hardwareReadiness, setHardwareReadiness] = useState<HardwareReadiness | null>(null);
+  const [checkingHardware, setCheckingHardware] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -110,6 +119,20 @@ export default function LocalModelsPage() {
     }
   }, []);
 
+  const refreshHardwareReadiness = useCallback(async () => {
+    setCheckingHardware(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/hardware-readiness`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "硬件检测失败");
+      setHardwareReadiness(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "硬件检测失败");
+    } finally {
+      setCheckingHardware(false);
+    }
+  }, []);
+
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -119,7 +142,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); }, [refresh, refreshInstaller]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness]);
 
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
