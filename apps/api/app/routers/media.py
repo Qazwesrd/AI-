@@ -719,6 +719,59 @@ def get_episode_render_readiness(episode_id: int, db: Session = Depends(get_db))
     }
 
 
+@router.get("/video/projects/{project_id}/quality-summary")
+def scan_project_episode_quality(project_id: int, db: Session = Depends(get_db)):
+    """Run a local, read-only render-readiness scan for every episode in a project."""
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if not project:
+        raise HTTPException(404, "剧本项目不存在")
+    ensure_project_source_current(project)
+    episodes = db.query(EpisodePlan).filter(
+        EpisodePlan.project_id == project_id
+    ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number, EpisodePlan.id).limit(200).all()
+    totals = {
+        "episodes": len(episodes), "ready_episodes": 0, "incomplete_episodes": 0,
+        "total_shots": 0, "ready_shots": 0, "missing_shots": 0,
+        "processing_shots": 0, "broken_shots": 0, "scan_errors": 0,
+    }
+    results = []
+    for episode in episodes:
+        try:
+            readiness = get_episode_render_readiness(episode.id, db)
+            row = {
+                "episode_id": episode.id, "episode_number": episode.episode_number,
+                "title": episode.title or "", "ready": bool(readiness.get("ready")),
+                "total_shots": int(readiness.get("total_shots") or 0),
+                "ready_count": int(readiness.get("ready_count") or 0),
+                "missing_count": int(readiness.get("missing_count") or 0),
+                "processing_count": int(readiness.get("processing_count") or 0),
+                "broken_count": int(readiness.get("broken_count") or 0),
+                "message": readiness.get("message") or "",
+            }
+        except Exception as exc:
+            row = {
+                "episode_id": episode.id, "episode_number": episode.episode_number,
+                "title": episode.title or "", "ready": False, "total_shots": 0,
+                "ready_count": 0, "missing_count": 0, "processing_count": 0,
+                "broken_count": 0, "scan_error": str(exc)[:300],
+            }
+            totals["scan_errors"] += 1
+        results.append(row)
+        totals["ready_episodes"] += int(row["ready"])
+        totals["incomplete_episodes"] += int(not row["ready"])
+        totals["total_shots"] += row["total_shots"]
+        totals["ready_shots"] += row["ready_count"]
+        totals["missing_shots"] += row["missing_count"]
+        totals["processing_shots"] += row["processing_count"]
+        totals["broken_shots"] += row["broken_count"]
+    return {
+        "project_id": project_id, "project_title": project.title or "",
+        "summary": totals, "episodes": results,
+        "message": "项目全部分集扫描完成。" if episodes and not totals["scan_errors"] else "扫描完成；部分分集需要复核。" if episodes else "该项目尚无分集。",
+        "note": "仅检查本地镜头视频文件及可解码视频流，不调用 AI API、不提交生成任务、不修改媒体文件。最多扫描 200 集。",
+    }
+
+
 @router.post("/video/episodes/{episode_id}/render")
 def render_episode_from_shots(
     episode_id: int, output_name: str = "episode.mp4",
