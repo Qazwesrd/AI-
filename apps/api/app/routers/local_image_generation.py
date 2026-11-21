@@ -16,7 +16,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.media import MediaFile
+from app.models.media import MediaFile, MediaTask
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision
 from app.services.media_service import STORAGE
 from pydantic import BaseModel, Field, field_validator
@@ -339,14 +339,47 @@ def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends
             prompt_id = result.get("prompt_id")
             if not isinstance(prompt_id, str) or not PROMPT_ID_RE.fullmatch(prompt_id):
                 raise HTTPException(502, "ComfyUI 未返回有效任务编号")
+            task_record = MediaTask(
+                task_type="local_image_batch",
+                provider="comfyui-local",
+                model=data.checkpoint,
+                status="queued",
+                prompt=row["prompt"],
+                remote_task_id=prompt_id,
+                request_data={
+                    "project_id": data.project_id,
+                    "episode_id": data.episode_id,
+                    "shot_id": row["shot_id"],
+                    "shot_number": row["shot_number"],
+                    "seed": seed,
+                    "style": data.style,
+                    "checkpoint": data.checkpoint,
+                    "width": data.width,
+                    "height": data.height,
+                    "steps": data.steps,
+                    "cfg": data.cfg,
+                },
+                result_data={"prompt_id": prompt_id, "images": []},
+            )
+            db.add(task_record)
+            db.commit()
             submitted.append({
                 "shot_id": row["shot_id"], "shot_number": row["shot_number"],
                 "prompt_id": prompt_id, "seed": seed, "status": "queued",
+                "history_id": task_record.id,
             })
         except (HTTPException, ValueError) as exc:
+            db.rollback()
             failed.append({
                 "shot_id": row["shot_id"], "shot_number": row["shot_number"],
                 "reason": exc.detail if isinstance(exc, HTTPException) else str(exc),
+            })
+            break
+        except Exception:
+            db.rollback()
+            failed.append({
+                "shot_id": row["shot_id"], "shot_number": row["shot_number"],
+                "reason": "任务可能已提交，但本地历史记录保存失败；请检查 ComfyUI 队列，不会自动重试。",
             })
             break
     return {
@@ -364,16 +397,76 @@ def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends
         "downloaded": False,
         "paid_api_used": False,
         "cloud_fallback": False,
-        "message": "已按分镜顺序提交到本机 ComfyUI 队列。请逐项检查任务状态并确认归档；未提交成功的任务不会自动重试。",
+        "history_persisted": True,
+        "message": "已按分镜顺序提交到本机 ComfyUI 队列；任务编号、分镜、模型和生成参数已写入本地历史。请逐项检查状态并确认归档；不会自动重试。",
     }
 
 
+@router.get("/batch/history")
+def list_local_image_batch_history(
+    project_id: int,
+    episode_id: int,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+):
+    if limit < 1 or limit > 200:
+        raise HTTPException(400, "历史记录查询数量必须在 1 到 200 之间。")
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    episode = db.query(EpisodePlan).filter(
+        EpisodePlan.id == episode_id,
+        EpisodePlan.project_id == project_id,
+    ).first()
+    if project is None or episode is None:
+        raise HTTPException(404, "项目或分集不存在，或分集不属于所选项目。")
+    records = db.query(MediaTask).filter(
+        MediaTask.task_type == "local_image_batch",
+        MediaTask.provider == "comfyui-local",
+    ).order_by(MediaTask.created_at.desc(), MediaTask.id.desc()).limit(1000).all()
+    items = []
+    for record in records:
+        request_data = record.request_data if isinstance(record.request_data, dict) else {}
+        if request_data.get("project_id") != project_id or request_data.get("episode_id") != episode_id:
+            continue
+        result_data = record.result_data if isinstance(record.result_data, dict) else {}
+        items.append({
+            "history_id": record.id,
+            "shot_id": request_data.get("shot_id"),
+            "shot_number": request_data.get("shot_number"),
+            "prompt_id": record.remote_task_id,
+            "status": record.status,
+            "seed": request_data.get("seed"),
+            "checkpoint": record.model,
+            "style": request_data.get("style"),
+            "width": request_data.get("width"),
+            "height": request_data.get("height"),
+            "steps": request_data.get("steps"),
+            "cfg": request_data.get("cfg"),
+            "images": result_data.get("images", []) if isinstance(result_data.get("images"), list) else [],
+            "error": record.error,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+            "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+        })
+        if len(items) >= limit:
+            break
+    return {
+        "project_id": project_id,
+        "episode_id": episode_id,
+        "count": len(items),
+        "tasks": items,
+        "persistent_local_history": True,
+        "local_only": True,
+    }
 
 
 @router.post("/batch/tasks")
-def get_local_image_batch_status(data: LocalImageBatchStatusInput):
+def get_local_image_batch_status(data: LocalImageBatchStatusInput, db: Session = Depends(get_db)):
     results = []
     for task in data.tasks:
+        record = db.query(MediaTask).filter(
+            MediaTask.task_type == "local_image_batch",
+            MediaTask.provider == "comfyui-local",
+            MediaTask.remote_task_id == task.prompt_id,
+        ).first()
         try:
             history = _local_request("/history/" + task.prompt_id, timeout=5.0)
             item = history.get(task.prompt_id)
@@ -398,18 +491,28 @@ def get_local_image_batch_status(data: LocalImageBatchStatusInput):
                         if isinstance(image, dict):
                             filename = image.get("filename")
                             subfolder = image.get("subfolder", "")
-                            if isinstance(filename, str) and filename and len(filename) <= 240 and ".." not in filename and "/" not in filename and "\\\\" not in filename and image.get("type", "output") == "output":
+                            if isinstance(filename, str) and filename and len(filename) <= 240 and ".." not in filename and "/" not in filename and "\\" not in filename and image.get("type", "output") == "output":
                                 images.append({"filename": filename, "subfolder": subfolder if isinstance(subfolder, str) else "", "type": "output"})
+            if record is not None:
+                record.status = status
+                record.result_data = {"prompt_id": task.prompt_id, "images": images[:20]}
+                record.error = None if status != "failed" else "ComfyUI 报告任务失败"
+                db.commit()
             results.append({
                 "shot_id": task.shot_id, "shot_number": task.shot_number,
                 "prompt_id": task.prompt_id, "status": status, "images": images[:20],
+                "history_id": record.id if record else None,
             })
         except (HTTPException, ValueError) as exc:
+            if record is not None:
+                record.status = "unavailable"
+                record.error = exc.detail if isinstance(exc, HTTPException) else str(exc)
+                db.commit()
             results.append({
                 "shot_id": task.shot_id, "shot_number": task.shot_number,
                 "prompt_id": task.prompt_id, "status": "unavailable",
                 "error": exc.detail if isinstance(exc, HTTPException) else str(exc),
-                "images": [],
+                "images": [], "history_id": record.id if record else None,
             })
     return {
         "tasks": results,
@@ -418,8 +521,8 @@ def get_local_image_batch_status(data: LocalImageBatchStatusInput):
         "failed_count": sum(item["status"] == "failed" for item in results),
         "local_only": True,
         "network_used": False,
+        "history_updated": True,
     }
-
 
 @router.get("/models")
 def list_local_image_models():
