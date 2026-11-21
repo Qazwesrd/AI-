@@ -1591,7 +1591,10 @@ def generate_reference_conditioned_shot(
     object_infos = {}
     for node_type in REFERENCE_NODE_TYPES:
         try:
-            object_infos[node_type] = _local_request("/object_info/" + node_type)
+            response = _local_request("/object_info/" + node_type)
+            node_info = response.get(node_type)
+            if isinstance(node_info, dict):
+                object_infos[node_type] = node_info
         except HTTPException as exc:
             if exc.status_code != 502:
                 raise
