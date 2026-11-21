@@ -331,16 +331,19 @@ def build_production_readiness_report(project_id: int, db: Session):
         subtitle_cues = data.get("subtitle_cues") if isinstance(data.get("subtitle_cues"), list) else []
         if not subtitle_cues and speech_task and isinstance(speech_task.request_data, dict):
             subtitle_cues = speech_task.request_data.get("subtitle_cues") or []
+        subtitle_file_state = _local_file_state(data.get("subtitle_path"))
+        subtitles_available = bool(subtitle_cues) or subtitle_file_state["exists"]
         if episode_has_dialogue and not voice_state["exists"]:
             add_issue("warning", "episode_voice_track_missing", f"第 {episode.episode_number} 集有对白，但没有可读取的独立配音轨", episode.id)
-        if episode_has_dialogue and not subtitle_cues:
-            add_issue("warning", "episode_subtitles_missing", f"第 {episode.episode_number} 集有对白，但时间轴中没有字幕条目", episode.id)
+        if episode_has_dialogue and not subtitles_available:
+            add_issue("warning", "episode_subtitles_missing", f"第 {episode.episode_number} 集有对白，但时间轴中没有可读取的字幕文件或字幕条目", episode.id)
         timeline_summary.append({
             "episode_id": episode.id,
             "voice_track_available": voice_state["exists"],
             "music_track_available": music_state["exists"],
             "sound_effect_track_count": valid_effects,
             "subtitle_cue_count": len(subtitle_cues),
+            "subtitle_file_available": subtitle_file_state["exists"],
         })
 
     blockers = sum(1 for item in issues if item["severity"] == "blocker")
