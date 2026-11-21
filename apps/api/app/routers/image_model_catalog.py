@@ -36,7 +36,7 @@ _CATALOG = [
         "license": "CreativeML OpenRAIL-M",
         "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
         "license_status": "review_required",
-        "license_note": "OpenRAIL-M 含使用限制；不能据此直接承诺所有商业用途均获许可，发布作品前需阅读许可证及模型卡。",
+        "license_note": "OpenRAIL-M 允许符合条件的商业使用和再分发，但必须遵守附件 A 的使用限制；再分发时还须向接收者提供完整许可证并传递限制条款。当前仍待逐项审核。",
         "hardware_status": "cpu_not_recommended",
         "hardware_note": "当前设备按 CPU 模式运行。该模型可作为 ComfyUI SD1.x 检查候选，但 CPU 生图预计较慢；文件大小不等于运行内存需求，必须先做小分辨率实机测试。",
         "recommended_directory": "ComfyUI/models/checkpoints",
