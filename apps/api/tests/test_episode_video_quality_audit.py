@@ -39,7 +39,7 @@ class EpisodeVideoQualityAuditTests(unittest.TestCase):
                 patch("app.routers.production_audit.subprocess.run", side_effect=responses) as run,
             ):
                 result = _probe_final_video(video)
-        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["status"], "ready_with_warnings")
         self.assertEqual(result["probe"]["duration_seconds"], 121.5)
         self.assertEqual(result["probe"]["video_streams"][0]["codec_name"], "h264")
         self.assertEqual(result["probe"]["audio_streams"][0]["codec_name"], "aac")
