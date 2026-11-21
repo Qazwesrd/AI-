@@ -35,6 +35,19 @@ if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
     throw "本地 AI 离线载荷缺少 manifest.json。"
 }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$bundleManifestPath = Join-Path (Split-Path -Parent $payload) "ComfyUI-Payload\manifest.json"
+if (!(Test-Path -LiteralPath $bundleManifestPath -PathType Leaf)) {
+    throw "完整离线套件缺少 ComfyUI 根清单，拒绝安装未绑定的 LocalAI-Payload。"
+}
+$bundleManifest = Get-Content -LiteralPath $bundleManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$payloadManifestHash = Get-Sha256 $manifestPath
+if ($bundleManifest.distribution_approved -ne $false -or
+    $bundleManifest.local_ai.model -cne "qwen3:4b" -or
+    $bundleManifest.local_ai.payload_manifest_sha256 -ne $payloadManifestHash -or
+    $bundleManifest.local_ai.runtime_sha256 -ne $manifest.ollama.sha256 -or
+    $bundleManifest.local_ai.model_manifest_sha256 -ne $manifest.model.manifest_sha256) {
+    throw "LocalAI-Payload 与完整离线套件根清单不匹配，拒绝安装。"
+}
 if ($manifest.schema_version -ne 1 -or
     $manifest.bundle_type -ne "internal-offline-local-ai-runtime-and-model" -or
     $manifest.distribution_approved -ne $false -or
