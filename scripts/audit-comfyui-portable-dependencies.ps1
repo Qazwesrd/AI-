@@ -472,3 +472,330 @@ finally {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+) {
+    throw "ReleaseTag 格式无效：$ReleaseTag"
+}
+
+$resolvedArchives = @()
+foreach ($archivePath in $ArchivePaths) {
+    if (!(Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+        throw "找不到 portable 归档：$archivePath"
+    }
+    $resolved = (Resolve-Path -LiteralPath $archivePath).Path
+    $assetName = [System.IO.Path]::GetFileName($resolved)
+    if ($ExpectedAssets -notcontains $assetName) {
+        throw "归档名称不是受支持的官方资产：$assetName"
+    }
+    if ($resolvedArchives | Where-Object { $_.Asset -eq $assetName }) {
+        throw "同一 portable 变体不能重复清点：$assetName"
+    }
+    $resolvedArchives += [pscustomobject]@{ Path = $resolved; Asset = $assetName }
+}
+
+$temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-comfyui-audit-" + [Guid]::NewGuid().ToString("N"))
+$null = New-Item -ItemType Directory -Path $temporaryRoot
+$report = @{
+    schema_version = 1
+    generated_utc = [DateTime]::UtcNow.ToString("o")
+    release_tag = $ReleaseTag
+    tool = "7zr.exe"
+    audit_status = "pending"
+    distribution_approved = $false
+    note = "Automated inventory only. Extracted metadata is evidence, not a legal conclusion. Human review is required."
+    portable_variants = @()
+}
+
+try {
+    foreach ($archive in $resolvedArchives) {
+        Write-Host "清点 $($archive.Asset)..."
+        $entries = @(Get-ArchiveEntries -Tool $SevenZipPath -Archive $archive.Path -EntryLimit $MaximumEntries)
+        $archiveHash = (Get-FileHash -LiteralPath $archive.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $variantRoot = Join-Path $temporaryRoot ([Guid]::NewGuid().ToString("N"))
+        $components = New-Object System.Collections.Generic.List[object]
+        $evidence = New-Object System.Collections.Generic.List[object]
+        $runtimeFiles = New-Object System.Collections.Generic.List[string]
+        $evidenceCount = 0
+        $totalEvidenceBytes = 0L
+
+        foreach ($entry in $entries) {
+            if ($entry.IsFolder) { continue }
+            if ($entry.Path -match $RuntimePattern) {
+                $runtimeFiles.Add($entry.Path)
+            }
+
+            $leaf = [System.IO.Path]::GetFileName($entry.Path)
+            $isMetadata = $MetadataNames -contains $leaf
+            $isLicense = $leaf -match $LicenseNamePattern
+            if (!$isMetadata -and !$isLicense) { continue }
+            if ($entry.IsLink) {
+                throw "拒绝提取符号链接或硬链接形式的许可证证据：$($entry.Path)"
+            }
+
+            $evidenceCount++
+            if ($evidenceCount -gt $MaximumEvidenceFiles) {
+                throw "证据文件数量超过安全上限 $MaximumEvidenceFiles：$($archive.Asset)"
+            }
+            $maxBytes = if ($isMetadata) { $MaximumMetadataBytes } else { $MaximumLicenseBytes }
+            if (($totalEvidenceBytes + $entry.Size) -gt $MaximumTotalEvidenceBytes) {
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $entry.Size
+                    extraction_status = "skipped_total_evidence_limit"
+                    reason = "Archive evidence extraction total exceeds configured limit."
+                })
+                continue
+            }
+            if ($entry.Size -gt $maxBytes) {
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $entry.Size
+                    extraction_status = "skipped_size_limit"
+                    reason = "File exceeds configured evidence extraction limit."
+                })
+                continue
+            }
+
+            $destination = Join-Path $variantRoot ([Guid]::NewGuid().ToString("N"))
+            $extractedPath = Get-ExtractedEvidence -Tool $SevenZipPath -Archive $archive.Path -EntryPath $entry.Path -Destination $destination -MaximumBytes $maxBytes
+            $actualEvidenceBytes = (Get-Item -LiteralPath $extractedPath).Length
+            if (($totalEvidenceBytes + $actualEvidenceBytes) -gt $MaximumTotalEvidenceBytes) {
+                Remove-Item -LiteralPath $extractedPath -Force
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $actualEvidenceBytes
+                    extraction_status = "skipped_total_evidence_limit"
+                    reason = "Extracted evidence exceeds configured total limit."
+                })
+                continue
+            }
+            $totalEvidenceBytes += $actualEvidenceBytes
+            $evidence.Add([pscustomobject]@{
+                archive_path = $entry.Path
+                file_name = $leaf
+                size_bytes = $entry.Size
+                extraction_status = "extracted"
+            })
+
+            if ($isMetadata) {
+                $metadataText = [System.IO.File]::ReadAllText($extractedPath, [System.Text.Encoding]::UTF8)
+                $components.Add([pscustomobject]@{
+                    name = Get-MetadataValue -Text $metadataText -Field "Name"
+                    version = Get-MetadataValue -Text $metadataText -Field "Version"
+                    license_expression = Get-MetadataValue -Text $metadataText -Field "License-Expression"
+                    license = Get-MetadataValue -Text $metadataText -Field "License"
+                    classifiers = @(Get-MetadataList -Text $metadataText -Field "Classifier" | Where-Object { $_ -like "License ::*" })
+                    project_urls = @(Get-MetadataList -Text $metadataText -Field "Project-URL")
+                    metadata_path = $entry.Path
+                    license_review_status = "pending"
+                    evidence = @($entry.Path)
+                })
+            }
+        }
+
+        $report.portable_variants += @{
+            asset = $archive.Asset
+            archive_path = $archive.Path
+            archive_size_bytes = (Get-Item -LiteralPath $archive.Path).Length
+            sha256 = $archiveHash
+            release_tag = $ReleaseTag
+            inventory_status = "inventory_generated_review_pending"
+            total_file_entries = @($entries | Where-Object { !$_.IsFolder }).Count
+            extracted_evidence_bytes = $totalEvidenceBytes
+            python_package_count = $components.Count
+            evidence_extraction_limit_bytes = $MaximumTotalEvidenceBytes
+            components = $components.ToArray()
+            runtime_files = @($runtimeFiles.ToArray() | Sort-Object -Unique)
+            evidence_files = $evidence.ToArray()
+            unresolved_items = @(
+                "Confirm each component version, license text, copyright and NOTICE obligations.",
+                "Review bundled native libraries and transitive runtime dependencies.",
+                "Check source-code and redistribution obligations for the exact release.",
+                "Do not infer redistribution permission from a metadata License field."
+            )
+        }
+        Remove-Item -LiteralPath $variantRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $outputFullPath = [System.IO.Path]::GetFullPath($OutputPath)
+    $outputDirectory = Split-Path -Parent $outputFullPath
+    if ($outputDirectory) { $null = New-Item -ItemType Directory -Path $outputDirectory -Force }
+    $json = $report | ConvertTo-Json -Depth 12
+    [System.IO.File]::WriteAllText($outputFullPath, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "依赖清点报告已生成：$outputFullPath"
+    Write-Warning "报告仅为自动提取结果，所有组件许可证和分发义务仍需人工审核；没有任何组件被自动批准。"
+}
+finally {
+    if (Test-Path -LiteralPath $temporaryRoot) {
+        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+) {
+    throw "ComfyUI ReleaseTag 格式无效；只允许 1-128 个字母、数字、点、下划线或连字符，且必须以字母或数字开头。"
+}
+if ($MaximumEntries -lt 1 -or $MaximumEntries -gt 100000 -or
+    $MaximumEvidenceFiles -lt 1 -or $MaximumEvidenceFiles -gt 50000 -or
+    $MaximumMetadataBytes -lt 1 -or $MaximumMetadataBytes -gt 20MB -or
+    $MaximumLicenseBytes -lt 1 -or $MaximumLicenseBytes -gt 20MB -or
+    $MaximumTotalEvidenceBytes -lt 1 -or $MaximumTotalEvidenceBytes -gt 512MB) {
+    throw "清点安全限制参数超出允许范围；条目最多 100000、证据文件最多 50000、单个元数据/许可证最多 20 MiB、证据总量最多 512 MiB。"
+}
+
+$resolvedArchives = @()
+foreach ($archivePath in $ArchivePaths) {
+    if (!(Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+        throw "找不到 portable 归档：$archivePath"
+    }
+    $resolved = (Resolve-Path -LiteralPath $archivePath).Path
+    $assetName = [System.IO.Path]::GetFileName($resolved)
+    if ($ExpectedAssets -notcontains $assetName) {
+        throw "归档名称不是受支持的官方资产：$assetName"
+    }
+    if ($resolvedArchives | Where-Object { $_.Asset -eq $assetName }) {
+        throw "同一 portable 变体不能重复清点：$assetName"
+    }
+    $resolvedArchives += [pscustomobject]@{ Path = $resolved; Asset = $assetName }
+}
+
+$temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-comfyui-audit-" + [Guid]::NewGuid().ToString("N"))
+$null = New-Item -ItemType Directory -Path $temporaryRoot
+$report = @{
+    schema_version = 1
+    generated_utc = [DateTime]::UtcNow.ToString("o")
+    release_tag = $ReleaseTag
+    tool = "7zr.exe"
+    audit_status = "pending"
+    distribution_approved = $false
+    note = "Automated inventory only. Extracted metadata is evidence, not a legal conclusion. Human review is required."
+    portable_variants = @()
+}
+
+try {
+    foreach ($archive in $resolvedArchives) {
+        Write-Host "清点 $($archive.Asset)..."
+        $entries = @(Get-ArchiveEntries -Tool $SevenZipPath -Archive $archive.Path -EntryLimit $MaximumEntries)
+        $archiveHash = (Get-FileHash -LiteralPath $archive.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $variantRoot = Join-Path $temporaryRoot ([Guid]::NewGuid().ToString("N"))
+        $components = New-Object System.Collections.Generic.List[object]
+        $evidence = New-Object System.Collections.Generic.List[object]
+        $runtimeFiles = New-Object System.Collections.Generic.List[string]
+        $evidenceCount = 0
+        $totalEvidenceBytes = 0L
+
+        foreach ($entry in $entries) {
+            if ($entry.IsFolder) { continue }
+            if ($entry.Path -match $RuntimePattern) {
+                $runtimeFiles.Add($entry.Path)
+            }
+
+            $leaf = [System.IO.Path]::GetFileName($entry.Path)
+            $isMetadata = $MetadataNames -contains $leaf
+            $isLicense = $leaf -match $LicenseNamePattern
+            if (!$isMetadata -and !$isLicense) { continue }
+            if ($entry.IsLink) {
+                throw "拒绝提取符号链接或硬链接形式的许可证证据：$($entry.Path)"
+            }
+
+            $evidenceCount++
+            if ($evidenceCount -gt $MaximumEvidenceFiles) {
+                throw "证据文件数量超过安全上限 $MaximumEvidenceFiles：$($archive.Asset)"
+            }
+            $maxBytes = if ($isMetadata) { $MaximumMetadataBytes } else { $MaximumLicenseBytes }
+            if (($totalEvidenceBytes + $entry.Size) -gt $MaximumTotalEvidenceBytes) {
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $entry.Size
+                    extraction_status = "skipped_total_evidence_limit"
+                    reason = "Archive evidence extraction total exceeds configured limit."
+                })
+                continue
+            }
+            if ($entry.Size -gt $maxBytes) {
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $entry.Size
+                    extraction_status = "skipped_size_limit"
+                    reason = "File exceeds configured evidence extraction limit."
+                })
+                continue
+            }
+
+            $destination = Join-Path $variantRoot ([Guid]::NewGuid().ToString("N"))
+            $extractedPath = Get-ExtractedEvidence -Tool $SevenZipPath -Archive $archive.Path -EntryPath $entry.Path -Destination $destination -MaximumBytes $maxBytes
+            $actualEvidenceBytes = (Get-Item -LiteralPath $extractedPath).Length
+            if (($totalEvidenceBytes + $actualEvidenceBytes) -gt $MaximumTotalEvidenceBytes) {
+                Remove-Item -LiteralPath $extractedPath -Force
+                $evidence.Add([pscustomobject]@{
+                    archive_path = $entry.Path
+                    file_name = $leaf
+                    size_bytes = $actualEvidenceBytes
+                    extraction_status = "skipped_total_evidence_limit"
+                    reason = "Extracted evidence exceeds configured total limit."
+                })
+                continue
+            }
+            $totalEvidenceBytes += $actualEvidenceBytes
+            $evidence.Add([pscustomobject]@{
+                archive_path = $entry.Path
+                file_name = $leaf
+                size_bytes = $entry.Size
+                extraction_status = "extracted"
+            })
+
+            if ($isMetadata) {
+                $metadataText = [System.IO.File]::ReadAllText($extractedPath, [System.Text.Encoding]::UTF8)
+                $components.Add([pscustomobject]@{
+                    name = Get-MetadataValue -Text $metadataText -Field "Name"
+                    version = Get-MetadataValue -Text $metadataText -Field "Version"
+                    license_expression = Get-MetadataValue -Text $metadataText -Field "License-Expression"
+                    license = Get-MetadataValue -Text $metadataText -Field "License"
+                    classifiers = @(Get-MetadataList -Text $metadataText -Field "Classifier" | Where-Object { $_ -like "License ::*" })
+                    project_urls = @(Get-MetadataList -Text $metadataText -Field "Project-URL")
+                    metadata_path = $entry.Path
+                    license_review_status = "pending"
+                    evidence = @($entry.Path)
+                })
+            }
+        }
+
+        $report.portable_variants += @{
+            asset = $archive.Asset
+            archive_path = $archive.Path
+            archive_size_bytes = (Get-Item -LiteralPath $archive.Path).Length
+            sha256 = $archiveHash
+            release_tag = $ReleaseTag
+            inventory_status = "inventory_generated_review_pending"
+            total_file_entries = @($entries | Where-Object { !$_.IsFolder }).Count
+            extracted_evidence_bytes = $totalEvidenceBytes
+            python_package_count = $components.Count
+            evidence_extraction_limit_bytes = $MaximumTotalEvidenceBytes
+            components = $components.ToArray()
+            runtime_files = @($runtimeFiles.ToArray() | Sort-Object -Unique)
+            evidence_files = $evidence.ToArray()
+            unresolved_items = @(
+                "Confirm each component version, license text, copyright and NOTICE obligations.",
+                "Review bundled native libraries and transitive runtime dependencies.",
+                "Check source-code and redistribution obligations for the exact release.",
+                "Do not infer redistribution permission from a metadata License field."
+            )
+        }
+        Remove-Item -LiteralPath $variantRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    $outputFullPath = [System.IO.Path]::GetFullPath($OutputPath)
+    $outputDirectory = Split-Path -Parent $outputFullPath
+    if ($outputDirectory) { $null = New-Item -ItemType Directory -Path $outputDirectory -Force }
+    $json = $report | ConvertTo-Json -Depth 12
+    [System.IO.File]::WriteAllText($outputFullPath, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "依赖清点报告已生成：$outputFullPath"
+    Write-Warning "报告仅为自动提取结果，所有组件许可证和分发义务仍需人工审核；没有任何组件被自动批准。"
+}
+finally {
+    if (Test-Path -LiteralPath $temporaryRoot) {
+        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
