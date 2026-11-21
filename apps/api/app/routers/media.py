@@ -1017,7 +1017,7 @@ def render_episode_from_shots(
             if not effect_record:
                 raise HTTPException(422, "音效必须来自本地音频素材库")
             if not _media_file_belongs_to_project(effect_record, episode.project_id, episode.id):
-                raise HTTPException(422, "音效属于其他项目，不能跨项目引用")
+                raise HTTPException(422, "音效不属于当前项目或分集，不能跨项目或分集引用")
             effect_info = probe_media(effect_path)
             if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
                 raise HTTPException(422, "音效文件不包含可用音轨")
@@ -3441,7 +3441,7 @@ def save_episode_edit_timeline(
             if not audio_record:
                 raise HTTPException(422, f"{label}必须来自本地音频素材库")
             if not _media_file_belongs_to_project(audio_record, episode.project_id, episode.id):
-                raise HTTPException(422, f"{label}属于其他项目，不能跨项目引用")
+                raise HTTPException(422, f"{label}不属于当前项目或分集，不能跨项目或分集引用")
             audio_info = probe_media(audio_path)
             if not any(stream.get("codec_type") == "audio" for stream in audio_info.get("streams", [])):
                 raise HTTPException(422, f"{label}文件不包含可用音轨")
