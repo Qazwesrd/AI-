@@ -1,5 +1,6 @@
 name: ComfyUI portable dependency license inventory
 
+# Each matrix leg downloads and audits exactly one official upstream portable archive.
 # Manual inventory only. This workflow does not upgrade the installed runtime,
 # build an installer, publish binaries, or approve third-party redistribution.
 on:
