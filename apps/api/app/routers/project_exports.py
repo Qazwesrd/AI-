@@ -356,7 +356,7 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
     return destination, manifest
 
 
-@router.get("/{project_id}/export")
+@router.post("/{project_id}/export")
 def export_story_project(project_id: int, db: Session = Depends(get_db)):
     try:
         path, manifest = build_project_archive(project_id, db)
@@ -364,12 +364,46 @@ def export_story_project(project_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, str(exc)) from exc
     except (ValueError, OSError) as exc:
         raise HTTPException(422, "项目归档失败：" + str(exc)[:1200]) from exc
-    return FileResponse(
-        path,
-        filename=path.name,
-        media_type="application/zip",
-        headers={
-            "X-Project-Archive-Files": str(manifest["file_count"]),
-            "X-Project-Archive-Missing": str(manifest["missing_file_count"]),
-        },
-    )
+    return {
+        "success": True,
+        "filename": path.name,
+        "size_bytes": path.stat().st_size,
+        "file_count": manifest["file_count"],
+        "missing_file_count": manifest["missing_file_count"],
+        "download_url": f"/api/story/projects/{project_id}/exports/{path.name}/download",
+        "manifest": manifest,
+        "message": "项目归档已生成并通过完整性校验。",
+    }
+
+
+@router.get("/{project_id}/exports")
+def list_story_project_exports(project_id: int, db: Session = Depends(get_db)):
+    exists = db.query(StoryProject.id).filter(StoryProject.id == project_id).first()
+    if not exists:
+        raise HTTPException(404, "剧本项目不存在")
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    prefix = f"project-{project_id}-"
+    items = [
+        {
+            "filename": path.name,
+            "size_bytes": path.stat().st_size,
+            "modified_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(),
+        }
+        for path in sorted(EXPORT_DIR.glob(prefix + "*.zip"), key=lambda item: item.stat().st_mtime, reverse=True)
+        if path.is_file() and path.name.startswith(prefix)
+    ]
+    return {"project_id": project_id, "items": items, "total": len(items)}
+
+
+@router.get("/{project_id}/exports/{filename}/download")
+def download_story_project_export(project_id: int, filename: str):
+    if (
+        not filename.endswith(".zip")
+        or Path(filename).name != filename
+        or not filename.startswith(f"project-{project_id}-")
+    ):
+        raise HTTPException(400, "项目归档文件名无效")
+    path = (EXPORT_DIR / filename).resolve()
+    if path.parent != EXPORT_DIR.resolve() or not path.is_file():
+        raise HTTPException(404, "项目归档文件不存在")
+    return FileResponse(path, filename=filename, media_type="application/zip")
