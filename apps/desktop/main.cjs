@@ -4,6 +4,7 @@ const path = require("path");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
+const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
 
 const API_PORT = 8000;
 const WEB_PORT = 3000;
@@ -627,3 +628,7 @@ ipcMain.handle("ai-browser:open", async (_event, payload = {}) => {
   await browser.loadURL(parsed.toString());
   return { opened: true, taskId };
 });
+
+
+// Install Ollama only after explicit user confirmation from the local model page.
+registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow });
