@@ -2,7 +2,7 @@ Unicode true
 !macro customInstall
   IfFileExists "$EXEDIR\ComfyUI-Payload\install-comfyui-offline.ps1" 0 comfyui_payload_missing
   IfFileExists "$EXEDIR\LocalAI-Payload\manifest.json" 0 localai_payload_missing
-  IfFileExists "$EXEDIR\..\scripts\install-local-engines-transaction.ps1" 0 transaction_script_missing
+  IfFileExists "$EXEDIR\ComfyUI-Payload\install-local-engines-transaction.ps1" 0 transaction_script_missing
 
   DetailPrint "正在预检并部署 ComfyUI、Ollama 和 Qwen3 4B 本地引擎..."
   ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$EXEDIR\ComfyUI-Payload\install-local-engines-transaction.ps1" -ComfyPayloadRoot "$EXEDIR\ComfyUI-Payload" -LocalAIPayloadRoot "$EXEDIR\LocalAI-Payload" -ComfyInstallRoot "$PROFILE\AIComicStudio\ComfyUI" -LocalAIInstallRoot "$PROFILE\AIComicStudio\Ollama" -LogDirectory "$TEMP\AIComicStudio-install"' $0
