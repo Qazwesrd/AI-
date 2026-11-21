@@ -79,6 +79,24 @@ def build_production_readiness_report(project_id: int, db: Session):
     media_ids = sorted({item.media_file_id for item in media_links})
     media_files = db.query(MediaFile).filter(MediaFile.id.in_(media_ids or [-1])).all()
     media_by_id = {item.id: item for item in media_files}
+    all_media_records = db.query(MediaFile).all()
+    final_outputs_by_episode = {}
+    for media in all_media_records:
+        metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+        try:
+            media_episode_id = int(metadata.get("episode_id") or 0)
+        except (TypeError, ValueError):
+            media_episode_id = 0
+        for episode_id in episode_ids:
+            is_episode_video = (
+                media_episode_id == episode_id
+                or (media.category or "").lower() in {"video", "视频"}
+                and media.name.startswith(f"episode_{episode_id}_")
+            )
+            if is_episode_video and (media.category or "").lower() in {"video", "视频"}:
+                state = _local_file_state(media.file_path)
+                if state["exists"]:
+                    final_outputs_by_episode.setdefault(episode_id, []).append(media)
     shot_ids = {item.id for item in shots}
     media_tasks = db.query(MediaTask).filter(
         MediaTask.task_type.in_(["storyboard_video", "episode_speech_track"])
@@ -171,6 +189,8 @@ def build_production_readiness_report(project_id: int, db: Session):
         episode_shots = shots_by_episode.get(episode.id, [])
         if not episode_shots:
             add_issue("blocker", "episode_missing_shots", f"第 {episode.episode_number} 集没有分镜", episode.id)
+        if not final_outputs_by_episode.get(episode.id):
+            add_issue("blocker", "episode_final_render_missing", f"第 {episode.episode_number} 集尚无可读取的最终合成视频", episode.id)
 
     if novel and chapters and len(covered_chapter_ids) < len(chapter_ids):
         missing = sorted(chapter_ids - covered_chapter_ids)
@@ -322,6 +342,7 @@ def build_production_readiness_report(project_id: int, db: Session):
             "shots_with_video": shot_video_ready,
             "shots_missing_video": shot_missing_video,
             "shots_with_image": shot_image_ready,
+            "final_rendered_episode_count": sum(bool(final_outputs_by_episode.get(item.id)) for item in episodes),
             "dialogue_shot_count": dialogue_shots,
             "blocker_count": blockers,
             "warning_count": warnings,
@@ -333,6 +354,8 @@ def build_production_readiness_report(project_id: int, db: Session):
                 "title": episode.title,
                 "shot_count": len(shots_by_episode.get(episode.id, [])),
                 "duration_seconds": episode.duration_seconds,
+                "final_video_available": bool(final_outputs_by_episode.get(episode.id)),
+                "final_video_files": [item.name for item in final_outputs_by_episode.get(episode.id, [])],
                 "timeline": next((item for item in timeline_summary if item["episode_id"] == episode.id), None),
             }
             for episode in episodes
