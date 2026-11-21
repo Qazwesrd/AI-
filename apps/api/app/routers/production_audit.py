@@ -38,8 +38,8 @@ def _local_file_state(raw_path):
     return {"exists": True, "size_bytes": path.stat().st_size}
 
 
-def _project_media_file_state(db, raw_path, project_id):
-    """Resolve a managed media path and reject rows explicitly owned by another project."""
+def _project_media_file_state(db, raw_path, project_id, episode_id=None):
+    """Resolve managed media and reject explicit foreign project/episode ownership."""
     state = _local_file_state(raw_path)
     if not state.get("exists"):
         return state
@@ -51,17 +51,24 @@ def _project_media_file_state(db, raw_path, project_id):
     if not media:
         return state
     metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
-    owner = metadata.get("project_id")
-    if owner in (None, "", 0, "0"):
-        return state
-    if isinstance(owner, bool):
-        return {"exists": False, "reason": "素材项目归属元数据无效"}
-    try:
-        matches = int(owner) == int(project_id)
-    except (TypeError, ValueError):
-        matches = False
-    if not matches:
-        return {"exists": False, "reason": "素材明确归属于其他项目"}
+    owner_project = metadata.get("project_id")
+    owner_episode = metadata.get("episode_id")
+    if owner_project not in (None, "", 0, "0"):
+        if isinstance(owner_project, bool):
+            return {"exists": False, "reason": "素材项目归属元数据无效"}
+        try:
+            if int(owner_project) != int(project_id):
+                return {"exists": False, "reason": "素材明确归属于其他项目"}
+        except (TypeError, ValueError):
+            return {"exists": False, "reason": "素材项目归属元数据无效"}
+    if episode_id is not None and owner_episode not in (None, "", 0, "0"):
+        if isinstance(owner_episode, bool):
+            return {"exists": False, "reason": "素材分集归属元数据无效"}
+        try:
+            if int(owner_episode) != int(episode_id):
+                return {"exists": False, "reason": "素材明确归属于其他分集"}
+        except (TypeError, ValueError):
+            return {"exists": False, "reason": "素材分集归属元数据无效"}
     return state
 
 
@@ -367,16 +374,16 @@ def build_production_readiness_report(project_id: int, db: Session):
             })
             continue
         data = timeline.edit_data if isinstance(timeline.edit_data, dict) else {}
-        voice_state = _project_media_file_state(db, data.get("voice_path"), project.id)
+        voice_state = _project_media_file_state(db, data.get("voice_path"), project.id, episode.id)
         if not voice_state["exists"] and speech_task:
-            voice_state = _project_media_file_state(db, speech_task.result_path, project.id)
-        music_state = _project_media_file_state(db, data.get("music_path"), project.id)
+            voice_state = _project_media_file_state(db, speech_task.result_path, project.id, episode.id)
+        music_state = _project_media_file_state(db, data.get("music_path"), project.id, episode.id)
         effect_tracks = data.get("sound_effect_tracks") if isinstance(data.get("sound_effect_tracks"), list) else []
         valid_effects = 0
         for track in effect_tracks:
             if not isinstance(track, dict):
                 continue
-            effect_state = _project_media_file_state(db, track.get("path"), project.id)
+            effect_state = _project_media_file_state(db, track.get("path"), project.id, episode.id)
             if effect_state["exists"]:
                 valid_effects += 1
             else:
@@ -403,7 +410,7 @@ def build_production_readiness_report(project_id: int, db: Session):
         subtitle_path = None if subtitle_track_mismatch else (
             data.get("subtitle_path") or (subtitle_track.file_path if subtitle_track else None)
         )
-        subtitle_file_state = _project_media_file_state(db, subtitle_path, project.id)
+        subtitle_file_state = _project_media_file_state(db, subtitle_path, project.id, episode.id)
         subtitles_available = bool(subtitle_cues) or subtitle_file_state["exists"]
         if episode_has_dialogue and not voice_state["exists"]:
             add_issue("warning", "episode_voice_track_missing", f"第 {episode.episode_number} 集有对白，但没有可读取的独立配音轨", episode.id)
