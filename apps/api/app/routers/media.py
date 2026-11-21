@@ -3117,7 +3117,10 @@ def scan_episode_final_quality(path: str, episode_id: Optional[int] = None, db: 
                 ).order_by(MediaTask.id.desc()).all()
                 for speech_task in speech_tasks:
                     speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
-                    if speech_meta.get("episode_id") == episode_id:
+                    if (
+                        speech_meta.get("episode_id") == episode_id
+                        and speech_meta.get("project_id") in (None, episode.project_id)
+                    ):
                         candidate = speech_meta.get("subtitle_cues")
                         if isinstance(candidate, list):
                             subtitle_cues = candidate
@@ -3349,7 +3352,10 @@ def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
     generated_subtitle_cues = []
     for speech_task in latest_speech_track:
         speech_meta = speech_task.request_data if isinstance(speech_task.request_data, dict) else {}
-        if speech_meta.get("episode_id") == episode_id:
+        if (
+            speech_meta.get("episode_id") == episode_id
+            and speech_meta.get("project_id") in (None, episode.project_id)
+        ):
             candidate = speech_meta.get("subtitle_cues")
             if isinstance(candidate, list):
                 generated_subtitle_cues = candidate
