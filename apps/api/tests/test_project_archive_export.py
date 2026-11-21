@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models.media import MediaFile, MediaTask
+from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
@@ -60,6 +60,8 @@ class ProjectArchiveExportTests(unittest.TestCase):
             image.write_bytes(b"fake-image-content")
             music = storage / "music.wav"
             music.write_bytes(b"fake-audio-content")
+            subtitle_file = storage / "episode.srt"
+            subtitle_file.write_text("1\\n00:00:00,000 --> 00:00:01,000\\n测试字幕\\n", encoding="utf-8")
             video = storage / "shot.mp4"
             video.write_bytes(b"fake-video-content")
             comfy_install = root / "comfy-install"
@@ -133,7 +135,13 @@ class ProjectArchiveExportTests(unittest.TestCase):
                         "rendered_output": True,
                     },
                 )
-                db.add_all([shot, media, rendered_video])
+                subtitle_track = SubtitleTrack(
+                    name="第一集字幕",
+                    file_path=str(subtitle_file),
+                    format="srt",
+                    language="zh-CN",
+                )
+                db.add_all([shot, media, rendered_video, subtitle_track])
                 db.flush()
                 db.add_all([
                     StoryAssetLink(project_id=project.id, asset_id=asset.id, role="character"),
@@ -145,7 +153,7 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     ),
                     EpisodeEditTimeline(
                         episode_id=episode.id,
-                        edit_data={"music_path": str(music)},
+                        edit_data={"music_path": str(music), "subtitle_track_id": subtitle_track.id},
                     ),
                     MediaTask(
                         task_type="storyboard_video",
@@ -186,14 +194,14 @@ class ProjectArchiveExportTests(unittest.TestCase):
                     )
 
                 self.assertTrue(archive_path.is_file())
-                self.assertEqual(manifest["file_count"], 4)
+                self.assertEqual(manifest["file_count"], 5)
                 self.assertEqual(manifest["missing_file_count"], 1)
                 with zipfile.ZipFile(archive_path, "r") as archive:
                     self.assertIsNone(archive.testzip())
                     names = set(archive.namelist())
                     self.assertIn("project-data.json", names)
                     self.assertIn("manifest.json", names)
-                    self.assertEqual(len([name for name in names if name.startswith("files/")]), 4)
+                    self.assertEqual(len([name for name in names if name.startswith("files/")]), 5)
                     project_data_bytes = archive.read("project-data.json")
                     payload = json.loads(project_data_bytes)
                     manifest_data = json.loads(archive.read("manifest.json"))
@@ -220,6 +228,8 @@ class ProjectArchiveExportTests(unittest.TestCase):
                         item["metadata_json"].get("rendered_output") is True
                         for item in payload["records"]["media_files"]
                     ))
+                    self.assertEqual(len(payload["records"]["subtitle_tracks"]), 1)
+                    self.assertTrue(payload["records"]["subtitle_tracks"][0]["file_path"].startswith("files/"))
                     self.assertTrue(
                         payload["records"]["visual_assets"][0]["image_path"].startswith("files/")
                     )
