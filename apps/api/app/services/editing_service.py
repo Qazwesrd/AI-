@@ -270,7 +270,7 @@ def execute_edit_plan(
                 "-t", str(duration),
                 "-vf",
                 f"scale={plan['width']}:{plan['height']}:force_original_aspect_ratio=decrease,"
-                f"pad={plan['width']}:{plan['height]}:(ow-iw)/2:(oh-ih)/2",
+                f"pad={plan['width']}:{plan['height']}:(ow-iw)/2:(oh-ih)/2",
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "21",
