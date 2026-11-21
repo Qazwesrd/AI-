@@ -323,7 +323,7 @@ function StoryboardConsistencyPanel({ projectId, checkpoint, style, width, heigh
       </details>
     </div>}
     {referencePreflight && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs"><p>已检查参考图 {referencePreflight.checked_reference_count} 张；文件与项目归属：{referencePreflight.references_ready ? "通过" : "未通过"}；ComfyUI 条件生图：{referencePreflight.reference_conditioning_ready ? "已具备节点和模型" : "尚未具备完整条件"}。</p>{referencePreflight.failures?.map((item, index: number) => <p key={index} className="text-amber-200">{item.label}素材 #{item.asset_id}：{item.reason}</p>)}{Array.from(new Set(referencePreflight.references?.flatMap((item) => item.ready ? item.shot_ids : []) || [])).map((shotId) => <div key={"shot-" + shotId} className="flex items-center justify-between gap-2 rounded bg-black/30 p-2"><span>镜头 #{shotId} · 使用该镜头全部已上传参考图</span><button type="button" disabled={busy || !checkpoint} onClick={() => void generateReferenceShot(shotId)} className="rounded border border-emerald-300/30 px-3 py-1.5 text-emerald-100 disabled:opacity-40">开始条件生图</button></div>)}{referencePreflight.references?.filter((item) => item.ready).map((item) => <div key={item.category + "-" + item.asset_id + "-" + item.media_file_id} className="flex flex-wrap items-center justify-between gap-2 rounded bg-black/20 p-2"><span>{item.label}素材 #{item.asset_id} · 图片 #{item.media_file_id}</span><button type="button" disabled={busy} onClick={() => void uploadReference(item)} className="rounded border border-cyan-300/30 px-3 py-1.5 text-cyan-100 disabled:opacity-40">确认上传到本机 ComfyUI</button></div>)}<p className="text-white/50">{referencePreflight.comfyui?.message}</p><p className="text-white/40">预检不会上传图片；只有点击对应按钮并再次确认后才会上传到本机 ComfyUI，上传本身不会启动生成。</p></div>}
-    <p className="text-xs text-amber-200/80">本阶段新增参考图文件安全与项目归属预检，以及本机 ComfyUI 节点/模型检测；尚未将图片上传为 ComfyUI 条件输入。不会自动下载插件或模型。</p>
+    <p className="text-xs text-amber-200/80">已支持参考图文件安全与项目归属预检，以及本机 ComfyUI 节点/模型检测。预检不会上传图片；只有你点击“确认上传到本机 ComfyUI”后，图片才会复制到本机输入目录。IP-Adapter/CLIP Vision 节点或模型缺失时不会自动下载，条件生图会明确提示缺项。</p>
     <p className="text-xs text-white/40">本功能仅生成和保存本地提示词规则，不会调用云端 AI，也不会自动开始生图；ComfyUI 仍需用户单独确认生成。</p>
   </section>;
 }
@@ -1009,7 +1009,7 @@ export default function LocalImageStudioPage() {
           </div>;
         })}</div> : null}
       </section>}
-      <p className="text-xs leading-5 text-white/40">当前版本采用 ComfyUI 标准 checkpoint 文生图工作流。图片归档需要逐张点击确认；归档后会登记到本地素材库。ControlNet、LoRA、参考图和批量镜头生成将在后续阶段增加。若模型架构与标准 checkpoint 工作流不兼容，ComfyUI 会返回错误，不会尝试云端替代。</p>
+      <p className="text-xs leading-5 text-white/40">当前版本采用 ComfyUI 标准 checkpoint 文生图工作流；支持参考图预检、用户确认后上传到本机，以及最多 20 个镜头的批量排队。IP-Adapter/CLIP Vision 条件生图依赖本机已安装且兼容的节点和模型；ControlNet、LoRA 不会随安装包自动下载或配置。图片归档仍需逐张确认；若模型架构或节点工作流不兼容，ComfyUI 会返回错误，不会尝试云端替代。</p>
     </main>
   );
 }
