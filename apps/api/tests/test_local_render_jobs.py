@@ -57,8 +57,8 @@ class LocalRenderJobPersistenceTests(unittest.TestCase):
 
     def test_worker_validates_then_atomically_publishes_completed_output(self):
         import tempfile
-        from pathlib import Path
         import threading
+        from pathlib import Path
 
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "final.mp4"
@@ -71,33 +71,36 @@ class LocalRenderJobPersistenceTests(unittest.TestCase):
                 "music_volume": 0.25, "original_volume": 1.0,
             }
             self.db.commit()
-            with patch.object(media, "SessionLocal", self.Session), \\
-                 patch.object(media, "safe_storage_file", return_value=Path(directory) / "source.mp4"), \\
-                 patch.object(media, "probe_media", return_value={
-                     "format": {"duration": "8.0"},
-                     "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
-                 }), \\
-                 patch.object(media, "run_ffmpeg_with_progress") as ffmpeg, \\
-                 patch.object(media, "validate_rendered_video", return_value={
-                     "valid": True, "duration_seconds": 8.0,
-                 }) as validate:
-                def write_output(args, **kwargs):
-                    Path(args[-1]).write_bytes(b"x" * 2048)
-                    kwargs["progress_callback"]({"percent": 99.9, "stage": "validating"})
-                ffmpeg.side_effect = write_output
-                with patch.dict(
-                    media._LOCAL_RENDER_RUNTIME,
-                    {self.task.id: {"cancel": threading.Event(), "process": None}},
-                    clear=True,
-                ):
-                    media._run_local_render_job(self.task.id)
+
+            def write_output(args, **kwargs):
+                Path(args[-1]).write_bytes(b"x" * 2048)
+                kwargs["progress_callback"]({"percent": 99.9, "stage": "validating"})
+
+            with patch.object(media, "SessionLocal", self.Session):
+                with patch.object(media, "safe_storage_file", return_value=Path(directory) / "source.mp4"):
+                    with patch.object(media, "probe_media", return_value={
+                        "format": {"duration": "8.0"},
+                        "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+                    }):
+                        with patch.object(media, "run_ffmpeg_with_progress") as ffmpeg:
+                            with patch.object(media, "validate_rendered_video", return_value={
+                                "valid": True, "duration_seconds": 8.0,
+                            }) as validate:
+                                ffmpeg.side_effect = write_output
+                                with patch.dict(
+                                    media._LOCAL_RENDER_RUNTIME,
+                                    {self.task.id: {"cancel": threading.Event(), "process": None}},
+                                    clear=True,
+                                ):
+                                    media._run_local_render_job(self.task.id)
+                                validate.assert_called_once()
+
             self.db.expire_all()
             saved = self.db.query(MediaTask).filter(MediaTask.id == self.task.id).one()
             self.assertEqual(saved.status, "completed")
             self.assertTrue(output.is_file())
             self.assertFalse(partial.exists())
             self.assertEqual(saved.result_data["progress"]["percent"], 100)
-            validate.assert_called_once()
 
     def test_progress_updates_are_saved_to_media_task(self):
         with patch.object(media, "SessionLocal", self.Session):
