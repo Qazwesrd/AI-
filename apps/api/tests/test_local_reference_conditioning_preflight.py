@@ -1,3 +1,4 @@
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -52,6 +53,37 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
                 result = local_images._inspect_reference_media_file(media)
         self.assertFalse(result["ready"])
         self.assertIn("25 MiB", result["reason"])
+
+
+    def test_upload_uses_fixed_local_endpoint_and_multipart_body(self):
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, size=-1):
+                return b'{"name":"reference.png","subfolder":"ai_comic_references/p1","type":"input"}'
+
+        with tempfile.TemporaryDirectory() as directory:
+            image = Path(directory) / "reference.png"
+            image.write_bytes(b"png-payload")
+            media = SimpleNamespace(file_path=str(image))
+            captured = {}
+            def capture(request, timeout):
+                captured["url"] = request.full_url
+                captured["body"] = request.data
+                captured["content_type"] = request.get_header("Content-type")
+                return Response()
+            with patch.object(local_images, "_inspect_reference_media_file", return_value={
+                "ready": True, "mime_type": "image/png", "size": 11,
+            }), patch.object(local_images, "OPENER") as opener:
+                opener.open.side_effect = capture
+                result = local_images._upload_reference_to_local_comfyui(media, 1, "characters", 2)
+        self.assertEqual(captured["url"], "http://127.0.0.1:8188/upload/image")
+        self.assertIn(b"Content-Disposition: form-data; name=\\"image\\"", captured["body"])
+        self.assertIn(b"png-payload", captured["body"])
+        self.assertIn(b"\\r\\n", captured["body"])
+        self.assertEqual(result["name"], "reference.png")
 
 
 if __name__ == "__main__":
