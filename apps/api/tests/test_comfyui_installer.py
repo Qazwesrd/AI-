@@ -211,5 +211,80 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_comfyui_install_plan(asset, "v1", 100 * GIB, "C:/ComfyUI")
 
+
+    def test_download_helper_verifies_digest_and_atomically_saves(self):
+        import hashlib
+        import io
+        import tempfile
+        import threading
+        from pathlib import Path
+        from app.routers.comfyui_installer import download_verified_official_asset
+        payload = b"comfyui archive bytes"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ComfyUI"
+            target = root / "downloads" / "ComfyUI_windows_portable_nvidia.7z"
+            asset = {
+                "name": target.name,
+                "download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v1/" + target.name,
+                "size_bytes": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+            class Response:
+                status = 200
+                headers = {"Content-Length": str(len(payload))}
+                def __init__(self): self.stream = io.BytesIO(payload)
+                def __enter__(self): return self
+                def __exit__(self, *args): return False
+                def geturl(self): return asset["download_url"]
+                def getcode(self): return self.status
+                def read(self, size=-1): return self.stream.read(size)
+            result = download_verified_official_asset(
+                asset, "v1", root, target, threading.Event(),
+                opener=lambda request, timeout: Response(),
+            )
+            self.assertEqual(Path(result["path"]).read_bytes(), payload)
+            self.assertEqual(result["sha256"], asset["sha256"])
+
+    def test_download_helper_rejects_bad_digest_and_outside_destination(self):
+        import hashlib
+        import io
+        import tempfile
+        import threading
+        from pathlib import Path
+        from app.routers.comfyui_installer import download_verified_official_asset
+        payload = b"untrusted"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ComfyUI"
+            target = root / "ComfyUI_windows_portable_nvidia.7z"
+            asset = {
+                "name": target.name,
+                "download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v1/" + target.name,
+                "size_bytes": len(payload),
+                "sha256": "0" * 64,
+            }
+            class Response:
+                status = 200
+                headers = {"Content-Length": str(len(payload))}
+                def __enter__(self): return self
+                def __exit__(self, *args): return False
+                def geturl(self): return asset["download_url"]
+                def getcode(self): return self.status
+                def read(self, size=-1):
+                    nonlocal payload
+                    chunk, payload = payload[:size], payload[size:]
+                    return chunk
+            with self.assertRaises(ValueError):
+                download_verified_official_asset(
+                    asset, "v1", root, target, threading.Event(),
+                    opener=lambda request, timeout: Response(),
+                )
+            self.assertFalse(target.exists())
+            with self.assertRaises(ValueError):
+                download_verified_official_asset(
+                    {**asset, "sha256": hashlib.sha256(b"x").hexdigest()},
+                    "v1", root, Path(tmp) / "outside.7z", threading.Event(),
+                    opener=lambda request, timeout: Response(),
+                )
+
 if __name__ == "__main__":
     unittest.main()
