@@ -222,6 +222,9 @@ Write-Host "图片生成模型不包含在本套件中。"
 $installScript = Join-Path $PSScriptRoot "install-comfyui-offline.ps1"
 if (!(Test-Path -LiteralPath $installScript -PathType Leaf)) { throw "离线安装脚本不存在：$installScript" }
 
+$auditScript = Join-Path $PSScriptRoot "audit-comfyui-portable-dependencies.ps1"
+if (!(Test-Path -LiteralPath $auditScript -PathType Leaf)) { throw "依赖清点脚本不存在：$auditScript" }
+
 
 $clientHandler = [System.Net.Http.HttpClientHandler]::new()
 $clientHandler.AllowAutoRedirect = $false
@@ -237,6 +240,7 @@ try {
 
     $toolResult = Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
+    Add-FileEntry $archive "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" $auditScript
     Add-FileEntry $archive "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json" $auditPath
     $sevenZipSourceResult = Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest
 
@@ -271,6 +275,7 @@ try {
         distribution_status = "blocked-pending-third-party-dependency-audit"
         distribution_approved = $false
         dependency_audit_register = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json"
+        dependency_inventory_tool = "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1"
         comfyui_version = $release.tag_name
         source = $ReleaseApi
         created_utc = [DateTime]::UtcNow.ToString("o")
@@ -317,6 +322,7 @@ AI漫剧制作大师 - ComfyUI 完整离线安装套件
 6. 图片生成模型不包含在本套件中；后续下载模型前必须显示来源、大小、磁盘空间并再次征求确认。
 7. 本套件面向 Windows x64。只对官方文档明确覆盖的 GPU 型号自动选择；不明确或不支持的型号会停止安装，不会猜测或联网回退。
 8. ComfyUI 采用 GPL-3.0；7-Zip 采用其上游许可证。详见 THIRD_PARTY_NOTICES。完整依赖许可证审查仍是正式公开分发前的必要关卡。
+9. 如需清点已取得的官方 Portable 包，可使用 ComfyUI-Payload\\audit-comfyui-portable-dependencies.ps1；具体参数见项目 docs/compliance/COMFYUI-DEPENDENCY-INVENTORY.md。清点报告不等于许可证批准。
 
 本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
 '@
@@ -369,6 +375,7 @@ try {
     foreach ($requiredName in @(
         "ComfyUI-Payload/manifest.json",
         "ComfyUI-Payload/install-comfyui-offline.ps1",
+        "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1",
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
         "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
         "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json",
