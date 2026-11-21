@@ -17,7 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaFile, MediaTask
-from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision, StoryAssetLink
+from app.models.visual import VisualAsset
 from app.services.media_service import STORAGE
 from pydantic import BaseModel, Field, field_validator
 
@@ -233,26 +234,40 @@ def inspect_local_reference_capabilities():
 
     has_load_image = nodes.get("LoadImage", {}).get("available", False)
     has_clip_vision = nodes.get("CLIPVisionLoader", {}).get("available", False)
-    has_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) or nodes.get("IPAdapterModelLoader", {}).get("available", False)
-    has_apply = nodes.get("IPAdapter", {}).get("available", False) or nodes.get("IPAdapterAdvanced", {}).get("available", False)
-    adapter_models = nodes.get("IPAdapterUnifiedLoader", {}).get("adapter_models") or nodes.get("IPAdapterModelLoader", {}).get("adapter_models") or []
+    unified_presets = _node_input_choices(
+        _local_request("/object_info/IPAdapterUnifiedLoader"), "preset"
+    ) if nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) else []
+    adapter_models = nodes.get("IPAdapterModelLoader", {}).get("adapter_models", [])
+    unified_model_files = nodes.get("IPAdapterUnifiedLoader", {}).get("adapter_models", [])
+    has_unified_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) and bool(unified_presets or unified_model_files)
+    has_model_loader = nodes.get("IPAdapterModelLoader", {}).get("available", False) and bool(adapter_models)
+    has_adapter = has_unified_adapter or has_model_loader
+    apply_type = "IPAdapterAdvanced" if nodes.get("IPAdapterAdvanced", {}).get("available", False) else "IPAdapter"
+    apply_info = _local_request("/object_info/" + apply_type) if nodes.get(apply_type, {}).get("available", False) else {}
+    apply_schema = apply_info.get(apply_type, {})
+    apply_required = set((apply_schema.get("input") or {}).get("required", {}).keys()) if isinstance(apply_schema, dict) else set()
+    needs_clip_vision = "clip_vision" in apply_required
     clip_models = nodes.get("CLIPVisionLoader", {}).get("clip_vision_models", [])
-    structural_ready = has_load_image and has_clip_vision and has_adapter and has_apply
-    model_ready = bool(adapter_models) and bool(clip_models)
+    apply_inputs = _node_input_names(apply_schema) if isinstance(apply_schema, dict) else set()
+    structural_ready = has_load_image and has_adapter and {"model", "ipadapter"}.issubset(apply_inputs)
+    model_ready = (has_unified_adapter or has_model_loader) and (not needs_clip_vision or (has_clip_vision and bool(clip_models)))
     return {
         "engine": "ComfyUI",
-        "status": "ready",
+        "status": "ready" if structural_ready and model_ready else "needs_setup",
         "reference_nodes": nodes,
         "reference_conditioning_nodes_ready": structural_ready,
         "reference_conditioning_models_ready": model_ready,
         "reference_conditioning_ready": structural_ready and model_ready,
-        "missing_node_types": [name for name, present in (
-            ("LoadImage", has_load_image), ("CLIPVisionLoader", has_clip_vision),
-            ("IPAdapterUnifiedLoader or IPAdapterModelLoader", has_adapter),
-            ("IPAdapter or IPAdapterAdvanced", has_apply),
-        ) if not present],
+        "missing_node_types": [
+            name for name, present in (
+                ("LoadImage", has_load_image),
+                ("IPAdapterUnifiedLoader or IPAdapterModelLoader with available models", has_adapter),
+                ("IPAdapter or IPAdapterAdvanced", {"model", "ipadapter"}.issubset(apply_inputs)),
+            ) if not present
+        ] + (["CLIPVisionLoader"] if needs_clip_vision and not has_clip_vision else []),
         "missing_model_files": [name for name, present in (
-            ("IP-Adapter model", bool(adapter_models)), ("CLIP Vision model", bool(clip_models)),
+            ("IP-Adapter model", bool(unified_presets or unified_model_files or adapter_models)),
+            *([( "CLIP Vision model", bool(clip_models))] if needs_clip_vision else []),
         ) if not present],
         "local_only": True,
         "network_used": False,
@@ -262,6 +277,134 @@ def inspect_local_reference_capabilities():
         "message": "已检测到参考图条件生图所需节点和模型。" if structural_ready and model_ready else "已完成本机兼容性检查；缺少的节点或模型需要你自行确认安装，本程序不会自动下载。",
     }
 
+
+
+def _node_input_names(node_info: dict) -> set[str]:
+    inputs = node_info.get("input") if isinstance(node_info, dict) else None
+    if not isinstance(inputs, dict):
+        return set()
+    names = set()
+    for section in ("required", "optional"):
+        values = inputs.get(section)
+        if isinstance(values, dict):
+            names.update(values.keys())
+    return names
+
+
+def _first_node_choice(node_info: dict, input_name: str) -> str | None:
+    choices = _node_input_choices(node_info, input_name)
+    return choices[0] if choices else None
+
+
+def build_reference_conditioned_workflow(
+    payload: LocalImageGenerateInput,
+    seed: int,
+    object_infos: dict,
+    reference_images: list[dict],
+) -> dict:
+    """Build an IP-Adapter graph from live ComfyUI schemas and confirmed local uploads."""
+    if not reference_images or len(reference_images) > 10:
+        raise ValueError("参考图数量必须为 1 到 10 张")
+    load_info = object_infos.get("LoadImage")
+    if not isinstance(load_info, dict) or not _node_input_names(load_info):
+        raise ValueError("本机 ComfyUI 缺少可用的 LoadImage 节点")
+    apply_type = next(
+        (name for name in ("IPAdapterAdvanced", "IPAdapter") if isinstance(object_infos.get(name), dict)),
+        None,
+    )
+    apply_info = object_infos.get(apply_type) if apply_type else None
+    if not apply_type or not _node_input_names(apply_info):
+        raise ValueError("本机 ComfyUI 缺少可用的 IP-Adapter 应用节点")
+
+    unified_info = object_infos.get("IPAdapterUnifiedLoader")
+    model_loader_info = object_infos.get("IPAdapterModelLoader")
+    use_unified = isinstance(unified_info, dict) and "model" in _node_input_names(unified_info) and bool(_first_node_choice(unified_info, "preset"))
+    if use_unified:
+        adapter_info = unified_info
+        adapter_type = "IPAdapterUnifiedLoader"
+        adapter_inputs = {"model": ["4", 0], "preset": _first_node_choice(unified_info, "preset")}
+    else:
+        if not isinstance(model_loader_info, dict):
+            raise ValueError("缺少 IPAdapterUnifiedLoader 和 IPAdapterModelLoader")
+        adapter_model = _first_node_choice(model_loader_info, "ipadapter_file")
+        if not adapter_model:
+            raise ValueError("本机没有可用的 IP-Adapter 模型文件")
+        adapter_info = model_loader_info
+        adapter_type = "IPAdapterModelLoader"
+        adapter_inputs = {"ipadapter_file": adapter_model}
+
+    apply_names = _node_input_names(apply_info)
+    required_names = set((apply_info.get("input") or {}).get("required", {}).keys())
+    supported = {"model", "ipadapter", "image", "weight", "weight_type", "combine_embeds", "start_at", "end_at", "embeds_scaling", "clip_vision"}
+    if not {"model", "ipadapter", "image", "weight"}.issubset(apply_names):
+        raise ValueError("当前 IP-Adapter 节点输入结构不兼容，缺少必要接口")
+    if not {"model", "ipadapter", "image", "weight"}.issubset(supported):
+        raise ValueError("IP-Adapter 节点不支持必要输入")
+
+    workflow = build_txt2img_workflow(payload, seed)
+    workflow["10"] = {"class_type": adapter_type, "inputs": adapter_inputs}
+    next_model = ["10", 0]
+    next_node_id = 11
+
+    clip_info = object_infos.get("CLIPVisionLoader")
+    clip_vision_link = None
+    if "clip_vision" in apply_names and isinstance(clip_info, dict):
+        clip_name = _first_node_choice(clip_info, "clip_name")
+        if clip_name:
+            clip_node_id = str(next_node_id)
+            next_node_id += 1
+            workflow[clip_node_id] = {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": clip_name}}
+            clip_vision_link = [clip_node_id, 0]
+
+    for reference in reference_images:
+        name = reference.get("name")
+        subfolder = reference.get("subfolder", "")
+        image_type = reference.get("type", "input")
+        if (
+            not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9 _.-]{1,240}", name)
+            or ".." in name or "/" in name or "\\\\" in name
+            or not isinstance(subfolder, str) or len(subfolder) > 240
+            or (subfolder and (
+                subfolder.startswith("/") or "\\\\" in subfolder or ":" in subfolder
+                or "//" in subfolder or any(part in ("", ".", "..") for part in subfolder.split("/"))
+                or not re.fullmatch(r"[A-Za-z0-9 _./-]+", subfolder)
+            ))
+            or image_type != "input"
+        ):
+            raise ValueError("ComfyUI 参考图文件名或输入目录不安全")
+        image_node_id = str(next_node_id)
+        apply_node_id = str(next_node_id + 1)
+        next_node_id += 2
+        workflow[image_node_id] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": f"{subfolder}/{name}" if subfolder else name},
+        }
+        apply_inputs = {
+            "model": next_model,
+            "ipadapter": ["10", 1] if use_unified else ["10", 0],
+            "image": [image_node_id, 0],
+            "weight": 0.65,
+        }
+        if "weight_type" in apply_names:
+            apply_inputs["weight_type"] = _first_node_choice(apply_info, "weight_type") or "linear"
+        if "combine_embeds" in apply_names:
+            apply_inputs["combine_embeds"] = _first_node_choice(apply_info, "combine_embeds") or "concat"
+        if "start_at" in apply_names:
+            apply_inputs["start_at"] = 0.0
+        if "end_at" in apply_names:
+            apply_inputs["end_at"] = 1.0
+        if "embeds_scaling" in apply_names:
+            apply_inputs["embeds_scaling"] = _first_node_choice(apply_info, "embeds_scaling") or "V only"
+        if "clip_vision" in apply_names:
+            if clip_vision_link is None and "clip_vision" in required_names:
+                raise ValueError("当前 IP-Adapter 节点要求 CLIP Vision 模型，但本机未检测到可用模型")
+            if clip_vision_link is not None:
+                apply_inputs["clip_vision"] = clip_vision_link
+        workflow[apply_node_id] = {"class_type": apply_type, "inputs": apply_inputs}
+        next_model = [apply_node_id, 0]
+
+    workflow["3"]["inputs"]["model"] = next_model
+    return workflow
 
 
 
@@ -1120,7 +1263,7 @@ def _consistency_prompt_for_shot(shot: StoryboardShot, profile: dict):
                     sections.append(f"【{label}参考图已绑定本地素材库图片 #{media_id}；生成前请在本地素材库查看并作为视觉参考】")
     if not sections:
         return ""
-    return "\\n".join(sections)
+    return "\n".join(sections)
 
 
 def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], profile: dict):
@@ -1144,7 +1287,7 @@ def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], p
         original = (shot.image_prompt or "").strip()
         preview = original
         if consistency_prompt:
-            preview = (original + "\\n\\n" if original else "") + consistency_prompt
+            preview = (original + "\n\n" if original else "") + consistency_prompt
         results.append({
             "shot_id": shot.id,
             "shot_number": shot.shot_number,
@@ -1167,6 +1310,435 @@ def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], p
         "message": "所有已引用角色、场景和道具均有统一外观档案。" if missing_count == 0 else "部分角色、场景或道具缺少统一外观档案；补齐后可获得更稳定的跨分镜一致性。",
         "local_only": True,
         "cloud_api_used": False,
+    }
+
+
+class ReferenceImageUploadInput(BaseModel):
+    asset_id: int = Field(ge=1)
+    media_file_id: int = Field(ge=1)
+    category: Literal["characters", "scenes", "props"]
+    confirm_local_upload: bool = False
+
+
+class ReferenceConditionedGenerateInput(BaseModel):
+    shot_id: int = Field(ge=1)
+    checkpoint: str = Field(min_length=1, max_length=240)
+    negative_prompt: str = Field(default="", max_length=6000)
+    style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
+    width: int = Field(default=768, ge=512, le=1536)
+    height: int = Field(default=768, ge=512, le=1536)
+    steps: int = Field(default=24, ge=1, le=40)
+    cfg: float = Field(default=7.0, ge=1.0, le=12.0)
+    seed: int | None = Field(default=None, ge=0, le=4294967295)
+    confirm_local_generation: bool = False
+
+
+class ReferenceConditioningPreflightInput(BaseModel):
+    shot_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+def _inspect_reference_media_file(media: MediaFile):
+    """Validate a reference image stays inside managed storage and matches its bytes."""
+    storage_root = Path(STORAGE).resolve()
+    candidate = Path(media.file_path)
+    try:
+        resolved = candidate.resolve(strict=True)
+        if os.path.commonpath((str(storage_root), str(resolved))) != str(storage_root):
+            return {"ready": False, "reason": "图片路径不在本地素材库目录内"}
+        if not resolved.is_file():
+            return {"ready": False, "reason": "素材路径不是普通文件"}
+        size = resolved.stat().st_size
+        if size <= 0 or size > MAX_IMAGE_BYTES:
+            return {"ready": False, "reason": "参考图为空或超过 25 MiB 安全上限"}
+        with resolved.open("rb") as stream:
+            header = stream.read(16)
+    except (OSError, ValueError):
+        return {"ready": False, "reason": "本地参考图文件不存在或无法安全读取"}
+
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    elif header.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        return {"ready": False, "reason": "文件内容不是有效的 PNG、JPEG 或 WebP 图片"}
+    if media.mime_type and media.mime_type not in (mime, "application/octet-stream"):
+        return {"ready": False, "reason": "图片文件内容与素材库 MIME 类型不一致"}
+    return {"ready": True, "mime_type": mime, "size": size, "local_path_validated": True}
+
+
+def _upload_reference_to_local_comfyui(media: MediaFile, project_id: int, category: str, asset_id: int):
+    validation = _inspect_reference_media_file(media)
+    if not validation["ready"]:
+        raise HTTPException(400, validation["reason"])
+    path = Path(media.file_path).resolve(strict=True)
+    suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[validation["mime_type"]]
+    filename = f"ref_p{project_id}_{category}_{asset_id}_{uuid.uuid4().hex}{suffix}"
+    subfolder = f"ai_comic_references/p{project_id}"
+    boundary = "----AIComicStudio" + uuid.uuid4().hex
+    fields = [
+        ("type", "input"),
+        ("subfolder", subfolder),
+        ("overwrite", "false"),
+    ]
+    chunks = []
+    for name, value in fields:
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+            value.encode("utf-8") + b"\r\n",
+        ])
+    chunks.extend([
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'.encode(),
+        f'Content-Type: {validation["mime_type"]}\r\n\r\n'.encode(),
+    ])
+    with path.open("rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
+    body = b"".join(chunks)
+    request = Request(
+        COMFYUI_BASE_URL + "/upload/image",
+        data=body,
+        headers={"Accept": "application/json", "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with OPENER.open(request, timeout=30.0) as response:
+            raw = response.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            raise HTTPException(502, "ComfyUI 上传响应超过安全上限")
+        result = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read(1200).decode("utf-8", errors="replace")
+        raise HTTPException(502, f"本机 ComfyUI 图片上传失败（HTTP {exc.code}）：{detail}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, "无法连接本机 ComfyUI；图片未确认上传成功") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, "ComfyUI 上传响应格式无效") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("name"), str):
+        raise HTTPException(502, "ComfyUI 未返回有效的参考图文件名")
+    return {
+        "name": result["name"],
+        "subfolder": result.get("subfolder", subfolder),
+        "type": result.get("type", "input"),
+        "mime_type": validation["mime_type"],
+        "size": validation["size"],
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-upload")
+def upload_project_reference_image(
+    project_id: int,
+    data: ReferenceImageUploadInput,
+    db: Session = Depends(get_db),
+):
+    if not data.confirm_local_upload:
+        raise HTTPException(400, "上传参考图到本机 ComfyUI 前，必须明确确认。")
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    profile = _get_visual_consistency(project)
+    field_name = {
+        "characters": "character_reference_images",
+        "scenes": "scene_reference_images",
+        "props": "prop_reference_images",
+    }[data.category]
+    bindings = profile.get(field_name, {})
+    if not isinstance(bindings, dict) or str(data.asset_id) not in bindings or int(bindings[str(data.asset_id)]) != data.media_file_id:
+        raise HTTPException(400, "这张图片尚未绑定到指定角色、场景或道具")
+    linked = db.query(StoryAssetLink).filter(
+        StoryAssetLink.project_id == project.id,
+        StoryAssetLink.asset_id == data.asset_id,
+    ).first()
+    asset = db.query(VisualAsset).filter(VisualAsset.id == data.asset_id).first()
+    if linked is None or asset is None or asset.category != data.category:
+        raise HTTPException(404, "指定素材不属于当前漫剧项目或素材分类不匹配")
+    media = db.query(MediaFile).filter(
+        MediaFile.id == data.media_file_id,
+        MediaFile.category == "image",
+    ).first()
+    if media is None:
+        raise HTTPException(404, "绑定的本地图片素材不存在")
+    uploaded = _upload_reference_to_local_comfyui(media, project.id, data.category, data.asset_id)
+    settings = dict(project.settings) if isinstance(project.settings, dict) else {}
+    uploaded_refs = dict(settings.get("comfyui_reference_uploads", {})) if isinstance(settings.get("comfyui_reference_uploads", {}), dict) else {}
+    reference_key = f"{data.category}:{data.asset_id}:{media.id}"
+    uploaded_refs[reference_key] = {
+        **uploaded,
+        "asset_id": data.asset_id,
+        "media_file_id": media.id,
+        "category": data.category,
+    }
+    settings["comfyui_reference_uploads"] = uploaded_refs
+    project.settings = settings
+    db.add(project)
+    db.commit()
+    return {
+        "project_id": project.id,
+        "asset_id": data.asset_id,
+        "media_file_id": media.id,
+        "category": data.category,
+        "comfyui_image": uploaded,
+        "local_only": True,
+        "user_confirmed": True,
+        "generation_started": False,
+        "message": "参考图已由你确认上传到本机 ComfyUI 输入目录；尚未启动图片生成。",
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-generate")
+def generate_reference_conditioned_shot(
+    project_id: int,
+    data: ReferenceConditionedGenerateInput,
+    db: Session = Depends(get_db),
+):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "参考图条件生图会占用本机 CPU/GPU；请明确确认后再提交。")
+    if data.width % 64 or data.height % 64:
+        raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    shot = db.query(StoryboardShot).filter(
+        StoryboardShot.id == data.shot_id,
+        StoryboardShot.project_id == project.id,
+    ).first()
+    if shot is None:
+        raise HTTPException(404, "分镜不存在或不属于当前项目")
+    prompt_text = (shot.image_prompt or "").strip()
+    if len(prompt_text) < 3:
+        raise HTTPException(400, "该分镜尚未填写图片提示词")
+
+    profile = _get_visual_consistency(project)
+    groups = (
+        ("character_reference_images", "characters", shot.character_ids if isinstance(shot.character_ids, list) else []),
+        ("scene_reference_images", "scenes", [shot.scene_asset_id] if shot.scene_asset_id else []),
+        ("prop_reference_images", "props", shot.prop_ids if isinstance(shot.prop_ids, list) else []),
+    )
+    linked_ids = {
+        row.asset_id for row in db.query(StoryAssetLink).filter(
+            StoryAssetLink.project_id == project.id
+        ).all()
+    }
+    uploaded_refs = project.settings.get("comfyui_reference_uploads", {}) if isinstance(project.settings, dict) else {}
+    if not isinstance(uploaded_refs, dict):
+        uploaded_refs = {}
+    references = []
+    missing = []
+    for field_name, category, asset_ids in groups:
+        bindings = profile.get(field_name, {})
+        if not isinstance(bindings, dict):
+            bindings = {}
+        for raw_asset_id in dict.fromkeys(asset_ids):
+            try:
+                asset_id = int(raw_asset_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, "分镜包含无效的视觉素材编号")
+            if asset_id not in linked_ids:
+                raise HTTPException(400, f"素材 #{asset_id} 不属于当前项目")
+            asset = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+            if asset is None or asset.category != category:
+                raise HTTPException(400, f"素材 #{asset_id} 的分类与参考图类型不匹配")
+            media_id = bindings.get(str(asset_id))
+            if not media_id:
+                missing.append(f"{category} 素材 #{asset_id} 尚未绑定参考图")
+                continue
+            try:
+                media_id = int(media_id)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"素材 #{asset_id} 的参考图编号无效")
+            media = db.query(MediaFile).filter(
+                MediaFile.id == media_id, MediaFile.category == "image"
+            ).first()
+            if media is None:
+                missing.append(f"{category} 素材 #{asset_id} 绑定的图片已不存在")
+                continue
+            upload_key = f"{category}:{asset_id}:{media_id}"
+            uploaded = uploaded_refs.get(upload_key)
+            if not isinstance(uploaded, dict):
+                missing.append(f"{category} 素材 #{asset_id} 尚未确认上传到本机 ComfyUI")
+                continue
+            if uploaded.get("subfolder") != f"ai_comic_references/p{project.id}" or uploaded.get("type") != "input":
+                raise HTTPException(400, f"素材 #{asset_id} 的本机参考图上传记录不安全")
+            references.append({
+                "name": uploaded.get("name"),
+                "subfolder": uploaded.get("subfolder", ""),
+                "type": uploaded.get("type", "input"),
+            })
+    if missing:
+        raise HTTPException(409, {"message": "参考图尚未准备完成", "missing": missing})
+    if not references:
+        raise HTTPException(400, "当前分镜没有绑定角色、场景或道具参考图")
+    if len(references) > 10:
+        raise HTTPException(400, "单个分镜最多使用 10 张参考图，请先减少绑定数量")
+
+    capability = inspect_local_reference_capabilities()
+    if not capability.get("reference_conditioning_ready"):
+        raise HTTPException(409, {
+            "message": "本机 ComfyUI 尚不具备完整的参考图条件生图能力",
+            "missing_nodes": capability.get("missing_node_types", []),
+            "missing_models": capability.get("missing_model_files", []),
+        })
+    checkpoint_info = _local_request("/object_info/CheckpointLoaderSimple")
+    if data.checkpoint not in _checkpoint_names(checkpoint_info):
+        raise HTTPException(404, "所选图片模型未安装在本机 ComfyUI 中；本程序不会自动下载模型。")
+    object_infos = {}
+    for node_type in REFERENCE_NODE_TYPES:
+        try:
+            response = _local_request("/object_info/" + node_type)
+            node_info = response.get(node_type)
+            if isinstance(node_info, dict):
+                object_infos[node_type] = node_info
+        except HTTPException as exc:
+            if exc.status_code != 502:
+                raise
+    payload = LocalImageGenerateInput(
+        checkpoint=data.checkpoint,
+        prompt=prompt_text[:6000],
+        negative_prompt=data.negative_prompt,
+        style=data.style,
+        width=data.width,
+        height=data.height,
+        steps=data.steps,
+        cfg=data.cfg,
+        seed=data.seed,
+        confirm_local_generation=True,
+    )
+    seed = data.seed if data.seed is not None else uuid.uuid4().int % (2 ** 32)
+    try:
+        workflow = build_reference_conditioned_workflow(payload, seed, object_infos, references)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    result = _local_request("/prompt", {"prompt": workflow, "client_id": str(uuid.uuid4())}, timeout=15.0)
+    prompt_id = result.get("prompt_id")
+    if not isinstance(prompt_id, str) or not PROMPT_ID_RE.fullmatch(prompt_id):
+        raise HTTPException(502, "ComfyUI 未返回有效任务编号，无法确认任务已进入队列。")
+    return {
+        "success": True,
+        "engine": "ComfyUI",
+        "prompt_id": prompt_id,
+        "seed": seed,
+        "checkpoint": data.checkpoint,
+        "shot_id": shot.id,
+        "reference_count": len(references),
+        "status": "queued",
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "paid_api_used": False,
+        "cloud_fallback": False,
+        "message": "参考图条件生图任务已提交到本机 ComfyUI 队列。",
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-preflight")
+def preflight_reference_conditioning(
+    project_id: int,
+    data: ReferenceConditioningPreflightInput,
+    db: Session = Depends(get_db),
+):
+    """Validate bound references and local ComfyUI support without uploading or generating."""
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    query = db.query(StoryboardShot).filter(StoryboardShot.project_id == project.id)
+    if data.shot_ids:
+        query = query.filter(StoryboardShot.id.in_(data.shot_ids))
+    shots = query.order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).limit(200).all()
+    if data.shot_ids and {shot.id for shot in shots} != set(data.shot_ids):
+        raise HTTPException(404, "所选分镜中包含不存在或不属于当前项目的镜头")
+    if not shots:
+        raise HTTPException(404, "当前项目没有可检查的分镜")
+
+    profile = _get_visual_consistency(project)
+    groups = (
+        ("character_reference_images", "characters", "角色", lambda shot: shot.character_ids if isinstance(shot.character_ids, list) else []),
+        ("scene_reference_images", "scenes", "场景", lambda shot: [shot.scene_asset_id] if shot.scene_asset_id else []),
+        ("prop_reference_images", "props", "道具", lambda shot: shot.prop_ids if isinstance(shot.prop_ids, list) else []),
+    )
+    references = {}
+    missing_bindings = []
+    for field_name, category, label, get_ids in groups:
+        bindings = profile.get(field_name, {})
+        if not isinstance(bindings, dict):
+            bindings = {}
+        for shot in shots:
+            for asset_id in get_ids(shot):
+                media_id = bindings.get(str(asset_id))
+                if not media_id:
+                    missing_bindings.append({
+                        "category": category, "asset_id": int(asset_id), "label": label,
+                        "shot_ids": [shot.id], "ready": False, "reason": "尚未绑定参考图",
+                    })
+                    continue
+                key = (category, str(asset_id), int(media_id))
+                references.setdefault(key, {
+                    "category": category, "asset_id": int(asset_id), "media_file_id": int(media_id),
+                    "label": label, "shot_ids": [],
+                })
+                references[key]["shot_ids"].append(shot.id)
+
+    asset_ids = {item["asset_id"] for item in references.values()}
+    linked_asset_ids = {
+        row.asset_id for row in db.query(StoryAssetLink).filter(
+            StoryAssetLink.project_id == project.id,
+            StoryAssetLink.asset_id.in_(asset_ids or {-1}),
+        ).all()
+    }
+    visual_assets = {
+        row.id: row for row in db.query(VisualAsset).filter(VisualAsset.id.in_(asset_ids or {-1})).all()
+    }
+    media_ids = {item["media_file_id"] for item in references.values()}
+    media_rows = {
+        row.id: row for row in db.query(MediaFile).filter(
+            MediaFile.id.in_(media_ids or {-1}), MediaFile.category == "image"
+        ).all()
+    }
+
+    checked = []
+    failures = list(missing_bindings)
+    for item in references.values():
+        asset = visual_assets.get(item["asset_id"])
+        media = media_rows.get(item["media_file_id"])
+        reason = None
+        if item["asset_id"] not in linked_asset_ids or asset is None or asset.category != item["category"]:
+            reason = "该角色、场景或道具不属于当前项目或素材分类不匹配"
+        elif media is None:
+            reason = "绑定的参考图不存在或不是图片素材"
+        else:
+            file_check = _inspect_reference_media_file(media)
+            if not file_check["ready"]:
+                reason = file_check["reason"]
+        result = {**item, "ready": reason is None}
+        if reason is not None:
+            result["reason"] = reason
+            failures.append(result)
+        else:
+            result.update({"mime_type": file_check["mime_type"], "size": file_check["size"]})
+        checked.append(result)
+
+    capabilities = inspect_local_reference_capabilities()
+    references_ready = not failures and bool(checked)
+    ready = references_ready and capabilities.get("reference_conditioning_ready", False)
+    return {
+        "project_id": project.id,
+        "checked_reference_count": len(checked),
+        "references_ready": references_ready,
+        "reference_conditioning_ready": ready,
+        "references": checked,
+        "failures": failures,
+        "comfyui": capabilities,
+        "upload_started": False,
+        "generation_started": False,
+        "local_only": True,
+        "network_used": False,
+        "message": "参考图文件和本机 ComfyUI 条件生图能力均已通过预检；本次没有上传图片或提交生成任务。" if ready else "预检发现参考图文件、项目归属或 ComfyUI 节点/模型尚未满足条件；本次没有上传图片或提交生成任务。",
     }
 
 
@@ -1254,7 +1826,7 @@ def apply_storyboard_consistency(project_id: int, data: StoryboardConsistencyPre
         marker_end = "【项目一致性规则结束】"
         if marker_start in original and marker_end in original:
             original = original.split(marker_start, 1)[0].rstrip()
-        shot.image_prompt = (original + "\\n\\n" if original else "") + marker_start + "\\n" + rules + "\\n" + marker_end
+        shot.image_prompt = (original + "\n\n" if original else "") + marker_start + "\n" + rules + "\n" + marker_end
         updated += 1
     db.commit()
     return {"success": True, "updated_shot_count": updated, "preflight": preflight, "local_only": True, "cloud_api_used": False}
