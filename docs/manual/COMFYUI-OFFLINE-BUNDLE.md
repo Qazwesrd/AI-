@@ -65,6 +65,26 @@ apps\desktop\release\AI漫剧制作大师-完整离线安装套件.zip.sha256
 
 审查时必须以实际下载的 Release tag 和每个官方资产 SHA-256 为基准，逐个清点 NVIDIA、NVIDIA cu126、AMD、Intel 包中的文件。重点包括嵌入式 Python 发行版、Python `*.dist-info/METADATA` 与许可证文件、PyTorch/torchvision/torchaudio、CUDA/ROCm/XPU 运行库、原生 DLL，以及 ComfyUI 本身。不同 GPU 变体的依赖可能不同，不能用一个变体的清单代替其他变体。对每个组件记录名称、版本、来源、许可证、版权/NOTICE、源代码提供义务、再分发限制和审核证据；未知或缺失信息保持 pending，不得猜测许可证。
 
+### 自动清点工具
+
+仓库提供 `scripts/audit-comfyui-portable-dependencies.ps1`，完整离线 ZIP 也会在 `ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1` 中携带该工具。将四种官方 7z 归档放在同一目录，在 PowerShell 中从项目根目录执行：
+
+```powershell
+$archives = @(
+  ".\ComfyUI_windows_portable_nvidia.7z",
+  ".\ComfyUI_windows_portable_nvidia_cu126.7z",
+  ".\ComfyUI_windows_portable_amd.7z",
+  ".\ComfyUI_windows_portable_intel.7z"
+)
+.\scripts\audit-comfyui-portable-dependencies.ps1 `
+  -SevenZipPath ".\apps\desktop\release\ComfyUI-Payload\7zr.exe" `
+  -ArchivePaths $archives `
+  -ReleaseTag "填写实际官方 Release tag" `
+  -OutputPath ".\apps\desktop\release\comfyui-dependency-inventory.json"
+```
+
+工具会记录每个归档的 SHA-256、文件清单、Python 包元数据、许可证文件线索及 PyTorch/CUDA/ROCm/XPU 等运行库候选项。为避免异常归档造成资源耗尽，工具限制归档条目数、证据文件数、单文件提取大小和每个变体的证据提取总量；临时提取目录会在结束时清理。报告中的许可证状态始终为 pending，跳过或无法识别的内容仍需人工补查。建议每次只对同一个官方 Release tag 的四种资产运行，并保留原始归档和报告供复核。
+
 只有四个变体都完成逐项清点、所有义务有对应材料、并经过人工复核后，才可以更新审查登记表的状态。仅修改 JSON 的状态字段不构成法律审核或自动批准；发布负责人仍须逐项核验并明确签署。模型权重许可另行审查，不能由软件依赖审查代替。
 
 ## 重要发布限制
