@@ -252,8 +252,17 @@ def start_local_image_runtime():
     if os.name != "nt":
         raise HTTPException(status_code=400, detail="当前启动管理仅支持 Windows 桌面版。")
     with _PROCESS_LOCK:
-        if _COMFYUI_PROCESS is not None and _COMFYUI_PROCESS.poll() is None:
-            return _status_payload()
+        if _COMFYUI_PROCESS is not None:
+            if _COMFYUI_PROCESS.poll() is None:
+                return _status_payload()
+            # Reap a previously exited managed process before replacing its
+            # handle. Preserve its exit code and close its log descriptor so
+            # repeated starts cannot leak handles or hide the prior failure.
+            _COMFYUI_LAST_EXIT_CODE = _COMFYUI_PROCESS.returncode
+            _COMFYUI_PROCESS = None
+            _COMFYUI_RUNTIME_MODE = None
+            _COMFYUI_STARTED_AT = None
+            _close_log_handle()
         # If another process already owns the port, do not adopt or terminate it.
         current = _local_json("/system_stats")
         if current and not current.get("_error"):
