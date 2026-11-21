@@ -140,11 +140,18 @@ try {
     $manifestAssets = @()
     foreach ($name in $assetNames) {
         $selected = ($name -ceq "ComfyUI_windows_portable_amd.7z")
+        if ($selected) {
+            $fixtureSize = [long](Get-Item -LiteralPath $archive).Length
+            $fixtureHash = $archiveHash
+        } else {
+            $fixtureSize = 1L
+            $fixtureHash = "0" * 64
+        }
         $manifestAssets += @{
             name = $name
             source = "https://github.com/Comfy-Org/ComfyUI/releases/download/$fixtureComfyVersion/$name"
-            size_bytes = if ($selected) { [long](Get-Item $archive).Length } else { 1L }
-            sha256 = if ($selected) { $archiveHash } else { ("0" * 64) }
+            size_bytes = $fixtureSize
+            sha256 = $fixtureHash
             verified = $true
         }
     }
