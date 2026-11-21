@@ -81,6 +81,14 @@ export default function EpisodeReadinessPage() {
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
   const [syncReport, setSyncReport] = useState<{ status?: string; metadata_only?: boolean; audio_video_start_offset_seconds?: number | null; audio_video_duration_delta_seconds?: number | null; warnings?: string[]; note?: string } | null>(null);
+  const [finalQualityReport, setFinalQualityReport] = useState<{
+    status?: string; duration_seconds?: number;
+    resolution?: { width?: number; height?: number };
+    streams?: { video_codec?: string; audio_codec?: string | null; has_audio?: boolean };
+    warnings?: string[];
+    subtitle_timing?: { total_cues?: number; invalid_ranges?: { index: number; reason: string }[]; overlaps?: { previous_index: number; current_index: number; overlap_seconds: number }[] };
+    note?: string;
+  } | null>(null);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
   const [generatedSubtitleCues, setGeneratedSubtitleCues] = useState<{ start: number; end: number; text: string }[]>([]);
   const [timelineVersion, setTimelineVersion] = useState(0);
@@ -385,6 +393,25 @@ export default function EpisodeReadinessPage() {
       setMessage(data.status === "ok" ? "音视频流时间元数据一致；仍建议试听并检查人物口型。" : "音画同步检查发现需要人工复核的项目。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "音画同步检查失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function checkFinalQuality() {
+    if (!renderResult?.output || !report?.episode_id) return;
+    setBusy(true);
+    setFinalQualityReport(null);
+    setMessage("正在本地扫描黑屏、静音、音视频流及字幕时间范围；不会调用 AI 服务……");
+    try {
+      const query = new URLSearchParams({ path: renderResult.output, episode_id: String(report.episode_id) });
+      const response = await fetch(API + "/api/media/final-quality-report?" + query.toString());
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "综合质量检查失败");
+      setFinalQualityReport(data);
+      setMessage(data.status === "ok" ? "综合检查未发现明显技术问题；建议仍人工试听和检查画面。" : "综合检查完成，发现需要人工复核的项目。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "综合质量检查失败");
     } finally {
       setBusy(false);
     }
@@ -810,6 +837,22 @@ export default function EpisodeReadinessPage() {
                 </p>
                 {!!syncReport.warnings?.length && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-200">{syncReport.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
                 <p className="mt-2 text-xs text-white/45">{syncReport.note}</p>
+              </div>
+            )}
+            <button disabled={busy} onClick={() => void checkFinalQuality()} className="mt-3 rounded-lg border border-emerald-300/40 bg-emerald-900/30 px-4 py-2 text-sm text-emerald-100 disabled:opacity-50">运行成片综合质量报告</button>
+            {finalQualityReport && (
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
+                <p className={finalQualityReport.status === "ok" ? "font-semibold text-emerald-300" : "font-semibold text-amber-300"}>
+                  {finalQualityReport.status === "ok" ? "未发现明显技术问题" : "检查完成：有项目需要复核"}
+                </p>
+                <p className="mt-2 text-sm text-white/70">
+                  时长 {finalQualityReport.duration_seconds ?? "—"} 秒 · 分辨率 {finalQualityReport.resolution?.width ?? "—"} × {finalQualityReport.resolution?.height ?? "—"} · 视频编码 {finalQualityReport.streams?.video_codec ?? "—"} · 音轨 {finalQualityReport.streams?.has_audio ? "存在" : "缺失"}
+                </p>
+                <p className="mt-2 text-sm text-white/70">
+                  字幕 {finalQualityReport.subtitle_timing?.total_cues ?? 0} 条 · 越界/无效 {finalQualityReport.subtitle_timing?.invalid_ranges?.length ?? 0} 条 · 重叠 {finalQualityReport.subtitle_timing?.overlaps?.length ?? 0} 处
+                </p>
+                {!!finalQualityReport.warnings?.length && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-200">{finalQualityReport.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+                <p className="mt-2 text-xs text-white/45">{finalQualityReport.note}</p>
               </div>
             )}
           </section>
