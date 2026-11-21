@@ -139,6 +139,7 @@ export default function LocalModelsPage() {
   const [comfyInstallPlan, setComfyInstallPlan] = useState<ComfyUIInstallPlan | null>(null);
   const [creatingComfyInstallPlan, setCreatingComfyInstallPlan] = useState(false);
   const [comfyDownloadTask, setComfyDownloadTask] = useState<ComfyUIDownloadTask | null>(null);
+  const [comfyDownloadHistory, setComfyDownloadHistory] = useState<ComfyUIDownloadTask[]>([]);
   const [startingComfyDownload, setStartingComfyDownload] = useState(false);
   const [cancellingComfyDownload, setCancellingComfyDownload] = useState(false);
 
@@ -261,6 +262,7 @@ export default function LocalModelsPage() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "启动 ComfyUI 下载失败");
       setComfyDownloadTask(result);
+      void refreshComfyDownloadHistory();
       setMessage("ComfyUI 官方安装包下载任务已启动；尚未安装或启动引擎。");
     } catch (err) {
       setError(err instanceof Error ? err.message : "启动 ComfyUI 下载失败");
@@ -269,16 +271,30 @@ export default function LocalModelsPage() {
     }
   };
 
+  const refreshComfyDownloadHistory = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/history`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取下载历史失败");
+      const tasks = Array.isArray(result.tasks) ? result.tasks as ComfyUIDownloadTask[] : [];
+      setComfyDownloadHistory(tasks);
+      setComfyDownloadTask((current) => current || tasks.find((task) => ["queued", "downloading", "cancelling"].includes(task.status)) || tasks[0] || null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取下载历史失败");
+    }
+  }, []);
+
   const refreshComfyDownloadTask = useCallback(async (taskId: string) => {
     try {
       const response = await fetch(`${API}/api/local-ai/comfyui-installer/download/${encodeURIComponent(taskId)}`, { cache: "no-store" });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "读取下载进度失败");
       setComfyDownloadTask(result);
+      void refreshComfyDownloadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取下载进度失败");
     }
-  }, []);
+  }, [refreshComfyDownloadHistory]);
 
   const cancelComfyDownload = async () => {
     if (!comfyDownloadTask) return;
@@ -311,7 +327,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); void refreshComfyDownloadHistory(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness, refreshComfyDownloadHistory]);
 
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
@@ -641,9 +657,19 @@ export default function LocalModelsPage() {
                 <p className="mt-2 text-xs text-white/55">{comfyInstallPlan.note}</p>
               </div>}
               {comfyInstallPlan && !comfyDownloadTask?.verified && <button type="button" disabled={startingComfyDownload || Boolean(comfyDownloadTask && ["queued", "downloading", "cancelling"].includes(comfyDownloadTask.status))} onClick={() => void startComfyDownload()} className="mt-3 rounded-lg border border-emerald-300/30 px-3 py-2 text-sm disabled:opacity-40">{startingComfyDownload ? "正在启动…" : "确认并下载官方安装包"}</button>}
+              {comfyDownloadHistory.length > 0 && <div className="mt-3 rounded-xl border border-white/10 p-3 text-sm">
+                <p className="font-semibold">本机下载任务记录</p>
+                <p className="mt-1 text-xs text-white/45">记录保存在本机。应用重启时未完成的任务会标记为“中断”，不会自动续传或重新下载。</p>
+                <div className="mt-2 space-y-2">
+                  {comfyDownloadHistory.slice().reverse().map((task) => <button key={task.task_id} type="button" onClick={() => setComfyDownloadTask(task)} className={`flex w-full flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left ${comfyDownloadTask?.task_id === task.task_id ? "border-cyan-300/40 bg-cyan-400/10" : "border-white/10 bg-white/[0.02]"}`}>
+                    <span className="min-w-0"><span className="block truncate">{task.asset_name}</span><span className="text-xs text-white/45">{task.version} · {size(task.received_bytes)} / {size(task.total_bytes)}</span></span>
+                    <span className="text-xs">{task.status === "verified" ? "校验通过" : task.status === "interrupted" ? "应用重启时中断" : task.status === "failed" ? "失败" : task.status === "cancelled" ? "已取消" : task.status === "downloading" ? "下载中" : task.status === "cancelling" ? "正在取消" : "等待中"}</span>
+                  </button>)}
+                </div>
+              </div>}
               {comfyDownloadTask && <div className="mt-3 rounded-xl border border-cyan-300/25 bg-cyan-400/5 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <strong>下载任务：{comfyDownloadTask.status === "verified" ? "校验通过" : comfyDownloadTask.status === "failed" ? "下载失败" : comfyDownloadTask.status === "cancelled" ? "已取消" : comfyDownloadTask.status === "cancelling" ? "正在取消…" : "下载中"}</strong>
+                  <strong>下载任务：{comfyDownloadTask.status === "verified" ? "校验通过" : comfyDownloadTask.status === "failed" ? "下载失败" : comfyDownloadTask.status === "cancelled" ? "已取消" : comfyDownloadTask.status === "interrupted" ? "应用重启时中断" : comfyDownloadTask.status === "cancelling" ? "正在取消…" : "下载中"}</strong>
                   {["queued", "downloading"].includes(comfyDownloadTask.status) && <button type="button" disabled={cancellingComfyDownload} onClick={() => void cancelComfyDownload()} className="rounded-lg border border-rose-300/30 px-3 py-1.5 text-xs disabled:opacity-40">{cancellingComfyDownload ? "正在取消…" : "取消下载"}</button>}
                 </div>
                 <p className="mt-2">{size(comfyDownloadTask.received_bytes)} / {size(comfyDownloadTask.total_bytes)} · {comfyDownloadTask.percent}%</p>
