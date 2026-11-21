@@ -639,17 +639,17 @@ class StoryboardConsistencyInput(BaseModel):
     @classmethod
     def validate_costumes(cls, value):
         if len(value) > 100:
-            raise ValueError("最多为 100 个角色保存圣衣/服装档案")
+            raise ValueError("最多为 100 个角色保存服装版本档案")
         cleaned = {}
         for character_id, variants in value.items():
             if not str(character_id).isdigit() or int(character_id) < 1 or not isinstance(variants, dict) or len(variants) > 30:
-                raise ValueError("圣衣档案角色编号或版本列表无效")
+                raise ValueError("服装档案角色编号或版本列表无效")
             cleaned[str(int(character_id))] = {}
             for variant_id, description in variants.items():
                 if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", str(variant_id)):
-                    raise ValueError("圣衣/服装版本编号仅允许字母、数字、下划线和连字符")
+                    raise ValueError("服装版本编号仅允许字母、数字、下划线和连字符")
                 if not isinstance(description, str) or not description.strip() or len(description.strip()) > 1200:
-                    raise ValueError("每条圣衣/服装描述必须为 1 至 1200 个字符")
+                    raise ValueError("每条服装描述必须为 1 至 1200 个字符")
                 cleaned[str(int(character_id))][str(variant_id)] = description.strip()
         return cleaned
 
@@ -725,7 +725,7 @@ def _consistency_prompt_for_shot(shot: StoryboardShot, profile: dict):
             variant_id = shot_variants.get(str(character_id))
             description = costume_profiles.get(str(character_id), {}).get(variant_id, "") if variant_id else ""
             if description:
-                sections.append(f"【角色 #{character_id} 本镜头指定圣衣/服装版本 {variant_id}，不得与其他版本混淆】{description}")
+                sections.append(f"【角色 #{character_id} 本镜头指定服装版本 {variant_id}，不得与其他版本混淆】{description}")
     reference_groups = [
         ("character_reference_images", shot.character_ids if isinstance(shot.character_ids, list) else [], "角色"),
         ("scene_reference_images", [shot.scene_asset_id] if shot.scene_asset_id else [], "场景"),
@@ -818,7 +818,7 @@ def save_storyboard_consistency(project_id: int, data: StoryboardConsistencyInpu
                 if character_id not in available_characters:
                     raise HTTPException(400, f"分镜 #{shot.id} 未关联角色 #{character_id}，不能指定该角色的服装版本")
                 if variant_id not in data.costume_profiles.get(character_id, {}):
-                    raise HTTPException(400, f"角色 #{character_id} 没有版本 {variant_id} 的圣衣/服装档案")
+                    raise HTTPException(400, f"角色 #{character_id} 没有版本 {variant_id} 的服装版本档案")
     reference_ids = set(data.character_reference_images.values()) | set(data.scene_reference_images.values()) | set(data.prop_reference_images.values())
     if reference_ids:
         valid_ids = {row.id for row in db.query(MediaFile.id).filter(MediaFile.id.in_(reference_ids), MediaFile.category == "image").all()}
