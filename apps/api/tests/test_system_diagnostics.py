@@ -2,10 +2,21 @@ import unittest
 
 from unittest.mock import patch
 
-from app.routers.system import _check_local_ai_tools, _health_status
+from app.routers.system import _check_local_ai_tools, _health_status, _recommend_local_model_tier
 
 
 class SystemDiagnosticsTests(unittest.TestCase):
+    def test_model_tier_recommends_small_model_for_low_ram(self):
+        result = _recommend_local_model_tier(6 * 1024 ** 3, None)
+        self.assertEqual(result["tier"], "very_small_or_not_recommended")
+        self.assertIsNone(result["vram_gib"])
+
+    def test_model_tier_uses_vram_when_available(self):
+        result = _recommend_local_model_tier(16 * 1024 ** 3, 8 * 1024 ** 3)
+        self.assertEqual(result["tier"], "gpu_3b_7b_quantized")
+        self.assertEqual(result["vram_gib"], 8.0)
+        self.assertIn("性能保证", result["caution"])
+
     def test_all_checks_ok(self):
         self.assertEqual(_health_status([
             {"status": "ok"}, {"status": "ok"}
