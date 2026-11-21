@@ -30,7 +30,7 @@ function isAllowedDownloadUrl(value) {
 
 function isTrustedOllamaSignature(result) {
   if (!result || result.status !== "Valid" || typeof result.subject !== "string") return false;
-  return /(^|,\\s*)O=Ollama Inc\\.(,|$)/i.test(result.subject);
+  return result.subject.split(",").some(part => part.trim().toLowerCase() === "o=ollama inc.");
 }
 
 function getFreeBytes(directory) {
