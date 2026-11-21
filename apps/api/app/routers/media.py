@@ -2341,7 +2341,7 @@ def render_video(data: RenderInput):
     output = None
     try:
         video = safe_storage_file(data.video_path)
-    output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
+        output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
         if not output_name.lower().endswith(".mp4"):
             output_name += ".mp4"
         if data.width % 2 or data.height % 2:
@@ -2575,7 +2575,7 @@ def create_local_render_job(
     except Exception as exc:
         raise HTTPException(400, f"渲染输入检查失败：{exc}") from exc
 
-        output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
+    output_name = re.sub(r"[^a-zA-Z0-9_\-\u4e00-\u9fff]", "_", data.output_name)
     if not output_name.lower().endswith(".mp4"):
         output_name += ".mp4"
     output = VIDEO_DIR / f"{uuid.uuid4().hex}_{output_name}"
