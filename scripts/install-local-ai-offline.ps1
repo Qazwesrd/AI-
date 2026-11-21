@@ -76,7 +76,9 @@ if ($bundleManifest.distribution_approved -ne $false -or
     $bundleManifest.local_ai.model -cne "qwen3:4b" -or
     $bundleManifest.local_ai.payload_manifest_sha256 -ne $payloadManifestHash -or
     $bundleManifest.local_ai.runtime_sha256 -ne $manifest.ollama.sha256 -or
-    $bundleManifest.local_ai.model_manifest_sha256 -ne $manifest.model.manifest_sha256) {
+    $bundleManifest.local_ai.model_manifest_sha256 -ne $manifest.model.manifest_sha256 -or
+    $bundleManifest.local_ai.cloud_features_disabled -ne $true -or
+    $manifest.cloud_features_disabled -ne $true) {
     throw "LocalAI-Payload 与完整离线套件根清单不匹配，拒绝安装。"
 }
 if ($manifest.schema_version -ne 1 -or
