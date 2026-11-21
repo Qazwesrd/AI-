@@ -30,7 +30,10 @@ type ModelItem = {
   };
 };
 
-type RuntimeModel = { name: string; size_bytes?: number | null };\ntype Runtime = { status: string; models: RuntimeModel[]; message: string };\n\ntype Catalog = {
+type RuntimeModel = { name: string; size_bytes?: number | null };
+type Runtime = { status: string; models: RuntimeModel[]; message: string };
+
+type Catalog = {
   items: ModelItem[];
   total: number;
   directory: string;
