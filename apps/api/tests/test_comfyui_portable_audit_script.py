@@ -60,6 +60,8 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn("inventoryReportPath", installer)
         self.assertIn("inventoryVariants.Count -ne 4", installer)
         self.assertIn("archive_size_bytes", installer)
+        self.assertIn("auditRegisterPath", installer)
+        self.assertIn("registerVariants", installer)
 
     def test_comfyui_installer_records_runtime_and_preserves_existing_install(self):
         installer_path = REPO_ROOT / "scripts" / "install-comfyui-offline.ps1"
