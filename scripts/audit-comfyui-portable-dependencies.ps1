@@ -147,7 +147,9 @@ $SevenZipPath = [System.IO.Path]::GetFullPath($SevenZipPath)
 if ($ArchivePaths.Count -lt 1 -or $ArchivePaths.Count -gt 4) {
     throw "请提供 1 到 4 个官方 ComfyUI Windows portable 归档。"
 }
-if ($ReleaseTag -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}
+if ($ReleaseTag -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') {
+    throw "ReleaseTag 格式无效：$ReleaseTag"
+}
 
 $resolvedArchives = @()
 foreach ($archivePath in $ArchivePaths) {
