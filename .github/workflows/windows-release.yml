@@ -47,6 +47,9 @@ jobs:
             "scripts/create-comfyui-offline-installer.ps1",
             "scripts/audit-comfyui-portable-dependencies.ps1",
             "scripts/prepare-local-ai-offline-payload.ps1",
+            "scripts/split-offline-bundle.ps1",
+            "scripts/join-offline-bundle.ps1",
+            "scripts/tests/test-offline-bundle-volumes.ps1",
             "scripts/install-local-ai-offline.ps1",
             "scripts/install-local-engines-transaction.ps1",
             "scripts/tests/test-local-ai-offline-install.ps1",
@@ -71,6 +74,10 @@ jobs:
       - name: Run local AI offline installer integration test
         shell: pwsh
         run: ./scripts/tests/test-local-ai-offline-install.ps1
+
+      - name: Run offline bundle volume split and merge test
+        shell: pwsh
+        run: ./scripts/tests/test-offline-bundle-volumes.ps1
 
       - name: Run ComfyUI dependency audit integration test
         shell: pwsh
