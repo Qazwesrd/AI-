@@ -58,6 +58,7 @@ type ImageModelLibrary = {
 };
 type CuratedImageModel = { id: string; name: string; publisher: string; repository: string; revision: string; filename: string; format: string; size_bytes: number | null; size_label: string; sha256: string; source_url: string; download_url: string; license: string; license_url: string; license_status: string; license_note: string; hardware_status: string; hardware_note: string; recommended_directory: string; sha256_source: string; sha256_verified: boolean; catalog_status: string };
 type CuratedImageModelCatalog = { status: string; models: CuratedImageModel[]; count: number; network_used: boolean; download_started: boolean; installation_started: boolean; note: string };
+type ImageModelPreflight = { model_id: string; preflight_status: string; upstream_size_bytes: number; upstream_size_gib: number; etag_present: boolean; publisher_sha256: string; publisher_sha256_verified_locally: boolean; disk: { target_directory: string; free_bytes: number; required_bytes: number; sufficient: boolean }; eligibility_blockers: string[]; download_allowed: boolean; download_started: boolean; installation_allowed: boolean; installation_started: boolean; message: string };
 
 type ComfyUIReadiness = {
   status: string; can_install_engine: boolean; hardware_profile: string;
@@ -141,6 +142,8 @@ export default function LocalModelsPage() {
   const [checkingImageModelLibrary, setCheckingImageModelLibrary] = useState(false);
   const [curatedImageCatalog, setCuratedImageCatalog] = useState<CuratedImageModelCatalog | null>(null);
   const [checkingCuratedImageCatalog, setCheckingCuratedImageCatalog] = useState(false);
+  const [imageModelPreflight, setImageModelPreflight] = useState<ImageModelPreflight | null>(null);
+  const [checkingImageModelPreflight, setCheckingImageModelPreflight] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -256,6 +259,22 @@ export default function LocalModelsPage() {
       setCheckingCuratedImageCatalog(false);
     }
   }, []);
+
+  const runImageModelPreflight = async (modelId: string) => {
+    setCheckingImageModelPreflight(true);
+    setImageModelPreflight(null);
+    setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/model-catalog/${encodeURIComponent(modelId)}/preflight`, { method: "POST", cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "图片模型下载预检失败");
+      setImageModelPreflight(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片模型下载预检失败");
+    } finally {
+      setCheckingImageModelPreflight(false);
+    }
+  };
 
   const refreshInstaller = useCallback(async () => {
     try {
@@ -647,6 +666,16 @@ export default function LocalModelsPage() {
               <a href={model.source_url} target="_blank" rel="noreferrer" className="text-cyan-200 underline">查看模型来源</a>
               <a href={model.license_url} target="_blank" rel="noreferrer" className="text-cyan-200 underline">查看许可证</a>
             </div>
+            <button type="button" disabled={checkingImageModelPreflight} onClick={() => void runImageModelPreflight(model.id)} className="mt-4 rounded-lg border border-cyan-300/30 px-3 py-2 text-sm text-cyan-100 disabled:opacity-40">
+              {checkingImageModelPreflight ? "正在查询官方文件信息…" : "检查文件大小与磁盘空间"}
+            </button>
+            {imageModelPreflight?.model_id === model.id && <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3 text-xs leading-5 text-white/70">
+              <p>官方文件精确大小：{size(imageModelPreflight.upstream_size_bytes)}（{imageModelPreflight.upstream_size_bytes.toLocaleString()} 字节）</p>
+              <p>当前可用空间：{size(imageModelPreflight.disk.free_bytes)} · 所需空间（含 1 GiB 安全余量）：{size(imageModelPreflight.disk.required_bytes)}</p>
+              <p>空间检查：{imageModelPreflight.disk.sufficient ? "通过" : "不足"} · ETag：{imageModelPreflight.etag_present ? "已提供" : "未提供"}</p>
+              <p className="mt-1 text-amber-100">下载与安装仍保持关闭；此操作只读取 HEAD 元数据，没有下载文件。</p>
+              {imageModelPreflight.eligibility_blockers.map((blocker, index) => <p key={index} className="mt-1">• {blocker}</p>)}
+            </div>}
           </div>)}
           <p className="mt-3 text-xs leading-5 text-white/45">{curatedImageCatalog?.note || "正在读取经过核验的候选模型…"}</p>
           <p className="mt-2 text-xs leading-5 text-white/45">SHA-256 尚未在本机下载后复核，精确文件字节数仍需从下载响应取得；两项完成前，安装流程必须保持关闭。当前 Ryzen 7 4800U 以 CPU 模式运行，该模型不作为快速生图推荐。</p>
