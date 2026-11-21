@@ -127,7 +127,11 @@ def build_production_readiness_report(project_id: int, db: Session):
         try:
             task_episode_id = int(metadata.get("episode_id") or 0)
             task_shot_id = int(metadata.get("shot_id") or 0)
+            task_project_id = int(metadata.get("project_id") or 0)
         except (TypeError, ValueError):
+            continue
+        # Older task records may omit project_id; when present it must match.
+        if task_project_id not in {0, project.id}:
             continue
         if task.task_type == "storyboard_video" and task_episode_id in episode_id_set and task_shot_id in shot_ids:
             video_tasks_by_shot.setdefault(task_shot_id, []).append(task)
