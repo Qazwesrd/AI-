@@ -206,5 +206,75 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 database.STORAGE_DIR = previous_storage
 
 
+    def test_newer_schema_is_rejected_before_any_mutation(self):
+        with tempfile.TemporaryDirectory(prefix="comic-newer-schema-") as temp:
+            root = Path(temp)
+            db_path = root / "newer.db"
+            storage_path = root / "storage"
+            with sqlite_connection(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE legacy_marker (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO legacy_marker (value) VALUES (?)",
+                    ("preserve-newer-database",),
+                )
+                connection.execute(
+                    "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                    (database.SCHEMA_VERSION + 1, "future_schema", "2099-01-01T00:00:00Z"),
+                )
+
+            previous_engine = database.engine
+            previous_path = database.DATABASE_PATH
+            previous_storage = database.STORAGE_DIR
+            test_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
+                future=True,
+            )
+            try:
+                database.engine = test_engine
+                database.DATABASE_PATH = db_path
+                database.STORAGE_DIR = storage_path
+
+                with self.assertRaisesRegex(RuntimeError, "任何结构变更前停止启动"):
+                    database.init_database()
+
+                with sqlite_connection(db_path) as connection:
+                    tables = {
+                        row[0] for row in connection.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        )
+                    }
+                    self.assertEqual(tables, {"legacy_marker", "schema_migrations"})
+                    self.assertEqual(
+                        connection.execute(
+                            "SELECT value FROM legacy_marker WHERE id=1"
+                        ).fetchone(),
+                        ("preserve-newer-database",),
+                    )
+                    self.assertEqual(
+                        connection.execute(
+                            "SELECT version, name FROM schema_migrations"
+                        ).fetchone(),
+                        (database.SCHEMA_VERSION + 1, "future_schema"),
+                    )
+                    self.assertEqual(
+                        connection.execute("PRAGMA integrity_check").fetchone(),
+                        ("ok",),
+                    )
+
+                self.assertFalse((storage_path / "backups" / "schema").exists())
+            finally:
+                test_engine.dispose()
+                database.engine = previous_engine
+                database.DATABASE_PATH = previous_path
+                database.STORAGE_DIR = previous_storage
+
+
 if __name__ == "__main__":
     unittest.main()
