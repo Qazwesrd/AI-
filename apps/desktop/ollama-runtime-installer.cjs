@@ -18,7 +18,7 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
 ]);
 const REQUIRED_FREE_BYTES = 5 * 1024 ** 3;
 function getApiUrl() {
-  const base = (process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\\/+$/, "");
+  const base = (process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
   return base + "/api/tags";
 }
 
