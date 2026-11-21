@@ -1,6 +1,8 @@
 import unittest
 
-from app.services.media_service import analyze_audio_video_sync, analyze_subtitle_timing
+from unittest.mock import patch
+
+from app.services.media_service import analyze_audio_video_sync, analyze_subtitle_timing, analyze_shot_media_consistency
 
 
 class AudioVideoSyncDiagnosticsTests(unittest.TestCase):
@@ -91,5 +93,27 @@ class AudioVideoSyncDiagnosticsTests(unittest.TestCase):
             analyze_subtitle_timing([], 0)
 
 
+    @patch("app.services.media_service.probe_media")
+    def test_shot_media_consistency_accepts_matching_clips(self, probe):
+        probe.side_effect = [{"streams":[{"codec_type":"video","width":1920,"height":1080,"avg_frame_rate":"25/1","codec_name":"h264","pix_fmt":"yuv420p"}]}, {"streams":[{"codec_type":"video","width":1920,"height":1080,"avg_frame_rate":"25/1","codec_name":"h264","pix_fmt":"yuv420p"}]}]
+        result = analyze_shot_media_consistency([{"shot_id":1,"shot_number":1,"path":"one.mp4"},{"shot_id":2,"shot_number":2,"path":"two.mp4"}])
+        self.assertEqual(result["anomalies"], [])
+        self.assertEqual(result["scanned_shots"], 2)
+
+    @patch("app.services.media_service.probe_media")
+    def test_shot_media_consistency_reports_resolution_and_frame_rate_mismatch(self, probe):
+        probe.side_effect = [{"streams":[{"codec_type":"video","width":1920,"height":1080,"avg_frame_rate":"25/1","codec_name":"h264","pix_fmt":"yuv420p"}]}, {"streams":[{"codec_type":"video","width":1280,"height":720,"avg_frame_rate":"30/1","codec_name":"h264","pix_fmt":"yuv420p"}]}]
+        result = analyze_shot_media_consistency([{"shot_id":1,"shot_number":1,"path":"one.mp4"},{"shot_id":2,"shot_number":2,"path":"two.mp4"}])
+        self.assertEqual(len(result["anomalies"]), 1)
+        labels = {x["label"] for x in result["anomalies"][0]["differences"]}
+        self.assertIn("画面宽度", labels)
+        self.assertIn("帧率", labels)
+
+    @patch("app.services.media_service.probe_media")
+    def test_shot_media_consistency_reports_unreadable_clip(self, probe):
+        probe.side_effect = [ValueError("probe failed")]
+        result = analyze_shot_media_consistency([{"shot_id":8,"shot_number":8,"path":"broken.mp4"}])
+        self.assertEqual(result["scanned_shots"], 0)
+        self.assertEqual(result["skipped_shots"][0]["shot_id"], 8)
 if __name__ == "__main__":
     unittest.main()

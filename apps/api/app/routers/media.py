@@ -2402,8 +2402,16 @@ def scan_episode_final_quality(path: str, episode_id: Optional[int] = None, db: 
                         if isinstance(candidate, list):
                             subtitle_cues = candidate
                         break
-        from app.services.media_service import scan_final_cut_quality
-        return scan_final_cut_quality(file_path, subtitle_cues)
+        from app.services.media_service import scan_final_cut_quality, analyze_shot_media_consistency
+        report = scan_final_cut_quality(file_path, subtitle_cues)
+        if episode_id is not None:
+            readiness = get_episode_render_readiness(episode_id, db)
+            shot_media = [{"shot_id": item.get("shot_id"), "shot_number": item.get("shot_number"), "path": (item.get("video") or {}).get("path")} for item in readiness.get("items", []) if item.get("status") == "ready" and (item.get("video") or {}).get("path")]
+            consistency = analyze_shot_media_consistency(shot_media)
+            report["shot_media_consistency"] = consistency
+            report["warnings"].extend(consistency.get("warnings") or [])
+            if consistency.get("warnings"): report["status"] = "warning"
+        return report
     except Exception as exc:
         raise HTTPException(422, "成片综合质量检查失败：" + str(exc)[:1200]) from exc
 

@@ -87,6 +87,7 @@ export default function EpisodeReadinessPage() {
     streams?: { video_codec?: string; audio_codec?: string | null; has_audio?: boolean };
     warnings?: string[];
     subtitle_timing?: { total_cues?: number; invalid_ranges?: { index: number; reason: string }[]; overlaps?: { previous_index: number; current_index: number; overlap_seconds: number }[] };
+    shot_media_consistency?: { scanned_shots?: number; skipped_shots?: { shot_number?: number; reason: string }[]; anomalies?: { shot_number?: number; differences: { label: string; expected: string | number | boolean; actual: string | number | boolean }[] }[] };
     note?: string;
   } | null>(null);
   const [timeline, setTimeline] = useState<EpisodeTimeline | null>(null);
@@ -852,6 +853,7 @@ export default function EpisodeReadinessPage() {
                   字幕 {finalQualityReport.subtitle_timing?.total_cues ?? 0} 条 · 越界/无效 {finalQualityReport.subtitle_timing?.invalid_ranges?.length ?? 0} 条 · 重叠 {finalQualityReport.subtitle_timing?.overlaps?.length ?? 0} 处
                 </p>
                 {!!finalQualityReport.warnings?.length && <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-200">{finalQualityReport.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+                {finalQualityReport.shot_media_consistency && <div className="mt-3 border-t border-white/10 pt-3"><p className="text-sm font-semibold text-white/85">逐镜头画面参数一致性</p><p className="mt-1 text-sm text-white/65">已扫描 {finalQualityReport.shot_media_consistency.scanned_shots ?? 0} 个镜头 · 异常 {finalQualityReport.shot_media_consistency.anomalies?.length ?? 0} 个 · 无法读取 {finalQualityReport.shot_media_consistency.skipped_shots?.length ?? 0} 个</p>{!!finalQualityReport.shot_media_consistency.anomalies?.length && <ul className="mt-2 space-y-2 text-sm text-amber-200">{finalQualityReport.shot_media_consistency.anomalies.map((shot,index)=><li key={index}>镜头 {shot.shot_number ?? "—"}：{shot.differences.map(d=>d.label+" "+d.actual+"（参考 "+d.expected+"）").join("；")}</li>)}</ul>}{!!finalQualityReport.shot_media_consistency.skipped_shots?.length && <p className="mt-2 text-xs text-amber-200">无法读取的镜头：{finalQualityReport.shot_media_consistency.skipped_shots.map(x=>x.shot_number ?? "未知").join("、")}</p>}</div>}
                 <p className="mt-2 text-xs text-white/45">{finalQualityReport.note}</p>
               </div>
             )}
