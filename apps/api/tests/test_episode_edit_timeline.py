@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline
 from app.models.visual import VisualAsset
-from app.models.media import MediaFile, MediaTask
+from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.routers.media import (
     EpisodeTimelineInput, get_episode_edit_timeline,
     save_episode_edit_timeline,
@@ -31,6 +31,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
                 VisualAsset.__table__,
                 MediaTask.__table__,
                 MediaFile.__table__,
+                SubtitleTrack.__table__,
             ],
         )
         self.Session = sessionmaker(bind=engine)
@@ -238,6 +239,79 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
                 save_episode_edit_timeline(self.episode_id, payload, self.db)
         self.assertEqual(caught.exception.status_code, 422)
         self.assertIn("属于其他项目", caught.exception.detail)
+
+    def test_rejects_subtitle_track_owned_by_another_project(self):
+        track = SubtitleTrack(
+            name="foreign.srt",
+            file_path="/managed/subtitles/foreign.srt",
+            project_id=2,
+            episode_id=99,
+        )
+        self.db.add(track)
+        self.db.commit()
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            subtitle_track_id=track.id,
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("其他项目", caught.exception.detail)
+
+    def test_rejects_subtitle_track_owned_by_another_episode_in_same_project(self):
+        track = SubtitleTrack(
+            name="other-episode.srt",
+            file_path="/managed/subtitles/other-episode.srt",
+            project_id=1,
+            episode_id=999,
+        )
+        self.db.add(track)
+        self.db.commit()
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            subtitle_track_id=track.id,
+        )
+        with self.assertRaises(HTTPException) as caught:
+            save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("其他分集", caught.exception.detail)
+
+    def test_allows_legacy_unscoped_subtitle_track(self):
+        track = SubtitleTrack(
+            name="legacy.srt",
+            file_path="/managed/subtitles/legacy.srt",
+        )
+        self.db.add(track)
+        self.db.commit()
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            subtitle_track_id=track.id,
+        )
+        saved = save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(saved["timeline"]["subtitle_track_id"], track.id)
+
+    def test_get_timeline_suppresses_foreign_subtitle_track_from_legacy_data(self):
+        track = SubtitleTrack(
+            name="foreign.srt",
+            file_path="/managed/subtitles/foreign.srt",
+            project_id=2,
+            episode_id=99,
+        )
+        self.db.add(track)
+        self.db.flush()
+        record = EpisodeEditTimeline(
+            episode_id=self.episode_id,
+            edit_data={
+                "shot_order": [self.shot_a.id, self.shot_b.id],
+                "subtitle_track_id": track.id,
+            },
+            version=1,
+        )
+        self.db.add(record)
+        self.db.commit()
+        result = get_episode_edit_timeline(self.episode_id, self.db)
+        self.assertNotIn("subtitle_track_id", result["timeline"])
+        self.assertIn("其他项目", result["subtitle_track_warning"])
 
     def test_rejects_cut_with_nonzero_duration(self):
         payload = EpisodeTimelineInput(
