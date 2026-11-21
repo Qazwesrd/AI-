@@ -12,6 +12,146 @@ type LibraryImage = { id: number; name: string; mime_type: string | null; file_s
 type ImageVersion = { version_number: number; media_file_id: number; name: string; file_size: number; download_url: string; current: boolean };
 const styles = ["国漫", "仿真人", "3D漫", "2D漫"] as const;
 
+
+type ConsistencyResult = {
+  ready: boolean;
+  shot_count: number;
+  missing_profile_count: number;
+  missing_profiles: { characters: string[]; scenes: string[]; props: string[] };
+  shots: Array<{ shot_id: number; shot_number: number; prompt_preview: string; consistency_rules_applied: boolean }>;
+  message: string;
+};
+
+function parseProfileLines(value: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of value.split(/\\r?\\n/)) {
+    const match = line.match(/^\\s*(\\d+)\\s*[=:：]\\s*(.+)\\s*$/);
+    if (match) result[match[1]] = match[2].trim();
+  }
+  return result;
+}
+
+function formatProfileLines(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  return Object.entries(value as Record<string, unknown>)
+    .map(([id, description]) => typeof description === "string" ? `${id}：${description}` : "")
+    .filter(Boolean).join("\\n");
+}
+
+function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
+  const [visualStyle, setVisualStyle] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState("");
+  const [characters, setCharacters] = useState("");
+  const [scenes, setScenes] = useState("");
+  const [props, setProps] = useState("");
+  const [result, setResult] = useState<ConsistencyResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!projectId) { setResult(null); return; }
+    let active = true;
+    setBusy(true); setError(""); setNotice(""); setResult(null);
+    fetch(`${API}/api/local-ai/images/projects/${projectId}/consistency`, { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取一致性档案失败");
+        if (!active) return;
+        const profile = data.profile || {};
+        setVisualStyle(profile.visual_style || "");
+        setNegativePrompt(profile.negative_prompt || "");
+        setCharacters(formatProfileLines(profile.character_profiles));
+        setScenes(formatProfileLines(profile.scene_profiles));
+        setProps(formatProfileLines(profile.prop_profiles));
+      })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取一致性档案失败"); })
+      .finally(() => { if (active) setBusy(false); });
+    return () => { active = false; };
+  }, [projectId]);
+
+  async function saveProfile() {
+    if (!projectId) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/projects/${projectId}/consistency`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          visual_style: visualStyle, negative_prompt: negativePrompt,
+          character_profiles: parseProfileLines(characters),
+          scene_profiles: parseProfileLines(scenes), prop_profiles: parseProfileLines(props),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "保存一致性档案失败");
+      setNotice("统一外观档案已保存。接下来先执行批量检查。");
+    } catch (err) { setError(err instanceof Error ? err.message : "保存一致性档案失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function runPreflight(apply: boolean) {
+    if (!projectId) return;
+    setBusy(true); setError(""); setNotice("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/projects/${projectId}/consistency/${apply ? "apply" : "preflight"}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shot_ids: [] }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        if (data.detail) throw new Error(data.detail);
+        throw new Error("批量一致性检查失败");
+      }
+      setResult(data.preflight || data);
+      setNotice(apply ? `已将统一外观规则写入 ${data.updated_shot_count} 个分镜提示词。` : "检查完成。先补齐缺失档案，再点击应用。");
+    } catch (err) { setError(err instanceof Error ? err.message : "批量一致性检查失败"); }
+    finally { setBusy(false); }
+  }
+
+  if (!projectId) return null;
+  return <section className="space-y-4 rounded-2xl border border-violet-300/25 bg-violet-950/15 p-5">
+    <div><h2 className="text-lg font-semibold">跨分镜角色、场景与道具一致性</h2>
+      <p className="mt-1 text-sm text-white/55">为同一个角色固定外观描述，为场景和道具固定视觉特征。先检查，再明确应用到本项目最多 200 个分镜。</p></div>
+    <label className="block text-sm text-white/70">全项目统一画风
+      <textarea value={visualStyle} onChange={(event) => setVisualStyle(event.target.value)} rows={2} maxLength={1200} placeholder="例如：国漫电影质感，统一线稿、色彩、光照和镜头质感" className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3" />
+    </label>
+    <label className="block text-sm text-white/70">全项目统一避免项
+      <textarea value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} rows={2} maxLength={2000} placeholder="例如：避免角色换脸、发色变化、服装变色、比例变化、文字水印" className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3" />
+    </label>
+    <div className="grid gap-3 md:grid-cols-3">
+      <label className="block text-sm text-white/70">角色外观档案
+        <textarea value={characters} onChange={(event) => setCharacters(event.target.value)} rows={5} placeholder={"每行一条：素材编号：固定外观描述\\n例如：12：银色长发，蓝色眼睛，白金圣衣"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+      </label>
+      <label className="block text-sm text-white/70">场景外观档案
+        <textarea value={scenes} onChange={(event) => setScenes(event.target.value)} rows={5} placeholder={"每行一条：场景素材编号：固定场景描述"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+      </label>
+      <label className="block text-sm text-white/70">道具外观档案
+        <textarea value={props} onChange={(event) => setProps(event.target.value)} rows={5} placeholder={"每行一条：道具素材编号：固定外观描述"} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-950 p-3 text-xs" />
+      </label>
+    </div>
+    <p className="text-xs text-white/45">编号对应项目中角色、场景和道具的素材编号；每行格式为“编号：描述”。保存档案不会自动修改分镜。</p>
+    <div className="flex flex-wrap gap-2">
+      <button type="button" onClick={() => void saveProfile()} disabled={busy} className="rounded-lg border border-violet-300/30 px-4 py-2 text-sm text-violet-100 disabled:opacity-40">{busy ? "处理中…" : "保存统一外观档案"}</button>
+      <button type="button" onClick={() => void runPreflight(false)} disabled={busy} className="rounded-lg border border-white/20 px-4 py-2 text-sm disabled:opacity-40">批量检查一致性</button>
+      <button type="button" onClick={() => void runPreflight(true)} disabled={busy} className="rounded-lg border border-emerald-300/30 px-4 py-2 text-sm text-emerald-100 disabled:opacity-40">应用到全部分镜提示词</button>
+    </div>
+    {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
+    {notice && <p className="text-sm text-emerald-200">{notice}</p>}
+    {result && <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-sm">检查了 {result.shot_count} 个分镜；缺失外观档案 {result.missing_profile_count} 项。</p>
+      {result.missing_profile_count > 0 && <div className="text-xs text-amber-200">
+        {result.missing_profiles.characters.length > 0 && <p>缺少角色档案：{result.missing_profiles.characters.join("、")}</p>}
+        {result.missing_profiles.scenes.length > 0 && <p>缺少场景档案：{result.missing_profiles.scenes.join("、")}</p>}
+        {result.missing_profiles.props.length > 0 && <p>缺少道具档案：{result.missing_profiles.props.join("、")}</p>}
+      </div>}
+      <p className="text-xs text-white/50">{result.message}</p>
+      <details className="text-xs text-white/60"><summary className="cursor-pointer">查看分镜提示词预览</summary>
+        <div className="mt-2 max-h-64 space-y-2 overflow-auto">{result.shots.map((shot) => <div key={shot.shot_id} className="rounded bg-black/20 p-2"><p className="font-medium">镜头 {shot.shot_number} · #{shot.shot_id}</p><pre className="mt-1 whitespace-pre-wrap break-words">{shot.prompt_preview || "尚无图片提示词或一致性规则"}</pre></div>)}</div>
+      </details>
+    </div>}
+    <p className="text-xs text-white/40">本功能仅生成和保存本地提示词规则，不会调用云端 AI，也不会自动开始生图；ComfyUI 仍需用户单独确认生成。</p>
+  </section>;
+}
+
 export default function LocalImageStudioPage() {
   const [models, setModels] = useState<string[]>([]);
   const [checkpoint, setCheckpoint] = useState("");
@@ -300,7 +440,7 @@ export default function LocalImageStudioPage() {
       </section>
 
 
-      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
+      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
           <span className="text-xs text-white/50">{shotImages.length} 张</span>
