@@ -307,9 +307,6 @@ finally {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
-) {
-    throw "ComfyUI ReleaseTag 格式无效；只允许 1-128 个字母、数字、点、下划线或连字符，且必须以字母或数字开头。"
-}
 if ($MaximumEntries -lt 1 -or $MaximumEntries -gt 100000 -or
     $MaximumEvidenceFiles -lt 1 -or $MaximumEvidenceFiles -gt 50000 -or
     $MaximumMetadataBytes -lt 1 -or $MaximumMetadataBytes -gt 20MB -or
