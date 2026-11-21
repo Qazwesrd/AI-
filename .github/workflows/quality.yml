@@ -38,6 +38,7 @@ jobs:
         run: python -m unittest apps/api/tests/test_comfyui_portable_audit_script.py -v
       - name: Validate ComfyUI dependency inventory tool safeguards
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           script = Path("scripts/audit-comfyui-portable-dependencies.ps1").read_text(encoding="utf-8")
@@ -46,12 +47,13 @@ jobs:
               "l -slt",
               "METADATA",
               "PKG-INFO",
-              "license_review_status = \"pending\"",
-              "inventory_status = \"inventory_generated_review_pending\"",
+              'license_review_status = "pending"',
+              'inventory_status = "inventory_generated_review_pending"',
               "distribution_approved = $false",
               "MaximumEvidenceFiles",
               "MaximumMetadataBytes",
               "MaximumLicenseBytes",
+              "MaximumTotalEvidenceBytes",
               "finally {",
               "Remove-Item -LiteralPath $temporaryRoot",
           ]
@@ -61,6 +63,7 @@ jobs:
           assert "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" in packer
           assert "dependency_inventory_tool" in packer
           print("ComfyUI dependency inventory tool safeguards and offline-bundle inclusion are present.")
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
