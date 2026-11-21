@@ -254,6 +254,25 @@ foreach ($variant in $inventoryVariants) {
         throw "自动清点报告不得将任何组件许可证标记为已批准：$($variant.asset)"
     }
 }
+
+$auditRegisterPath = Join-Path $bundleRoot "THIRD_PARTY_NOTICES\comfyui-portable-dependency-audit.json"
+if (!(Test-Path -LiteralPath $auditRegisterPath -PathType Leaf)) {
+    throw "离线安装套件缺少第三方依赖审查登记表。"
+}
+$auditRegister = Get-Content -LiteralPath $auditRegisterPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($auditRegister.audit_status -ne "pending" -or $auditRegister.distribution_approved -ne $false) {
+    throw "第三方依赖审查登记表状态无效；自动清点不能代替人工许可证审核。"
+}
+$registerVariants = @($auditRegister.portable_variants)
+foreach ($variant in $inventoryVariants) {
+    $registerEntry = @($registerVariants | Where-Object { $_.asset -ceq [string]$variant.asset })
+    if ($registerEntry.Count -ne 1 -or
+        $registerEntry[0].inventory_status -ne "inventory_generated_review_pending" -or
+        [string]$registerEntry[0].sha256 -ne [string]$variant.sha256 -or
+        [string]$registerEntry[0].release_tag -ne [string]$variant.release_tag) {
+        throw "第三方审查登记表与依赖清点报告不匹配：$($variant.asset)"
+    }
+}
 foreach ($manifestAsset in $manifestAssetItems) {
     $expectedUrl = "https://github.com/Comfy-Org/ComfyUI/releases/download/$($manifest.comfyui_version)/$($manifestAsset.name)"
     if ($manifestAsset.verified -ne $true -or $manifestAsset.source -ne $expectedUrl -or
