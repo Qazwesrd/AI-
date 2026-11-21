@@ -2690,12 +2690,15 @@ def list_subtitles(
     episode_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(SubtitleTrack)
-    if project_id is not None:
-        query = query.filter(SubtitleTrack.project_id == project_id)
+    rows = db.query(SubtitleTrack).order_by(SubtitleTrack.id.desc()).all()
     if episode_id is not None:
-        query = query.filter(SubtitleTrack.episode_id == episode_id)
-    rows = query.order_by(SubtitleTrack.id.desc()).all()
+        rows = [
+            item for item in rows
+            if item.project_id in (None, project_id)
+            and item.episode_id in (None, episode_id)
+        ]
+    elif project_id is not None:
+        rows = [item for item in rows if item.project_id in (None, project_id)]
     return [{
         "id": x.id, "name": x.name, "path": x.file_path,
         "format": x.format, "language": x.language,
