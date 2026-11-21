@@ -401,7 +401,7 @@ def build_production_readiness_report(project_id: int, db: Session):
             candidate_track = db.query(SubtitleTrack).filter(
                 SubtitleTrack.id == subtitle_track_id
             ).first()
-            if candidate_track and not _subtitle_track_matches_episode(
+            if not candidate_track or not _subtitle_track_matches_episode(
                 candidate_track, project.id, episode.id
             ):
                 subtitle_track_mismatch = True
