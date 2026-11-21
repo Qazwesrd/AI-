@@ -25,6 +25,11 @@ from app.routers import project_exports
 
 
 class ProjectArchiveExportTests(unittest.TestCase):
+    def test_comfyui_output_path_rejects_traversal_without_filesystem_access(self):
+        self.assertIsNone(project_exports._safe_comfyui_output_file("../outside.png", ""))
+        self.assertIsNone(project_exports._safe_comfyui_output_file("safe.png", "../outside"))
+        self.assertIsNone(project_exports._safe_comfyui_output_file("safe.png", "folder\\..\\outside"))
+
     def test_path_rewriter_only_rewrites_path_fields(self):
         value = {
             "image_path": "/private/storage/character.png",
