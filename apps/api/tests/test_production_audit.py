@@ -12,6 +12,7 @@ from app.models.novel import Chapter, Novel
 from app.models.story import EpisodePlan, StoryboardShot, StoryProject
 from app.routers.production_audit import (
     _as_int_ids,
+    _project_media_file_state,
     build_production_readiness_report,
     audit_episode_video_quality,
 )
@@ -21,6 +22,53 @@ class ProductionReadinessAuditTests(unittest.TestCase):
     def test_as_int_ids_ignores_invalid_values(self):
         self.assertEqual(_as_int_ids([1, "2", 0, -1, "bad", None]), {1, 2})
         self.assertEqual(_as_int_ids(None), set())
+
+    def test_project_media_state_rejects_foreign_owned_audio_and_subtitles(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            foreign_file = root / "foreign.mp3"
+            foreign_file.write_bytes(b"media")
+            engine = create_engine(f"sqlite:///{root / 'ownership.db'}")
+            Base.metadata.create_all(engine)
+            db = Session(engine)
+            try:
+                db.add(MediaFile(
+                    name="foreign.mp3",
+                    category="audio",
+                    file_path=str(foreign_file),
+                    metadata_json={"project_id": 22},
+                ))
+                db.commit()
+                with patch("app.routers.production_audit.safe_storage_file", return_value=foreign_file):
+                    state = _project_media_file_state(db, str(foreign_file), 11)
+                self.assertFalse(state["exists"])
+                self.assertIn("其他项目", state["reason"])
+            finally:
+                db.close()
+                engine.dispose()
+
+    def test_project_media_state_keeps_legacy_unscoped_library_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            shared_file = root / "shared.mp3"
+            shared_file.write_bytes(b"media")
+            engine = create_engine(f"sqlite:///{root / 'ownership-legacy.db'}")
+            Base.metadata.create_all(engine)
+            db = Session(engine)
+            try:
+                db.add(MediaFile(
+                    name="shared.mp3",
+                    category="audio",
+                    file_path=str(shared_file),
+                    metadata_json={},
+                ))
+                db.commit()
+                with patch("app.routers.production_audit.safe_storage_file", return_value=shared_file):
+                    state = _project_media_file_state(db, str(shared_file), 11)
+                self.assertTrue(state["exists"])
+            finally:
+                db.close()
+                engine.dispose()
 
     def test_project_audit_reports_unfinished_pipeline_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:
