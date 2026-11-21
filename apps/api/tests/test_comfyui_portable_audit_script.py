@@ -35,6 +35,9 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         source = source_path.read_text(encoding="utf-8")
         self.assertEqual(source.count('ContainsKey("Folder")'), 2)
         self.assertEqual(source.count('ContainsKey("Attributes")'), 2)
+        self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
+        self.assertIn('"e", "-y", "-spd"', source)
+        self.assertIn('if ($entry.IsLink)', source)
         self.assertFalse(any('IsFolder = ($record["Folder"] -eq "+")' in line for line in source.splitlines()))
         self.assertFalse(any('Attributes = [string]$record["Attributes"]' in line for line in source.splitlines()))
 
