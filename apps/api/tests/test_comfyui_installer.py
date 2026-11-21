@@ -1,7 +1,7 @@
 import unittest
 
 from app.routers.comfyui_installer import (
-    GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,
+    GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,\n    classify_gpu_vendor, parse_windows_video_adapters,
 )
 
 
@@ -38,6 +38,20 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertFalse(result["network_used"])
 
 
+    def test_gpu_vendor_classification_prefers_pnp_vendor_id(self):
+        self.assertEqual(classify_gpu_vendor("Generic Display Adapter", "PCI\\\\VEN_10DE&DEV_2684"), "NVIDIA")
+        self.assertEqual(classify_gpu_vendor("Generic Display Adapter", "PCI\\\\VEN_1002&DEV_744C"), "AMD")
+        self.assertEqual(classify_gpu_vendor("Generic Display Adapter", "PCI\\\\VEN_8086&DEV_56A0"), "Intel")
+        self.assertEqual(classify_gpu_vendor("Mystery Adapter", None), "unknown")
+
+    def test_windows_adapter_parser_does_not_trust_adapter_ram(self):
+        adapters = parse_windows_video_adapters([
+            {"Name": "NVIDIA GeForce RTX", "PNPDeviceID": "PCI\\\\VEN_10DE", "AdapterRAM": 4294967295},
+            {"Name": "Intel UHD Graphics", "PNPDeviceID": "PCI\\\\VEN_8086", "AdapterRAM": 1073741824},
+        ])
+        self.assertEqual([item["vendor"] for item in adapters], ["NVIDIA", "Intel"])
+        self.assertIsNone(adapters[0]["vram_bytes"])
+        self.assertIsNone(adapters[1]["vram_bytes"])
 
     def test_release_catalog_only_accepts_official_assets_and_urls(self):
         payload = {
