@@ -48,7 +48,9 @@ jobs:
             "scripts/audit-comfyui-portable-dependencies.ps1",
             "scripts/prepare-local-ai-offline-payload.ps1",
             "scripts/install-local-ai-offline.ps1",
+            "scripts/install-local-engines-transaction.ps1",
             "scripts/tests/test-local-ai-offline-install.ps1",
+            "scripts/tests/test-local-engines-transaction.ps1",
             "scripts/tests/test-comfyui-portable-audit.ps1"
           )) {
             $tokens = $null
@@ -72,6 +74,10 @@ jobs:
       - name: Run ComfyUI dependency audit integration test
         shell: pwsh
         run: ./scripts/tests/test-comfyui-portable-audit.ps1
+
+      - name: Run local engine transaction integration test
+        shell: pwsh
+        run: ./scripts/tests/test-local-engines-transaction.ps1
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
