@@ -129,7 +129,8 @@ try {
     if (!$ollamaExe) {
         throw "解压后的 Ollama 运行包缺少 ollama.exe。"
     }
-    Move-Item -LiteralPath $extractRoot -Destination $runtimeRoot
+    $runtimeSourceRoot = $ollamaExe.Directory.FullName
+    Move-Item -LiteralPath $runtimeSourceRoot -Destination $runtimeRoot
     Copy-Item -LiteralPath (Join-Path $payload "models") -Destination $modelsRoot -Recurse
 
     foreach ($file in $modelFiles) {
