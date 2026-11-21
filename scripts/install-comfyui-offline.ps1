@@ -186,8 +186,11 @@ if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf) -or !(Test-Path -Lite
     throw "离线引擎数据包不完整，缺少 manifest.json 或 7zr.exe。请确认 Setup.exe 与 ComfyUI-Payload 文件夹在同一目录。"
 }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($manifest.target_architecture -ne "windows-x64" -or $manifest.bundle_type -ne "complete-offline-comfyui-engine") {
-    throw "离线引擎数据包版本或系统架构不匹配。"
+if ($manifest.target_architecture -ne "windows-x64" -or
+    $manifest.bundle_type -ne "complete-offline-comfyui-engine-internal-validation-only" -or
+    $manifest.distribution_approved -ne $false -or
+    $manifest.distribution_status -ne "blocked-pending-third-party-dependency-audit") {
+    throw "离线引擎数据包版本、系统架构或内部验证/分发门禁状态不匹配。"
 }
 $expectedAssetNames = @(
     "ComfyUI_windows_portable_nvidia.7z",
