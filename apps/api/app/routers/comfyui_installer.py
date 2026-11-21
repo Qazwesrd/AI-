@@ -3,9 +3,9 @@
 This endpoint does not download, install, launch, or modify anything. It reports
 hardware and storage constraints before the user chooses an installation plan.
 """
-import shutil
-
 import json
+import re
+import shutil
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen\nfrom urllib.parse import urlsplit\nimport re
 
