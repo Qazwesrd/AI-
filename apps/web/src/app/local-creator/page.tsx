@@ -36,6 +36,7 @@ export default function LocalCreatorPage() {
   const [novelId, setNovelId] = useState("");
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [chapterId, setChapterId] = useState("");
+  const [sourceContext, setSourceContext] = useState<{ novel_id: number; chapter_id: number } | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
   const [packageLoading, setPackageLoading] = useState(false);
   const [packageStages, setPackageStages] = useState<Array<{ stage: string; title: string; content: string }>>([]);
@@ -95,6 +96,7 @@ export default function LocalCreatorPage() {
       const chapterBudget = Math.max(1000, 12000 - Math.min(continuityBlock.length, 4000));
       const combined = `【小说】${context.novel_title}\n【章节】第${context.chapter_number}章 ${context.chapter_title}\n\n【章节正文】\n${context.content.slice(0, chapterBudget)}${continuityBlock.slice(0, 4000)}`;
       setSource(combined.slice(0, 12000));
+      setSourceContext({ novel_id: Number(novelId), chapter_id: Number(chapterId) });
       setNotice(`已载入“${context.novel_title} / ${context.chapter_title}”。${context.source_text_truncated || context.continuity_truncated || combined.length > 12000 ? "资料较长，部分内容已按安全长度截取。" : ""}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "章节资料读取失败");
@@ -128,8 +130,8 @@ export default function LocalCreatorPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model, style, source_text: source, extra_requirements: extra,
-          novel_id: novelId ? Number(novelId) : null,
-          chapter_id: chapterId ? Number(chapterId) : null,
+          novel_id: sourceContext?.novel_id ?? null,
+          chapter_id: sourceContext?.chapter_id ?? null,
         }),
       });
       const data = await response.json();
@@ -198,7 +200,7 @@ export default function LocalCreatorPage() {
           </label>
         </div>
         <label className="mt-4 block text-sm">章节正文与连续性资料（可编辑，最多 12,000 字符）</label>
-        <textarea value={source} onChange={(e) => setSource(e.target.value)} maxLength={12000} rows={12} placeholder="选择上方小说章节后点击载入，也可以直接粘贴素材……" className="mt-1 w-full rounded-xl border border-white/15 bg-slate-950 p-3 text-sm leading-6 outline-none focus:border-cyan-400" />
+        <textarea value={source} onChange={(e) => { setSource(e.target.value); setSourceContext(null); }} maxLength={12000} rows={12} placeholder="选择上方小说章节后点击载入，也可以直接粘贴素材……" className="mt-1 w-full rounded-xl border border-white/15 bg-slate-950 p-3 text-sm leading-6 outline-none focus:border-cyan-400" />
         <label className="mt-3 block text-sm">额外要求（选填）</label>
         <textarea value={extra} onChange={(e) => setExtra(e.target.value)} maxLength={3000} rows={3} placeholder="例如：严格按原著顺序；人物服装、发型、道具保持连续一致；每集约 2 分钟……" className="mt-1 w-full rounded-xl border border-white/15 bg-slate-950 p-3 text-sm leading-6 outline-none focus:border-cyan-400" />
         <div className="mt-4 flex flex-wrap items-center gap-3">
