@@ -52,6 +52,7 @@ function Select-ComfyAsset($Adapters) {
                 name = "ComfyUI_windows_portable_nvidia_cu126.7z"
                 detected_gpu = $model
                 vendor = "NVIDIA"
+                runtime_mode = "gpu"
                 selection_reason = "GTX 10 系列及更旧型号，使用官方 cu126 运行包"
             }
         }
@@ -59,6 +60,7 @@ function Select-ComfyAsset($Adapters) {
             name = "ComfyUI_windows_portable_nvidia.7z"
             detected_gpu = $model
             vendor = "NVIDIA"
+            runtime_mode = "gpu"
             selection_reason = "除 GTX 10 系列及更旧型号外，使用官方标准 NVIDIA 运行包"
         }
     }
