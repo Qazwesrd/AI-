@@ -46,7 +46,9 @@ class LocalSpecializedModelInput(BaseModel):
         if not re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,62}", normalized):
             raise ValueError("模型名称只能使用 2-63 位小写英文字母、数字、点、下划线或连字符")
         return normalized
-\n\nCREATIVE_TASKS = {
+
+
+CREATIVE_TASKS = {
     "screenplay": "将素材改编为可拍摄的短剧剧本。输出场次、地点、时间、人物、动作、对白和必要的转场，不擅自改变核心剧情。",
     "character": "整理人物设定。输出姓名、身份、性格、外貌、服装、能力、人物关系、当前剧情阶段状态，区分原文事实与合理推测。",
     "plot": "分析剧情。输出事件顺序、因果关系、冲突、伏笔、人物动机和待确认信息，不凭空补写原文没有的事实。",
