@@ -464,6 +464,9 @@ export default function AIToolsPage() {
         setNotice(`已打开 ${target.name}。提示词已复制；当前运行环境不支持内嵌浏览器自动收集，请手动导入结果。`);
       }
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "opened" } : item));
+      setActiveTaskId(task.id);
+      setResultText(task.resultText || "");
+      setResultUrl(task.resultUrl || "");
     } catch {
       setNotice("打开网页失败，请检查工具网址或默认浏览器设置。");
     }
