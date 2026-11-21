@@ -35,3 +35,15 @@ contextBridge.exposeInMainWorld("aiBrowserDesktop", {
     return () => ipcRenderer.removeListener("ai-browser:download-rejected", listener);
   }
 });
+
+ 
+contextBridge.exposeInMainWorld("localAIInstallerDesktop", {
+  getStatus: () => ipcRenderer.invoke("local-ai:ollama-status"),
+  install: (confirm) => ipcRenderer.invoke("local-ai:install-ollama", { confirm }),
+  cancelDownload: () => ipcRenderer.invoke("local-ai:cancel-ollama-download"),
+  onProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("local-ai:ollama-install-progress", listener);
+    return () => ipcRenderer.removeListener("local-ai:ollama-install-progress", listener);
+  }
+});

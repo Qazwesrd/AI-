@@ -34,6 +34,26 @@ type RuntimeModel = { name: string; size_bytes?: number | null };
 type Runtime = { status: string; models: RuntimeModel[]; message: string };
 type InstallerInfo = { engine_status: string; model: string; model_size_bytes: number; required_free_bytes: number; free_bytes: number | null; enough_space: boolean; installed: boolean | null; download_source: string; license: string; license_url: string; job: { status: string; stage: string; percent: number; completed_bytes: number; total_bytes: number; error?: string | null } };
 
+type HardwareReadiness = {
+  model: string; status: string; label: string; free_disk_bytes: number | null;
+  ram_bytes: number | null; vram_bytes: number | null; logical_cores: number | null;
+  operating_system: { status: string; message: string; supported?: boolean | null };
+  reasons: string[]; blockers: string[]; note: string;
+  ollama_running: boolean; ollama_model_installed: boolean;
+};
+type OllamaRuntimeStatus = { installed: boolean; status: string; freeBytes: number | null; requiredFreeBytes: number; enoughSpace: boolean; installDirectory: string };
+type OllamaInstallProgress = { status: string; stage: string; percent?: number | null; receivedBytes?: number; totalBytes?: number; message: string };
+declare global {
+  interface Window {
+    localAIInstallerDesktop?: {
+      getStatus: () => Promise<OllamaRuntimeStatus>;
+      install: (confirm: boolean) => Promise<{ status: string }>;
+      cancelDownload: () => Promise<{ cancelled: boolean }>;
+      onProgress: (callback: (progress: OllamaInstallProgress) => void) => () => void;
+    };
+  }
+}
+
 type Catalog = {
   items: ModelItem[];
   total: number;
@@ -76,6 +96,12 @@ export default function LocalModelsPage() {
   const [creatingModel, setCreatingModel] = useState(false);
   const [installerInfo, setInstallerInfo] = useState<InstallerInfo | null>(null);
   const [installingBaseModel, setInstallingBaseModel] = useState(false);
+  const [runtimeInstallStatus, setRuntimeInstallStatus] = useState<OllamaRuntimeStatus | null>(null);
+  const [runtimeInstallProgress, setRuntimeInstallProgress] = useState<OllamaInstallProgress | null>(null);
+  const [installingRuntime, setInstallingRuntime] = useState(false);
+  const [hasDesktopInstaller, setHasDesktopInstaller] = useState(false);
+  const [hardwareReadiness, setHardwareReadiness] = useState<HardwareReadiness | null>(null);
+  const [checkingHardware, setCheckingHardware] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -93,6 +119,20 @@ export default function LocalModelsPage() {
     }
   }, []);
 
+  const refreshHardwareReadiness = useCallback(async () => {
+    setCheckingHardware(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/hardware-readiness`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "硬件检测失败");
+      setHardwareReadiness(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "硬件检测失败");
+    } finally {
+      setCheckingHardware(false);
+    }
+  }, []);
+
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -102,7 +142,26 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); }, [refresh, refreshInstaller]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness]);
+
+  useEffect(() => {
+    const desktop = window.localAIInstallerDesktop;
+    if (!desktop) return;
+    setHasDesktopInstaller(true);
+    let mounted = true;
+    void desktop.getStatus().then(result => { if (mounted) setRuntimeInstallStatus(result); }).catch(() => {});
+    const unsubscribe = desktop.onProgress(progress => {
+      if (!mounted) return;
+      setRuntimeInstallProgress(progress);
+      if (["success", "failed", "cancelled"].includes(progress.status)) {
+        setInstallingRuntime(false);
+        void desktop.getStatus().then(result => { if (mounted) setRuntimeInstallStatus(result); }).catch(() => {});
+        void refreshRuntime();
+        void refreshInstaller();
+      }
+    });
+    return () => { mounted = false; unsubscribe(); };
+  }, [refreshInstaller]);
 
   useEffect(() => {
     if (!installerInfo || !["downloading", "verifying"].includes(installerInfo.job.status)) return;
@@ -128,6 +187,44 @@ export default function LocalModelsPage() {
       setBaseModel((current) => current || result.models?.[0]?.name || "");
     } catch (err) {
       setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });
+    }
+  };
+
+  const installOllamaRuntime = async () => {
+    const desktop = window.localAIInstallerDesktop;
+    if (!desktop) {
+      setError("自动安装本地运行环境需要 Windows 桌面安装版。请安装桌面版后再使用此功能。");
+      return;
+    }
+    if (!window.confirm("即将从 Ollama 官方网站下载并安装本地运行环境。安装程序可能需要较大网络流量，安装至少需要约 4 GB 磁盘空间（建议预留 5 GiB）。之后还需单独下载约 2.5 GB 的 Qwen3 4B 模型，并为模型预留至少 6 GiB 空间。不会产生 API 费用，也不会连接云端模型。是否继续？")) return;
+    setInstallingRuntime(true); setError(""); setMessage("");
+    setRuntimeInstallProgress({ status: "starting", stage: "准备下载", percent: 0, message: "正在启动安装流程" });
+    try {
+      const result = await desktop.install(true);
+      if (result.status === "already_installed") {
+        setMessage("检测到 Ollama 已安装并运行。");
+        setInstallingRuntime(false);
+      } else {
+        setMessage("已启动 Ollama 本地运行环境安装。");
+      }
+      const status = await desktop.getStatus();
+      setRuntimeInstallStatus(status);
+      await refreshRuntime();
+      await refreshInstaller();
+    } catch (err) {
+      setInstallingRuntime(false);
+      setError(err instanceof Error ? err.message : "Ollama 本地运行环境安装失败");
+      const status = await desktop.getStatus().catch(() => null);
+      if (status) setRuntimeInstallStatus(status);
+    }
+  };
+
+  const cancelOllamaDownload = async () => {
+    try {
+      const result = await window.localAIInstallerDesktop?.cancelDownload();
+      if (result?.cancelled) setMessage("已发送取消下载请求。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取消下载失败");
     }
   };
 
@@ -234,7 +331,7 @@ export default function LocalModelsPage() {
         <section className="rounded-2xl border border-emerald-300/20 bg-emerald-400/5 p-4">
           <div className="font-semibold text-emerald-100">严格本地管理模式</div>
           <p className="mt-2 text-sm leading-6 text-white/65">
-            本页面不会联网、下载、启动、删除或修改模型文件，也不会调用云端 API。不会产生模型服务费或下载流量费用。
+            本页面不会自动联网或下载。只有在你明确确认后，才会下载官方运行环境或模型文件；不会调用云端 API，也不会产生模型服务费。
             本地运行仍会使用电脑硬件和电力。许可证信息需要你自行查阅官方来源，软件不会把用户填写的状态当作法律核验结果。
           </p>
         </section>
