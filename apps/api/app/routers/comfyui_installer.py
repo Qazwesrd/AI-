@@ -601,3 +601,141 @@ def download_verified_official_asset(asset, release_tag, install_root, destinati
         except OSError:
             pass
         raise
+
+
+# Download tasks are process-local and intentionally do not start until the
+# explicit /download/start confirmation endpoint is called.
+import threading
+import uuid
+
+_DOWNLOAD_TASKS = {}
+_DOWNLOAD_TASKS_LOCK = threading.Lock()
+_DOWNLOAD_THREADS = {}
+
+
+def _public_download_task(task):
+    return {
+        "task_id": task["task_id"],
+        "status": task["status"],
+        "asset_name": task["asset_name"],
+        "version": task["version"],
+        "received_bytes": task["received_bytes"],
+        "total_bytes": task["total_bytes"],
+        "percent": task["percent"],
+        "error": task.get("error"),
+        "verified": task["status"] == "verified",
+        "installation_started": False,
+    }
+
+
+def _run_download_task(task_id, asset, version, install_root):
+    from pathlib import Path
+    with _DOWNLOAD_TASKS_LOCK:
+        task = _DOWNLOAD_TASKS.get(task_id)
+        if task is None:
+            return
+        cancel_event = task["cancel_event"]
+        task["status"] = "downloading"
+
+    def update(progress):
+        with _DOWNLOAD_TASKS_LOCK:
+            current = _DOWNLOAD_TASKS.get(task_id)
+            if current is None:
+                return
+            current["received_bytes"] = progress.get("received_bytes", current["received_bytes"])
+            current["total_bytes"] = progress.get("total_bytes", current["total_bytes"])
+            current["percent"] = progress.get("percent", current["percent"])
+            if progress.get("status") == "verified":
+                current["status"] = "verified"
+
+    try:
+        destination = Path(install_root) / "downloads" / asset["name"]
+        result = download_verified_official_asset(
+            asset, version, install_root, destination,
+            cancel_event=cancel_event, progress_callback=update,
+        )
+        with _DOWNLOAD_TASKS_LOCK:
+            current = _DOWNLOAD_TASKS.get(task_id)
+            if current is not None:
+                current["status"] = "verified"
+                current["received_bytes"] = result["size_bytes"]
+                current["total_bytes"] = result["size_bytes"]
+                current["percent"] = 100
+    except DownloadCancelled:
+        with _DOWNLOAD_TASKS_LOCK:
+            if task_id in _DOWNLOAD_TASKS:
+                _DOWNLOAD_TASKS[task_id]["status"] = "cancelled"
+    except Exception as exc:
+        with _DOWNLOAD_TASKS_LOCK:
+            if task_id in _DOWNLOAD_TASKS:
+                _DOWNLOAD_TASKS[task_id]["status"] = "failed"
+                _DOWNLOAD_TASKS[task_id]["error"] = str(exc)[:500]
+    finally:
+        with _DOWNLOAD_TASKS_LOCK:
+            _DOWNLOAD_THREADS.pop(task_id, None)
+
+
+@router.post("/download/start")
+def start_comfyui_download(payload: dict):
+    """Start an official asset download only after a separate explicit confirmation."""
+    from fastapi import HTTPException
+    if not isinstance(payload, dict) or payload.get("confirm_download") is not True:
+        raise HTTPException(status_code=400, detail="下载前必须单独明确确认")
+    asset_name = payload.get("asset_name")
+    expected_version = payload.get("version")
+    if not isinstance(asset_name, str) or asset_name not in ALLOWED_ASSET_NAMES:
+        raise HTTPException(status_code=400, detail="请选择官方列表中的安装包")
+    try:
+        catalog = fetch_official_release_catalog()
+        if expected_version != catalog["version"]:
+            raise ValueError("官方版本已变化，请重新查询版本并生成安装计划")
+        asset = next((item for item in catalog["assets"] if item["name"] == asset_name), None)
+        if asset is None:
+            raise ValueError("官方资产不存在或没有可信 SHA-256")
+        root = Path.home() / "AIComicStudio" / "ComfyUI"
+        root.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(root).free
+        build_comfyui_install_plan(asset, catalog["version"], free, str(root))
+        task_id = uuid.uuid4().hex
+        task = {
+            "task_id": task_id, "status": "queued", "asset_name": asset_name,
+            "version": catalog["version"], "received_bytes": 0,
+            "total_bytes": asset["size_bytes"], "percent": 0, "error": None,
+            "cancel_event": threading.Event(),
+        }
+        with _DOWNLOAD_TASKS_LOCK:
+            _DOWNLOAD_TASKS[task_id] = task
+            worker = threading.Thread(
+                target=_run_download_task,
+                args=(task_id, asset, catalog["version"], str(root)),
+                name=f"comfyui-download-{task_id[:8]}", daemon=True,
+            )
+            _DOWNLOAD_THREADS[task_id] = worker
+            worker.start()
+        return _public_download_task(task)
+    except (RuntimeError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/download/{task_id}")
+def get_comfyui_download(task_id: str):
+    from fastapi import HTTPException
+    with _DOWNLOAD_TASKS_LOCK:
+        task = _DOWNLOAD_TASKS.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="下载任务不存在或应用已重启")
+        return _public_download_task(task)
+
+
+@router.post("/download/{task_id}/cancel")
+def cancel_comfyui_download(task_id: str):
+    from fastapi import HTTPException
+    with _DOWNLOAD_TASKS_LOCK:
+        task = _DOWNLOAD_TASKS.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="下载任务不存在或应用已重启")
+        if task["status"] in {"verified", "failed", "cancelled"}:
+            return _public_download_task(task)
+        task["cancel_event"].set()
+        task["status"] = "cancelling"
+        return _public_download_task(task)
