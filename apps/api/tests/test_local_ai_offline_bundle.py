@@ -14,6 +14,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             'digest',
             'OLLAMA_MODELS',
             'OLLAMA_HOST',
+            'OLLAMA_NO_CLOUD = "1"',
             'pull $ModelName',
             'manifest_sha256',
             'distribution_approved = $false',
@@ -36,6 +37,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             "为保护已有数据",
             "OLLAMA_HOST",
             "127.0.0.1:11435",
+            'set "OLLAMA_NO_CLOUD=1"',
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
@@ -66,6 +68,7 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         model_installer = (ROOT / "apps" / "api" / "app" / "routers" / "local_model_installer.py").read_text(encoding="utf-8")
         self.assertIn('path.join(ollamaRuntime, "ollama.exe")', main)
         self.assertIn('OLLAMA_HOST: "127.0.0.1:11435"', main)
+        self.assertIn('OLLAMA_NO_CLOUD: "1"', main)
         self.assertIn("waitForOllama(ollamaBaseUrl)", main)
         self.assertIn('os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")', runtime)
         self.assertIn('os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")', model_installer)
