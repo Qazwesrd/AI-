@@ -49,7 +49,7 @@ const statusNames: Record<string, string> = {
   completed: "已完成", failed: "失败", cancelled: "已取消",
   canceled: "已取消", paused: "已暂停", partial: "部分完成",
   submission_unknown: "提交结果待核实", awaiting_video_url: "等待视频地址",
-  interrupted_unknown: "执行中断·待核实",
+  interrupted_unknown: "执行中断·待核实", cancellation_requested: "正在停止",
 };
 
 const groupStyles: Record<string, string> = {
@@ -64,8 +64,8 @@ const groupStyles: Record<string, string> = {
 function taskHref(task: TaskItem) {
   const path = task.source === "analysis" ? "/novels"
     : task.source === "image" ? "/visual-studio"
-    : task.type === "speech" || task.type === "episode_speech" ? "/media-studio"
-    : task.type === "video" ? "/video-editor" : "/storyboard";
+    : task.type === "local_render" || task.type === "video" ? "/video-editor"
+    : task.type === "speech" || task.type === "episode_speech" ? "/media-studio" : "/storyboard";
   const params = new URLSearchParams();
   if (task.project_id) params.set("projectId", String(task.project_id));
   if (task.novel_id) params.set("novelId", String(task.novel_id));
@@ -135,6 +135,15 @@ export default function TasksPage() {
   useEffect(() => { void loadTasks(); }, [loadTasks]);
 
   useEffect(() => {
+    const hasActiveLocalRender = items.some(item =>
+      item.type === "local_render" && ["queued", "processing"].includes(item.status)
+    );
+    if (!hasActiveLocalRender) return;
+    const timer = window.setInterval(() => { void loadTasks(); }, 2000);
+    return () => window.clearInterval(timer);
+  }, [items, loadTasks]);
+
+  useEffect(() => {
     const requestedProjectId = new URLSearchParams(window.location.search).get("projectId");
     if (requestedProjectId && /^\\d+$/.test(requestedProjectId)) setProjectId(requestedProjectId);
     fetch(`${API}/api/story/projects`, { cache: "no-store" })
@@ -162,7 +171,10 @@ export default function TasksPage() {
     setBusyTask(task.id);
     try {
       const query = uncertainRetry ? "?confirm_no_remote_job=true" : "";
-      const response = await fetch(`${API}/api/tasks/${task.source}/${task.source_id}/${action}${query}`, { method: "POST" });
+      const endpoint = task.type === "local_render" && action === "cancel"
+        ? `${API}/api/media/render/jobs/${task.source_id}/cancel`
+        : `${API}/api/tasks/${task.source}/${task.source_id}/${action}${query}`;
+      const response = await fetch(endpoint, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "任务操作失败");
       setMessage(data.message || `任务已执行：${actionNames[action]}`);
@@ -363,6 +375,17 @@ export default function TasksPage() {
                   </div>
                   <p className="mt-1 text-xs text-purple-200">{task.context || task.type} · {task.provider || "本地任务"}{task.model ? ` / ${task.model}` : ""}{task.project_id ? ` · 项目 #${task.project_id}` : ""}</p>
                   {task.summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">{task.summary}</p>}
+                  {task.type === "local_render" && (
+                    <div className="mt-3 max-w-xl">
+                      <div className="mb-1 flex justify-between text-xs text-slate-400">
+                        <span>本地视频渲染进度</span><span>{Math.max(0, Math.min(100, task.progress || 0))}%</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-800">
+                        <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${Math.max(0, Math.min(100, task.progress || 0))}%` }} />
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">本地 FFmpeg 执行；停止只终止本机渲染，不会调用云端服务。</p>
+                    </div>
+                  )}
                   {task.source === "analysis" && (
                     <div className="mt-3 max-w-xl">
                       <div className="mb-1 flex justify-between text-xs text-slate-400">
@@ -404,6 +427,14 @@ export default function TasksPage() {
                   {task.source === "image" && ["pending", "paused", "failed"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "cancel")}
                       className="rounded-lg border border-red-300/25 px-3 py-2 text-xs text-red-200 disabled:opacity-40">取消</button>
+                  )}
+                  {task.source === "media" && task.type === "local_render" && ["queued", "processing"].includes(task.status) && (
+                    <>
+                      <button disabled={busyTask === task.id} onClick={() => void runAction(task, "refresh")}
+                        className="rounded-lg border border-cyan-300/25 px-3 py-2 text-xs text-cyan-200 disabled:opacity-40">刷新进度</button>
+                      <button disabled={busyTask === task.id} onClick={() => void runAction(task, "cancel")}
+                        className="rounded-lg border border-red-300/25 px-3 py-2 text-xs text-red-200 disabled:opacity-40">停止渲染</button>
+                    </>
                   )}
                   {task.source === "media" && ["video", "storyboard_video"].includes(task.type) && !["completed", "failed", "cancelled", "submission_unknown"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "refresh")}
