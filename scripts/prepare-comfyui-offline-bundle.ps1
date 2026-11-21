@@ -270,13 +270,42 @@ $client = [System.Net.Http.HttpClient]::new($clientHandler)
 $client.Timeout = [System.Threading.Timeout]::InfiniteTimeSpan
 $stream = [System.IO.File]::Open($target, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
 $archive = [System.IO.Compression.ZipArchive]::new($stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+$inventoryTempRoot = $null
 try {
+    $inventoryTempRoot = Join-Path $targetDir (".comfyui-audit-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $inventoryTempRoot -Force | Out-Null
+
     $manifestResults = @()
+    $inventoryReports = @()
+    $sevenZipTempPath = Join-Path $inventoryTempRoot "7zr.exe"
+    $toolResult = Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest $sevenZipTempPath
+
     foreach ($asset in $manifestAssets) {
-        $manifestResults += Add-VerifiedRemoteEntry $archive $client ("ComfyUI-Payload/" + $asset.name) $asset.url $asset.size_bytes $asset.sha256
+        $assetTempPath = Join-Path $inventoryTempRoot $asset.name
+        $reportTempPath = Join-Path $inventoryTempRoot ($asset.name + ".inventory.json")
+        $manifestResults += Add-VerifiedRemoteEntry $archive $client ("ComfyUI-Payload/" + $asset.name) $asset.url $asset.size_bytes $asset.sha256 $assetTempPath
+        & $auditScript -SevenZipPath $sevenZipTempPath -ArchivePaths @($assetTempPath) -ReleaseTag $release.tag_name -OutputPath $reportTempPath
+        if (!(Test-Path -LiteralPath $reportTempPath -PathType Leaf)) {
+            throw "ComfyUI 官方资产依赖清点未生成报告：$($asset.name)"
+        }
+        $singleReport = Get-Content -LiteralPath $reportTempPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($singleReport.audit_status -ne "pending" -or $singleReport.distribution_approved -ne $false -or
+            $singleReport.release_tag -ne $release.tag_name -or @($singleReport.portable_variants).Count -ne 1) {
+            throw "ComfyUI 官方资产依赖清点报告无效或意外批准了分发：$($asset.name)"
+        }
+        $inventoryReports += $singleReport
+        Remove-Item -LiteralPath $assetTempPath, $reportTempPath -Force
     }
 
-    $toolResult = Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest
+    if ($inventoryReports.Count -ne 4) { throw "必须为四种 ComfyUI Portable 运行包分别生成依赖清点报告。" }
+    $inventoryBase = $inventoryReports[0]
+    $inventoryBase.portable_variants = @($inventoryReports | ForEach-Object { @($_.portable_variants)[0] })
+    $inventoryBase.unresolved_items = @($inventoryReports | ForEach-Object { $_.unresolved_items } | Sort-Object -Unique)
+    $inventoryBase.generated_utc = [DateTime]::UtcNow.ToString("o")
+    $inventoryBase.audit_status = "pending"
+    $inventoryBase.distribution_approved = $false
+    $inventoryReportPath = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json"
+    Add-TextEntry $archive $inventoryReportPath ($inventoryBase | ConvertTo-Json -Depth 12)
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
     Add-FileEntry $archive "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" $auditScript
     Add-FileEntry $archive "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json" $auditPath
@@ -319,6 +348,7 @@ try {
         distribution_approved = $false
         dependency_audit_register = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json"
         dependency_inventory_tool = "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1"
+        dependency_inventory_report = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json"
         comfyui_version = $release.tag_name
         source = $ReleaseApi
         created_utc = [DateTime]::UtcNow.ToString("o")
@@ -392,6 +422,9 @@ AI漫剧制作大师 - 完整离线安装套件（内部验证版）
     $archive.Dispose()
     $stream.Dispose()
     $client.Dispose()
+    if ($inventoryTempRoot -and (Test-Path -LiteralPath $inventoryTempRoot)) {
+        Remove-Item -LiteralPath $inventoryTempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Re-open the finished ZIP and verify its central directory, required entries,
@@ -454,6 +487,7 @@ try {
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
         "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
         "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json",
+        "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json",
         "安装说明.txt",
         "Setup.exe.sha256"
     )) {
