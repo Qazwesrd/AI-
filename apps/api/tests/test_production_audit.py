@@ -68,6 +68,30 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                 db.close()
                 engine.dispose()
 
+    def test_project_media_state_rejects_asset_from_another_episode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            other_episode_file = root / "other-episode.mp3"
+            other_episode_file.write_bytes(b"media")
+            engine = create_engine(f"sqlite:///{root / 'episode-ownership.db'}")
+            Base.metadata.create_all(engine)
+            db = Session(engine)
+            try:
+                db.add(MediaFile(
+                    name="other-episode.mp3",
+                    category="audio",
+                    file_path=str(other_episode_file),
+                    metadata_json={"project_id": 11, "episode_id": 22},
+                ))
+                db.commit()
+                with patch("app.routers.production_audit.safe_storage_file", return_value=other_episode_file):
+                    state = _project_media_file_state(db, str(other_episode_file), 11, 21)
+                self.assertFalse(state["exists"])
+                self.assertIn("其他分集", state["reason"])
+            finally:
+                db.close()
+                engine.dispose()
+
     def test_project_media_state_keeps_legacy_unscoped_library_assets(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
