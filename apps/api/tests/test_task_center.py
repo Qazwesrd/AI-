@@ -16,7 +16,7 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertFalse(is_known_remote_3d_task(task))
 
     def test_active_provider_statuses_are_normalized(self):
-        for value in ("pending", "queued", "submitted", "processing", "running"):
+        for value in ("pending", "queued", "submitted", "processing", "running", "queued_or_running"):
             with self.subTest(status=value):
                 self.assertEqual(_status_group(value), "active")
 
@@ -85,6 +85,30 @@ class UnifiedTaskStatusTests(unittest.TestCase):
             control_unified_task("analysis", 2, "retry", db=db)
         self.assertEqual(raised.exception.status_code, 409)
         db.commit.assert_not_called()
+
+    def test_unified_local_reference_image_refreshes_comfyui_history(self):
+        task = Mock(
+            task_type="local_image_reference",
+            remote_task_id="a" * 32,
+            request_data={"shot_id": 7, "shot_number": 3},
+            result_data={"images": []},
+            result_path="",
+        )
+        refreshed = Mock(
+            result_data={"images": [{"filename": "reference-output.png", "subfolder": "", "type": "output"}]},
+            result_path="",
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, refreshed]
+        with patch(
+            "app.routers.tasks.get_local_image_batch_status",
+            return_value={"tasks": [{"status": "completed", "images": [{"filename": "reference-output.png"}]}]},
+        ) as refresh:
+            result = control_unified_task("media", 77, "refresh", db=db)
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["result_available"])
+        self.assertEqual(result["images"][0]["filename"], "reference-output.png")
+        refresh.assert_called_once()
 
     def test_unified_media_does_not_allow_local_force_cancel(self):
         with self.assertRaises(HTTPException) as raised:
