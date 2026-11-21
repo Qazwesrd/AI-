@@ -42,7 +42,7 @@ MAX_PROJECT_DATA_JSON_BYTES = 512 * 1024**2
 EXPORT_DISK_SAFETY_MARGIN = 512 * 1024**2
 
 
-_SENSITIVE_KEY_PARTS = ("api_key", "secret", "password", "credential", "access_token", "refresh_token")
+_SENSITIVE_KEY_PARTS = ("api_key", "secret", "password", "credential", "token", "authorization")
 
 
 def _json_value(value: Any, key: str = ""):
@@ -311,6 +311,16 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
             bad_member = archive.testzip()
             if bad_member:
                 raise ValueError(f"归档完整性检查失败：{bad_member}")
+            for item in file_entries:
+                digest = hashlib.sha256()
+                with archive.open(item["archive_path"], "r") as source:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        digest.update(chunk)
+                if digest.hexdigest() != item["sha256"]:
+                    raise ValueError(f"归档素材在打包期间发生变化，SHA-256 不匹配：{item['archive_path']}")
         temporary.replace(destination)
     except Exception:
         temporary.unlink(missing_ok=True)
