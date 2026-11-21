@@ -10,7 +10,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 schema_migrations = Table(
     "schema_migrations",
     Base.metadata,
@@ -320,10 +320,14 @@ def _record_schema_version():
                 f"数据库结构版本 {current} 高于当前软件支持版本 {SCHEMA_VERSION}，"
                 "为防止降级破坏数据，已停止启动。"
             )
-        if current < 1:
+        migrations = {
+            1: "baseline_schema",
+            2: "subtitle_track_project_episode_ownership",
+        }
+        for version in range(current + 1, SCHEMA_VERSION + 1):
             connection.execute(schema_migrations.insert().values(
-                version=1,
-                name="baseline_schema",
+                version=version,
+                name=migrations.get(version, f"schema_v{version}"),
                 applied_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
             ))
 
