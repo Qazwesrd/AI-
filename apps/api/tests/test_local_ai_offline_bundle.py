@@ -22,6 +22,10 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             '12GB',
             'Apache License',
             'cloud_features_disabled = $true',
+            'minimum_system_ram_bytes = 8GB',
+            'recommended_system_ram_bytes = 16GB',
+            'OLLAMA_NUM_PARALLEL = "1"',
+            'OLLAMA_MAX_LOADED_MODELS = "1"',
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
@@ -43,6 +47,9 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             "OLLAMA_HOST",
             "127.0.0.1:11435",
             'set "OLLAMA_NO_CLOUD=1"',
+            'set "OLLAMA_NUM_PARALLEL=1"',
+            'set "OLLAMA_MAX_LOADED_MODELS=1"',
+            "Win32_ComputerSystem",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
@@ -74,7 +81,10 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         self.assertIn('path.join(ollamaRuntime, "ollama.exe")', main)
         self.assertIn('OLLAMA_HOST: "127.0.0.1:11435"', main)
         self.assertIn('OLLAMA_NO_CLOUD: "1"', main)
-        self.assertIn("waitForOllama(ollamaBaseUrl)", main)
+        self.assertIn('OLLAMA_NUM_PARALLEL: "1"', main)
+        self.assertIn('OLLAMA_MAX_LOADED_MODELS: "1"', main)
+        self.assertIn("scheduleOllamaRestart", main)
+        self.assertIn("startBundledOllama", main)
         self.assertIn('os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")', runtime)
         self.assertIn('os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")', model_installer)
 
