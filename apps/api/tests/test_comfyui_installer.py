@@ -2,7 +2,7 @@ import unittest
 
 from app.routers.comfyui_installer import (
     GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,
-    classify_gpu_vendor, parse_windows_video_adapters,
+    classify_gpu_vendor, parse_windows_video_adapters, recommend_official_asset,
 )
 
 
@@ -54,6 +54,14 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIsNone(adapters[0]["vram_bytes"])
         self.assertIsNone(adapters[1]["vram_bytes"])
 
+    def test_recommends_asset_for_detected_gpu_and_architecture(self):
+        self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GeForce GTX 1080 Ti", "AMD64"), "ComfyUI_windows_portable_nvidia_cu126.7z")
+        self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GeForce RTX 4080", "AMD64"), "ComfyUI_windows_portable_nvidia.7z")
+        self.assertEqual(recommend_official_asset("NVIDIA", "NVIDIA GPU", "ARM64"), "ComfyUI_windows_portable_nvidia_arm64.7z")
+        self.assertEqual(recommend_official_asset("AMD", "AMD Radeon RX 7900", "AMD64"), "ComfyUI_windows_portable_amd.7z")
+        self.assertEqual(recommend_official_asset("Intel", "Intel Arc", "AMD64"), "ComfyUI_windows_portable_intel.7z")
+        self.assertIsNone(recommend_official_asset("unknown", "Unknown GPU", "AMD64"))
+
     def test_release_catalog_only_accepts_official_assets_and_urls(self):
         payload = {
             "tag_name": "v-test",
@@ -77,7 +85,7 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
                     "digest": "sha256:not-a-real-digest",
                 },
                 {
-                    "name": "malicious.exe",
+                    "name": "ComfyUI_windows_portable_nvidia_arm64.7z",\n                    "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/ComfyUI_windows_portable_nvidia_arm64.7z",\n                    "size": 456,\n                    "digest": "sha256:" + "b" * 64,\n                },\n                {\n                    "name": "malicious.exe",
                     "browser_download_url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v-test/malicious.exe",
                     "size": 100,
                 },
@@ -85,7 +93,7 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         }
         result = parse_official_release(payload)
         self.assertEqual(result["version"], "v-test")
-        self.assertEqual(len(result["assets"]), 1)
+        self.assertEqual(len(result["assets"]), 2)
         self.assertEqual(result["assets"][0]["size_bytes"], 123456)
         self.assertEqual(result["assets"][0]["sha256"], "a" * 64)
         self.assertFalse(result["download_started"])
