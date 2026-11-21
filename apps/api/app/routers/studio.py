@@ -65,6 +65,11 @@ def runtime(db):
         db.add(row)
         db.commit()
         db.refresh(row)
+    if STRICT_ZERO_COST_MODE and (row.network_enabled or row.paid_api_allowed):
+        row.network_enabled = False
+        row.paid_api_allowed = False
+        db.commit()
+        db.refresh(row)
     return row
 
 def provider_dict(x):
@@ -194,9 +199,14 @@ def get_runtime(db: Session = Depends(get_db)):
 
 @router.put("/ai/runtime")
 def update_runtime(payload: RuntimeInput, db: Session = Depends(get_db)):
+    if STRICT_ZERO_COST_MODE and (payload.network_enabled or payload.paid_api_allowed):
+        raise HTTPException(
+            403,
+            "严格零费用模式已锁定：云端 AI API 网络调用和付费 API 授权均不可开启。",
+        )
     x = runtime(db)
-    x.network_enabled = payload.network_enabled
-    x.paid_api_allowed = payload.paid_api_allowed
+    x.network_enabled = False if STRICT_ZERO_COST_MODE else payload.network_enabled
+    x.paid_api_allowed = False if STRICT_ZERO_COST_MODE else payload.paid_api_allowed
     db.commit()
     return {
         "success": True,
@@ -223,6 +233,7 @@ def usage_logs(db: Session = Depends(get_db)):
 
 @router.post("/ai/chat")
 def ai_chat(payload: ChatInput, db: Session = Depends(get_db)):
+    require_cloud_ai_api_disabled()
     settings = runtime(db)
     config = db.query(AIProviderConfig).filter(
         AIProviderConfig.provider == payload.provider.lower()
