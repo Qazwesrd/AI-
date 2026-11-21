@@ -108,6 +108,34 @@ try {
         $archivePaths += $archivePath
     }
 
+    $invalidReleaseTagRejected = $false
+    try {
+        & $auditScript -SevenZipPath $sevenZip -ArchivePaths $archivePaths -ReleaseTag "../fixture-v1.0.0" -OutputPath $reportPath
+    } catch {
+        if ($_.Exception.Message -match "ReleaseTag 格式无效") {
+            $invalidReleaseTagRejected = $true
+        } else {
+            throw
+        }
+    }
+    if (!$invalidReleaseTagRejected) {
+        throw "依赖清点脚本未拒绝包含路径分隔符的 ReleaseTag。"
+    }
+
+    $unsafeLimitRejected = $false
+    try {
+        & $auditScript -SevenZipPath $sevenZip -ArchivePaths $archivePaths -ReleaseTag "fixture-v1.0.0" -OutputPath $reportPath -MaximumTotalEvidenceBytes 1TB
+    } catch {
+        if ($_.Exception.Message -match "清点安全限制参数超出允许范围") {
+            $unsafeLimitRejected = $true
+        } else {
+            throw
+        }
+    }
+    if (!$unsafeLimitRejected) {
+        throw "依赖清点脚本未拒绝超出上限的证据提取配置。"
+    }
+
     try {
         & $auditScript -SevenZipPath $sevenZip -ArchivePaths $archivePaths -ReleaseTag "fixture-v1.0.0" -OutputPath $reportPath
     } catch {
