@@ -277,7 +277,8 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
           ...process.env,
           OLLAMA_MODELS: ollamaModels,
           OLLAMA_HOST: "127.0.0.1:11435",
-          OLLAMA_KEEP_ALIVE: "5m"
+          OLLAMA_KEEP_ALIVE: "5m",
+          OLLAMA_NO_CLOUD: "1"
         }
       });
       logChild("OLLAMA", ollamaProcess);
@@ -306,6 +307,7 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
         FFMPEG_PATH: ffmpeg,
         FFPROBE_PATH: ffprobe,
         OLLAMA_BASE_URL: ollamaBaseUrl,
+        OLLAMA_NO_CLOUD: "1",
         ...(process.env.OLLAMA_MODELS ? { OLLAMA_MODELS: process.env.OLLAMA_MODELS } : {}),
         ...(process.env.PATH ? { PATH: process.env.PATH } : {})
       }
