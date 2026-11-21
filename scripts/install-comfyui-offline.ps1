@@ -117,7 +117,17 @@ function Select-ComfyAsset($Adapters) {
 }
 
 function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
-    $listing = @(& $SevenZip l -slt -- $ArchivePath 2>&1)
+    # Bound native listing output before parsing to avoid unbounded memory use
+    # when an archive contains an unexpectedly large directory table.
+    $maximumEntries = 50000
+    $maximumListingLines = ([long]$maximumEntries * 12) + 1000
+    $listing = New-Object System.Collections.Generic.List[string]
+    & $SevenZip l -slt -- $ArchivePath 2>&1 | ForEach-Object {
+        if ($listing.Count -ge $maximumListingLines) {
+            throw "ComfyUI 运行包目录清单超过安全上限 $maximumListingLines 行。"
+        }
+        $listing.Add([string]$_)
+    }
     if ($LASTEXITCODE -ne 0) { throw "ComfyUI 运行包目录清单读取失败。" }
     $blocks = @()
     $current = @{}
@@ -135,7 +145,7 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
     if ($current.Count -gt 0) { $blocks += ,$current }
 
     $entries = @($blocks | Where-Object { $_.Path -and $_.ContainsKey("Size") })
-    if ($entries.Count -lt 1 -or $entries.Count -gt 100000) {
+    if ($entries.Count -lt 1 -or $entries.Count -gt $maximumEntries) {
         throw "ComfyUI 压缩包文件数量无效或超过安全限制。"
     }
 
