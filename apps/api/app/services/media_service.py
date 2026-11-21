@@ -410,6 +410,60 @@ def scan_media_quality(path, black_min_duration=0.5, silence_min_duration=1.0, s
     }
 
 
+def analyze_shot_media_consistency(shot_media):
+    """Compare per-shot technical stream properties; all findings are advisory."""
+    from collections import Counter
+    def parse_rate(value):
+        if value in (None, "", "0/0", "N/A"): return None
+        try:
+            if isinstance(value, str) and "/" in value:
+                numerator, denominator = value.split("/", 1)
+                denominator = float(denominator)
+                return float(numerator) / denominator if denominator else None
+            return float(value)
+        except (TypeError, ValueError, ZeroDivisionError): return None
+    scanned, skipped = [], []
+    for item in shot_media if isinstance(shot_media, list) else []:
+        if not isinstance(item, dict) or not item.get("path"): continue
+        try:
+            streams = (probe_media(item["path"]).get("streams") or [])
+            video = next((x for x in streams if x.get("codec_type") == "video"), None)
+            audio = next((x for x in streams if x.get("codec_type") == "audio"), None)
+            if not video: raise ValueError("缺少视频流")
+            sample_rate = audio.get("sample_rate") if audio else None
+            scanned.append({
+                "shot_id": item.get("shot_id"), "shot_number": item.get("shot_number"),
+                "width": int(video.get("width") or 0) or None,
+                "height": int(video.get("height") or 0) or None,
+                "frame_rate": parse_rate(video.get("avg_frame_rate")) or parse_rate(video.get("r_frame_rate")),
+                "video_codec": video.get("codec_name"), "pixel_format": video.get("pix_fmt"),
+                "has_audio": bool(audio),
+                "audio_sample_rate": int(sample_rate) if sample_rate and str(sample_rate).isdigit() else None,
+                "audio_channels": int(audio.get("channels")) if audio and audio.get("channels") else None,
+            })
+        except Exception as exc:
+            skipped.append({"shot_id": item.get("shot_id"), "shot_number": item.get("shot_number"), "reason": str(exc)[:240]})
+    def common(field):
+        values = [x.get(field) for x in scanned if x.get(field) is not None]
+        return Counter(values).most_common(1)[0][0] if values else None
+    fields = ["width", "height", "frame_rate", "video_codec", "pixel_format", "has_audio", "audio_sample_rate", "audio_channels"]
+    baseline = {field: common(field) for field in fields}
+    anomalies = []
+    labels = {"width":"画面宽度", "height":"画面高度", "video_codec":"视频编码", "pixel_format":"像素格式", "has_audio":"音轨存在性", "audio_sample_rate":"音频采样率", "audio_channels":"音频声道数"}
+    for item in scanned:
+        differences = []
+        for field, label in labels.items():
+            expected, actual = baseline.get(field), item.get(field)
+            if expected is not None and actual != expected:
+                differences.append({"field":field, "label":label, "expected":expected, "actual":actual})
+        expected, actual = baseline.get("frame_rate"), item.get("frame_rate")
+        if expected is not None and actual is not None and abs(actual - expected) > 0.01:
+            differences.append({"field":"frame_rate", "label":"帧率", "expected":round(expected,3), "actual":round(actual,3)})
+        if differences: anomalies.append({"shot_id":item.get("shot_id"), "shot_number":item.get("shot_number"), "differences":differences})
+    warnings = []
+    if anomalies: warnings.append("发现 %d 个镜头的媒体参数与本集主流参数不一致" % len(anomalies))
+    if skipped: warnings.append("有 %d 个镜头无法读取媒体参数" % len(skipped))
+    return {"scan_complete":True, "scanned_shots":len(scanned), "skipped_shots":skipped, "baseline":baseline, "shots":scanned, "anomalies":anomalies, "warnings":warnings, "note":"逐镜头参数以本集出现频率最高的参数作为对照；不同创作意图可能导致合理差异，所有提示均需人工复核。"}
 def analyze_subtitle_timing(cues, video_duration, tolerance=0.05):
     """Validate subtitle cue ranges and overlaps against the rendered video duration."""
     try:
