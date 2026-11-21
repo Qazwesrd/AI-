@@ -11,6 +11,7 @@ type Diagnostic = {
   database: { status: string; path: string; size_bytes?: number; tables?: number; schema_version?: number; message: string };
   storage: { path: string; disk: { status: string; free_bytes: number; total_bytes: number; message: string } };
   media_tools: { ffmpeg: { status: string; path?: string | null; message: string }; ffprobe: { status: string; path?: string | null; message: string } };
+  local_ai: { mode: string; network_used: boolean; auto_downloaded: boolean; note: string; tools: { id: string; name: string; purpose: string; status: string; executable?: string | null; install_hint: string }[] };
   ai_permissions: { network_enabled: boolean; paid_api_allowed: boolean; note: string };
   tasks: { active_leases: number; queued_tasks: number };
   warnings: string[];
@@ -110,6 +111,27 @@ export default function SystemDiagnosticsPage() {
               </div>
               <a href="/tasks" className="mt-4 inline-flex text-sm text-cyan-200 underline">打开统一任务中心</a>
             </div>
+          </section>
+          <section className={panel}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold">本地 AI 引擎检测</h2>
+              <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200">离线检测 · 不下载 · 不收费</span>
+            </div>
+            <p className="mt-2 text-xs leading-6 text-white/55">{data.local_ai.note}</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {data.local_ai.tools.map((tool) => (
+                <div key={tool.id} className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="font-semibold">{tool.name}</h3>
+                    <Status value={tool.status === "installed" ? "ok" : "warning"} />
+                  </div>
+                  <p className="mt-2 text-xs text-white/60">{tool.purpose}</p>
+                  <p className="mt-2 break-all text-xs text-white/45">{tool.executable || "未在系统 PATH 中检测到"}</p>
+                  {tool.status !== "installed" && <p className="mt-3 text-xs leading-5 text-amber-100/80">{tool.install_hint}</p>}
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-white/45">检测到运行环境不代表已经下载模型或具备生成能力。模型下载前需要确认文件大小、电脑配置和模型许可证；本功能不会自动下载任何内容。</p>
           </section>
         </>}
       </div>
