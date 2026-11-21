@@ -385,8 +385,10 @@ def execute_edit_plan(
         os.replace(temporary_output, output)
         report({"percent": 100.0, "stage": "completed"})
         return str(output), output.stat().st_size
-    except FFmpegCancelledError:
+    except FFmpegCancelledError as exc:
         keep_work = True
+        exc.partial_output = str(temporary_output) if temporary_output.exists() else None
+        exc.work_directory = str(work) if work.exists() else None
         raise
     except Exception:
         if output.exists():
