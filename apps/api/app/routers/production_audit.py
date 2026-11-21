@@ -601,12 +601,22 @@ def audit_episode_video_quality(project_id: int, episode_id: int, db: Session = 
         metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
         try:
             media_episode_id = int(metadata.get("episode_id") or 0)
+            metadata_project_id = int(metadata.get("project_id") or 0)
         except (TypeError, ValueError):
             media_episode_id = 0
-        is_final = (
-            metadata.get("rendered_output") is True and media_episode_id == episode_id
-        ) or (
-            not metadata.get("shot_id") and (media.name or "").startswith(f"episode_{episode_id}_")
+            metadata_project_id = 0
+        # Keep this endpoint consistent with the project-level readiness audit:
+        # global media rows explicitly owned by another project are never candidates.
+        belongs_to_project = metadata_project_id in {0, project.id}
+        is_final = belongs_to_project and (
+            (
+                metadata.get("rendered_output") is True
+                and metadata_project_id == project.id
+                and media_episode_id == episode_id
+            ) or (
+                not metadata.get("shot_id")
+                and (media.name or "").startswith(f"episode_{episode_id}_")
+            )
         )
         if is_final:
             state = _local_file_state(media.file_path)
