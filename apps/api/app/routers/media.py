@@ -1091,7 +1091,13 @@ def render_episode_from_shots(
             subtitle_file = SUBTITLE_DIR / f"episode_{episode_id}_{uuid.uuid4().hex[:8]}.srt"
             subtitle_file.write_text("\n".join(subtitle_lines), encoding="utf-8-sig")
             subtitle_path = str(subtitle_file)
-            db.add(SubtitleTrack(name=f"第{episode.episode_number}集字幕", file_path=subtitle_path, format="srt"))
+            db.add(SubtitleTrack(
+                name=f"第{episode.episode_number}集字幕",
+                file_path=subtitle_path,
+                format="srt",
+                project_id=episode.project_id,
+                episode_id=episode.id,
+            ))
         subtitles_burned_in = False
         if subtitle_path and bool(timeline.get("subtitle_burn_in", True)):
             try:
@@ -2581,6 +2587,8 @@ class SubtitleCue(BaseModel):
 class SubtitleInput(BaseModel):
     name: str = "字幕"
     cues: list[SubtitleCue]
+    project_id: Optional[int] = Field(default=None, gt=0)
+    episode_id: Optional[int] = Field(default=None, gt=0)
 
 
 def srt_time(seconds):
@@ -2609,18 +2617,55 @@ def create_subtitle(data: SubtitleInput, db: Session = Depends(get_db)):
     destination = SUBTITLE_DIR / filename
     destination.write_text("\n".join(lines), encoding="utf-8-sig")
 
-    track = SubtitleTrack(name=data.name, file_path=str(destination), format="srt")
+    project_id = data.project_id
+    episode_id = data.episode_id
+    if episode_id is not None:
+        episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+        if not episode:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(404, "指定分集不存在")
+        if project_id is not None and project_id != episode.project_id:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(422, "指定项目与分集不匹配")
+        project_id = episode.project_id
+    if project_id is not None and not db.query(StoryProject).filter(
+        StoryProject.id == project_id
+    ).first():
+        destination.unlink(missing_ok=True)
+        raise HTTPException(404, "指定剧本项目不存在")
+    track = SubtitleTrack(
+        name=data.name,
+        file_path=str(destination),
+        format="srt",
+        project_id=project_id,
+        episode_id=episode_id,
+    )
     db.add(track)
     db.commit()
     db.refresh(track)
-    return {"id": track.id, "name": track.name, "path": track.file_path}
+    return {
+        "id": track.id, "name": track.name, "path": track.file_path,
+        "project_id": track.project_id, "episode_id": track.episode_id,
+    }
 
 
 @router.get("/subtitles")
-def list_subtitles(db: Session = Depends(get_db)):
-    rows = db.query(SubtitleTrack).order_by(SubtitleTrack.id.desc()).all()
-    return [{"id": x.id, "name": x.name, "path": x.file_path,
-             "format": x.format} for x in rows]
+def list_subtitles(
+    project_id: Optional[int] = None,
+    episode_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(SubtitleTrack)
+    if project_id is not None:
+        query = query.filter(SubtitleTrack.project_id == project_id)
+    if episode_id is not None:
+        query = query.filter(SubtitleTrack.episode_id == episode_id)
+    rows = query.order_by(SubtitleTrack.id.desc()).all()
+    return [{
+        "id": x.id, "name": x.name, "path": x.file_path,
+        "format": x.format, "language": x.language,
+        "project_id": x.project_id, "episode_id": x.episode_id,
+    } for x in rows]
 
 
 class RenderInput(BaseModel):
@@ -3117,6 +3162,7 @@ class EpisodeTimelineInput(BaseModel):
     original_volume: float = Field(default=0.35, ge=0, le=2)
     sound_effect_tracks: list[EpisodeSoundEffectInput] = Field(default_factory=list)
     subtitle_cues: Optional[list[EpisodeSubtitleCueInput]] = None
+    subtitle_track_id: Optional[int] = Field(default=None, gt=0)
 
 
 
@@ -3210,6 +3256,27 @@ def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
         EpisodeEditTimeline.episode_id == episode_id
     ).first()
     data = record.edit_data if record and isinstance(record.edit_data, dict) else {}
+    data = dict(data)
+    subtitle_track = None
+    subtitle_track_warning = None
+    try:
+        selected_subtitle_id = int(data.get("subtitle_track_id") or 0)
+    except (TypeError, ValueError):
+        selected_subtitle_id = 0
+    if selected_subtitle_id:
+        candidate = db.query(SubtitleTrack).filter(
+            SubtitleTrack.id == selected_subtitle_id
+        ).first()
+        if not candidate:
+            subtitle_track_warning = "时间轴引用的字幕轨道已不存在"
+        elif candidate.project_id not in (None, episode.project_id):
+            subtitle_track_warning = "时间轴引用的字幕轨道属于其他项目，已停止使用"
+        elif candidate.episode_id not in (None, episode.id):
+            subtitle_track_warning = "时间轴引用的字幕轨道属于其他分集，已停止使用"
+        else:
+            subtitle_track = candidate
+    if subtitle_track_warning:
+        data.pop("subtitle_track_id", None)
     if not data:
         data = {
             "shot_order": [shot.id for shot in shots],
@@ -3247,6 +3314,14 @@ def get_episode_edit_timeline(episode_id: int, db: Session = Depends(get_db)):
         "episode_title": episode.title,
         "version": record.version if record else 0,
         "timeline": data,
+        "subtitle_track": ({
+            "id": subtitle_track.id,
+            "name": subtitle_track.name,
+            "path": subtitle_track.file_path,
+            "format": subtitle_track.format,
+            "language": subtitle_track.language,
+        } if subtitle_track else None),
+        "subtitle_track_warning": subtitle_track_warning,
         "generated_subtitle_cues": generated_subtitle_cues,
         "characters": [{"id": item.id, "name": item.name} for item in characters],
         "shots": [{
@@ -3338,6 +3413,16 @@ def save_episode_edit_timeline(
         effect_info = probe_media(effect_path)
         if not any(stream.get("codec_type") == "audio" for stream in effect_info.get("streams", [])):
             raise HTTPException(422, "音效文件不包含可用音轨")
+    if data.subtitle_track_id is not None:
+        subtitle_track = db.query(SubtitleTrack).filter(
+            SubtitleTrack.id == data.subtitle_track_id
+        ).first()
+        if not subtitle_track:
+            raise HTTPException(422, "所选字幕轨道不存在")
+        if subtitle_track.project_id not in (None, episode.project_id):
+            raise HTTPException(422, "所选字幕轨道属于其他项目，不能跨项目引用")
+        if subtitle_track.episode_id not in (None, episode.id):
+            raise HTTPException(422, "所选字幕轨道属于其他分集，不能跨分集引用")
     for cue in data.subtitle_cues or []:
         if cue.end <= cue.start:
             raise HTTPException(422, "字幕结束时间必须大于开始时间")
