@@ -59,6 +59,24 @@ class StoryboardImageReplaceInput(BaseModel):
 
 
 
+
+
+class LocalImageBatchStatusItem(BaseModel):
+    shot_id: int = Field(ge=1)
+    shot_number: int = Field(ge=1)
+    prompt_id: str = Field(min_length=32, max_length=36)
+
+    @field_validator("prompt_id")
+    @classmethod
+    def validate_prompt_id(cls, value):
+        if not PROMPT_ID_RE.fullmatch(value):
+            raise ValueError("任务编号格式无效")
+        return value
+
+
+class LocalImageBatchStatusInput(BaseModel):
+    tasks: list[LocalImageBatchStatusItem] = Field(min_length=1, max_length=20)
+
 class LocalImageBatchInput(BaseModel):
     project_id: int = Field(ge=1)
     episode_id: int = Field(ge=1)
@@ -347,6 +365,59 @@ def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends
         "paid_api_used": False,
         "cloud_fallback": False,
         "message": "已按分镜顺序提交到本机 ComfyUI 队列。请逐项检查任务状态并确认归档；未提交成功的任务不会自动重试。",
+    }
+
+
+
+
+@router.post("/batch/tasks")
+def get_local_image_batch_status(data: LocalImageBatchStatusInput):
+    results = []
+    for task in data.tasks:
+        try:
+            history = _local_request("/history/" + task.prompt_id, timeout=5.0)
+            item = history.get(task.prompt_id)
+            if not isinstance(item, dict):
+                status = "queued_or_running"
+                images = []
+            else:
+                status_info = item.get("status") if isinstance(item.get("status"), dict) else {}
+                status_text = status_info.get("status_str")
+                if status_info.get("completed") is True:
+                    status = "completed" if status_text in (None, "success") else "failed"
+                elif status_text in ("error", "failed"):
+                    status = "failed"
+                else:
+                    status = "running"
+                outputs = item.get("outputs") if isinstance(item.get("outputs"), dict) else {}
+                images = []
+                for output in outputs.values():
+                    if not isinstance(output, dict):
+                        continue
+                    for image in output.get("images", []) if isinstance(output.get("images"), list) else []:
+                        if isinstance(image, dict):
+                            filename = image.get("filename")
+                            subfolder = image.get("subfolder", "")
+                            if isinstance(filename, str) and filename and len(filename) <= 240 and ".." not in filename and "/" not in filename and "\\\\" not in filename and image.get("type", "output") == "output":
+                                images.append({"filename": filename, "subfolder": subfolder if isinstance(subfolder, str) else "", "type": "output"})
+            results.append({
+                "shot_id": task.shot_id, "shot_number": task.shot_number,
+                "prompt_id": task.prompt_id, "status": status, "images": images[:20],
+            })
+        except (HTTPException, ValueError) as exc:
+            results.append({
+                "shot_id": task.shot_id, "shot_number": task.shot_number,
+                "prompt_id": task.prompt_id, "status": "unavailable",
+                "error": exc.detail if isinstance(exc, HTTPException) else str(exc),
+                "images": [],
+            })
+    return {
+        "tasks": results,
+        "completed_count": sum(item["status"] == "completed" for item in results),
+        "running_count": sum(item["status"] in ("running", "queued_or_running") for item in results),
+        "failed_count": sum(item["status"] == "failed" for item in results),
+        "local_only": True,
+        "network_used": False,
     }
 
 
