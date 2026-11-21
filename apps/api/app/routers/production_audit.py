@@ -105,6 +105,16 @@ def build_production_readiness_report(project_id: int, db: Session):
             "shot_id": shot_id,
         })
 
+    missing_link_asset_ids = sorted({
+        item.asset_id for item in asset_links if item.asset_id
+    } - set(assets_by_id))
+    if missing_link_asset_ids:
+        add_issue(
+            "warning",
+            "project_asset_link_missing",
+            f"项目素材关联中有 {len(missing_link_asset_ids)} 个视觉素材记录不存在",
+        )
+
     if not novel:
         add_issue("blocker", "source_novel_missing", "项目关联的原著不存在")
     elif not chapters:
@@ -237,7 +247,9 @@ def build_production_readiness_report(project_id: int, db: Session):
         "summary": {
             "chapter_count": len(chapters),
             "covered_chapter_count": len(covered_chapter_ids & chapter_ids),
+            "chapter_coverage_ratio": round(len(covered_chapter_ids & chapter_ids) / len(chapter_ids), 4) if chapter_ids else 0.0,
             "episode_count": len(episodes),
+            "visual_asset_count": len(assets),
             "shot_count": len(shots),
             "shots_with_video": shot_video_ready,
             "shots_missing_video": shot_missing_video,
