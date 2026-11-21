@@ -32,6 +32,7 @@ _COMFYUI_PROCESS = None
 _COMFYUI_LOG_HANDLE = None
 _COMFYUI_RUNTIME_MODE = None
 _COMFYUI_STARTED_AT = None
+_COMFYUI_LAST_EXIT_CODE = None
 
 
 def _install_root() -> Path:
@@ -185,6 +186,7 @@ def _status_payload():
         "process_id": managed["process_id"],
         "runtime_mode": _COMFYUI_RUNTIME_MODE if managed["managed"] else None,
         "started_at": _COMFYUI_STARTED_AT if managed["managed"] else None,
+        "last_exit_code": _COMFYUI_LAST_EXIT_CODE,
         "network_used": False,
         "downloaded": False,
         "cloud_fallback": False,
@@ -210,6 +212,9 @@ def _status_payload():
     elif managed["process_alive"]:
         status = "starting"
         message = "ComfyUI 进程已启动，正在等待本机健康检查通过。"
+    elif installed and _COMFYUI_LAST_EXIT_CODE not in (None, 0):
+        status = "failed"
+        message = f"ComfyUI 进程已退出，退出代码：{_COMFYUI_LAST_EXIT_CODE}。请查看运行日志定位原因。"
     elif installed:
         status = "stopped"
         message = "已找到本地 ComfyUI 引擎，但当前没有运行。"
@@ -230,9 +235,12 @@ def _status_payload():
 @router.get("/image-runtime")
 def local_image_runtime():
     """Discover local ComfyUI status and already-installed checkpoints."""
-    global _COMFYUI_PROCESS
+    global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT, _COMFYUI_LAST_EXIT_CODE
     if _COMFYUI_PROCESS is not None and _COMFYUI_PROCESS.poll() is not None:
+        _COMFYUI_LAST_EXIT_CODE = _COMFYUI_PROCESS.returncode
         _COMFYUI_PROCESS = None
+        _COMFYUI_RUNTIME_MODE = None
+        _COMFYUI_STARTED_AT = None
         _close_log_handle()
     return _status_payload()
 
@@ -240,7 +248,7 @@ def local_image_runtime():
 @router.post("/image-runtime/start")
 def start_local_image_runtime():
     """Start only the application's fixed local ComfyUI installation."""
-    global _COMFYUI_PROCESS, _COMFYUI_LOG_HANDLE, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT
+    global _COMFYUI_PROCESS, _COMFYUI_LOG_HANDLE, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT, _COMFYUI_LAST_EXIT_CODE
     if os.name != "nt":
         raise HTTPException(status_code=400, detail="当前启动管理仅支持 Windows 桌面版。")
     with _PROCESS_LOCK:
@@ -288,6 +296,7 @@ def start_local_image_runtime():
             raise HTTPException(status_code=500, detail=f"启动 ComfyUI 失败：{exc}") from exc
         _COMFYUI_PROCESS = process
         _COMFYUI_LOG_HANDLE = handle
+        _COMFYUI_LAST_EXIT_CODE = None
         _COMFYUI_RUNTIME_MODE = mode
         _COMFYUI_STARTED_AT = int(time.time())
         return {
@@ -306,7 +315,7 @@ def start_local_image_runtime():
 @router.post("/image-runtime/stop")
 def _stop_managed_process():
     """Terminate only the process object created by this module."""
-    global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT
+    global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT, _COMFYUI_LAST_EXIT_CODE
     with _PROCESS_LOCK:
         process = _COMFYUI_PROCESS
         if process is None:
@@ -321,6 +330,7 @@ def _stop_managed_process():
         _COMFYUI_PROCESS = None
         _COMFYUI_RUNTIME_MODE = None
         _COMFYUI_STARTED_AT = None
+        _COMFYUI_LAST_EXIT_CODE = None
         _close_log_handle()
         return True
 
