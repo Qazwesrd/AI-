@@ -174,6 +174,9 @@ class LocalAIRuntimeTests(unittest.TestCase):
         )
         generated = [{"response": f"阶段{i}成果"} for i in range(1, 6)]
         db = Mock()
+        def assign_media_id():
+            db.add.call_args.args[0].id = 42
+        db.flush.side_effect = assign_media_id
         with tempfile.TemporaryDirectory() as temporary, patch(
             "app.routers.local_ai_runtime.LOCAL_AI_RESULTS_DIR", Path(temporary)
         ), patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name": "qwen2.5:3b"}]), patch(
@@ -189,7 +192,7 @@ class LocalAIRuntimeTests(unittest.TestCase):
         self.assertTrue(result["saved_automatically"])
         self.assertTrue(saved_file.is_file())
         self.assertIn("阶段1成果", saved_content)
-        self.assertEqual(result["media_file_id"], db.add.call_args.args[0].id)
+        self.assertEqual(result["media_file_id"], 42)
         db.flush.assert_called_once()
         db.commit.assert_called_once()
         self.assertEqual(request.call_count, 5)
