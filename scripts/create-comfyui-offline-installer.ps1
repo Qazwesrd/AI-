@@ -19,6 +19,7 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 $root = Split-Path -Parent $PSScriptRoot
 $buildScript = Join-Path $PSScriptRoot "build-windows.ps1"
 $bundleScript = Join-Path $PSScriptRoot "prepare-comfyui-offline-bundle.ps1"
+$localAIBuilder = Join-Path $PSScriptRoot "prepare-local-ai-offline-payload.ps1"
 $releaseDir = Join-Path $root "apps\desktop\release"
 
 if ([string]::IsNullOrWhiteSpace($OutputZip)) {
@@ -68,12 +69,28 @@ if (!(Test-Path -LiteralPath $SetupExe -PathType Leaf)) {
 if (!(Test-Path -LiteralPath $bundleScript -PathType Leaf)) {
     throw "缺少离线套件构建脚本：$bundleScript"
 }
+if (!(Test-Path -LiteralPath $localAIBuilder -PathType Leaf)) {
+    throw "缺少本地 AI 离线载荷构建脚本：$localAIBuilder"
+}
 
-Write-Host "第 2/2 步：从 ComfyUI 和 7-Zip 官方发布源下载并校验全部离线引擎资源。"
-Write-Host "预计下载约 7.3 GiB；请使用稳定网络，并确保输出盘有至少 10 GiB 可用空间。"
-Write-Host "下载内容只用于制作离线 ZIP，不会安装到当前电脑。"
+$localAIPayloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-local-ai-payload-" + [Guid]::NewGuid().ToString("N"))
+try {
+    Write-Host "第 2/3 步：下载并验证 Ollama 官方运行环境，准备 Qwen3 4B 本地模型离线载荷。"
+    Write-Host "此步骤会准备约 4 GiB 本地 AI 资源，并需要额外临时空间；不会安装到当前电脑。"
+    & $localAIBuilder -OutputDirectory $localAIPayloadRoot
+    if (!(Test-Path -LiteralPath (Join-Path $localAIPayloadRoot "manifest.json") -PathType Leaf)) {
+        throw "本地 AI 离线载荷构建未生成有效 manifest。"
+    }
 
-& $bundleScript -SetupExe $SetupExe -OutputZip $OutputZip
+    Write-Host "第 3/3 步：下载并校验 ComfyUI 四种官方运行包、7-Zip 及完整离线安装 ZIP。"
+    Write-Host "完整套件预计约 11 GiB；输出盘还需预留打包和安装临时空间。"
+    Write-Host "本步骤仅制作 ZIP，不会在当前电脑安装 ComfyUI 或 Ollama。"
+    & $bundleScript -SetupExe $SetupExe -OutputZip $OutputZip -LocalAIPayloadRoot $localAIPayloadRoot
+} finally {
+    if (Test-Path -LiteralPath $localAIPayloadRoot) {
+        Remove-Item -LiteralPath $localAIPayloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 if (!(Test-Path -LiteralPath $OutputZip -PathType Leaf)) {
     throw "离线 ZIP 没有生成。"
