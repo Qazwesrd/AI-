@@ -484,6 +484,7 @@ export default function StoryboardPage() {
         <div className="text-sm text-purple-300">AI COMIC STUDIO / STORYBOARD</div>
         <h1 className="mt-2 text-3xl font-bold">剧本改编与智能分镜中心</h1>
         <p className="mt-2 text-sm text-slate-300">小说 → 分集规划 → 影视剧本 → 镜头分镜 → 视觉素材匹配</p>
+        <p className="mt-2 text-xs text-slate-400">视频生成可在 AI 网页协作中心手动准备任务；本地 FFmpeg 合成仍可使用已下载的视频素材。云端 TTS 已禁用，本地离线配音引擎尚待接入。</p>
         <p className="mt-3 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs text-cyan-100">严格零费用模式：云端 AI API 统一拦截，不会因误点产生 API 费用。剧本与分镜请使用已安装的本地模型，或到 AI 网页协作中心手动操作；第三方网站的免费额度和收费规则由网站本身决定。</p>
       </header>
 
@@ -551,8 +552,8 @@ export default function StoryboardPage() {
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <a href="/local-creator" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-3 py-1.5 text-xs text-cyan-100">前往本地 AI 生成剧本与分镜</a>
-                <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
-                <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
+                <a href="/ai-tools" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-3 py-1.5 text-xs text-cyan-100">准备网页视频生成任务</a>
+                <button type="button" disabled title="严格零费用模式已拦截云端 TTS；本地离线配音引擎仍在开发中。" className="rounded-lg border border-amber-300/20 bg-amber-900/20 px-3 py-1.5 text-xs text-amber-100/60 cursor-not-allowed">本地离线配音引擎待接入</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
                 <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs" disabled={busy} onClick={() => checkEpisodeConsistency(ep.id)}>检查视觉一致性</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
