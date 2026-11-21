@@ -484,6 +484,7 @@ export default function StoryboardPage() {
         <div className="text-sm text-purple-300">AI COMIC STUDIO / STORYBOARD</div>
         <h1 className="mt-2 text-3xl font-bold">剧本改编与智能分镜中心</h1>
         <p className="mt-2 text-sm text-slate-300">小说 → 分集规划 → 影视剧本 → 镜头分镜 → 视觉素材匹配</p>
+        <p className="mt-3 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs text-cyan-100">严格零费用模式：云端 AI API 统一拦截，不会因误点产生 API 费用。剧本与分镜请使用已安装的本地模型，或到 AI 网页协作中心手动操作；第三方网站的免费额度和收费规则由网站本身决定。</p>
       </header>
 
       {message && <div className="rounded-xl border border-purple-300/20 bg-purple-950/50 p-3 text-sm text-purple-100">{message}</div>}
