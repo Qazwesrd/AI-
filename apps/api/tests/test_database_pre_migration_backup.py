@@ -285,9 +285,13 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                         connection.execute("PRAGMA integrity_check").fetchone(),
                         ("ok",),
                     )
-                self.assertTrue(test_engine.connect().exec_driver_sql(
-                    "SELECT value FROM protected_data WHERE id=1"
-                ).scalar_one() == "must-remain-untouched")
+                with test_engine.connect() as connection:
+                    self.assertEqual(
+                        connection.exec_driver_sql(
+                            "SELECT value FROM protected_data WHERE id=1"
+                        ).scalar_one(),
+                        "must-remain-untouched",
+                    )
             finally:
                 test_engine.dispose()
                 database.engine = previous_engine
