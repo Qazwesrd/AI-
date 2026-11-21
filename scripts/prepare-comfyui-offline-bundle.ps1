@@ -108,15 +108,15 @@ function Add-VerifiedRemoteEntry(
         $output = $entry.Open()
         $input = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
         $mirror = $null
-        if ($MirrorPath) {
-            $mirrorParent = Split-Path -Parent $MirrorPath
-            if ($mirrorParent) { New-Item -ItemType Directory -Path $mirrorParent -Force | Out-Null }
-            $mirror = [System.IO.File]::Open($MirrorPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-        }
         $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
         $buffer = [byte[]]::new($ChunkBytes)
         [long]$received = 0
         try {
+            if ($MirrorPath) {
+                $mirrorParent = Split-Path -Parent $MirrorPath
+                if ($mirrorParent) { New-Item -ItemType Directory -Path $mirrorParent -Force | Out-Null }
+                $mirror = [System.IO.File]::Open($MirrorPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            }
             while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
                 $received += $read
                 if ($received -gt $ExpectedSize) { throw "下载数据超过官方声明大小：$EntryName" }
