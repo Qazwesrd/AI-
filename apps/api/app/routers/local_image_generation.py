@@ -260,9 +260,9 @@ def _download_comfyui_output(filename: str, subfolder: str):
         raise HTTPException(502, "ComfyUI 返回了空图片")
     if len(raw) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "单张图片超过 25 MiB 安全归档上限")
-    if raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
         return raw, "image/png", ".png"
-    if raw.startswith(b"\\xff\\xd8\\xff"):
+    if raw.startswith(b"\xff\xd8\xff"):
         return raw, "image/jpeg", ".jpg"
     if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
         return raw, "image/webp", ".webp"
