@@ -206,6 +206,54 @@ class DatabasePreMigrationBackupTests(unittest.TestCase):
                 database.STORAGE_DIR = previous_storage
 
 
+    def test_corrupt_rollback_snapshot_is_rejected_before_live_database_is_touched(self):
+        with tempfile.TemporaryDirectory(prefix="comic-db-corrupt-rollback-") as temp:
+            root = Path(temp)
+            db_path = root / "live.db"
+            backup_path = root / "corrupt-backup.db"
+            with sqlite_connection(db_path) as connection:
+                connection.execute(
+                    "CREATE TABLE protected_data (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.execute(
+                    "INSERT INTO protected_data (value) VALUES (?)",
+                    ("must-remain-untouched",),
+                )
+            backup_path.write_bytes(b"SQLite format 3\\x00" + b"corrupt-snapshot" * 32)
+
+            previous_engine = database.engine
+            previous_path = database.DATABASE_PATH
+            test_engine = create_engine(
+                f"sqlite:///{db_path.as_posix()}",
+                connect_args={"check_same_thread": False, "timeout": 30},
+                poolclass=NullPool,
+                future=True,
+            )
+            try:
+                database.engine = test_engine
+                database.DATABASE_PATH = db_path
+                with self.assertRaisesRegex(RuntimeError, "不是有效的 SQLite 数据库"):
+                    database._restore_database_backup(backup_path)
+
+                with sqlite_connection(db_path) as connection:
+                    self.assertEqual(
+                        connection.execute(
+                            "SELECT value FROM protected_data WHERE id=1"
+                        ).fetchone(),
+                        ("must-remain-untouched",),
+                    )
+                    self.assertEqual(
+                        connection.execute("PRAGMA integrity_check").fetchone(),
+                        ("ok",),
+                    )
+                self.assertTrue(test_engine.connect().exec_driver_sql(
+                    "SELECT value FROM protected_data WHERE id=1"
+                ).scalar_one() == "must-remain-untouched")
+            finally:
+                test_engine.dispose()
+                database.engine = previous_engine
+                database.DATABASE_PATH = previous_path
+
     def test_newer_schema_is_rejected_before_any_mutation(self):
         with tempfile.TemporaryDirectory(prefix="comic-newer-schema-") as temp:
             root = Path(temp)
