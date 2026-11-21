@@ -300,7 +300,6 @@ try {
     if ($inventoryReports.Count -ne 4) { throw "必须为四种 ComfyUI Portable 运行包分别生成依赖清点报告。" }
     $inventoryBase = $inventoryReports[0]
     $inventoryBase.portable_variants = @($inventoryReports | ForEach-Object { @($_.portable_variants)[0] })
-    $inventoryBase.unresolved_items = @($inventoryReports | ForEach-Object { $_.unresolved_items } | Sort-Object -Unique)
     $inventoryBase.generated_utc = [DateTime]::UtcNow.ToString("o")
     $inventoryBase.audit_status = "pending"
     $inventoryBase.distribution_approved = $false
