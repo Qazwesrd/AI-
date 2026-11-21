@@ -1232,19 +1232,26 @@ def preflight_reference_conditioning(
         ("prop_reference_images", "props", "道具", lambda shot: shot.prop_ids if isinstance(shot.prop_ids, list) else []),
     )
     references = {}
+    missing_bindings = []
     for field_name, category, label, get_ids in groups:
         bindings = profile.get(field_name, {})
         if not isinstance(bindings, dict):
-            continue
+            bindings = {}
         for shot in shots:
             for asset_id in get_ids(shot):
                 media_id = bindings.get(str(asset_id))
-                if media_id:
-                    references[(category, str(asset_id), int(media_id))] = {
-                        "category": category, "asset_id": int(asset_id), "media_file_id": int(media_id),
-                        "label": label, "shot_ids": [],
-                    }
-                    references[(category, str(asset_id), int(media_id))]["shot_ids"].append(shot.id)
+                if not media_id:
+                    missing_bindings.append({
+                        "category": category, "asset_id": int(asset_id), "label": label,
+                        "shot_ids": [shot.id], "ready": False, "reason": "尚未绑定参考图",
+                    })
+                    continue
+                key = (category, str(asset_id), int(media_id))
+                references.setdefault(key, {
+                    "category": category, "asset_id": int(asset_id), "media_file_id": int(media_id),
+                    "label": label, "shot_ids": [],
+                })
+                references[key]["shot_ids"].append(shot.id)
 
     asset_ids = {item["asset_id"] for item in references.values()}
     linked_asset_ids = {
@@ -1264,7 +1271,7 @@ def preflight_reference_conditioning(
     }
 
     checked = []
-    failures = []
+    failures = list(missing_bindings)
     for item in references.values():
         asset = visual_assets.get(item["asset_id"])
         media = media_rows.get(item["media_file_id"])
