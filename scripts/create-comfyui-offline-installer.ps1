@@ -96,7 +96,7 @@ if (!(Test-Path -LiteralPath $OutputZip -PathType Leaf)) {
     throw "离线 ZIP 没有生成。"
 }
 $zip = Get-Item -LiteralPath $OutputZip
-if ($zip.Length -lt 6GB) {
+if ($zip.Length -lt 9GB) {
     throw "生成的 ZIP 小于预期（$([math]::Round($zip.Length / 1GB, 2)) GiB），拒绝交付。"
 }
 $checksumPath = "$OutputZip.sha256"
