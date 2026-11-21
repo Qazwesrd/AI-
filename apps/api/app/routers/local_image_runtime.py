@@ -312,7 +312,6 @@ def start_local_image_runtime():
         }
 
 
-@router.post("/image-runtime/stop")
 def _stop_managed_process():
     """Terminate only the process object created by this module."""
     global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT, _COMFYUI_LAST_EXIT_CODE
@@ -344,6 +343,7 @@ def shutdown_managed_comfyui():
         pass
 
 
+@router.post("/image-runtime/stop")
 def stop_local_image_runtime():
     """Stop only the exact process handle launched by this API process."""
     if _COMFYUI_PROCESS is None:
