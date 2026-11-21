@@ -288,6 +288,7 @@ try {
         model = $manifest.model.name
         model_manifest_sha256 = $manifest.model.manifest_sha256
         installed_utc = [DateTime]::UtcNow.ToString("o")
+        cloud_features_disabled = $true
         distribution_approved = $false
     }
     $installedManifest | ConvertTo-Json -Depth 5 |
