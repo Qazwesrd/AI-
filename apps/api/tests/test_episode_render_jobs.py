@@ -78,6 +78,34 @@ class EpisodeRenderJobTests(unittest.TestCase):
             del media._EPISODE_RENDER_CONTEXT.task_id
             del media._EPISODE_RENDER_CONTEXT.duration_seconds
 
+    def test_successful_publish_wins_over_late_cancel_request(self):
+        self.task.status = "queued"
+        self.db.commit()
+        event = threading.Event()
+
+        def completed_render(*args, **kwargs):
+            event.set()
+            return {
+                "success": True, "episode_id": 12, "output": "storage/video/episode.mp4",
+                "quality_report": {"valid": True},
+            }
+
+        with patch.object(media, "SessionLocal", self.Session):
+            with patch.object(media, "render_episode_from_shots", side_effect=completed_render):
+                with patch.dict(
+                    media._EPISODE_RENDER_RUNTIME,
+                    {self.task.id: {"cancel": event, "phase": {"index": 0}}},
+                    clear=True,
+                ):
+                    media._run_episode_render_job(
+                        self.task.id, 12, "episode.mp4", None, 0.18,
+                    )
+        self.db.expire_all()
+        saved = self.db.query(MediaTask).filter(MediaTask.id == self.task.id).one()
+        self.assertEqual(saved.status, "completed")
+        self.assertEqual(saved.result_path, "storage/video/episode.mp4")
+        self.assertEqual(saved.result_data["progress"]["percent"], 100)
+
     def test_worker_persists_successful_result(self):
         self.task.status = "queued"
         self.db.commit()
