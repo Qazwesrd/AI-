@@ -28,7 +28,7 @@ function Get-Sha256([string]$Path) {
 }
 
 $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-comfyui-audit-test-" + [Guid]::NewGuid().ToString("N"))
-$sevenZip = Join-Path $temp "7zr.exe"
+$sevenZip = $null
 $fixtureRoot = Join-Path $temp "fixture"
 $comfyRoot = Join-Path $fixtureRoot "ComfyUI"
 $archive = Join-Path $temp "ComfyUI_windows_portable_amd.7z"
@@ -48,27 +48,23 @@ $installLog = Join-Path $temp "comfyui-install.log"
 try {
     New-Item -ItemType Directory -Path $temp, $comfyRoot -Force | Out-Null
 
-    $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ip7z/7zip/releases/latest" -Headers @{
-        Accept = "application/vnd.github+json"
-        "X-GitHub-Api-Version" = "2022-11-28"
-        "User-Agent" = "AI-Comic-Studio-Dependency-Audit-Test"
-    } -TimeoutSec 30
-    $asset = @($release.assets | Where-Object { $_.name -ceq "7zr.exe" }) | Select-Object -First 1
-    if (!$asset -or $asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
-        throw "7-Zip 官方 Release 缺少带 SHA-256 的 7zr.exe。"
+    # The integration fixture needs a local 7z-compatible CLI, not a fresh
+    # download of the production bundler's 7zr.exe. The bundle builder separately
+    # verifies the official 7zr.exe release metadata and SHA-256 before packaging.
+    $sevenZipCommand = Get-Command "7z.exe" -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (!$sevenZipCommand) {
+        $knownSevenZipPaths = @(
+            (Join-Path $env:ProgramFiles "7-Zip\7z.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "7-Zip\7z.exe")
+        )
+        $sevenZipPath = $knownSevenZipPaths | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1
+    } else {
+        $sevenZipPath = $sevenZipCommand.Source
     }
-    $expectedHash = ([regex]::Match($asset.digest, '^sha256:([0-9a-fA-F]{64})$')).Groups[1].Value.ToLowerInvariant()
-    $assetUri = [Uri]$asset.browser_download_url
-    $expectedPath = "/ip7z/7zip/releases/download/$($release.tag_name)/7zr.exe"
-    if ($assetUri.Scheme -ne "https" -or $assetUri.Host -ne "github.com" -or
-        $assetUri.AbsolutePath -cne $expectedPath -or $assetUri.Query -or $assetUri.Fragment) {
-        throw "7-Zip 7zr.exe 下载地址与官方 Release 不匹配。"
+    if (!$sevenZipPath) {
+        throw "Windows CI runner 未预装 7-Zip CLI；依赖审计集成测试无法创建本地 fixture。"
     }
-    Invoke-WebRequest -Uri $assetUri.AbsoluteUri -OutFile $sevenZip -TimeoutSec 120
-    if ((Get-Item -LiteralPath $sevenZip).Length -ne [long]$asset.size -or
-        (Get-Sha256 $sevenZip) -ne $expectedHash) {
-        throw "7zr.exe 大小或 SHA-256 校验失败。"
-    }
+    $sevenZip = (Resolve-Path -LiteralPath $sevenZipPath).Path
 
     $sitePackages = Join-Path $comfyRoot "python_embeded\Lib\site-packages"
     $metadataDir = Join-Path $sitePackages "audit_fixture-1.0.dist-info"
