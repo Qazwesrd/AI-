@@ -540,6 +540,11 @@ def control_unified_task(
         return handler(task_id, db)
 
     if source == "media":
+        if action not in ("retry", "refresh"):
+            raise HTTPException(
+                409,
+                "媒体任务暂不支持本地强制暂停或取消；图片/视频任务请刷新状态，配音任务请走人工核实流程",
+            )
         task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
         if not task:
             raise HTTPException(404, "媒体任务不存在")
@@ -570,11 +575,6 @@ def control_unified_task(
                 "success": True, "task_id": task_id, "status": task.status,
                 "message": "已完成配音任务人工核实并解除重试保护；请返回配音页面重新发起，系统不会自动调用 AI。",
             }
-        if action != "refresh":
-            raise HTTPException(
-                409,
-                "媒体任务暂不支持本地强制暂停或取消；图片/视频任务请刷新状态，配音任务请走人工核实流程",
-            )
         if task.task_type in ("local_image_batch", "local_image_reference"):
             metadata = task.request_data if isinstance(task.request_data, dict) else {}
             if not task.remote_task_id:
