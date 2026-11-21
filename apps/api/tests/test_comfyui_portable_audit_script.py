@@ -39,6 +39,7 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
         self.assertIn('"e", "-y", "-spd"', source)
         self.assertIn("return $entries.ToArray()", source)
+        self.assertIn('if ($record.ContainsKey("Path") -and $record["Path"] -ne $Archive -and !$record.ContainsKey("Type"))', source)
         self.assertIn("components = $components.ToArray()", source)
         self.assertIn("evidence_files = $evidence.ToArray()", source)
 
