@@ -12,6 +12,8 @@ from app.routers.local_ai_runtime import (
     test_local_model,
     get_local_novel_context,
     _bounded_continuity,
+    LocalEpisodePackageInput,
+    generate_local_episode_package,
 )
 
 
@@ -157,6 +159,33 @@ class LocalAIRuntimeTests(unittest.TestCase):
         result, truncated = _bounded_continuity(items, max_chars=1200)
         self.assertTrue(truncated)
         self.assertLessEqual(sum(len(__import__("json").dumps(x, ensure_ascii=False)) for x in result), 1200)
+
+
+    def test_episode_package_runs_five_local_stages_and_carries_previous_context(self):
+        payload = LocalEpisodePackageInput(model="qwen2.5:3b", style="国漫", source_text="主角进入神殿。")
+        generated = [{"response": f"阶段{i}成果"} for i in range(1, 6)]
+        with patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name": "qwen2.5:3b"}]), patch(
+            "app.routers.local_ai_runtime._ollama_request", side_effect=generated
+        ) as request:
+            result = generate_local_episode_package(payload)
+        self.assertEqual(result["stage_count"], 5)
+        self.assertEqual([x["stage"] for x in result["stages"]], ["screenplay", "character", "plot", "storyboard", "image_prompt"])
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["cloud_fallback"])
+        self.assertFalse(result["saved_automatically"])
+        self.assertEqual(request.call_count, 5)
+        self.assertIn("阶段1成果", request.call_args_list[3].args[1]["prompt"])
+        self.assertIn("阶段2成果", request.call_args_list[3].args[1]["prompt"])
+
+    def test_episode_package_rejects_missing_model(self):
+        payload = LocalEpisodePackageInput(model="missing", source_text="章节")
+        with patch("app.routers.local_ai_runtime._installed_models", return_value=[]), patch(
+            "app.routers.local_ai_runtime._ollama_request"
+        ) as request:
+            with self.assertRaises(HTTPException) as caught:
+                generate_local_episode_package(payload)
+        self.assertEqual(caught.exception.status_code, 404)
+        request.assert_not_called()
 
 
 if __name__ == "__main__":

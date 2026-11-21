@@ -36,6 +36,8 @@ export default function LocalCreatorPage() {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [chapterId, setChapterId] = useState("");
   const [contextLoading, setContextLoading] = useState(false);
+  const [packageLoading, setPackageLoading] = useState(false);
+  const [packageStages, setPackageStages] = useState<Array<{ stage: string; title: string; content: string }>>([]);
 
   const refresh = useCallback(async () => {
     setError("");
@@ -116,6 +118,19 @@ export default function LocalCreatorPage() {
     } finally { setLoading(false); }
   }
 
+  async function generatePackage() {
+    if (!model || !source.trim()) { setError("请先选择本地模型并载入章节资料"); return; }
+    setPackageLoading(true); setError(""); setResult(""); setPackageStages([]);
+    try {
+      const response = await fetch(`${API}/api/local-ai/generate-package`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, style, source_text: source, extra_requirements: extra }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "整章创作包生成失败");
+      setPackageStages(data.stages || []);
+      setNotice("五阶段创作包已生成，结果仅保存在当前页面，尚未写入原稿。");
+    } catch (err) { setError(err instanceof Error ? err.message : "本地创作包生成失败；没有切换到云端"); }
+    finally { setPackageLoading(false); }
+  }
+
   async function copyResult() {
     try { await navigator.clipboard.writeText(result); }
     catch { setError("复制失败，请手动选中生成结果复制"); }
@@ -180,8 +195,12 @@ export default function LocalCreatorPage() {
           <button disabled={loading || !model || !source.trim() || runtime?.status !== "ready"} onClick={() => void generate()} className="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">{loading ? "本地模型正在生成，请稍候……" : "开始本地生成"}</button>
           <span className="text-xs text-white/45">生成速度取决于电脑 CPU、内存、显卡和模型大小。</span>
         </div>
+        <button disabled={packageLoading || loading || !model || !source.trim() || runtime?.status !== "ready"} onClick={() => void generatePackage()} className="mt-3 rounded-xl border border-cyan-300/40 px-5 py-3 font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40">{packageLoading ? "正在依次生成五个阶段，请耐心等待…" : "一键生成整章创作包（5阶段）"}</button>
+        <p className="mt-2 text-xs text-white/45">整套流程会连续调用本机模型五次，速度取决于电脑性能；不会产生云端 API 费用，也不会自动保存。</p>
         {error && <p role="alert" className="mt-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
       </section>
+
+      {packageStages.length > 0 && <section className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">整章创作包 · 五阶段结果</h2><button onClick={() => void navigator.clipboard.writeText(packageStages.map((item) => `# ${item.title}\n\n${item.content}`).join("\n\n---\n\n"))} className="rounded-lg border border-cyan-200/30 px-3 py-2 text-sm">复制完整创作包</button></div>{packageStages.map((item) => <details key={item.stage} open className="mt-3 rounded-xl border border-white/10 bg-slate-950/50 p-3"><summary className="cursor-pointer font-semibold">{item.title}</summary><pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-7">{item.content}</pre></details>)}<p className="mt-3 text-xs text-white/50">内容只保存在当前页面，刷新页面后不会保留；检查后请自行复制保存。</p></section>}
 
       {result && <section className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">生成结果</h2><button onClick={() => void copyResult()} className="rounded-lg border border-cyan-200/30 px-3 py-2 text-sm">复制全部内容</button></div>
