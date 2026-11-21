@@ -89,7 +89,20 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         nsis_path = REPO_ROOT / "apps" / "desktop" / "build-resources" / "installer.nsh"
         nsis = nsis_path.read_text(encoding="utf-8")
         self.assertIn("install-comfyui-offline.ps1", nsis)
-        self.assertIn("install-local-ai-offline.ps1", nsis)
+        self.assertIn("install-local-engines-transaction.ps1", nsis)
+        self.assertIn("ComfyUI-Payload", nsis)
+        self.assertIn("LocalAI-Payload", nsis)
+
+        transaction_path = REPO_ROOT / "scripts" / "install-local-engines-transaction.ps1"
+        transaction = transaction_path.read_text(encoding="utf-8")
+        self.assertIn("-ValidateOnly", transaction)
+        self.assertIn("Remove-TransactionOwnedInstall", transaction)
+        self.assertIn("$comfyExistedBefore", transaction)
+        self.assertIn("$localAIExistedBefore", transaction)
+
+        local_ai_installer = (REPO_ROOT / "scripts" / "install-local-ai-offline.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$ValidateOnly", local_ai_installer)
+        self.assertIn("if ($ValidateOnly)", local_ai_installer)
         self.assertNotIn('IfFileExists "$PROFILE\\AIComicStudio\\ComfyUI\\ComfyUI\\main.py"', nsis)
         self.assertNotIn('Remove-Item "$PROFILE\\AIComicStudio', nsis)
 
