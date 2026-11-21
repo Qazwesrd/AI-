@@ -19,6 +19,8 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
         self.assertNotIn("distribution_approved = $true", source)
+        self.assertIn("[int]$MaximumEntries = 100000", source)
+        self.assertIn("$MaximumEntries -gt 100000", source)
 
     def test_only_known_official_portable_asset_names_are_accepted(self):
         source_path = REPO_ROOT / "scripts" / "audit-comfyui-portable-dependencies.ps1"
