@@ -169,9 +169,27 @@ $expectedAssetNames = @(
     "ComfyUI_windows_portable_amd.7z",
     "ComfyUI_windows_portable_intel.7z"
 )
-$manifestAssetNames = @($manifest.assets | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
-if ($manifestAssetNames.Count -ne 4 -or (Compare-Object $expectedAssetNames $manifestAssetNames).Count -gt 0) {
-    throw "离线数据包缺少官方显卡运行包或包含未知文件。"
+$manifestAssetItems = @($manifest.assets)
+$manifestAssetNames = @($manifestAssetItems | ForEach-Object { [string]$_.name } | Sort-Object -Unique)
+if ($manifestAssetItems.Count -ne 4 -or $manifestAssetNames.Count -ne 4 -or
+    (Compare-Object $expectedAssetNames $manifestAssetNames).Count -gt 0) {
+    throw "离线数据包缺少官方显卡运行包、包含重复项或包含未知文件。"
+}
+$bundleRoot = Split-Path -Parent $payload
+$comfyLicensePath = Join-Path $bundleRoot ([string]$manifest.license.license_file)
+$sevenZipLicensePath = Join-Path $bundleRoot ([string]$manifest.seven_zip.license_file)
+$sevenZipSourcePath = Join-Path $bundleRoot (([string]$manifest.seven_zip.source_archive).Replace("/", "\"))
+if (!(Test-Path -LiteralPath $comfyLicensePath -PathType Leaf) -or
+    (Get-Content -LiteralPath $comfyLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE") {
+    throw "缺少 ComfyUI GPL-3.0 许可证文件。"
+}
+if (!(Test-Path -LiteralPath $sevenZipLicensePath -PathType Leaf) -or
+    (Get-Content -LiteralPath $sevenZipLicensePath -Raw -Encoding UTF8) -notmatch "GNU LGPL") {
+    throw "缺少 7-Zip 许可证文件。"
+}
+if (!(Test-Path -LiteralPath $sevenZipSourcePath -PathType Leaf) -or
+    (Get-Sha256 $sevenZipSourcePath) -ne ([string]$manifest.seven_zip.source_sha256).ToLowerInvariant()) {
+    throw "7-Zip 对应源代码包缺失或 SHA-256 校验失败。"
 }
 $cpuArchitecture = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture | Select-Object -Unique)
 if ([Environment]::Is64BitOperatingSystem -ne $true -or $cpuArchitecture.Count -ne 1 -or $cpuArchitecture[0] -ne 9) {
@@ -179,8 +197,10 @@ if ([Environment]::Is64BitOperatingSystem -ne $true -or $cpuArchitecture.Count -
 }
 
 $tool = $manifest.tools | Where-Object { $_.name -eq "7zr.exe" } | Select-Object -First 1
-if (!$tool -or (Get-Sha256 $sevenZip) -ne ([string]$tool.sha256).ToLowerInvariant()) {
-    throw "7-Zip 解压工具 SHA-256 校验失败。"
+$expectedToolUrl = "https://github.com/ip7z/7zip/releases/download/$($manifest.seven_zip.version)/7zr.exe"
+if (!$tool -or $tool.source -ne $expectedToolUrl -or
+    (Get-Sha256 $sevenZip) -ne ([string]$tool.sha256).ToLowerInvariant()) {
+    throw "7-Zip 解压工具来源或 SHA-256 校验失败。"
 }
 
 $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
