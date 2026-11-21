@@ -46,6 +46,16 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertFalse(any('IsFolder = ($record["Folder"] -eq "+")' in line for line in source.splitlines()))
         self.assertFalse(any('Attributes = [string]$record["Attributes"]' in line for line in source.splitlines()))
 
+    def test_bundle_builder_scans_all_portable_assets_before_packaging(self):
+        builder_path = REPO_ROOT / "scripts" / "prepare-comfyui-offline-bundle.ps1"
+        builder = builder_path.read_text(encoding="utf-8")
+        self.assertIn("[string]$MirrorPath", builder)
+        self.assertIn("-SevenZipPath $sevenZipTempPath", builder)
+        self.assertIn("dependency_inventory_report", builder)
+        self.assertIn("comfyui-portable-dependency-inventory.json", builder)
+        self.assertIn("largestAssetBytes", builder)
+        self.assertIn("inventoryReports.Count -ne 4", builder)
+
     def test_comfyui_installer_records_runtime_and_preserves_existing_install(self):
         installer_path = REPO_ROOT / "scripts" / "install-comfyui-offline.ps1"
         installer = installer_path.read_text(encoding="utf-8")
