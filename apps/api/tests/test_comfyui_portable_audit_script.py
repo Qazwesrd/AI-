@@ -37,7 +37,7 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         source_path = REPO_ROOT / "scripts" / "audit-comfyui-portable-dependencies.ps1"
         source = source_path.read_text(encoding="utf-8")
         self.assertEqual(source.count('ContainsKey("Folder")'), 2)
-        self.assertEqual(source.count('ContainsKey("Attributes")'), 2)
+        self.assertEqual(source.count('ContainsKey("Attributes")'), 4)
         self.assertEqual(source.count('IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))'), 2)
         self.assertIn("Expand-ValidatedArchive", source)
         self.assertEqual(source.count('-match "(^|\\\\s)D"'), 2)
