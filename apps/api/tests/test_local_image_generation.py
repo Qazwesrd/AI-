@@ -45,6 +45,18 @@ class LocalImageGenerationTests(unittest.TestCase):
         self.assertEqual(result["status"], "queued")
         self.assertEqual(request.call_args_list[1].args[0], "/prompt")
 
+    def test_generation_rejects_dimensions_not_multiple_of_64_before_local_call(self):
+        payload = LocalImageGenerateInput(checkpoint="model.safetensors", prompt="A cinematic mountain", width=700, confirm_local_generation=True)
+        with patch("app.routers.local_image_generation._local_request") as request:
+            with self.assertRaises(HTTPException) as caught:
+                generate_local_image(payload)
+        self.assertEqual(caught.exception.status_code, 400)
+        request.assert_not_called()
+
+    def test_checkpoint_path_traversal_is_rejected(self):
+        with self.assertRaises(ValueError):
+            LocalImageGenerateInput(checkpoint="../outside.safetensors", prompt="A cinematic mountain")
+
     def test_status_rejects_invalid_task_id(self):
         with self.assertRaises(HTTPException) as caught:
             get_local_image_task("../etc/passwd")
