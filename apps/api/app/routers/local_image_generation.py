@@ -429,12 +429,13 @@ def list_shot_media_versions(shot_id: int, link_id: int, db: Session = Depends(g
     elif not any(row.media_file_id == link.media_file_id for row in rows):
         rows.append(type("CurrentRevision", (), {"version_number": max(row.version_number for row in rows) + 1, "media_file_id": link.media_file_id, "created_at": link.created_at})())
     result = []
+    current_version = max(row.version_number for row in rows)
     for row in sorted(rows, key=lambda item: item.version_number, reverse=True):
         media = db.query(MediaFile).filter(MediaFile.id == row.media_file_id, MediaFile.category == "image").first()
         if media:
             result.append({"version_number": row.version_number, "media_file_id": media.id, "name": media.name,
                 "file_size": media.file_size, "download_url": f"/api/media/files/{media.id}/download",
-                "current": media.id == link.media_file_id})
+                "current": row.version_number == current_version})
     return {"shot_id": shot.id, "link_id": link.id, "versions": result}
 
 
