@@ -44,7 +44,8 @@ jobs:
           foreach ($script in @(
             "scripts/prepare-comfyui-offline-bundle.ps1",
             "scripts/install-comfyui-offline.ps1",
-            "scripts/create-comfyui-offline-installer.ps1"
+            "scripts/create-comfyui-offline-installer.ps1",
+            "scripts/test-comfyui-offline-bundle-smoke.ps1"
           )) {
             $tokens = $null
             $errors = $null
