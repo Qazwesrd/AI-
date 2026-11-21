@@ -1,5 +1,4 @@
 import unittest
-from datetime import datetime
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -7,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models.media import MediaTask
+from app.models.media import MediaTask, MediaFile
 from app.routers import media
 
 
@@ -18,7 +17,7 @@ class LocalRenderJobPersistenceTests(unittest.TestCase):
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-        Base.metadata.create_all(self.engine, tables=[MediaTask.__table__])
+        Base.metadata.create_all(self.engine, tables=[MediaTask.__table__, MediaFile.__table__])
         self.Session = sessionmaker(bind=self.engine)
         self.db = self.Session()
         self.task = MediaTask(
@@ -47,6 +46,58 @@ class LocalRenderJobPersistenceTests(unittest.TestCase):
             self.db.query(MediaTask).filter(MediaTask.id == self.task.id).one().status,
             "interrupted_unknown",
         )
+
+    def test_queued_job_after_restart_is_not_left_stuck_or_auto_started(self):
+        self.task.status = "queued"
+        self.db.commit()
+        with patch.dict(media._LOCAL_RENDER_RUNTIME, {}, clear=True):
+            result = media.get_local_render_job(self.task.id, self.db)
+        self.assertEqual(result["status"], "interrupted_unknown")
+        self.assertIn("未自动重新渲染", result["error"])
+
+    def test_worker_validates_then_atomically_publishes_completed_output(self):
+        import tempfile
+        from pathlib import Path
+        import threading
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "final.mp4"
+            partial = output.with_name("final.partial.mp4")
+            self.task.status = "queued"
+            self.task.result_path = str(output)
+            self.task.request_data = {
+                "video_path": "source.mp4", "audio_path": None,
+                "subtitle_path": None, "width": 1280, "height": 720,
+                "music_volume": 0.25, "original_volume": 1.0,
+            }
+            self.db.commit()
+            with patch.object(media, "SessionLocal", self.Session), \\
+                 patch.object(media, "safe_storage_file", return_value=Path(directory) / "source.mp4"), \\
+                 patch.object(media, "probe_media", return_value={
+                     "format": {"duration": "8.0"},
+                     "streams": [{"codec_type": "video", "width": 1280, "height": 720}],
+                 }), \\
+                 patch.object(media, "run_ffmpeg_with_progress") as ffmpeg, \\
+                 patch.object(media, "validate_rendered_video", return_value={
+                     "valid": True, "duration_seconds": 8.0,
+                 }) as validate:
+                def write_output(args, **kwargs):
+                    Path(args[-1]).write_bytes(b"x" * 2048)
+                    kwargs["progress_callback"]({"percent": 99.9, "stage": "validating"})
+                ffmpeg.side_effect = write_output
+                with patch.dict(
+                    media._LOCAL_RENDER_RUNTIME,
+                    {self.task.id: {"cancel": threading.Event(), "process": None}},
+                    clear=True,
+                ):
+                    media._run_local_render_job(self.task.id)
+            self.db.expire_all()
+            saved = self.db.query(MediaTask).filter(MediaTask.id == self.task.id).one()
+            self.assertEqual(saved.status, "completed")
+            self.assertTrue(output.is_file())
+            self.assertFalse(partial.exists())
+            self.assertEqual(saved.result_data["progress"]["percent"], 100)
+            validate.assert_called_once()
 
     def test_progress_updates_are_saved_to_media_task(self):
         with patch.object(media, "SessionLocal", self.Session):
