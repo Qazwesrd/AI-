@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db, ROOT_DIR
 from app.models.media import MediaFile
+from app.models.novel import Chapter
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
@@ -346,6 +347,15 @@ def get_local_novel_context(novel_id: int, chapter_id: int):
 @router.post("/generate-package")
 def generate_local_episode_package(payload: LocalEpisodePackageInput, db: Session = Depends(get_db)):
     """Generate a five-stage episode package with an already-installed local model."""
+    if (payload.novel_id is None) != (payload.chapter_id is None):
+        raise HTTPException(422, "小说和章节必须同时关联，不能只填写其中一个编号。")
+    if payload.chapter_id is not None:
+        chapter = db.query(Chapter).filter(
+            Chapter.id == payload.chapter_id,
+            Chapter.novel_id == payload.novel_id,
+        ).first()
+        if not chapter:
+            raise HTTPException(404, "所关联的章节不属于所选小说，已阻止错误关联。")
     model = payload.model.strip()
     if not MODEL_NAME_PATTERN.fullmatch(model):
         raise HTTPException(400, "模型名称格式无效")
