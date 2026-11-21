@@ -28,6 +28,7 @@ ROUTER_MODULES = [
     "app.routers.local_model_hardware",
     "app.routers.local_image_generation",
     "app.routers.local_image_runtime",
+    "app.routers.comfyui_installer",
     "app.routers.workspace_backups",
     "app.routers.ai_novel_analysis",
     "app.routers.publishing",
