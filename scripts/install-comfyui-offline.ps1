@@ -95,7 +95,7 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
     }
     if ($current.Count -gt 0) { $blocks += ,$current }
 
-    $entries = @($blocks | Where-Object { $_.Path -and $_.Path -ne $ArchivePath })
+    $entries = @($blocks | Where-Object { $_.Path -and -not $_.ContainsKey("Type") })
     if ($entries.Count -lt 1 -or $entries.Count -gt 100000) {
         throw "ComfyUI 压缩包文件数量无效或超过安全限制。"
     }
