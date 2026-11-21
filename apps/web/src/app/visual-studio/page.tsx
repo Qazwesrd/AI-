@@ -481,7 +481,7 @@ export default function VisualStudioPage() {
               </label>
             </div>
             <p className="text-xs leading-5 text-slate-400">
-              图片生成只在你主动点击执行后调用。付费服务还需要 AI 管理中心开启付费授权并在本页确认。
+              当前图片生成入口只创建本地工作流任务；云端付费 API 保持禁用，不会自动提交或产生 API 费用。
             </p>
           </div>
         </div>
