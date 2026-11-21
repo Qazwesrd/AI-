@@ -34,6 +34,11 @@ type RuntimeModel = { name: string; size_bytes?: number | null };
 type Runtime = { status: string; models: RuntimeModel[]; message: string };
 type InstallerInfo = { engine_status: string; model: string; model_size_bytes: number; required_free_bytes: number; free_bytes: number | null; enough_space: boolean; installed: boolean | null; download_source: string; license: string; license_url: string; job: { status: string; stage: string; percent: number; completed_bytes: number; total_bytes: number; error?: string | null } };
 
+type LocalImageRuntime = {
+  status: string; message: string; checkpoint_count: number; checkpoints: string[];
+  hardware: { ram_bytes: number | null; vram_bytes: number | null; gpu_level: string; reasons: string[]; note: string };
+  limitations?: string;
+};
 type HardwareReadiness = {
   model: string; status: string; label: string; free_disk_bytes: number | null;
   ram_bytes: number | null; vram_bytes: number | null; logical_cores: number | null;
@@ -102,6 +107,8 @@ export default function LocalModelsPage() {
   const [hasDesktopInstaller, setHasDesktopInstaller] = useState(false);
   const [hardwareReadiness, setHardwareReadiness] = useState<HardwareReadiness | null>(null);
   const [checkingHardware, setCheckingHardware] = useState(false);
+  const [imageRuntime, setImageRuntime] = useState<LocalImageRuntime | null>(null);
+  const [checkingImageRuntime, setCheckingImageRuntime] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -133,6 +140,20 @@ export default function LocalModelsPage() {
     }
   }, []);
 
+  const refreshImageRuntime = useCallback(async () => {
+    setCheckingImageRuntime(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "本地图片引擎检测失败");
+      setImageRuntime(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "本地图片引擎检测失败");
+    } finally {
+      setCheckingImageRuntime(false);
+    }
+  }, []);
+
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -142,7 +163,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); }, [refresh, refreshInstaller, refreshHardwareReadiness]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
 
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
@@ -371,6 +392,51 @@ export default function LocalModelsPage() {
             </div>
           ) : <p className="mt-3 text-sm text-white/50">正在检查本地引擎和磁盘空间…</p>}
           <p className="mt-3 text-xs leading-5 text-white/45">下载需联网并消耗网络流量；不收取模型 API 费用。下载操作仅在你点击确认后开始。不会登录云端、不会调用云端模型，也不会自动购买或充值。首次下载完成后，模型可在本机离线运行。</p>
+        </section>
+
+        <section className="rounded-2xl border border-fuchsia-300/25 bg-slate-950/70 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">本地图片生成引擎检测（ComfyUI）</h2>
+              <p className="mt-1 text-sm leading-6 text-white/55">检测本机 ComfyUI 是否运行、已安装哪些 checkpoint，并评估显存适配情况。</p>
+            </div>
+            <button type="button" disabled={checkingImageRuntime} onClick={() => void refreshImageRuntime()} className="rounded-lg border border-fuchsia-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingImageRuntime ? "检测中…" : "重新检测图片引擎"}</button>
+          </div>
+          {imageRuntime ? (
+            <>
+              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未安装或启动" : "检测异常"}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已安装图片模型</div><div className="mt-1 font-semibold">{imageRuntime.checkpoint_count} 个 checkpoint</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">显存适配初筛</div><div className="mt-1 font-semibold">{({unknown:"未知",limited:"显存紧张",basic:"基础运行",capable:"具备一定余量",strong:"较充足"} as Record<string,string>)[imageRuntime.hardware?.gpu_level] || "待检测"}</div></div>
+              </div>
+              <div className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm">
+                <p>{imageRuntime.message}</p>
+                {imageRuntime.checkpoints.length > 0 && <div className="mt-2 space-y-1 text-white/65">{imageRuntime.checkpoints.slice(0,12).map((name) => <p key={name} className="break-all">• {name}</p>)}</div>}
+                {imageRuntime.hardware?.reasons?.map((reason,index) => <p key={index} className="mt-2 text-white/65">• {reason}</p>)}
+              </div>
+              <p className="mt-2 text-xs leading-5 text-amber-100/65">{imageRuntime.hardware?.note} {imageRuntime.limitations || "本阶段仅做本地引擎和模型检测，尚未提交图片生成任务。"}</p>
+            </>
+          ) : <p className="mt-3 text-sm text-white/55">正在检测本机图片引擎…</p>}
+          <p className="mt-3 text-xs leading-5 text-white/45">本检测只访问本机 127.0.0.1:8188，不会联网下载模型、启动程序、提交生成任务或调用云端 API。ComfyUI 和图片模型需要另行安装；后续会增加经过确认的安装向导。</p>
+        </section>
+
+        <section className="rounded-2xl border border-purple-300/25 bg-slate-950/70 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">Qwen3 4B 硬件适配检测</h2>
+              <p className="mt-1 text-sm text-white/55">只读取系统信息和磁盘空间，不进行压力测试。</p>
+            </div>
+            <button type="button" disabled={checkingHardware} onClick={() => void refreshHardwareReadiness()} className="rounded-lg border border-purple-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingHardware ? "正在检测…" : "重新检测电脑"}</button>
+          </div>
+          {hardwareReadiness && <>
+            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">适配结论</div><div className="mt-1 font-semibold">{hardwareReadiness.label}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">系统内存</div><div className="mt-1 font-semibold">{size(hardwareReadiness.ram_bytes)}</div></div>
+              <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">模型磁盘空间</div><div className="mt-1 font-semibold">{size(hardwareReadiness.free_disk_bytes)}</div></div>
+            </div>
+            <div className="mt-3 space-y-1 text-sm text-white/65">{hardwareReadiness.blockers.map((item,index)=><p key={index}>• {item}</p>)}{hardwareReadiness.reasons.map((item,index)=><p key={index}>• {item}</p>)}</div>
+            <p className="mt-2 text-xs text-white/45">{hardwareReadiness.note}</p>
+          </>}
         </section>
 
         {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
