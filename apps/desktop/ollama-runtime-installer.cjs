@@ -213,6 +213,7 @@ module.exports = {
   INSTALLER_URL,
   ALLOWED_DOWNLOAD_HOSTS,
   REQUIRED_FREE_BYTES,
+  getApiUrl,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
   getFreeBytes,
