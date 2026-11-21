@@ -15,7 +15,7 @@ from app.models.story import (
     StoryboardShot,
     StoryProject,
 )
-from app.models.visual import VisualAsset
+from app.models.visual import ImageTask, VisualAsset
 from app.services.media_service import safe_storage_file
 
 router = APIRouter(prefix="/api/story/projects", tags=["漫剧生产链路检查"])
@@ -106,6 +106,12 @@ def build_production_readiness_report(project_id: int, db: Session):
         VisualAsset.id.in_(sorted(asset_ids) or [-1])
     ).all()
     assets_by_id = {item.id: item for item in assets}
+    image_tasks = db.query(ImageTask).filter(
+        ImageTask.asset_id.in_(sorted(asset_ids) or [-1])
+    ).all()
+    image_tasks_by_asset = {}
+    for task in image_tasks:
+        image_tasks_by_asset.setdefault(task.asset_id, []).append(task)
 
     timeline_by_episode = {item.episode_id: item for item in timelines}
     shots_by_episode = {}
@@ -187,7 +193,21 @@ def build_production_readiness_report(project_id: int, db: Session):
             dialogue_shots += 1
 
         linked_video = False
-        linked_image = False
+        linked_image = any(
+            _local_file_state(path)["exists"]
+            for asset_id in referenced_asset_ids
+            for path in (
+                assets_by_id[asset_id].image_path,
+                assets_by_id[asset_id].reference_path,
+            )
+            if asset_id in assets_by_id and path
+        )
+        if not linked_image:
+            linked_image = any(
+                task.result_path and _local_file_state(task.result_path)["exists"]
+                for asset_id in referenced_asset_ids
+                for task in image_tasks_by_asset.get(asset_id, [])
+            )
         for task in video_tasks_by_shot.get(shot.id, []):
             if task.status == "completed" and task.result_path:
                 task_file_state = _local_file_state(task.result_path)
