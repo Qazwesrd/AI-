@@ -269,6 +269,8 @@ export default function EpisodeReadinessPage() {
     try {
       const form = new FormData();
       form.append("file", file);
+      if (projectId) form.append("project_id", projectId);
+      if (report?.episode_id) form.append("episode_id", String(report.episode_id));
       const response = await fetch(API + "/api/media/files/upload?category=audio", { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "音频上传失败");
@@ -968,7 +970,7 @@ export default function EpisodeReadinessPage() {
                     className="mt-3 w-full rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-white"
                   >
                     <option value="">不指定字幕素材（使用下方字幕时间轴）</option>
-                    {subtitleTracks.filter(track => track.format.toLowerCase() === "srt").map(track => (
+                    {subtitleTracks.filter(track => String(track.format || "").toLowerCase() === "srt").map(track => (
                       <option key={track.id} value={track.id}>
                         {track.name}{track.episode_id === report?.episode_id ? " · 本集" : track.project_id ? " · 本项目" : " · 共享素材"}
                       </option>
