@@ -427,6 +427,5 @@ def generate_local_episode_package(payload: LocalEpisodePackageInput, db: Sessio
         "downloaded": False, "cloud_fallback": False, "saved_automatically": True,
         "media_file_id": media.id,
         "download_url": f"/api/media/files/{media.id}/download",
-        "saved_path": str(destination),
         "message": "五阶段创作包已在本机生成，并自动保存到素材库；不会覆盖原稿。",
     }
