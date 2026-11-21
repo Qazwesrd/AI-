@@ -238,7 +238,8 @@ def inspect_local_reference_capabilities():
         _local_request("/object_info/IPAdapterUnifiedLoader"), "preset"
     ) if nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) else []
     adapter_models = nodes.get("IPAdapterModelLoader", {}).get("adapter_models", [])
-    has_unified_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) and bool(unified_presets)
+    unified_model_files = nodes.get("IPAdapterUnifiedLoader", {}).get("adapter_models", [])
+    has_unified_adapter = nodes.get("IPAdapterUnifiedLoader", {}).get("available", False) and bool(unified_presets or unified_model_files)
     has_model_loader = nodes.get("IPAdapterModelLoader", {}).get("available", False) and bool(adapter_models)
     has_adapter = has_unified_adapter or has_model_loader
     apply_type = "IPAdapterAdvanced" if nodes.get("IPAdapterAdvanced", {}).get("available", False) else "IPAdapter"
@@ -247,7 +248,8 @@ def inspect_local_reference_capabilities():
     apply_required = set((apply_schema.get("input") or {}).get("required", {}).keys()) if isinstance(apply_schema, dict) else set()
     needs_clip_vision = "clip_vision" in apply_required
     clip_models = nodes.get("CLIPVisionLoader", {}).get("clip_vision_models", [])
-    structural_ready = has_load_image and has_adapter and bool(apply_schema)
+    apply_inputs = _node_input_names(apply_schema) if isinstance(apply_schema, dict) else set()
+    structural_ready = has_load_image and has_adapter and {"model", "ipadapter"}.issubset(apply_inputs)
     model_ready = (has_unified_adapter or has_model_loader) and (not needs_clip_vision or (has_clip_vision and bool(clip_models)))
     return {
         "engine": "ComfyUI",
@@ -260,11 +262,11 @@ def inspect_local_reference_capabilities():
             name for name, present in (
                 ("LoadImage", has_load_image),
                 ("IPAdapterUnifiedLoader or IPAdapterModelLoader with available models", has_adapter),
-                ("IPAdapter or IPAdapterAdvanced", bool(apply_schema)),
+                ("IPAdapter or IPAdapterAdvanced", {"model", "ipadapter"}.issubset(apply_inputs)),
             ) if not present
         ] + (["CLIPVisionLoader"] if needs_clip_vision and not has_clip_vision else []),
         "missing_model_files": [name for name, present in (
-            ("IP-Adapter preset/model", bool(unified_presets or adapter_models)),
+            ("IP-Adapter model", bool(unified_presets or unified_model_files or adapter_models)),
             *([( "CLIP Vision model", bool(clip_models))] if needs_clip_vision else []),
         ) if not present],
         "local_only": True,
