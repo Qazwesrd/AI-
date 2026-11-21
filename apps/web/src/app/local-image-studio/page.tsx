@@ -39,7 +39,7 @@ type ConsistencyResult = {
 function parseProfileLines(value: string): Record<string, string> {
   const result: Record<string, string> = {};
   for (const line of value.split(/\r?\n/)) {
-    const match = line.match(/^\\s*(\\d+)\\s*[=:：]\\s*(.+)\\s*$/);
+    const match = line.match(/^\s*(\d+)\s*[=:：]\s*(.+)\s*$/);
     if (match) result[match[1]] = match[2].trim();
   }
   return result;
@@ -56,7 +56,7 @@ function parseCostumeProfiles(value: string): Record<string, Record<string, stri
   const result: Record<string, Record<string, string>> = {};
   for (const line of value.split(/\r?\n/)) {
     const [characterId, variantId, ...description] = line.split("|");
-    if (/^\\d+$/.test((characterId || "").trim()) && /^[A-Za-z0-9_-]{1,40}$/.test((variantId || "").trim()) && description.join("|").trim()) {
+    if (/^\d+$/.test((characterId || "").trim()) && /^[A-Za-z0-9_-]{1,40}$/.test((variantId || "").trim()) && description.join("|").trim()) {
       const id = String(Number(characterId.trim()));
       result[id] ||= {};
       result[id][variantId.trim()] = description.join("|").trim();
@@ -78,7 +78,7 @@ function parseShotCostumes(value: string): Record<string, Record<string, string>
   const result: Record<string, Record<string, string>> = {};
   for (const line of value.split(/\r?\n/)) {
     const [shotId, characterId, variantId] = line.split("|").map((part) => part.trim());
-    if (/^\\d+$/.test(shotId || "") && /^\\d+$/.test(characterId || "") && /^[A-Za-z0-9_-]{1,40}$/.test(variantId || "")) {
+    if (/^\d+$/.test(shotId || "") && /^\d+$/.test(characterId || "") && /^[A-Za-z0-9_-]{1,40}$/.test(variantId || "")) {
       const id = String(Number(shotId));
       result[id] ||= {};
       result[id][String(Number(characterId))] = variantId;
@@ -100,7 +100,7 @@ function parseReferenceBindings(value: string): Record<string, number> {
   const result: Record<string, number> = {};
   for (const line of value.split(/\r?\n/)) {
     const [assetId, mediaId] = line.split("|").map((part) => part.trim());
-    if (/^\\d+$/.test(assetId || "") && /^\\d+$/.test(mediaId || "")) result[String(Number(assetId))] = Number(mediaId);
+    if (/^\d+$/.test(assetId || "") && /^\d+$/.test(mediaId || "")) result[String(Number(assetId))] = Number(mediaId);
   }
   return result;
 }
