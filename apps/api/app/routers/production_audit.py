@@ -376,13 +376,25 @@ def build_production_readiness_report(project_id: int, db: Session):
         if not subtitle_cues and speech_task and isinstance(speech_task.request_data, dict):
             subtitle_cues = speech_task.request_data.get("subtitle_cues") or []
         subtitle_track = None
+        subtitle_track_mismatch = False
         try:
             subtitle_track_id = int(data.get("subtitle_track_id") or data.get("subtitle_id") or 0)
         except (TypeError, ValueError):
             subtitle_track_id = 0
         if subtitle_track_id > 0:
-            subtitle_track = db.query(SubtitleTrack).filter(SubtitleTrack.id == subtitle_track_id).first()
-        subtitle_path = data.get("subtitle_path") or (subtitle_track.file_path if subtitle_track else None)
+            candidate_track = db.query(SubtitleTrack).filter(
+                SubtitleTrack.id == subtitle_track_id
+            ).first()
+            if candidate_track and (
+                candidate_track.project_id not in (None, project.id)
+                or candidate_track.episode_id not in (None, episode.id)
+            ):
+                subtitle_track_mismatch = True
+            else:
+                subtitle_track = candidate_track
+        subtitle_path = None if subtitle_track_mismatch else (
+            data.get("subtitle_path") or (subtitle_track.file_path if subtitle_track else None)
+        )
         subtitle_file_state = _project_media_file_state(db, subtitle_path, project.id)
         subtitles_available = bool(subtitle_cues) or subtitle_file_state["exists"]
         if episode_has_dialogue and not voice_state["exists"]:
