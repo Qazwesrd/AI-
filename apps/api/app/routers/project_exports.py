@@ -113,17 +113,17 @@ def _safe_comfyui_output_file(filename: str, subfolder: str = ""):
         or ":" in filename
     ):
         return None
-    if (
-        not isinstance(subfolder, str)
-        or len(subfolder) > 240
+    if not isinstance(subfolder, str):
+        return None
+    if subfolder and (
+        len(subfolder) > 240
         or subfolder.startswith("/")
         or "\\" in subfolder
         or ":" in subfolder
         or "//" in subfolder
-        or any(part in {"", ".", ".."} for part in subfolder.split("/")) if subfolder else False
+        or any(part in {"", ".", ".."} for part in subfolder.split("/"))
+        or not re.fullmatch(r"[A-Za-z0-9 _./-]+", subfolder)
     ):
-        return None
-    if subfolder and not re.fullmatch(r"[A-Za-z0-9 _./-]+", subfolder):
         return None
     try:
         from app.routers.local_image_runtime import _install_root
