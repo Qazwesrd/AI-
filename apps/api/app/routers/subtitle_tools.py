@@ -508,8 +508,10 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
             args += ["-i", str(path)]
         filename = f"subtitle_local_voice_{uuid.uuid4().hex[:12]}.mp3"
         destination = AUDIO_DIR / filename
+        filter_script = job_dir / "mix-filter.txt"
+        filter_script.write_text(";".join(filters), encoding="utf-8")
         run_ffmpeg(args + [
-            "-filter_complex", ";".join(filters), "-map", "[voice]",
+            "-filter_complex_script", str(filter_script), "-map", "[voice]",
             "-t", f"{max_end:.3f}", "-c:a", "libmp3lame", "-q:a", "3", str(destination),
         ])
         info = probe_media(destination)
