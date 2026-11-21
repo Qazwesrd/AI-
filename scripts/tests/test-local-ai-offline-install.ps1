@@ -138,7 +138,10 @@ try {
     }
 
     $tamperedPayload = Join-Path $temp "tampered-payload"
-    Copy-Item -LiteralPath $payload -Destination $tamperedPayload -Recurse
+    New-Item -ItemType Directory -Path $tamperedPayload -Force | Out-Null
+    foreach ($payloadItem in Get-ChildItem -LiteralPath $payload -Force) {
+        Copy-Item -LiteralPath $payloadItem.FullName -Destination $tamperedPayload -Recurse
+    }
     Write-Utf8 (Join-Path $tamperedPayload "models\blobs\$blobName") "tampered model blob"
     $tamperedRoot = Join-Path $temp "tampered-install"
     $rejected = $false
