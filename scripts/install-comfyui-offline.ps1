@@ -104,11 +104,23 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
     foreach ($entry in $entries) {
         $relative = [string]$entry.Path
         $normalized = $relative.Replace("/", "\")
+        $parts = @($normalized.Split("\"))
+        $invalidWindowsName = $false
+        foreach ($part in $parts) {
+            if ([string]::IsNullOrWhiteSpace($part) -or
+                $part.EndsWith(".") -or $part.EndsWith(" ") -or
+                $part -match "^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)" -or
+                $part.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+                $invalidWindowsName = $true
+                break
+            }
+        }
         if ([System.IO.Path]::IsPathRooted($normalized) -or
             $normalized -match "^[A-Za-z]:" -or
             $normalized.StartsWith("\") -or
-            $normalized.Split("\") -contains ".." -or
-            $normalized.Contains(":")) {
+            $parts -contains ".." -or
+            $normalized.Contains(":") -or
+            $invalidWindowsName) {
             throw "压缩包包含不安全路径，已停止安装：$relative"
         }
         if ($entry.ContainsKey("Symbolic Link") -or $entry.ContainsKey("Hard Link")) {
@@ -137,7 +149,8 @@ $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | Convert
 if ($manifest.target_architecture -ne "windows-x64" -or $manifest.bundle_type -ne "complete-offline-comfyui-engine") {
     throw "离线引擎数据包版本或系统架构不匹配。"
 }
-if ([Environment]::Is64BitOperatingSystem -ne $true -or $env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
+$cpuArchitecture = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture | Select-Object -Unique)
+if ([Environment]::Is64BitOperatingSystem -ne $true -or $cpuArchitecture.Count -ne 1 -or $cpuArchitecture[0] -ne 9) {
     throw "当前系统不是受支持的 Windows x64 环境。"
 }
 
@@ -184,6 +197,9 @@ try {
 
     & $sevenZip x -y ("-o" + $stage) -- $archivePath
     if ($LASTEXITCODE -ne 0) { throw "ComfyUI 运行环境解压失败。" }
+    $reparsePoints = @(Get-ChildItem -LiteralPath $stage -Force -Recurse |
+        Where-Object { ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 })
+    if ($reparsePoints.Count -gt 0) { throw "解压结果包含链接或重解析点，已停止部署。" }
 
     $python = Get-ChildItem -LiteralPath $stage -Filter "python.exe" -File -Recurse |
         Where-Object { $_.FullName -match "(?i)python[_-]?embed" } | Select-Object -First 1
