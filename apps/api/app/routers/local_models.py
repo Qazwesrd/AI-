@@ -103,12 +103,20 @@ def _catalog_items():
     items = []
     for model in scanned.get("files", []):
         review = catalog.get(model["name"], {})
+        if not isinstance(review, dict):
+            review = {}
+        license_review = review.get("license_review", "unverified")
+        if license_review not in LICENSE_REVIEW_VALUES:
+            license_review = "unverified"
+        license_name = review.get("license_name", "")
+        license_url = review.get("license_url")
+        notes = review.get("notes", "")
         items.append({
             **model,
-            "license_review": review.get("license_review", "unverified"),
-            "license_name": review.get("license_name", ""),
-            "license_url": review.get("license_url"),
-            "notes": review.get("notes", ""),
+            "license_review": license_review,
+            "license_name": license_name if isinstance(license_name, str) else "",
+            "license_url": license_url if isinstance(license_url, str) and license_url.startswith("https://") else None,
+            "notes": notes if isinstance(notes, str) else "",
             "license_notice": "许可证状态由用户自行填写，软件未核验其真实性、完整性或商用授权。",
             "compatibility": _compatibility(model["size_bytes"], hardware),
         })
