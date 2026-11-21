@@ -107,6 +107,9 @@ def _sha256_file(path: Path) -> str:
 
 
 def _rewrite_paths(value, path_map, key=""):
+    normalized_key = key.lower()
+    if any(part in normalized_key for part in _SENSITIVE_KEY_PARTS) or normalized_key == "result_url":
+        return None
     if isinstance(value, dict):
         return {
             str(child_key): _rewrite_paths(child, path_map, str(child_key))
