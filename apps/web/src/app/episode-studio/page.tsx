@@ -75,6 +75,14 @@ const statusText: Record<ShotItem["status"], string> = {
 
 export default function EpisodeReadinessPage() {
   const [episodeId, setEpisodeId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchReport, setBatchReport] = useState<{
+    project_id: number; project_title: string;
+    summary: { episodes: number; ready_episodes: number; incomplete_episodes: number; total_shots: number; ready_shots: number; missing_shots: number; processing_shots: number; broken_shots: number; scan_errors: number };
+    episodes: { episode_id: number; episode_number: number; title: string; ready: boolean; total_shots: number; ready_count: number; missing_count: number; processing_count: number; broken_count: number; scan_error?: string }[];
+    message: string; note: string;
+  } | null>(null);
   const [report, setReport] = useState<Readiness | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -331,6 +339,28 @@ export default function EpisodeReadinessPage() {
     }
   }
 
+  async function checkProjectQuality() {
+    const id = Number(projectId);
+    if (!Number.isInteger(id) || id <= 0) {
+      setMessage("请输入有效的项目 ID（正整数）。");
+      return;
+    }
+    setBatchBusy(true);
+    setBatchReport(null);
+    setMessage("正在逐集检查项目中的镜头视频文件和媒体流；不会调用 AI 服务……");
+    try {
+      const response = await fetch(`${API}/api/media/video/projects/${id}/quality-summary`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "项目批量质检失败");
+      setBatchReport(data);
+      setMessage(data.message || "项目批量质检完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "项目批量质检失败");
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
   async function replaceShot(shotId: number) {
     const file = replacement[shotId];
     if (!file || !report) {
@@ -443,6 +473,47 @@ export default function EpisodeReadinessPage() {
             <input value={episodeId} onChange={event => setEpisodeId(event.target.value)} inputMode="numeric" placeholder="输入分集 ID，例如 1" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-3" />
             <button disabled={busy} onClick={() => void checkReadiness()} className="rounded-lg bg-indigo-600 px-5 py-3 font-semibold disabled:opacity-50">检查成片条件</button>
           </div>
+        </section>
+
+        <section className={panel}>
+          <h2 className="mb-3 text-lg font-semibold">项目批量分集质检</h2>
+          <p className="mb-3 text-sm text-white/55">一次扫描项目内全部分集，汇总可合成集数、缺失镜头、生成中镜头及损坏镜头。只做本地读取，最多扫描 200 集。</p>
+          <div className="flex flex-wrap gap-3">
+            <input value={projectId} onChange={event => setProjectId(event.target.value)} inputMode="numeric" placeholder="输入项目 ID，例如 1" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-3" />
+            <button disabled={batchBusy} onClick={() => void checkProjectQuality()} className="rounded-lg border border-cyan-300/40 bg-cyan-900/40 px-5 py-3 font-semibold text-cyan-100 disabled:opacity-50">{batchBusy ? "批量扫描中…" : "扫描项目全部分集"}</button>
+          </div>
+          {batchReport && (
+            <div className="mt-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                {[
+                  ["分集总数", batchReport.summary.episodes],
+                  ["可合成分集", batchReport.summary.ready_episodes],
+                  ["待处理分集", batchReport.summary.incomplete_episodes],
+                  ["镜头总数", batchReport.summary.total_shots],
+                  ["可用镜头", batchReport.summary.ready_shots],
+                  ["缺失镜头", batchReport.summary.missing_shots],
+                  ["生成中", batchReport.summary.processing_shots],
+                  ["异常镜头", batchReport.summary.broken_shots],
+                ].map(([label, value]) => <div key={label} className="rounded-xl bg-black/25 p-3"><div className="text-xl font-bold">{value}</div><div className="mt-1 text-xs text-white/55">{label}</div></div>)}
+              </div>
+              <div className="space-y-2">
+                {batchReport.episodes.map(episode => (
+                  <div key={episode.episode_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                    <div>
+                      <div className="font-medium">第 {episode.episode_number} 集 · {episode.title || "未命名"}</div>
+                      <div className="mt-1 text-xs text-white/55">镜头 {episode.ready_count}/{episode.total_shots} 可用 · 缺失 {episode.missing_count} · 生成中 {episode.processing_count} · 异常 {episode.broken_count}</div>
+                      {episode.scan_error && <div className="mt-1 text-xs text-rose-300">{episode.scan_error}</div>}
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={episode.ready ? "text-sm text-emerald-300" : "text-sm text-amber-300"}>{episode.ready ? "可合成" : "待处理"}</span>
+                      <button onClick={() => { setEpisodeId(String(episode.episode_id)); setBatchReport(null); }} className="rounded-lg border border-white/15 px-3 py-2 text-xs hover:bg-white/10">打开本集检查</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-white/40">{batchReport.note}</p>
+            </div>
+          )}
         </section>
 
         {report && (
