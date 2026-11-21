@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, JSON, Boolean
+from sqlalchemy import Column, Integer, String, Text, DateTime, Float, JSON, Boolean, UniqueConstraint
 from app.database import Base
 
 
@@ -86,3 +86,17 @@ class EpisodeEditTimeline(Base):
     version = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StoryboardMediaLink(Base):
+    __tablename__ = "storyboard_media_links"
+    __table_args__ = (
+        UniqueConstraint("shot_id", "media_file_id", name="uq_storyboard_media_link_shot_media"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, nullable=False, index=True)
+    episode_id = Column(Integer, nullable=False, index=True)
+    shot_id = Column(Integer, nullable=False, index=True)
+    media_file_id = Column(Integer, nullable=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

@@ -4,6 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type ImageTask = { prompt_id: string; status: string; images?: Array<{ filename: string; subfolder: string; type: string }> };
+type TargetShot = { id: number; shot_number: number; scene_name: string; visual_description: string };
+type TargetEpisode = { id: number; episode_number: number; title: string; shots: TargetShot[] };
+type TargetProject = { id: number; name: string; episodes: TargetEpisode[] };
 const styles = ["国漫", "仿真人", "3D漫", "2D漫"] as const;
 
 export default function LocalImageStudioPage() {
@@ -24,6 +27,10 @@ export default function LocalImageStudioPage() {
   const [message, setMessage] = useState("");
   const [archiving, setArchiving] = useState<string | null>(null);
   const [archived, setArchived] = useState<Record<string, { id: number; name: string }>>({});
+  const [targets, setTargets] = useState<TargetProject[]>([]);
+  const [targetProjectId, setTargetProjectId] = useState("");
+  const [targetEpisodeId, setTargetEpisodeId] = useState("");
+  const [targetShotId, setTargetShotId] = useState("");
 
   const refreshModels = useCallback(async () => {
     setChecking(true); setError("");
@@ -35,6 +42,10 @@ export default function LocalImageStudioPage() {
       setModels(names);
       setCheckpoint((current) => current && names.includes(current) ? current : (names[0] || ""));
       setMessage(names.length ? `发现 ${names.length} 个已安装图片模型。` : "ComfyUI 已连接，但尚未发现可用 checkpoint。");
+      const targetResponse = await fetch(`${API}/api/local-ai/images/targets`, { cache: "no-store" });
+      const targetData = await targetResponse.json();
+      if (!targetResponse.ok) throw new Error(targetData.detail || "读取漫剧分镜列表失败");
+      setTargets(Array.isArray(targetData.projects) ? targetData.projects : []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "未连接本机 ComfyUI");
     } finally { setChecking(false); }
@@ -75,7 +86,10 @@ export default function LocalImageStudioPage() {
       const response = await fetch(`${API}/api/local-ai/images/tasks/${encodeURIComponent(task.prompt_id)}/archive`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: image.filename, subfolder: image.subfolder, type: image.type || "output" }),
+        body: JSON.stringify({
+          filename: image.filename, subfolder: image.subfolder, type: image.type || "output",
+          ...(targetShotId ? { shot_id: Number(targetShotId) } : {}),
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "图片归档失败");
@@ -144,6 +158,32 @@ export default function LocalImageStudioPage() {
 
       {error && <p role="alert" className="rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-100">{error}</p>}
       {message && <p className="rounded-xl border border-emerald-300/20 bg-emerald-950/20 p-3 text-sm text-emerald-100">{message}</p>}
+      <section className="rounded-2xl border border-cyan-300/20 bg-cyan-950/15 p-5">
+        <h2 className="text-lg font-semibold">图片归档目标（可选）</h2>
+        <p className="mt-1 text-sm text-white/55">归档时可指定图片属于哪一个项目、分集和分镜。留空则只保存到素材库，不会自动关联。</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="text-sm text-white/70">漫剧项目
+            <select value={targetProjectId} onChange={(event) => { setTargetProjectId(event.target.value); setTargetEpisodeId(""); setTargetShotId(""); }} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-900 p-3">
+              <option value="">不关联项目</option>
+              {targets.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+            </select>
+          </label>
+          <label className="text-sm text-white/70">分集
+            <select value={targetEpisodeId} onChange={(event) => { setTargetEpisodeId(event.target.value); setTargetShotId(""); }} disabled={!targetProjectId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-900 p-3 disabled:opacity-40">
+              <option value="">选择分集</option>
+              {(targets.find((project) => String(project.id) === targetProjectId)?.episodes || []).map((episode) => <option key={episode.id} value={episode.id}>第{episode.episode_number}集 · {episode.title}</option>)}
+            </select>
+          </label>
+          <label className="text-sm text-white/70">分镜镜头
+            <select value={targetShotId} onChange={(event) => setTargetShotId(event.target.value)} disabled={!targetEpisodeId} className="mt-2 w-full rounded-lg border border-white/15 bg-slate-900 p-3 disabled:opacity-40">
+              <option value="">选择镜头</option>
+              {(targets.flatMap((project) => project.episodes).find((episode) => String(episode.id) === targetEpisodeId)?.shots || []).map((shot) => <option key={shot.id} value={shot.id}>镜头 {shot.shot_number} · {shot.scene_name || "未命名场景"}</option>)}
+            </select>
+          </label>
+        </div>
+        {targetProjectId && targetEpisodeId && targetShotId && <p className="mt-3 text-xs text-cyan-100">已选定关联目标；归档图片时会同时保存并关联到该镜头。</p>}
+      </section>
+
       {task && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">本地生成任务</h2><p className="mt-1 break-all text-xs text-white/50">任务编号：{task.prompt_id}</p></div><button type="button" onClick={() => void refreshTask()} disabled={checking} className="rounded-lg border border-white/20 px-3 py-2 text-sm disabled:opacity-40">{checking ? "查询中…" : "刷新任务状态"}</button></div>
         <p className="mt-3 text-sm">状态：{task.status === "completed" ? "已完成" : task.status === "running" ? "生成中" : "排队中"}</p>

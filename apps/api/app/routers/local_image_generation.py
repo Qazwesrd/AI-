@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaFile
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink
 from app.services.media_service import STORAGE
 from pydantic import BaseModel, Field, field_validator
 
@@ -44,6 +45,7 @@ class LocalImageArchiveInput(BaseModel):
     filename: str = Field(min_length=1, max_length=240)
     subfolder: str = Field(default="", max_length=240)
     type: Literal["output"] = "output"
+    shot_id: int | None = Field(default=None, ge=1)
 
 
 class LocalImageGenerateInput(BaseModel):
@@ -274,6 +276,95 @@ def _download_comfyui_output(filename: str, subfolder: str):
     raise HTTPException(415, "返回内容不是有效的 PNG、JPEG 或 WebP 图片")
 
 
+@router.get("/targets")
+def list_storyboard_image_targets(db: Session = Depends(get_db)):
+    """Return project/episode/shot choices for optional local image association."""
+    projects = db.query(StoryProject).order_by(StoryProject.created_at.desc()).all()
+    result = []
+    for project in projects:
+        episodes = db.query(EpisodePlan).filter(
+            EpisodePlan.project_id == project.id
+        ).order_by(EpisodePlan.sort_order, EpisodePlan.episode_number).all()
+        episode_rows = []
+        for episode in episodes:
+            shots = db.query(StoryboardShot).filter(
+                StoryboardShot.project_id == project.id,
+                StoryboardShot.episode_id == episode.id,
+            ).order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).all()
+            episode_rows.append({
+                "id": episode.id,
+                "episode_number": episode.episode_number,
+                "title": episode.title,
+                "shots": [{
+                    "id": shot.id,
+                    "shot_number": shot.shot_number,
+                    "scene_name": shot.scene_name,
+                    "visual_description": (shot.visual_description or "")[:240],
+                } for shot in shots],
+            })
+        result.append({
+            "id": project.id,
+            "name": project.name,
+            "adaptation_style": project.adaptation_style,
+            "episodes": episode_rows,
+        })
+    return {"projects": result}
+
+
+@router.get("/shots/{shot_id}/media")
+def list_shot_media(shot_id: int, db: Session = Depends(get_db)):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "分镜镜头不存在")
+    links = db.query(StoryboardMediaLink).filter(
+        StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.project_id == shot.project_id,
+        StoryboardMediaLink.episode_id == shot.episode_id,
+    ).all()
+    result = []
+    for link in links:
+        media = db.query(MediaFile).filter(
+            MediaFile.id == link.media_file_id,
+            MediaFile.category == "image",
+        ).first()
+        if media is None:
+            continue
+        result.append({
+            "link_id": link.id,
+            "media_file_id": media.id,
+            "name": media.name,
+            "mime_type": media.mime_type,
+            "file_size": media.file_size,
+            "download_url": f"/api/media/files/{media.id}/download",
+            "created_at": link.created_at.isoformat() if link.created_at else None,
+        })
+    return {"shot_id": shot.id, "images": result}
+
+
+def _attach_media_to_shot(db: Session, media: MediaFile, shot_id: int):
+    shot = db.query(StoryboardShot).filter(StoryboardShot.id == shot_id).first()
+    if shot is None:
+        raise HTTPException(404, "所选分镜镜头不存在")
+    project = db.query(StoryProject).filter(StoryProject.id == shot.project_id).first()
+    episode = db.query(EpisodePlan).filter(EpisodePlan.id == shot.episode_id).first()
+    if project is None or episode is None or episode.project_id != project.id:
+        raise HTTPException(409, "分镜所属项目或分集关系异常，无法关联图片")
+    existing = db.query(StoryboardMediaLink).filter(
+        StoryboardMediaLink.shot_id == shot.id,
+        StoryboardMediaLink.media_file_id == media.id,
+    ).first()
+    if existing:
+        return existing, True
+    link = StoryboardMediaLink(
+        project_id=project.id,
+        episode_id=episode.id,
+        shot_id=shot.id,
+        media_file_id=media.id,
+    )
+    db.add(link)
+    return link, False
+
+
 @router.post("/tasks/{prompt_id}/archive")
 def archive_local_image_task_output(
     prompt_id: str,
@@ -283,7 +374,15 @@ def archive_local_image_task_output(
     """Archive one explicitly selected completed ComfyUI output into the local media library."""
     if not PROMPT_ID_RE.fullmatch(prompt_id):
         raise HTTPException(400, "任务编号格式无效")
-    selected_filename, selected_subfolder, _ = _safe_output_image(data.model_dump())
+    selected_filename, selected_subfolder, _ = _safe_output_image(data.model_dump(exclude={"shot_id"}))
+    if data.shot_id is not None:
+        target_shot = db.query(StoryboardShot).filter(StoryboardShot.id == data.shot_id).first()
+        if target_shot is None:
+            raise HTTPException(404, "所选分镜镜头不存在，请刷新项目和分镜列表")
+        target_project = db.query(StoryProject).filter(StoryProject.id == target_shot.project_id).first()
+        target_episode = db.query(EpisodePlan).filter(EpisodePlan.id == target_shot.episode_id).first()
+        if target_project is None or target_episode is None or target_episode.project_id != target_project.id:
+            raise HTTPException(409, "所选分镜的项目/分集关系异常，无法归档关联")
     history = _local_request("/history/" + prompt_id, timeout=5.0)
     item = history.get(prompt_id)
     if not isinstance(item, dict):
@@ -315,10 +414,14 @@ def archive_local_image_task_output(
             and meta.get("comfyui_filename") == selected_filename
             and meta.get("comfyui_subfolder", "") == selected_subfolder
         ):
+            if data.shot_id is not None:
+                _attach_media_to_shot(db, media, data.shot_id)
+                db.commit()
             return {
                 "success": True, "already_archived": True, "media_file_id": media.id,
                 "name": media.name, "path": media.file_path,
-                "message": "这张图片已经归档到素材库，没有重复保存。",
+                "linked_to_shot": data.shot_id is not None, "shot_id": data.shot_id,
+                "message": "图片已存在于素材库" + ("，并已关联到所选分镜。" if data.shot_id is not None else "，没有重复保存。"),
             }
     raw, mime_type, suffix = _download_comfyui_output(selected_filename, selected_subfolder)
     folder = STORAGE / "images"
@@ -345,6 +448,9 @@ def archive_local_image_task_output(
             },
         )
         db.add(media)
+        db.flush()
+        if data.shot_id is not None:
+            _attach_media_to_shot(db, media, data.shot_id)
         db.commit()
         db.refresh(media)
         return {
@@ -352,7 +458,8 @@ def archive_local_image_task_output(
             "name": media.name, "category": media.category, "mime_type": media.mime_type,
             "size": media.file_size, "path": media.file_path,
             "url": f"/api/media/files/{media.id}/download",
-            "message": "图片已保存到本地素材库。",
+            "linked_to_shot": data.shot_id is not None, "shot_id": data.shot_id,
+            "message": "图片已保存到本地素材库" + ("，并已关联到所选分镜。" if data.shot_id is not None else "。"),
         }
     except Exception:
         db.rollback()
