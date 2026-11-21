@@ -5,12 +5,12 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline
+from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline, StoryProject
 from app.models.visual import VisualAsset
 from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.routers.media import (
-    EpisodeTimelineInput, get_episode_edit_timeline,
-    save_episode_edit_timeline,
+    EpisodeTimelineInput, SubtitleInput, get_episode_edit_timeline,
+    save_episode_edit_timeline, create_subtitle,
 )
 from fastapi import HTTPException
 
@@ -25,6 +25,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         Base.metadata.create_all(
             engine,
             tables=[
+                StoryProject.__table__,
                 EpisodePlan.__table__,
                 StoryboardShot.__table__,
                 EpisodeEditTimeline.__table__,
@@ -36,6 +37,9 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         )
         self.Session = sessionmaker(bind=engine)
         self.db = self.Session()
+        project = StoryProject(id=1, novel_id=1, name="测试项目")
+        self.db.add(project)
+        self.db.flush()
         episode = EpisodePlan(
             project_id=1, episode_number=1, title="测试分集",
             duration_seconds=100,
@@ -67,6 +71,48 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
 
     def tearDown(self):
         self.db.close()
+
+    def test_create_subtitle_persists_project_and_episode_ownership(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("app.routers.media.SUBTITLE_DIR", Path(temporary)):
+                result = create_subtitle(
+                    SubtitleInput(
+                        name="本集字幕",
+                        project_id=1,
+                        episode_id=self.episode_id,
+                        cues=[{"start": 0, "end": 1, "text": "测试字幕"}],
+                    ),
+                    self.db,
+                )
+            track = self.db.query(SubtitleTrack).filter(SubtitleTrack.id == result["id"]).first()
+            self.assertEqual(track.project_id, 1)
+            self.assertEqual(track.episode_id, self.episode_id)
+
+    def test_create_subtitle_rejects_mismatched_project_and_episode(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        self.db.add(StoryProject(id=2, novel_id=1, name="其他项目"))
+        self.db.commit()
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch("app.routers.media.SUBTITLE_DIR", Path(temporary)):
+                with self.assertRaises(HTTPException) as caught:
+                    create_subtitle(
+                        SubtitleInput(
+                            name="错误归属字幕",
+                            project_id=2,
+                            episode_id=self.episode_id,
+                            cues=[{"start": 0, "end": 1, "text": "测试字幕"}],
+                        ),
+                        self.db,
+                    )
+            self.assertEqual(caught.exception.status_code, 422)
+            self.assertEqual(list(Path(temporary).glob("*.srt")), [])
 
     def test_default_timeline_uses_all_existing_shots(self):
         result = get_episode_edit_timeline(self.episode_id, self.db)
