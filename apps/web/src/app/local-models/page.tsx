@@ -497,7 +497,7 @@ export default function LocalModelsPage() {
           <div className="mt-4 border-t border-white/10 pt-4">
             <div className="rounded-xl border border-cyan-300/20 bg-cyan-400/5 p-4 text-sm leading-6">
               <p className="font-semibold text-cyan-100">正式版采用完整离线安装套件</p>
-              <p className="mt-2 text-white/65">ComfyUI 引擎将随安装套件一并提供。安装流程自动识别 NVIDIA、AMD、Intel 显卡，只部署匹配的运行环境；安装完成后不再单独联网下载 ComfyUI。</p>
+              <p className="mt-2 text-white/65">ComfyUI 引擎将随安装套件一并提供。安装流程自动识别 NVIDIA、AMD、Intel 显卡，只部署官方文档明确支持的匹配型号；无法确认的型号会停止安装，不会猜测。安装完成后不再单独联网下载 ComfyUI。</p>
               <p className="mt-2 text-white/65">图片生成模型与引擎分开管理，不包含在引擎安装包内。下载模型前会显示来源、大小、磁盘需求并要求你明确确认。</p>
               <p className="mt-2 text-xs text-white/45">当前页面只进行硬件和磁盘只读评估；不会启动下载或安装。完整离线安装包仍需通过构建、安装器集成和许可证审查后才能发布。</p>
             </div>
