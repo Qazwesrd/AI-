@@ -56,7 +56,9 @@ type ImageModelLibrary = {
   gpu_level: string | null; runtime_mode: string; adapter_name: string;
   hardware_notes: string[]; hardware_note: string | null; note: string;
 };
-type ComfyUIReadiness = {
+type CuratedImageModel = { id: string; name: string; publisher: string; repository: string; revision: string; filename: string; format: string; size_bytes: number | null; size_label: string; sha256: string; source_url: string; download_url: string; license: string; license_url: string; license_status: string; license_note: string; hardware_status: string; hardware_note: string; recommended_directory: string; sha256_source: string; sha256_verified: boolean; catalog_status: string };
+type CuratedImageModelCatalog = { status: string; models: CuratedImageModel[]; count: number; network_used: boolean; download_started: boolean; installation_started: boolean; note: string };
+\ntype ComfyUIReadiness = {
   status: string; can_install_engine: boolean; hardware_profile: string;
   ram_bytes: number | null; vram_bytes: number | null; free_disk_bytes: number | null;
   engine_disk_reserve_bytes: number; optional_model_disk_reserve_bytes: number;
@@ -135,7 +137,7 @@ export default function LocalModelsPage() {
   const [comfyReadiness, setComfyReadiness] = useState<ComfyUIReadiness | null>(null);
   const [checkingComfyReadiness, setCheckingComfyReadiness] = useState(false);
   const [imageModelLibrary, setImageModelLibrary] = useState<ImageModelLibrary | null>(null);
-  const [checkingImageModelLibrary, setCheckingImageModelLibrary] = useState(false);
+  const [checkingImageModelLibrary, setCheckingImageModelLibrary] = useState(false);\n  const [curatedImageCatalog, setCuratedImageCatalog] = useState<CuratedImageModelCatalog | null>(null);\n  const [checkingCuratedImageCatalog, setCheckingCuratedImageCatalog] = useState(false);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -238,6 +240,20 @@ export default function LocalModelsPage() {
     }
   }, []);
 
+  const refreshCuratedImageCatalog = useCallback(async () => {
+    setCheckingCuratedImageCatalog(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/model-catalog`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取图片模型清单失败");
+      setCuratedImageCatalog(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取图片模型清单失败");
+    } finally {
+      setCheckingCuratedImageCatalog(false);
+    }
+  }, []);
+
   const refreshInstaller = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
@@ -247,7 +263,7 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); void refreshImageModelLibrary(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness, refreshImageModelLibrary]);
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); void refreshComfyReadiness(); void refreshImageModelLibrary(); void refreshCuratedImageCatalog(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime, refreshComfyReadiness, refreshImageModelLibrary, refreshCuratedImageCatalog]);
   useEffect(() => {
     if (imageRuntime?.status !== "starting") return;
     const timer = window.setInterval(() => { void refreshImageRuntime(); }, 1800);
@@ -604,7 +620,35 @@ export default function LocalModelsPage() {
           </> : <p className="mt-3 text-sm text-white/50">正在读取本机图片模型目录…</p>}
         </section>
 
-        {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
+
+        <section className="rounded-2xl border border-amber-300/25 bg-slate-950/70 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold">经过来源核验的图片模型候选</h2>
+              <p className="mt-1 text-sm leading-6 text-white/55">目前先提供一个固定版本的 SD 1.5 FP16 候选，展示来源、版本、校验值和许可证。此页只展示元数据，不会下载或安装模型。</p>
+            </div>
+            <button type="button" disabled={checkingCuratedImageCatalog} onClick={() => void refreshCuratedImageCatalog()} className="rounded-lg border border-amber-300/30 px-3 py-2 text-sm disabled:opacity-40">{checkingCuratedImageCatalog ? "读取中…" : "刷新候选清单"}</button>
+          </div>
+          {curatedImageCatalog?.models.map(model => <div key={model.id} className="mt-4 rounded-xl bg-white/[0.04] p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-semibold">{model.name}</h3>
+              <span className="rounded-full bg-amber-400/10 px-2 py-1 text-xs text-amber-100">仅预览 · 尚不可下载</span>
+            </div>
+            <p className="mt-2 text-xs text-white/60">发布者：{model.publisher} · 固定版本：{model.revision} · 格式：{model.format} · 文件：{model.size_label}</p>
+            <p className="mt-2 break-all text-xs text-white/55">文件名：{model.filename}</p>
+            <p className="mt-2 break-all text-xs text-white/55">SHA-256（上游页面提供）：{model.sha256}</p>
+            <p className="mt-2 text-xs text-white/55">目标目录：{model.recommended_directory}</p>
+            <p className="mt-2 text-xs text-amber-100/80">硬件提示：{model.hardware_note}</p>
+            <p className="mt-2 text-xs text-amber-100/80">许可证：{model.license}。{model.license_note}</p>
+            <div className="mt-3 flex flex-wrap gap-4 text-xs">
+              <a href={model.source_url} target="_blank" rel="noreferrer" className="text-cyan-200 underline">查看模型来源</a>
+              <a href={model.license_url} target="_blank" rel="noreferrer" className="text-cyan-200 underline">查看许可证</a>
+            </div>
+          </div>)}
+          <p className="mt-3 text-xs leading-5 text-white/45">{curatedImageCatalog?.note || "正在读取经过核验的候选模型…"}</p>
+          <p className="mt-2 text-xs leading-5 text-white/45">SHA-256 尚未在本机下载后复核，精确文件字节数仍需从下载响应取得；两项完成前，安装流程必须保持关闭。当前 Ryzen 7 4800U 以 CPU 模式运行，该模型不作为快速生图推荐。</p>
+        </section>
+\n        {error && <div className="rounded-xl border border-rose-400/30 bg-rose-500/10 p-4 text-rose-200">{error}</div>}
         {message && <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-4 text-emerald-100">{message}</div>}
 
 
