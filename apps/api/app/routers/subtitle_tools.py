@@ -401,7 +401,7 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
             result_path=str(destination),
         )
         db.add(task)
-        db.add(MediaFile(
+        media_record = MediaFile(
             name=filename,
             category="audio",
             file_path=str(destination),
@@ -414,7 +414,9 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
                 "local_tts": True,
                 "network_used": False,
             },
-        ))
+        )
+        db.add(media_record)
+        db.flush()
         db.add(AIUsageLog(
             provider="windows-sapi",
             model=data.voice,
@@ -428,6 +430,8 @@ def create_local_subtitle_voice(data: LocalVoiceInput, db: Session = Depends(get
             "task_id": task.id,
             "path": str(destination),
             "name": filename,
+            "media_file_id": media_record.id,
+            "download_url": f"/api/media/files/{media_record.id}/download",
             "cue_count": len(cues),
             "duration_seconds": duration,
             "timeline_aligned": True,
