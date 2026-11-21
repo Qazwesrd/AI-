@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models.story import EpisodePlan, StoryboardShot, EpisodeEditTimeline
 from app.models.visual import VisualAsset
-from app.models.media import MediaTask
+from app.models.media import MediaFile, MediaTask
 from app.routers.media import (
     EpisodeTimelineInput, get_episode_edit_timeline,
     save_episode_edit_timeline,
@@ -30,6 +30,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
                 EpisodeEditTimeline.__table__,
                 VisualAsset.__table__,
                 MediaTask.__table__,
+                MediaFile.__table__,
             ],
         )
         self.Session = sessionmaker(bind=engine)
@@ -164,6 +165,54 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as caught:
             save_episode_edit_timeline(self.episode_id, payload, self.db)
         self.assertEqual(caught.exception.status_code, 422)
+
+    def test_rejects_audio_owned_by_another_project(self):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        audio_path = "/managed/audio/foreign-music.mp3"
+        self.db.add(MediaFile(
+            name="foreign-music.mp3",
+            category="audio",
+            file_path=audio_path,
+            metadata_json={"project_id": 2},
+        ))
+        self.db.commit()
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            music_path=audio_path,
+        )
+        with (
+            patch("app.routers.media.safe_storage_file", return_value=Path(audio_path)),
+            patch("app.routers.media.probe_media", return_value={"streams": [{"codec_type": "audio"}]}),
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("属于其他项目", caught.exception.detail)
+
+    def test_allows_legacy_shared_audio_without_project_metadata(self):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        audio_path = "/managed/audio/shared-music.mp3"
+        self.db.add(MediaFile(
+            name="shared-music.mp3",
+            category="audio",
+            file_path=audio_path,
+            metadata_json={},
+        ))
+        self.db.commit()
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            music_path=audio_path,
+        )
+        with (
+            patch("app.routers.media.safe_storage_file", return_value=Path(audio_path)),
+            patch("app.routers.media.probe_media", return_value={"streams": [{"codec_type": "audio"}]}),
+        ):
+            saved = save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(saved["version"], 1)
 
     def test_rejects_cut_with_nonzero_duration(self):
         payload = EpisodeTimelineInput(
