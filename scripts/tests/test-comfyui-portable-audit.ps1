@@ -13,9 +13,9 @@ if (!(Test-Path -LiteralPath $auditScript -PathType Leaf) -or
 # its current deployment attempt when a post-move step fails. Existing installs
 # are checked and returned before this ownership flag is ever set.
 $installerSource = Get-Content -LiteralPath $installScript -Raw -Encoding UTF8
-if ($installerSource -notmatch '\$deploymentOwned\s*=\s*\$true' -or
+if ($installerSource -notmatch '(?s)Move-Item\s+-LiteralPath\s+\$portableRoot\s+-Destination\s+\$installFullPath\s*\r?\n\s*\$deploymentOwned\s*=\s*\$true' -or
     $installerSource -notmatch '(?s)catch\s*\{.*?\$deploymentOwned\s*-and\s*\(Test-Path\s+-LiteralPath\s+\$installFullPath\).*?Remove-Item\s+-LiteralPath\s+\$installFullPath\s+-Recurse\s+-Force') {
-    throw "ComfyUI 安装器缺少仅针对本次新建目录的失败回滚保护。"
+    throw "ComfyUI 安装器必须在目标目录移动成功后才取得回滚所有权，且只能回滚本次新建目录。"
 }
 
 function Write-Utf8([string]$Path, [string]$Value) {
