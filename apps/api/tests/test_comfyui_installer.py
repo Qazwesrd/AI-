@@ -18,6 +18,9 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIn(f'$manifest.bundle_type -ne "{bundle_type}"', install)
         self.assertIn(f'$manifest.distribution_status -ne "{distribution_status}"', install)
         self.assertIn('$manifest.distribution_approved -ne $false', install)
+        self.assertIn('$maximumEntries = 50000', install)
+        self.assertIn('$maximumListingLines = ([long]$maximumEntries * 12) + 1000', install)
+        self.assertIn('System.Collections.Generic.List[string]', install)
 
     def test_low_disk_blocks_engine_install(self):
         result = assess_comfyui_install(
