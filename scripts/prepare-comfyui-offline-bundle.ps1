@@ -370,7 +370,7 @@ try {
 # Never leave a seemingly complete ZIP behind if post-write verification fails.
 try {
     $zipItem = Get-Item -LiteralPath $target -ErrorAction Stop
-    if ($zipItem.Length -lt $estimatedBundleBytes - 512MB) {
+    if ($zipItem.Length -lt ([long]$totalBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length)) {
         throw "完整离线 ZIP 体积异常，低于按官方资产元数据计算的合理下限。"
     }
 
