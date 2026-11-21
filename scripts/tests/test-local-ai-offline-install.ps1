@@ -145,7 +145,9 @@ try {
         (Test-Path -LiteralPath (Join-Path $installRoot ".ollama-upgrade-transaction.json"))) {
         throw "离线升级回滚测试失败：安装清单写入故障未恢复旧运行环境。"
     }
-    Remove-Item -LiteralPath $stateWriteBlocker -Recurse -Force
+    if (Test-Path -LiteralPath $stateWriteBlocker) {
+        Remove-Item -LiteralPath $stateWriteBlocker -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     & $installer -PayloadRoot $payload -InstallRoot $installRoot -LogPath $log
     $installedState = Get-Content -LiteralPath (Join-Path $installRoot "install-manifest.json") -Raw | ConvertFrom-Json
