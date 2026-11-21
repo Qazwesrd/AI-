@@ -6,10 +6,26 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.routers import local_image_generation as local_images
-from app.routers.local_image_generation import LocalImageGenerateInput
+from fastapi import HTTPException
+
+from app.routers.local_image_generation import (
+    LocalImageGenerateInput,
+    ReferenceConditionedGenerateInput,
+    generate_reference_conditioned_shot,
+)
 
 
 class ReferenceMediaFileValidationTests(unittest.TestCase):
+    def test_reference_generation_requires_explicit_local_confirmation_before_database_access(self):
+        payload = ReferenceConditionedGenerateInput(
+            shot_id=1,
+            checkpoint="comic-model.safetensors",
+            confirm_local_generation=False,
+        )
+        with self.assertRaises(HTTPException) as raised:
+            generate_reference_conditioned_shot(1, payload, db=object())
+        self.assertEqual(raised.exception.status_code, 400)
+
     def test_accepts_png_inside_managed_storage(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
