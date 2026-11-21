@@ -30,6 +30,8 @@ ROUTER_MODULES = [
     "app.routers.local_model_hardware",
     "app.routers.local_image_generation",
     "app.routers.local_image_runtime",
+    "app.routers.comfyui_installer",
+    "app.routers.image_model_catalog",
     "app.routers.workspace_backups",
     "app.routers.ai_novel_analysis",
     "app.routers.publishing",
@@ -76,8 +78,17 @@ async def lifespan(application: FastAPI):
     elif lease_scan["active_count"]:
         logger.warning("Task runtime startup scan found %s active lease(s) from a previous process; none were auto-released.", lease_scan["active_count"])
     logger.info("AI Comic Studio API started. Registered routers: %s", len(_loaded_routers))
-    yield
-    logger.info("AI Comic Studio API stopped.")
+    try:
+        yield
+    finally:
+        # A ComfyUI process launched by this API must not be orphaned when the
+        # desktop application shuts down. Cleanup uses only its owned Popen handle.
+        try:
+            from app.routers.local_image_runtime import shutdown_managed_comfyui
+            shutdown_managed_comfyui()
+        except Exception:
+            logger.exception("Failed to stop the application-managed ComfyUI process.")
+        logger.info("AI Comic Studio API stopped.")
 
 
 app = FastAPI(
