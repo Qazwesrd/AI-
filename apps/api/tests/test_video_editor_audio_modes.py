@@ -123,7 +123,9 @@ class VideoEditorAudioModeTests(unittest.TestCase):
                         cancel_event=cancel,
                     )
                 self.assertIsNone(raised.exception.partial_output)
-                self.assertTrue(Path(raised.exception.work_directory).is_dir())
+                self.assertIsNone(raised.exception.work_directory)
+                work_root = root / "edit"
+                self.assertFalse(work_root.exists() and any(work_root.iterdir()))
 
 
 
