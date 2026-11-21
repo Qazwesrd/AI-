@@ -178,6 +178,15 @@ foreach ($toolAsset in @($sevenZipTool, $sevenZipSource)) {
 }
 
 $totalBytes = ($manifestAssets | Measure-Object -Property size_bytes -Sum).Sum
+$estimatedBundleBytes = [long]$totalBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + 1GB
+$target = [System.IO.Path]::GetFullPath($OutputZip)
+$targetDir = Split-Path -Parent $target
+New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+$targetDrive = [System.IO.Path]::GetPathRoot($target)
+$targetDriveInfo = [System.IO.DriveInfo]::new($targetDrive)
+if ($targetDriveInfo.AvailableFreeSpace -lt $estimatedBundleBytes) {
+    throw ("输出盘空间不足。制作完整 ZIP 至少需要 {0:N2} GiB 可用空间，当前仅有 {1:N2} GiB。" -f ($estimatedBundleBytes / 1GB), ($targetDriveInfo.AvailableFreeSpace / 1GB))
+}
 Write-Host ("ComfyUI 官方版本：{0}，四种 Windows x64 运行包总计 {1:N2} GiB。" -f $release.tag_name, ($totalBytes / 1GB))
 Write-Host ("7-Zip 解压工具版本：{0}。" -f $sevenZipRelease.tag_name)
 Write-Host "图片生成模型不包含在本套件中。"
@@ -185,9 +194,6 @@ Write-Host "图片生成模型不包含在本套件中。"
 $installScript = Join-Path $PSScriptRoot "install-comfyui-offline.ps1"
 if (!(Test-Path -LiteralPath $installScript -PathType Leaf)) { throw "离线安装脚本不存在：$installScript" }
 
-$target = [System.IO.Path]::GetFullPath($OutputZip)
-$targetDir = Split-Path -Parent $target
-New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
 if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Force }
 
 $clientHandler = [System.Net.Http.HttpClientHandler]::new()
