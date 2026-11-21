@@ -143,6 +143,16 @@ function Get-RequiredSha256($Asset, [string]$Label) {
 }
 
 if (!(Test-Path -LiteralPath $SetupExe -PathType Leaf)) { throw "找不到桌面安装程序：$SetupExe" }
+$auditPath = Join-Path $PSScriptRoot "..\\docs\\compliance\\comfyui-portable-dependency-audit.json"
+$auditPath = [System.IO.Path]::GetFullPath($auditPath)
+if (!(Test-Path -LiteralPath $auditPath -PathType Leaf)) {
+    throw "缺少第三方依赖许可证审查登记表：$auditPath"
+}
+$auditRegister = Get-Content -LiteralPath $auditPath -Raw | ConvertFrom-Json
+if ($auditRegister.distribution_approved -ne $false -or $auditRegister.audit_status -ne "pending") {
+    throw "第三方依赖审查状态与当前内部构建策略不一致；请人工复核登记表后再构建。"
+}
+Write-Warning "第三方依赖许可证审查尚未完成：本次离线套件仅供内部验证，禁止公开或客户分发。"
 $setupItem = Get-Item -LiteralPath $SetupExe
 if ($setupItem.Length -lt 1MB) { throw "桌面安装程序大小异常。" }
 
@@ -227,6 +237,7 @@ try {
 
     $toolResult = Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest
     Add-FileEntry $archive "ComfyUI-Payload/install-comfyui-offline.ps1" $installScript
+    Add-FileEntry $archive "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json" $auditPath
     $sevenZipSourceResult = Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest
 
     $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
@@ -256,7 +267,10 @@ try {
     $manifest = @{
         schema_version = 1
         product = "AI漫剧制作大师"
-        bundle_type = "complete-offline-comfyui-engine"
+        bundle_type = "complete-offline-comfyui-engine-internal-validation-only"
+        distribution_status = "blocked-pending-third-party-dependency-audit"
+        distribution_approved = $false
+        dependency_audit_register = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json"
         comfyui_version = $release.tag_name
         source = $ReleaseApi
         created_utc = [DateTime]::UtcNow.ToString("o")
@@ -357,6 +371,7 @@ try {
         "ComfyUI-Payload/install-comfyui-offline.ps1",
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
         "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
+        "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json",
         "安装说明.txt",
         "Setup.exe.sha256"
     )) {
