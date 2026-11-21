@@ -81,7 +81,7 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
                 result = local_images._upload_reference_to_local_comfyui(media, 1, "characters", 2)
         self.assertEqual(captured["url"], "http://127.0.0.1:8188/upload/image")
         self.assertIn(b'Content-Disposition: form-data; name="image"', captured["body"])
-        self.assertIn(b"\r\n", captured["body"])
+        self.assertIn(b"png-payload", captured["body"])
         self.assertIn(b"\r\n", captured["body"])
         self.assertEqual(result["name"], "reference.png")
 
