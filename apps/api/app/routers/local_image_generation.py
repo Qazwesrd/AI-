@@ -43,11 +43,22 @@ STYLE_GUIDANCE = {
 }
 
 
+class LocalVisualAssetGenerateInput(BaseModel):
+    checkpoint: str = Field(min_length=1, max_length=240)
+    width: int = Field(default=768, ge=512, le=1536)
+    height: int = Field(default=768, ge=512, le=1536)
+    steps: int = Field(default=24, ge=1, le=40)
+    cfg: float = Field(default=7.0, ge=1.0, le=12.0)
+    seed: int | None = Field(default=None, ge=0, le=4294967295)
+    confirm_local_generation: bool = False
+
+
 class LocalImageArchiveInput(BaseModel):
     filename: str = Field(min_length=1, max_length=240)
     subfolder: str = Field(default="", max_length=240)
     type: Literal["output"] = "output"
     shot_id: int | None = Field(default=None, ge=1)
+    asset_id: int | None = Field(default=None, ge=1)
 
 
 class StoryboardImageReuseInput(BaseModel):
@@ -762,6 +773,112 @@ def list_local_image_models():
         "network_used": False,
         "downloaded": False,
         "cloud_fallback": False,
+    }
+
+
+@router.post("/assets/{asset_id}/generate")
+def generate_local_visual_asset_image(
+    asset_id: int,
+    data: LocalVisualAssetGenerateInput,
+    db: Session = Depends(get_db),
+):
+    if not data.confirm_local_generation:
+        raise HTTPException(400, "本地素材生图会占用电脑资源；请明确确认后再开始。")
+    asset = db.query(VisualAsset).filter(VisualAsset.id == asset_id).first()
+    if asset is None:
+        raise HTTPException(404, "视觉素材不存在。")
+    if not asset.confirmed:
+        raise HTTPException(409, "请先确认该素材的角色/场景/道具设定，再开始本地生图。")
+    category_labels = {
+        "character": "角色立绘",
+        "scene": "场景概念图",
+        "prop": "道具设定图",
+        "weapon": "武器设定图",
+        "costume": "服装设定图",
+        "building": "建筑设定图",
+        "special_item": "特殊物品设定图",
+    }
+    style_value = str(asset.style or "")
+    style = "3D漫" if "3D" in style_value else "2D漫" if "2D" in style_value else "仿真人" if "仿真" in style_value else "国漫"
+    prompt_parts = [
+        f"Create one polished {category_labels.get(asset.category, 'visual concept')} for {asset.name}.",
+        f"Art direction: {style_value or style}.",
+        str(asset.description or "").strip(),
+        str(asset.appearance or "").strip(),
+        str(asset.clothing or "").strip(),
+        str(asset.personality or "").strip(),
+        str(asset.consistency_prompt or "").strip(),
+    ]
+    if isinstance(asset.data, dict):
+        for key in ("visual_direction", "color_palette", "camera", "environment", "materials", "silhouette"):
+            value = asset.data.get(key)
+            if isinstance(value, str) and value.strip():
+                prompt_parts.append(f"{key}: {value.strip()[:500]}")
+    prompt = "\n".join(part for part in prompt_parts if part)
+    if len(prompt) < 10 or len(prompt) > 6000:
+        raise HTTPException(422, "素材提示词为空或过长，请先完善素材设定。")
+    image_payload = LocalImageGenerateInput(
+        checkpoint=data.checkpoint,
+        prompt=prompt,
+        negative_prompt="low quality, blurry, distorted anatomy, extra fingers, text, watermark, inconsistent design, cropped subject",
+        style=style,
+        width=data.width,
+        height=data.height,
+        steps=data.steps,
+        cfg=data.cfg,
+        seed=data.seed,
+        confirm_local_generation=True,
+    )
+    task = MediaTask(
+        task_type="local_visual_asset_image",
+        provider="comfyui-local",
+        model=data.checkpoint,
+        status="submitting",
+        prompt=prompt,
+        request_data={
+            "asset_id": asset.id,
+            "asset_category": asset.category,
+            "asset_name": asset.name,
+            "checkpoint": data.checkpoint,
+            "width": data.width,
+            "height": data.height,
+            "steps": data.steps,
+            "cfg": data.cfg,
+            "network_used": False,
+            "paid_api_used": False,
+        },
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    try:
+        result = generate_local_image(image_payload)
+        task.remote_task_id = result["prompt_id"]
+        task.status = "processing"
+        task.request_data = {
+            **(task.request_data if isinstance(task.request_data, dict) else {}),
+            "prompt_id": result["prompt_id"],
+            "seed": result["seed"],
+        }
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        failed_task = db.query(MediaTask).filter(MediaTask.id == task.id).first()
+        if failed_task:
+            failed_task.status = "failed"
+            failed_task.error = str(exc)[:1200]
+            db.commit()
+        raise
+    return {
+        **result,
+        "media_task_id": task.id,
+        "asset_id": asset.id,
+        "asset_name": asset.name,
+        "local_only": True,
+        "network_used": False,
+        "paid_api_used": False,
+        "cloud_fallback": False,
+        "message": "本地 ComfyUI 已接收素材生图任务。完成后请检查图片，再明确归档到该素材。",
     }
 
 
