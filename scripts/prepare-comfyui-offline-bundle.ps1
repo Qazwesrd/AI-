@@ -494,6 +494,29 @@ try {
             throw "离线 ZIP 缺少必要文件：$requiredName"
         }
     }
+
+    $inventoryEntry = $verifyArchive.GetEntry("THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json")
+    $inventoryReader = [System.IO.StreamReader]::new($inventoryEntry.Open(), [System.Text.Encoding]::UTF8)
+    try { $inventoryText = $inventoryReader.ReadToEnd() } finally { $inventoryReader.Dispose() }
+    $inventoryObject = $inventoryText | ConvertFrom-Json
+    $inventoryVariants = @($inventoryObject.portable_variants)
+    $inventoryNames = @($inventoryVariants | ForEach-Object { [string]$_.asset } | Sort-Object -Unique)
+    $inventoryDifferences = @(Compare-Object -ReferenceObject $AssetNames -DifferenceObject $inventoryNames)
+    if ($inventoryObject.audit_status -ne "pending" -or
+        $inventoryObject.distribution_approved -ne $false -or
+        $inventoryObject.release_tag -cne $release.tag_name -or
+        $inventoryVariants.Count -ne 4 -or $inventoryDifferences.Count -gt 0) {
+        throw "完整离线 ZIP 中的四种 Portable 依赖清点报告未通过完整性检查。"
+    }
+
+    $bundleManifestEntry = $verifyArchive.GetEntry("ComfyUI-Payload/manifest.json")
+    $bundleManifestReader = [System.IO.StreamReader]::new($bundleManifestEntry.Open(), [System.Text.Encoding]::UTF8)
+    try { $bundleManifestText = $bundleManifestReader.ReadToEnd() } finally { $bundleManifestReader.Dispose() }
+    $bundleManifestCheck = $bundleManifestText | ConvertFrom-Json
+    if ($bundleManifestCheck.dependency_inventory_report -cne "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json" -or
+        $bundleManifestCheck.comfyui_version -cne $inventoryObject.release_tag) {
+        throw "ComfyUI 主清单与依赖清点报告版本或路径不匹配。"
+    }
 } finally {
     if ($verifyArchive) { $verifyArchive.Dispose() }
     $verifyStream.Dispose()
