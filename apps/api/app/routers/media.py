@@ -2509,6 +2509,8 @@ async def upload_media(
     file: UploadFile = File(...),
     category: str = "video",
     description: str = Form(""),
+    project_id: Optional[int] = Form(None),
+    episode_id: Optional[int] = Form(None),
     db: Session = Depends(get_db),
 ):
     allowed = {
@@ -2519,6 +2521,17 @@ async def upload_media(
     }
     if category not in allowed:
         raise HTTPException(400, "不支持的素材类别")
+    if episode_id is not None:
+        episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
+        if not episode:
+            raise HTTPException(404, "指定分集不存在")
+        if project_id is not None and project_id != episode.project_id:
+            raise HTTPException(422, "上传素材指定的项目与分集不匹配")
+        project_id = episode.project_id
+    if project_id is not None and not db.query(StoryProject).filter(
+        StoryProject.id == project_id
+    ).first():
+        raise HTTPException(404, "指定剧本项目不存在")
 
     original_name = Path(file.filename or "upload.bin").name
     suffix = Path(original_name).suffix.lower()[:20]
@@ -2548,14 +2561,22 @@ async def upload_media(
             name=original_name, category=category,
             file_path=str(destination), mime_type=file.content_type,
             file_size=size,
-            metadata_json={"description": description[:2000], "stored_name": filename},
+            metadata_json={
+                "description": description[:2000],
+                "stored_name": filename,
+                "project_id": project_id,
+                "episode_id": episode_id,
+            },
         )
         db.add(media)
         db.commit()
         db.refresh(media)
-        return {"id": media.id, "name": media.name, "category": category,
-                "size": size, "path": media.file_path,
-                "description": description[:2000]}
+        return {
+            "id": media.id, "name": media.name, "category": category,
+            "size": size, "path": media.file_path,
+            "description": description[:2000],
+            "project_id": project_id, "episode_id": episode_id,
+        }
     except Exception:
         db.rollback()
         destination.unlink(missing_ok=True)
