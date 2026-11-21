@@ -19,7 +19,7 @@ COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 OPENER = build_opener(ProxyHandler({}))
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 PROMPT_ID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
-CHECKPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ -]{0,239}$")
+CHECKPOINT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._ /-]{0,239}$")
 STYLE_GUIDANCE = {
     "国漫": "Chinese animation visual style, expressive cinematic composition, refined linework, rich traditional-inspired color design",
     "仿真人": "photorealistic live-action film still, natural human proportions, cinematic lighting, realistic materials",
@@ -44,7 +44,7 @@ class LocalImageGenerateInput(BaseModel):
     @classmethod
     def validate_checkpoint(cls, value):
         value = value.strip()
-        if not CHECKPOINT_RE.fullmatch(value) or ".." in value:
+        if not CHECKPOINT_RE.fullmatch(value) or ".." in value or "//" in value or "\\\\" in value:
             raise ValueError("图片模型名称格式无效")
         return value
 
@@ -93,7 +93,7 @@ def _checkpoint_names(object_info: dict):
     names = required.get("ckpt_name") if isinstance(required, dict) else None
     if not isinstance(names, list) or not names or not isinstance(names[0], list):
         return []
-    return [name for name in names[0] if isinstance(name, str) and CHECKPOINT_RE.fullmatch(name)]
+    return [name for name in names[0] if isinstance(name, str) and CHECKPOINT_RE.fullmatch(name) and ".." not in name and "//" not in name and "\\\\" not in name]
 
 
 def build_txt2img_workflow(payload: LocalImageGenerateInput, seed: int):
