@@ -185,36 +185,6 @@ export default function StoryboardPage() {
     }
   }
 
-  async function planEpisodesAI() {
-    if (!projectId) return setMessage("请先选择剧本项目");
-    const approved = window.confirm("AI 将按每批最多3章的方式分析剧情；每章完成后立即保存。886章小说需要多批处理，过程中可关闭软件，之后再次点击会从上次进度继续。若当前模型为付费服务，可能产生费用。是否开始/继续？");
-    if (!approved) return;
-    setBusy(true);
-    try {
-      let done = false;
-      let latest: { episodes?: Episode[]; message?: string; processed_chapters?: number; total_chapters?: number } | null = null;
-      let batches = 0;
-      while (!done && batches < 400) {
-        const batchResult = await request(`/api/story/projects/${projectId}/plan-ai`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirm_paid: true,
-            prompt_style: promptStyle,
-            additional_instructions: additionalPromptInstructions,
-          }),
-        });
-        latest = batchResult;
-        done = Boolean(batchResult.done);
-        setEpisodes(batchResult.episodes || []);
-        setMessage(batchResult.message || "AI分集规划处理中");
-        batches += 1;
-      }
-      if (!done) throw new Error("已达到单次连续执行批次数上限；当前进度已保存，再次点击即可继续。");
-      setMessage(latest?.message || "AI分集规划完成");
-    } catch (error) {
-      setMessage((error instanceof Error ? error.message : "AI分集规划暂停") + "。已完成章节会保留，再次点击可继续。");
-    } finally { setBusy(false); }
-  }
   async function planEpisodes() {
     if (!projectId) return setMessage("请先选择剧本项目");
     setBusy(true);
@@ -563,7 +533,7 @@ export default function StoryboardPage() {
           <p className="mt-2 text-xs text-slate-400">点击 AI 任务时，软件会自动组合基础提示词、所选方案和补充要求；无需先单独生成提示词。不会自动把内容发送给网页版 AI。</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodesAI}>AI智能分集规划</button>
+          <a href="/local-creator" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-4 py-2 text-sm text-cyan-100">使用本地 AI 创作工作台</a>
           <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodes}>按章节建立草案</button>
           <button className="rounded-xl border border-sky-300/30 bg-sky-800/60 px-4 py-2 text-sm" disabled={episodes.length < 2} onClick={mergeEpisodes}>合并前两集</button>
         </div>
