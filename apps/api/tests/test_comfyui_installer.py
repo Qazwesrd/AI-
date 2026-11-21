@@ -1,7 +1,8 @@
 import unittest
 
 from app.routers.comfyui_installer import (
-    GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,\n    classify_gpu_vendor, parse_windows_video_adapters,
+    GIB, ENGINE_RESERVE_BYTES, MODEL_RESERVE_BYTES, assess_comfyui_install, parse_official_release,
+    classify_gpu_vendor, parse_windows_video_adapters,
 )
 
 
