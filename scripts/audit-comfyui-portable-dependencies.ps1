@@ -62,7 +62,7 @@ function Get-ArchiveEntries {
                 $entries.Add([pscustomobject]@{
                     Path = [string]$record["Path"]
                     Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
-                    IsFolder = ($record.ContainsKey("Folder") -and $record["Folder"] -eq "+")
+                    IsFolder = (($record.ContainsKey("Folder") -and $record["Folder"] -eq "+") -or ($record.ContainsKey("Attributes") -and $record["Attributes"] -match "(^|\\s)D"))
                     Attributes = if ($record.ContainsKey("Attributes")) { [string]$record["Attributes"] } else { "" }
                     IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))
                 })
@@ -85,7 +85,7 @@ function Get-ArchiveEntries {
         $entries.Add([pscustomobject]@{
             Path = [string]$record["Path"]
             Size = if ($record.ContainsKey("Size")) { [long]$record["Size"] } else { 0L }
-            IsFolder = ($record.ContainsKey("Folder") -and $record["Folder"] -eq "+")
+            IsFolder = (($record.ContainsKey("Folder") -and $record["Folder"] -eq "+") -or ($record.ContainsKey("Attributes") -and $record["Attributes"] -match "(^|\\s)D"))
             Attributes = if ($record.ContainsKey("Attributes")) { [string]$record["Attributes"] } else { "" }
             IsLink = ($record.ContainsKey("Symbolic Link") -or $record.ContainsKey("Hard Link"))
         })
