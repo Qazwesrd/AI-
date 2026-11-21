@@ -197,17 +197,14 @@ def manually_release_stale_lease(
             raise HTTPException(404, "小说分析任务不存在")
     elif source == "media":
         task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-        if not task or task.task_type not in (
-            "video", "storyboard_video", "speech", "episode_speech",
-            "local_image_batch", "local_image_reference",
-        ):
+        if not task or task.task_type not in ("video", "storyboard_video", "speech", "episode_speech"):
             raise HTTPException(404, "媒体任务不存在")
         if task.remote_task_id:
             raise HTTPException(409, "该媒体任务已有服务商远程任务编号，不能释放提交租约")
         if task.status not in ("submission_unknown", "submitting"):
             raise HTTPException(409, "只有提交状态不确定的媒体任务可以人工核实释放")
     else:
-        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、3D 模型、视频/本地图片提交或小说解析任务租约")
+        raise HTTPException(400, "当前仅支持人工核实后释放视觉图片、3D 模型提交、视频提交或小说解析任务租约")
     lease = db.query(TaskExecutionLease).filter(
         TaskExecutionLease.source == source,
         TaskExecutionLease.task_id == task_id,
