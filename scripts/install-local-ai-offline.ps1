@@ -150,7 +150,21 @@ if ($modelDescriptors.Count -lt 1) {
     throw "qwen3:4b 模型 manifest 不包含任何内容层。"
 }
 foreach ($descriptor in $modelDescriptors) {
-    $digestMatch = [regex]::Match([string]$descriptor.digest, '^sha256:([0-9a-fA-F]{64})foreach ($notice in @($manifest.notices)) {
+foreach ($descriptor in $modelDescriptors) {
+    $digestMatch = [regex]::Match([string]$descriptor.digest, '^sha256:([0-9a-fA-F]{64})$')
+    if (!$digestMatch.Success -or [long]$descriptor.size -le 0) {
+        throw "qwen3:4b 模型 manifest 包含无效的内容层描述。"
+    }
+    $digest = $digestMatch.Groups[1].Value.ToLowerInvariant()
+    $blobRelative = "models/blobs/sha256-$digest"
+    $blobRecords = @($modelFiles | Where-Object { $_.path -ceq $blobRelative })
+    $layerRecords = @($manifest.model.layers | Where-Object { $_.digest -ceq "sha256:$digest" })
+    if ($blobRecords.Count -ne 1 -or [long]$blobRecords[0].size_bytes -ne [long]$descriptor.size -or
+        $layerRecords.Count -ne 1 -or [long]$layerRecords[0].size_bytes -ne [long]$descriptor.size) {
+        throw "模型清单未完整登记 manifest 引用的 blob：$digest"
+    }
+}
+foreach ($notice in @($manifest.notices)) {
     $noticePath = Resolve-SafeRelativePath $payload ([string]$notice)
     if (!(Test-Path -LiteralPath $noticePath -PathType Leaf)) {
         throw "本地 AI 离线载荷缺少许可证/NOTICE 文件：$notice"
