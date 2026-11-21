@@ -21,7 +21,7 @@ from app.routers.visual import (
     retry_image_task,
     cancel_image_task,
 )
-from app.routers.media import refresh_video_task
+from app.routers.media import refresh_video_task, get_local_render_job
 from app.routers.local_image_generation import (
     LocalImageBatchStatusInput,
     LocalImageBatchStatusItem,
@@ -611,15 +611,16 @@ def control_unified_task(
                 "message": "已完成配音任务人工核实并解除重试保护；请返回配音页面重新发起，系统不会自动调用 AI。",
             }
         if task.task_type == "local_render":
-            progress = (task.result_data or {}).get("progress", {}) if isinstance(task.result_data, dict) else {}
+            local_status = get_local_render_job(task_id, db)
+            progress = local_status.get("progress") or {}
             return {
                 "task_id": task_id,
-                "status": task.status,
+                "status": local_status.get("status", task.status),
                 "progress": progress.get("percent", 0),
                 "stage": progress.get("stage", "unknown"),
-                "result_available": task.status == "completed" and bool(task.result_path),
-                "result_path": task.result_path if task.status == "completed" else None,
-                "error": task.error,
+                "result_available": local_status.get("status") == "completed" and bool(local_status.get("output")),
+                "result_path": local_status.get("output"),
+                "error": local_status.get("error"),
                 "polling_skipped": False,
                 "message": "本地渲染状态已读取；不会调用 AI 服务商，也不会自动重新渲染。",
             }
