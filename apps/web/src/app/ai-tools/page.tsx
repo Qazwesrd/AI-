@@ -435,12 +435,26 @@ export default function AIToolsPage() {
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
         throw new Error("只允许 HTTP 或 HTTPS 网站地址");
       }
-      const embedded = (window as Window & { aiBrowserDesktop?: { openTask?: (taskId: string, url: string) => Promise<{ opened: boolean }> } }).aiBrowserDesktop;
+      const embedded = (window as Window & { aiBrowserDesktop?: {
+        openTask?: (taskId: string, url: string) => Promise<{ opened: boolean }>;
+        fillPrompt?: (taskId: string, prompt: string) => Promise<{ filled: boolean; length: number; submitted: boolean }>;
+      } }).aiBrowserDesktop;
       const desktop = (window as Window & { desktopAPI?: { openExternal?: (url: string) => Promise<boolean> } }).desktopAPI;
       await copyText(task.prompt);
       if (embedded?.openTask) {
-        await embedded.openTask(task.id, parsed.toString());
-        setNotice(`已在软件内打开 ${target.name}。请在网页中粘贴提示词并生成；支持的下载文件会自动归档到当前任务。`);
+        const opened = await embedded.openTask(task.id, parsed.toString());
+        if (!opened?.opened) throw new Error("内嵌 AI 网页未能打开");
+        if (embedded.fillPrompt) {
+          try {
+            const filled = await embedded.fillPrompt(task.id, task.prompt);
+            if (!filled?.filled || filled.submitted) throw new Error("自动填入状态未通过校验");
+            setNotice(`已在软件内打开 ${target.name}，并自动填入完整提示词（${filled.length} 字）。请先检查网页内容，再由你手动点击发送；软件不会自动提交或触发付费。`);
+          } catch {
+            setNotice(`已在软件内打开 ${target.name}，提示词已复制到剪贴板，但该网页暂未能自动定位输入框。请手动粘贴后检查并发送。`);
+          }
+        } else {
+          setNotice(`已在软件内打开 ${target.name}，提示词已复制到剪贴板。请手动粘贴、检查并发送。`);
+        }
       } else {
         const opening = desktop?.openExternal
           ? desktop.openExternal(parsed.toString())
