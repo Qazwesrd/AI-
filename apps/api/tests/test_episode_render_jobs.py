@@ -67,8 +67,9 @@ class EpisodeRenderJobTests(unittest.TestCase):
                 {self.task.id: runtime},
                 clear=True,
             ):
-                with patch.object(media, "run_ffmpeg_with_progress") as runner:
-                    media._run_episode_render_ffmpeg(["-i", "input.mp4", "output.mp4"])
+                with patch.object(media, "SessionLocal", self.Session):
+                    with patch.object(media, "run_ffmpeg_with_progress") as runner:
+                        media._run_episode_render_ffmpeg(["-i", "input.mp4", "output.mp4"])
             kwargs = runner.call_args.kwargs
             self.assertEqual(kwargs["duration_seconds"], 120.0)
             self.assertIs(kwargs["cancel_event"], event)
