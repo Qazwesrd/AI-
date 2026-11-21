@@ -470,8 +470,6 @@ export default function VisualStudioPage() {
               {generatedPrompt && <button type="button" className="mt-2 rounded-lg border border-purple-300/30 px-3 py-1.5 text-xs" onClick={() => navigator.clipboard?.writeText(generatedPrompt)}>复制实际提示词</button>}
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} />
-              我已了解本次图片生成可能产生费用，并确认执行
             </label>
             <div className="flex flex-wrap gap-2">
               <button className={button} disabled={busy} onClick={createTask}>创建图片任务</button>
