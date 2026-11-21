@@ -152,8 +152,11 @@ export default function SystemDiagnosticsPage() {
 
           <section className={panel}>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-semibold">本地模型文件库</h2>
-              <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/70">{data.local_models.count} 个模型文件</span>
+              <div>
+                <h2 className="font-semibold">本地模型文件库</h2>
+                <p className="mt-1 text-xs text-white/45">已识别 {data.local_models.count} 个模型文件</p>
+              </div>
+              <a href="/local-models" className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">打开模型管理</a>
             </div>
             <p className="mt-2 break-all text-xs text-white/45">扫描目录：{data.local_models.directory}</p>
             <p className="mt-2 text-sm text-white/65">已识别文件总大小：{size(data.local_models.total_bytes)}</p>
