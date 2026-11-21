@@ -25,9 +25,7 @@ function Hash([string]$Path) {
 
 try {
     $modelManifestRelative = "models/manifests/registry.ollama.ai/library/qwen3/4b"
-    $blobName = "sha256-" + ("mock-model-blob" | ForEach-Object { [Convert]::ToHexString([System.Text.Encoding]::UTF8.GetBytes($_)).ToLowerInvariant() })
     $modelManifestPath = Join-Path $payload ($modelManifestRelative.Replace("/", "\"))
-    $blobPath = Join-Path (Join-Path $payload "models\blobs") $blobName
     $runtimeZip = Join-Path $payload "ollama-windows-amd64.zip"
 
     New-Item -ItemType Directory -Path $payload, $bundle, $runtimeSource -Force | Out-Null
@@ -36,8 +34,12 @@ try {
     $runtimeHash = Hash $runtimeZip
 
     $blobContent = "mock-model-blob"
-    Write-Utf8 $blobPath $blobContent
-    $blobHash = Hash $blobPath
+    $temporaryBlob = Join-Path $temp "model-blob"
+    Write-Utf8 $temporaryBlob $blobContent
+    $blobHash = Hash $temporaryBlob
+    $blobName = "sha256-" + $blobHash
+    $blobPath = Join-Path (Join-Path $payload "models\blobs") $blobName
+    Copy-Item -LiteralPath $temporaryBlob -Destination $blobPath
     Write-Utf8 $modelManifestPath '{"schemaVersion":2,"config":{"digest":"sha256:' + $blobHash + '","size":' + ([System.Text.Encoding]::UTF8.GetByteCount($blobContent)) + '},"layers":[]}'
 
     $modelManifestHash = Hash $modelManifestPath
