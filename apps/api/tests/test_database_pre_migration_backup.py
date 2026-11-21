@@ -24,6 +24,45 @@ def sqlite_connection(path):
 
 
 class DatabasePreMigrationBackupTests(unittest.TestCase):
+    def test_pre_migration_backup_includes_uncheckpointed_wal_rows(self):
+        with tempfile.TemporaryDirectory(prefix="comic-db-wal-backup-") as temp:
+            root = Path(temp)
+            db_path = root / "wal-live.db"
+            previous_path = database.DATABASE_PATH
+            previous_storage = database.STORAGE_DIR
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute("PRAGMA journal_mode=WAL")
+                connection.execute("PRAGMA wal_autocheckpoint=0")
+                connection.execute(
+                    "CREATE TABLE wal_marker (id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
+                )
+                connection.commit()
+                connection.execute(
+                    "INSERT INTO wal_marker (value) VALUES (?)",
+                    ("committed-but-not-checkpointed",),
+                )
+                connection.commit()
+                self.assertTrue(Path(str(db_path) + "-wal").exists())
+
+                database.DATABASE_PATH = db_path
+                database.STORAGE_DIR = root / "storage"
+                backup_path = database._backup_database_before_migration()
+                self.assertIsNotNone(backup_path)
+                with sqlite_connection(backup_path) as backup:
+                    self.assertEqual(
+                        backup.execute("SELECT value FROM wal_marker WHERE id=1").fetchone(),
+                        ("committed-but-not-checkpointed",),
+                    )
+                    self.assertEqual(
+                        backup.execute("PRAGMA integrity_check").fetchone(),
+                        ("ok",),
+                    )
+            finally:
+                connection.close()
+                database.DATABASE_PATH = previous_path
+                database.STORAGE_DIR = previous_storage
+
     def test_existing_database_is_backed_up_before_create_all(self):
         with tempfile.TemporaryDirectory(prefix="comic-db-backup-test-") as temp:
             root = Path(temp)
