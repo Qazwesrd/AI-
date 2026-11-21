@@ -38,6 +38,7 @@ router = APIRouter(prefix="/api/story/projects", tags=["项目归档导出"])
 EXPORT_DIR = DATA_ROOT / "project_exports"
 MAX_PROJECT_EXPORT_BYTES = 50 * 1024**3
 MAX_PROJECT_EXPORT_FILES = 20_000
+MAX_PROJECT_DATA_JSON_BYTES = 512 * 1024**2
 EXPORT_DISK_SAFETY_MARGIN = 512 * 1024**2
 
 
@@ -242,7 +243,7 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         "format": "ai-comic-studio-project",
         "format_version": 1,
         "exported_at": datetime.utcnow().isoformat() + "Z",
-        "project": _row_dict(project),
+        "project": _rewrite_paths(_row_dict(project), path_map),
         "records": {},
     }
     if records["novel"]:
@@ -254,6 +255,10 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         project_data["records"][key] = [
             _rewrite_paths(row, path_map) for row in serialized
         ]
+
+    project_data_bytes = json.dumps(project_data, ensure_ascii=False, indent=2).encode("utf-8")
+    if len(project_data_bytes) > MAX_PROJECT_DATA_JSON_BYTES:
+        raise ValueError("项目文字和结构化数据超过 512 MiB 安全上限，请先拆分超大型项目再归档")
 
     filename = f"project-{project.id}-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:8]}.zip"
     destination = target_dir / filename
@@ -285,7 +290,7 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         with zipfile.ZipFile(temporary, "w", allowZip64=True) as archive:
             archive.writestr(
                 "project-data.json",
-                json.dumps(project_data, ensure_ascii=False, indent=2).encode("utf-8"),
+                project_data_bytes,
                 compress_type=zipfile.ZIP_DEFLATED,
             )
             for item in file_entries:
