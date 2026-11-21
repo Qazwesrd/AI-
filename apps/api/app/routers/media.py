@@ -8,13 +8,15 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Optional, Literal
+from datetime import datetime
+import threading
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.services.cost_safety import require_cloud_ai_api_disabled
 from app.routers.story import ensure_project_source_current
 from app.models.media import MediaTask, MediaFile, SubtitleTrack
@@ -25,8 +27,8 @@ from app.services.task_runtime import acquire_task_lease, release_task_lease
 from app.services.media_service import (
     ROOT, STORAGE, VIDEO_DIR, AUDIO_DIR, SUBTITLE_DIR,
     decrypt_api_key, http_json, http_download,
-    safe_storage_file, run_ffmpeg, probe_media, validate_rendered_video,
-    scan_audio_video_sync
+    safe_storage_file, run_ffmpeg, run_ffmpeg_with_progress, FFmpegCancelledError,
+    probe_media, validate_rendered_video, scan_audio_video_sync
 )
 
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
@@ -2397,6 +2399,264 @@ def render_video(data: RenderInput):
         if output and output.exists():
             output.unlink()
         raise HTTPException(500, f"视频合成失败：{exc}")
+
+
+# Local render jobs are process-local by design: this desktop app runs one API
+# worker. Persisted state remains authoritative after restart; a missing runtime
+# handle is treated as interrupted/unknown, never automatically resubmitted.
+_LOCAL_RENDER_RUNTIME = {}
+_LOCAL_RENDER_LOCK = threading.Lock()
+
+
+def _local_render_args(payload, output_path):
+    video = safe_storage_file(payload["video_path"])
+    audio = safe_storage_file(payload["audio_path"]) if payload.get("audio_path") else None
+    subtitle = safe_storage_file(payload["subtitle_path"]) if payload.get("subtitle_path") else None
+    if payload["width"] % 2 or payload["height"] % 2:
+        raise ValueError("输出宽度和高度必须是偶数")
+    video_info = probe_media(video)
+    has_original_audio = any(
+        stream.get("codec_type") == "audio"
+        for stream in video_info.get("streams", [])
+    )
+    args = ["-i", str(video)]
+    if audio:
+        args += ["-i", str(audio)]
+        if has_original_audio:
+            filter_complex = (
+                f"[0:a]volume={payload['original_volume']}[original];"
+                f"[1:a]volume={payload['music_volume']}[music];"
+                "[original][music]amix=inputs=2:duration=first:dropout_transition=2[mix]"
+            )
+        else:
+            filter_complex = f"[1:a]volume={payload['music_volume']}[mix]"
+        args += ["-filter_complex", filter_complex, "-map", "0:v:0",
+                 "-map", "[mix]", "-shortest"]
+    else:
+        args += ["-map", "0:v:0"]
+        if has_original_audio:
+            args += ["-map", "0:a:0"]
+        else:
+            args += ["-an"]
+    filters = [
+        f"scale={payload['width']}:{payload['height']}:force_original_aspect_ratio=decrease",
+        f"pad={payload['width']}:{payload['height']}:(ow-iw)/2:(oh-ih)/2",
+    ]
+    if subtitle:
+        escaped = str(subtitle).replace("\\", "/").replace(":", "\\:")
+        filters.append(f"subtitles='{escaped}'")
+    args += ["-vf", ",".join(filters),
+             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+             "-c:a", "aac", "-movflags", "+faststart", str(output_path)]
+    duration = float(video_info.get("format", {}).get("duration") or 0)
+    return args, duration, bool(audio or has_original_audio)
+
+
+def _update_local_render_job(task_id, *, status=None, progress=None, result_data=None, error=None, result_path=None):
+    db = SessionLocal()
+    try:
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if not task:
+            return
+        if status is not None:
+            task.status = status
+        if progress is not None:
+            current = dict(task.result_data) if isinstance(task.result_data, dict) else {}
+            current["progress"] = progress
+            task.result_data = current
+        if result_data is not None:
+            task.result_data = result_data
+        if error is not None:
+            task.error = str(error)[:4000]
+        if result_path is not None:
+            task.result_path = str(result_path)
+        task.updated_at = datetime.utcnow()
+        db.commit()
+    finally:
+        db.close()
+
+
+def _run_local_render_job(task_id):
+    db = SessionLocal()
+    try:
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if not task or task.task_type != "local_render" or task.status != "queued":
+            return
+        payload = dict(task.request_data or {})
+        output = Path(task.result_path)
+        temporary = output.with_name(output.stem + ".partial" + output.suffix)
+        with _LOCAL_RENDER_LOCK:
+            runtime = _LOCAL_RENDER_RUNTIME.get(task_id)
+            if runtime is None:
+                runtime = {"cancel": threading.Event(), "process": None}
+                _LOCAL_RENDER_RUNTIME[task_id] = runtime
+        if runtime["cancel"].is_set():
+            task.status = "cancelled"
+            task.error = "任务在启动前已收到停止请求；未启动 FFmpeg"
+            db.commit()
+            return
+        task.status = "processing"
+        task.error = None
+        task.result_data = {"progress": {"percent": 0, "stage": "preparing"}}
+        db.commit()
+        args, duration, require_audio = _local_render_args(payload, temporary)
+
+        def report(progress):
+            _update_local_render_job(task_id, progress=progress)
+
+        def process_changed(process):
+            runtime["process"] = process
+
+        run_ffmpeg_with_progress(
+            args,
+            duration_seconds=duration,
+            progress_callback=report,
+            cancel_event=runtime["cancel"],
+            process_callback=process_changed,
+        )
+        if runtime["cancel"].is_set():
+            raise FFmpegCancelledError("用户请求停止本地渲染")
+        _update_local_render_job(task_id, progress={
+            "percent": 99.9, "stage": "validating", "out_time_seconds": duration,
+        })
+        quality = validate_rendered_video(
+            temporary, expected_duration=duration if duration > 0 else None,
+            duration_tolerance=2.0, require_audio=require_audio,
+        )
+        os.replace(temporary, output)
+        size = output.stat().st_size
+        db.expire_all()
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        task.status = "completed"
+        task.result_path = str(output)
+        task.result_data = {"progress": {"percent": 100, "stage": "completed"},
+                            "size": size, "quality_report": quality}
+        task.error = None
+        db.add(MediaFile(name=output.name, category="video", file_path=str(output),
+                         mime_type="video/mp4", file_size=size,
+                         duration=quality.get("duration_seconds")))
+        db.commit()
+    except FFmpegCancelledError as exc:
+        _update_local_render_job(
+            task_id, status="cancelled",
+            error=str(exc),
+            result_data={"progress": {"stage": "cancelled"},
+                         "partial_output": str(temporary) if "temporary" in locals() and temporary.exists() else None},
+        )
+    except Exception as exc:
+        _update_local_render_job(
+            task_id, status="failed", error=str(exc),
+            result_data={"progress": {"stage": "failed"},
+                         "partial_output": str(temporary) if "temporary" in locals() and temporary.exists() else None},
+        )
+    finally:
+        db.close()
+        with _LOCAL_RENDER_LOCK:
+            _LOCAL_RENDER_RUNTIME.pop(task_id, None)
+
+
+@router.post("/render/jobs", status_code=202)
+def create_local_render_job(
+    data: RenderInput,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    # Validate every input and build a unique output name before persisting work.
+    try:
+        video = safe_storage_file(data.video_path)
+        if data.audio_path:
+            safe_storage_file(data.audio_path)
+        if data.subtitle_path:
+            safe_storage_file(data.subtitle_path)
+        if data.width % 2 or data.height % 2:
+            raise HTTPException(400, "输出宽度和高度必须是偶数")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"渲染输入检查失败：{exc}") from exc
+
+    output_name = re.sub(r"[^a-zA-Z0-9_\\-\\u4e00-\\u9fff]", "_", data.output_name)
+    if not output_name.lower().endswith(".mp4"):
+        output_name += ".mp4"
+    output = VIDEO_DIR / f"{uuid.uuid4().hex}_{output_name}"
+    task = MediaTask(
+        task_type="local_render",
+        provider="local_ffmpeg",
+        model="libx264",
+        status="queued",
+        prompt="本地视频合成",
+        request_data=data.model_dump(),
+        result_path=str(output),
+        result_data={"progress": {"percent": 0, "stage": "queued"}},
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    with _LOCAL_RENDER_LOCK:
+        _LOCAL_RENDER_RUNTIME[task.id] = {"cancel": threading.Event(), "process": None}
+    background_tasks.add_task(_run_local_render_job, task.id)
+    return {"task_id": task.id, "status": task.status,
+            "status_url": f"/api/media/render/jobs/{task.id}",
+            "cancel_url": f"/api/media/render/jobs/{task.id}/cancel",
+            "message": "本地渲染任务已保存并进入后台执行；不会调用云端 AI 服务。"}
+
+
+@router.get("/render/jobs/{task_id}")
+def get_local_render_job(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(MediaTask).filter(
+        MediaTask.id == task_id, MediaTask.task_type == "local_render"
+    ).first()
+    if not task:
+        raise HTTPException(404, "本地渲染任务不存在")
+    if task.status == "processing":
+        with _LOCAL_RENDER_LOCK:
+            running_here = task_id in _LOCAL_RENDER_RUNTIME
+        if not running_here:
+            task.status = "interrupted_unknown"
+            task.error = "应用重启或执行进程丢失；已保留任务记录和部分输出，未自动重新渲染。请检查部分文件后手动新建任务。"
+            task.updated_at = datetime.utcnow()
+            db.commit()
+    return {
+        "task_id": task.id, "status": task.status, "task_type": task.task_type,
+        "progress": (task.result_data or {}).get("progress", {}) if isinstance(task.result_data, dict) else {},
+        "output": task.result_path if task.status == "completed" else None,
+        "result": task.result_data if task.status == "completed" else None,
+        "partial_output": (task.result_data or {}).get("partial_output") if isinstance(task.result_data, dict) else None,
+        "error": task.error, "created_at": task.created_at.isoformat() if task.created_at else None,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    }
+
+
+@router.post("/render/jobs/{task_id}/cancel")
+def cancel_local_render_job(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(MediaTask).filter(
+        MediaTask.id == task_id, MediaTask.task_type == "local_render"
+    ).first()
+    if not task:
+        raise HTTPException(404, "本地渲染任务不存在")
+    if task.status == "queued":
+        with _LOCAL_RENDER_LOCK:
+            runtime = _LOCAL_RENDER_RUNTIME.get(task_id)
+            if runtime:
+                runtime["cancel"].set()
+        task.status = "cancelled"
+        task.error = "用户在渲染开始前取消任务"
+        task.updated_at = datetime.utcnow()
+        db.commit()
+        return {"task_id": task_id, "status": "cancelled", "message": "已取消尚未启动的本地任务。"}
+    if task.status != "processing":
+        raise HTTPException(409, f"当前任务状态为 {task.status}，不能停止")
+    with _LOCAL_RENDER_LOCK:
+        runtime = _LOCAL_RENDER_RUNTIME.get(task_id)
+        if not runtime:
+            task.status = "interrupted_unknown"
+            task.error = "找不到本机渲染进程；未尝试自动重启。"
+            db.commit()
+            return {"task_id": task_id, "status": task.status, "message": task.error}
+        runtime["cancel"].set()
+    return {"task_id": task_id, "status": "cancellation_requested",
+            "message": "已向本地 FFmpeg 发送安全停止请求；稍后查询任务状态确认停止结果。"}
+
 
 
 @router.get("/probe")
