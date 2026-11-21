@@ -43,7 +43,13 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                     min_duration=90,
                     max_duration=150,
                 )
-                db.add_all([chapter, project])
+                foreign_project = StoryProject(
+                    novel_id=novel.id,
+                    name="其他项目",
+                    min_duration=90,
+                    max_duration=150,
+                )
+                db.add_all([chapter, project, foreign_project])
                 db.flush()
                 episode = EpisodePlan(
                     project_id=project.id,
@@ -55,13 +61,25 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                 )
                 db.add(episode)
                 db.flush()
-                db.add(StoryboardShot(
+                shot = StoryboardShot(
                     project_id=project.id,
                     episode_id=episode.id,
                     shot_number=1,
                     visual_description="主角走入大厅",
                     image_prompt="cinematic character entering a hall",
                     character_ids=[],
+                )
+                db.add(shot)
+                db.flush()
+                db.add(MediaTask(
+                    task_type="storyboard_video",
+                    status="completed",
+                    request_data={
+                        "project_id": foreign_project.id,
+                        "episode_id": episode.id,
+                        "shot_id": shot.id,
+                    },
+                    result_path="/foreign-project/shot.mp4",
                 ))
                 db.commit()
 
@@ -77,6 +95,11 @@ class ProductionReadinessAuditTests(unittest.TestCase):
                 self.assertIn(
                     "shot_video_missing",
                     {item["code"] for item in report["issues"]},
+                )
+                self.assertNotIn(
+                    "shot_video_task_file_missing",
+                    {item["code"] for item in report["issues"]},
+                    "其他项目的任务不得污染当前项目的镜头任务状态",
                 )
             finally:
                 db.close()
