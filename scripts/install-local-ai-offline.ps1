@@ -228,6 +228,7 @@ if (Test-Path -LiteralPath $installFullPath) {
                     model = $manifest.model.name
                     model_manifest_sha256 = $existingModelHash
                     installed_utc = [DateTime]::UtcNow.ToString("o")
+                    cloud_features_disabled = $true
                     distribution_approved = $false
                 }
                 $stateTemp = Join-Path $installFullPath "install-manifest.json.new"
