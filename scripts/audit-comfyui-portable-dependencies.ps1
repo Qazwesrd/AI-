@@ -137,15 +137,20 @@ function Get-ExtractedEvidence {
     $leaf = [System.IO.Path]::GetFileName($EntryPath)
     if (!$leaf) { throw "归档证据文件名无效：$EntryPath" }
     $null = New-Item -ItemType Directory -Path $Destination -Force
-    $arguments = @("e", "-y", "-spd", "-o$Destination", $Archive, $EntryPath)
+    # Use 7-Zip's x mode to preserve the validated relative path. The e mode
+    # flattens paths and can silently fail to materialize extensionless metadata
+    # files from nested frontend packages on some portable archives.
+    $arguments = @("x", "-y", "-spd", "-o$Destination", $Archive, $EntryPath)
     $output = @(& $Tool @arguments 2>&1)
     if ($LASTEXITCODE -ne 0) {
         $outputText = [string]::Join(" ", [string[]]$output)
         throw "提取证据文件失败：$EntryPath；$outputText"
     }
-    $extracted = Join-Path $Destination $leaf
+    $relativeEntryPath = $normalizedEntryPath.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+    $extracted = Join-Path $Destination $relativeEntryPath
     if (!(Test-Path -LiteralPath $extracted -PathType Leaf)) {
-        throw "7-Zip 未生成预期的证据文件：$EntryPath"
+        $outputText = [string]::Join(" ", [string[]]$output)
+        throw "7-Zip 未生成预期的证据文件：$EntryPath；7-Zip 输出：$outputText"
     }
     $item = Get-Item -LiteralPath $extracted
     if ($item.Length -gt $MaximumBytes) {
