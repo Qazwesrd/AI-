@@ -603,14 +603,122 @@ def download_verified_official_asset(asset, release_tag, install_root, destinati
         raise
 
 
-# Download tasks are process-local and intentionally do not start until the
-# explicit /download/start confirmation endpoint is called.
+# Download task metadata is persisted locally so users can inspect the result
+# after restarting the desktop application. In-flight transfers are marked
+# interrupted on restart; they are never silently resumed or restarted.
 import threading
 import uuid
 
 _DOWNLOAD_TASKS = {}
 _DOWNLOAD_TASKS_LOCK = threading.Lock()
 _DOWNLOAD_THREADS = {}
+_TERMINAL_DOWNLOAD_STATES = {"verified", "failed", "cancelled", "interrupted"}
+
+
+def _download_state_file():
+    return Path.home() / "AIComicStudio" / "ComfyUI" / ".installer_state" / "download_tasks.json"
+
+
+def _persist_download_tasks_locked():
+    """Atomically persist bounded task metadata; never persist credentials or events."""
+    import tempfile
+    state_file = _download_state_file()
+    state_dir = state_file.parent
+    state_dir.mkdir(parents=True, exist_ok=True)
+    if state_dir.is_symlink() or state_file.is_symlink():
+        raise OSError("下载任务状态目录不能是符号链接")
+    records = []
+    for task in list(_DOWNLOAD_TASKS.values())[-200:]:
+        records.append({
+            "task_id": task["task_id"],
+            "status": task["status"],
+            "asset_name": task["asset_name"],
+            "version": task["version"],
+            "received_bytes": task["received_bytes"],
+            "total_bytes": task["total_bytes"],
+            "percent": task["percent"],
+            "error": task.get("error"),
+        })
+    temp_path = state_file.with_name(state_file.name + ".tmp")
+    if temp_path.is_symlink():
+        raise OSError("下载任务临时状态文件不能是符号链接")
+    payload = json.dumps({"schema_version": 1, "tasks": records}, ensure_ascii=False)
+    try:
+        with temp_path.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, state_file)
+    finally:
+        try:
+            temp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _restore_download_tasks():
+    """Restore completed history and mark nonterminal tasks interrupted."""
+    state_file = _download_state_file()
+    try:
+        if state_file.is_symlink() or not state_file.is_file():
+            return
+        if state_file.stat().st_size > 1024 * 1024:
+            return
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+            return
+        records = payload.get("tasks")
+        if not isinstance(records, list):
+            return
+        restored = {}
+        for record in records[-200:]:
+            if not isinstance(record, dict):
+                continue
+            task_id = record.get("task_id")
+            asset_name = record.get("asset_name")
+            version = record.get("version")
+            status = record.get("status")
+            if (
+                not isinstance(task_id, str) or not re.fullmatch(r"[0-9a-f]{32}", task_id)
+                or asset_name not in ALLOWED_ASSET_NAMES
+                or not isinstance(version, str) or len(version) > 100
+                or status not in {"queued", "downloading", "cancelling", *_TERMINAL_DOWNLOAD_STATES}
+            ):
+                continue
+            total = record.get("total_bytes")
+            received = record.get("received_bytes")
+            percent = record.get("percent")
+            if (
+                not isinstance(total, int) or isinstance(total, bool) or total <= 0
+                or not isinstance(received, int) or isinstance(received, bool)
+                or not 0 <= received <= total
+                or not isinstance(percent, int) or isinstance(percent, bool)
+                or not 0 <= percent <= 100
+            ):
+                continue
+            restored_status = status
+            error = record.get("error")
+            if status not in _TERMINAL_DOWNLOAD_STATES:
+                restored_status = "interrupted"
+                error = "应用重启时下载未完成；为避免损坏文件，没有自动续传。"
+            restored[task_id] = {
+                "task_id": task_id,
+                "status": restored_status,
+                "asset_name": asset_name,
+                "version": version,
+                "received_bytes": received,
+                "total_bytes": total,
+                "percent": percent if restored_status == "verified" else min(percent, 99),
+                "error": str(error)[:500] if error else None,
+                "cancel_event": threading.Event(),
+            }
+        with _DOWNLOAD_TASKS_LOCK:
+            _DOWNLOAD_TASKS.update(restored)
+            if restored:
+                _persist_download_tasks_locked()
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        # A corrupt state file must not prevent the application from starting.
+        return
 
 
 def _public_download_task(task):
@@ -637,11 +745,16 @@ def _run_download_task(task_id, asset, version, install_root):
         cancel_event = task["cancel_event"]
         if cancel_event.is_set():
             task["status"] = "cancelled"
+            _persist_download_tasks_locked()
             _DOWNLOAD_THREADS.pop(task_id, None)
             return
         task["status"] = "downloading"
+        _persist_download_tasks_locked()
+
+    last_persisted_percent = -1
 
     def update(progress):
+        nonlocal last_persisted_percent
         with _DOWNLOAD_TASKS_LOCK:
             current = _DOWNLOAD_TASKS.get(task_id)
             if current is None:
@@ -651,6 +764,9 @@ def _run_download_task(task_id, asset, version, install_root):
             current["percent"] = progress.get("percent", current["percent"])
             if progress.get("status") == "verified":
                 current["status"] = "verified"
+            if current["percent"] != last_persisted_percent or progress.get("status") == "verified":
+                _persist_download_tasks_locked()
+                last_persisted_percent = current["percent"]
 
     try:
         destination = Path(install_root) / "downloads" / asset["name"]
@@ -665,15 +781,18 @@ def _run_download_task(task_id, asset, version, install_root):
                 current["received_bytes"] = result["size_bytes"]
                 current["total_bytes"] = result["size_bytes"]
                 current["percent"] = 100
+                _persist_download_tasks_locked()
     except DownloadCancelled:
         with _DOWNLOAD_TASKS_LOCK:
             if task_id in _DOWNLOAD_TASKS:
                 _DOWNLOAD_TASKS[task_id]["status"] = "cancelled"
+                _persist_download_tasks_locked()
     except Exception as exc:
         with _DOWNLOAD_TASKS_LOCK:
             if task_id in _DOWNLOAD_TASKS:
                 _DOWNLOAD_TASKS[task_id]["status"] = "failed"
                 _DOWNLOAD_TASKS[task_id]["error"] = str(exc)[:500]
+                _persist_download_tasks_locked()
     finally:
         with _DOWNLOAD_TASKS_LOCK:
             _DOWNLOAD_THREADS.pop(task_id, None)
@@ -709,6 +828,7 @@ def start_comfyui_download(payload: dict):
         }
         with _DOWNLOAD_TASKS_LOCK:
             _DOWNLOAD_TASKS[task_id] = task
+            _persist_download_tasks_locked()
             worker = threading.Thread(
                 target=_run_download_task,
                 args=(task_id, asset, catalog["version"], str(root)),
@@ -721,13 +841,19 @@ def start_comfyui_download(payload: dict):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.get("/download/history")
+def list_comfyui_download_history():
+    with _DOWNLOAD_TASKS_LOCK:
+        return {"tasks": [_public_download_task(task) for task in list(_DOWNLOAD_TASKS.values())[-200:]]}
+
+
 @router.get("/download/{task_id}")
 def get_comfyui_download(task_id: str):
     from fastapi import HTTPException
     with _DOWNLOAD_TASKS_LOCK:
         task = _DOWNLOAD_TASKS.get(task_id)
         if task is None:
-            raise HTTPException(status_code=404, detail="下载任务不存在或应用已重启")
+            raise HTTPException(status_code=404, detail="下载任务不存在")
         return _public_download_task(task)
 
 
@@ -737,9 +863,13 @@ def cancel_comfyui_download(task_id: str):
     with _DOWNLOAD_TASKS_LOCK:
         task = _DOWNLOAD_TASKS.get(task_id)
         if task is None:
-            raise HTTPException(status_code=404, detail="下载任务不存在或应用已重启")
-        if task["status"] in {"verified", "failed", "cancelled"}:
+            raise HTTPException(status_code=404, detail="下载任务不存在")
+        if task["status"] in _TERMINAL_DOWNLOAD_STATES:
             return _public_download_task(task)
         task["cancel_event"].set()
         task["status"] = "cancelling"
+        _persist_download_tasks_locked()
         return _public_download_task(task)
+
+
+_restore_download_tasks()
