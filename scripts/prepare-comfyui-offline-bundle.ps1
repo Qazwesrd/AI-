@@ -520,6 +520,15 @@ try {
         $bundleManifestCheck.comfyui_version -cne $inventoryObject.release_tag) {
         throw "ComfyUI 主清单与依赖清点报告版本或路径不匹配。"
     }
+    $bundleAssetItems = @($bundleManifestCheck.assets)
+    foreach ($variant in $inventoryVariants) {
+        $matchingAsset = @($bundleAssetItems | Where-Object { $_.name -ceq [string]$variant.asset })
+        if ($matchingAsset.Count -ne 1 -or
+            [string]$matchingAsset[0].sha256 -ne [string]$variant.sha256 -or
+            [long]$matchingAsset[0].size_bytes -ne [long]$variant.archive_size_bytes) {
+            throw "最终 ZIP 的依赖清点报告与主清单资产校验值不匹配：$($variant.asset)"
+        }
+    }
 } finally {
     if ($verifyArchive) { $verifyArchive.Dispose() }
     $verifyStream.Dispose()
