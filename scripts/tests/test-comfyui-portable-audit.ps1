@@ -64,7 +64,14 @@ try {
         Pop-Location
     }
 
-    & $auditScript -SevenZipPath $sevenZip -ArchivePaths @($archive) -ReleaseTag $release.tag_name -OutputPath $reportPath
+    try {
+        & $auditScript -SevenZipPath $sevenZip -ArchivePaths @($archive) -ReleaseTag $release.tag_name -OutputPath $reportPath
+    } catch {
+        Write-Host "ComfyUI audit diagnostic:"
+        Write-Host ($_ | Format-List * -Force | Out-String)
+        Write-Host (Get-PSCallStack | Out-String)
+        throw
+    }
     if (!(Test-Path -LiteralPath $reportPath -PathType Leaf)) {
         throw "依赖清点脚本没有生成报告。"
     }
