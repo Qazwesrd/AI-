@@ -72,8 +72,6 @@ export default function VisualStudioPage() {
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [promptMode, setPromptMode] = useState("professional");
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null);
-  const [confirmPaid, setConfirmPaid] = useState(false);
-  const [confirm3dPaid, setConfirm3dPaid] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -217,7 +215,6 @@ export default function VisualStudioPage() {
           task_type: category,
           prompt: effectivePrompt,
           size: "2K",
-          confirm_paid: confirmPaid,
         }),
       });
       const result = await response.json();
@@ -231,24 +228,8 @@ export default function VisualStudioPage() {
     }
   }
 
-  async function runTask(id: number) {
-    setBusy(true);
-    try {
-      const response = await fetch(
-        `${API}/api/visual/tasks/${id}/run?confirm_paid=${confirmPaid}`,
-        { method: "POST" }
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "生成失败");
-      setMessage(`图片任务 #${id} 已完成`);
-      await loadTasks();
-      await loadAssets();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "生成失败");
-      await loadTasks();
-    } finally {
-      setBusy(false);
-    }
+  async function runTask(_id: number) {
+    setMessage("严格零费用模式已拦截云端图片生成 API。请前往本地 ComfyUI 图片工作台生成；不会提交任何云端请求。");
   }
 
 
@@ -309,27 +290,10 @@ export default function VisualStudioPage() {
     } finally { setBusy(false); }
   }
 
-  async function generateEditable3D(asset: Asset) {
-    if (!asset.confirmed) {
-      setMessage("请先确认素材设定，再生成真实三维模型。");
-      return;
-    }
-    if (!window.confirm("将把已生成的正面、侧面、背面参考图上传到 Tripo，并调用多视图转 3D 模型 API。该服务可能消耗付费额度，是否继续？")) return;
-    setBusy(true);
-    try {
-      const response = await fetch(API + "/api/visual/assets/" + asset.id + "/model3d/tripo", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "tripo3d", model: "v3.1-20260211", texture: true, pbr: true, texture_quality: "detailed", geometry_quality: "standard", confirm_paid: confirm3dPaid }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "3D 模型任务提交失败");
-      setMessage("已提交 Tripo 三维模型任务 #" + result.task_id + "。输入视角：" + (result.input_views || []).join("、") + "。稍后可点击查询并下载 GLB。");
-      await loadAssets();
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "3D 模型生成失败");
-    } finally { setBusy(false); }
+  async function generateEditable3D(_asset: Asset) {
+    setMessage("云端 Tripo 3D API 已在严格零费用模式下禁用；本地 3D 生成引擎尚未集成，不会上传素材或产生费用。");
   }
+
 
   async function refreshEditable3D(asset: Asset) {
     const taskId = asset.data?.model3d_task?.task_id;
@@ -415,6 +379,7 @@ export default function VisualStudioPage() {
         >← 返回主页</a>
         <div className="text-sm text-purple-300">AI COMIC STUDIO / VISUAL LAB</div>
         <h1 className="mt-2 text-3xl font-bold">AI视觉素材生产中心</h1>
+        <p className="mt-3 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs text-cyan-100">严格零费用模式：云端图片与 Tripo 3D API 不会被调用。图片请使用本地 ComfyUI 工作台；本地 3D 模型生成仍待开发。</p>
         <p className="mt-2 text-sm text-slate-300">
           统一管理人物、场景、普通道具、武器刀具、服装、建筑和特殊物品，并为后续镜头生成提供统一视觉参考。
         </p>
@@ -570,8 +535,7 @@ export default function VisualStudioPage() {
                   <button className="rounded-lg border border-sky-300/20 px-3 py-1.5 text-xs hover:bg-sky-900/40" disabled={busy} onClick={() => generateProfessionalPrompt(item.id)}>生成专业提示词</button>
                   {item.confirmed && (
                     <>
-                      <label className="flex items-center gap-1 text-xs text-amber-200"><input type="checkbox" checked={confirm3dPaid} onChange={e => setConfirm3dPaid(e.target.checked)} />确认本次 3D 生成可能收费</label>
-                      <button className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30 disabled:opacity-50" disabled={busy} onClick={() => generateEditable3D(item)}>生成真实3D模型（Tripo）</button>
+                      <button type="button" disabled title="严格零费用模式已禁用云端 Tripo API，本地 3D 引擎尚未集成。" className="rounded-lg border border-emerald-300/15 px-3 py-1.5 text-xs text-emerald-100/50 cursor-not-allowed">云端 3D API 已禁用</button>
                     </>
                   )}
                   {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" disabled={busy} onClick={() => refreshEditable3D(item)}>查询/下载3D模型</button>}
@@ -603,7 +567,7 @@ export default function VisualStudioPage() {
               <span className="text-xs text-purple-300">{task.status}</span>
               {task.status === "pending" && (
                 <>
-                  <button className={button} disabled={busy} onClick={() => runTask(task.id)}>执行生成</button>
+                  <a href="/local-image-studio" className="rounded-lg border border-cyan-300/30 bg-cyan-950/30 px-3 py-2 text-xs text-cyan-100">前往本地 ComfyUI 图片工作台</a>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "pause")}>暂停</button>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "cancel")}>取消</button>
                 </>
