@@ -17,7 +17,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.media import MediaFile, MediaTask
-from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision
+from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision, StoryAssetLink
+from app.models.visual import VisualAsset
 from app.services.media_service import STORAGE
 from pydantic import BaseModel, Field, field_validator
 
@@ -1120,7 +1121,7 @@ def _consistency_prompt_for_shot(shot: StoryboardShot, profile: dict):
                     sections.append(f"【{label}参考图已绑定本地素材库图片 #{media_id}；生成前请在本地素材库查看并作为视觉参考】")
     if not sections:
         return ""
-    return "\\n".join(sections)
+    return "\n".join(sections)
 
 
 def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], profile: dict):
@@ -1144,7 +1145,7 @@ def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], p
         original = (shot.image_prompt or "").strip()
         preview = original
         if consistency_prompt:
-            preview = (original + "\\n\\n" if original else "") + consistency_prompt
+            preview = (original + "\n\n" if original else "") + consistency_prompt
         results.append({
             "shot_id": shot.id,
             "shot_number": shot.shot_number,
@@ -1167,6 +1168,277 @@ def _consistency_preflight(project: StoryProject, shots: list[StoryboardShot], p
         "message": "所有已引用角色、场景和道具均有统一外观档案。" if missing_count == 0 else "部分角色、场景或道具缺少统一外观档案；补齐后可获得更稳定的跨分镜一致性。",
         "local_only": True,
         "cloud_api_used": False,
+    }
+
+
+class ReferenceImageUploadInput(BaseModel):
+    asset_id: int = Field(ge=1)
+    media_file_id: int = Field(ge=1)
+    category: Literal["characters", "scenes", "props"]
+    confirm_local_upload: bool = False
+
+
+class ReferenceConditioningPreflightInput(BaseModel):
+    shot_ids: list[int] = Field(default_factory=list, max_length=200)
+
+
+def _inspect_reference_media_file(media: MediaFile):
+    """Validate a reference image stays inside managed storage and matches its bytes."""
+    storage_root = Path(STORAGE).resolve()
+    candidate = Path(media.file_path)
+    try:
+        resolved = candidate.resolve(strict=True)
+        if os.path.commonpath((str(storage_root), str(resolved))) != str(storage_root):
+            return {"ready": False, "reason": "图片路径不在本地素材库目录内"}
+        if not resolved.is_file():
+            return {"ready": False, "reason": "素材路径不是普通文件"}
+        size = resolved.stat().st_size
+        if size <= 0 or size > MAX_IMAGE_BYTES:
+            return {"ready": False, "reason": "参考图为空或超过 25 MiB 安全上限"}
+        with resolved.open("rb") as stream:
+            header = stream.read(16)
+    except (OSError, ValueError):
+        return {"ready": False, "reason": "本地参考图文件不存在或无法安全读取"}
+
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    elif header.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        mime = "image/webp"
+    else:
+        return {"ready": False, "reason": "文件内容不是有效的 PNG、JPEG 或 WebP 图片"}
+    if media.mime_type and media.mime_type not in (mime, "application/octet-stream"):
+        return {"ready": False, "reason": "图片文件内容与素材库 MIME 类型不一致"}
+    return {"ready": True, "mime_type": mime, "size": size, "local_path_validated": True}
+
+
+def _upload_reference_to_local_comfyui(media: MediaFile, project_id: int, category: str, asset_id: int):
+    validation = _inspect_reference_media_file(media)
+    if not validation["ready"]:
+        raise HTTPException(400, validation["reason"])
+    path = Path(media.file_path).resolve(strict=True)
+    suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}[validation["mime_type"]]
+    filename = f"ref_p{project_id}_{category}_{asset_id}_{uuid.uuid4().hex}{suffix}"
+    subfolder = f"ai_comic_references/p{project_id}"
+    boundary = "----AIComicStudio" + uuid.uuid4().hex
+    fields = [
+        ("type", "input"),
+        ("subfolder", subfolder),
+        ("overwrite", "false"),
+    ]
+    chunks = []
+    for name, value in fields:
+        chunks.extend([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+            value.encode("utf-8") + b"\r\n",
+        ])
+    chunks.extend([
+        f"--{boundary}\r\n".encode(),
+        f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'.encode(),
+        f'Content-Type: {validation["mime_type"]}\r\n\r\n'.encode(),
+    ])
+    with path.open("rb") as stream:
+        while True:
+            block = stream.read(1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
+    body = b"".join(chunks)
+    request = Request(
+        COMFYUI_BASE_URL + "/upload/image",
+        data=body,
+        headers={"Accept": "application/json", "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with OPENER.open(request, timeout=30.0) as response:
+            raw = response.read(64 * 1024 + 1)
+        if len(raw) > 64 * 1024:
+            raise HTTPException(502, "ComfyUI 上传响应超过安全上限")
+        result = json.loads(raw.decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read(1200).decode("utf-8", errors="replace")
+        raise HTTPException(502, f"本机 ComfyUI 图片上传失败（HTTP {exc.code}）：{detail}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, "无法连接本机 ComfyUI；图片未确认上传成功") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, "ComfyUI 上传响应格式无效") from exc
+    if not isinstance(result, dict) or not isinstance(result.get("name"), str):
+        raise HTTPException(502, "ComfyUI 未返回有效的参考图文件名")
+    return {
+        "name": result["name"],
+        "subfolder": result.get("subfolder", subfolder),
+        "type": result.get("type", "input"),
+        "mime_type": validation["mime_type"],
+        "size": validation["size"],
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-upload")
+def upload_project_reference_image(
+    project_id: int,
+    data: ReferenceImageUploadInput,
+    db: Session = Depends(get_db),
+):
+    if not data.confirm_local_upload:
+        raise HTTPException(400, "上传参考图到本机 ComfyUI 前，必须明确确认。")
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    profile = _get_visual_consistency(project)
+    field_name = {
+        "characters": "character_reference_images",
+        "scenes": "scene_reference_images",
+        "props": "prop_reference_images",
+    }[data.category]
+    bindings = profile.get(field_name, {})
+    if not isinstance(bindings, dict) or str(data.asset_id) not in bindings or int(bindings[str(data.asset_id)]) != data.media_file_id:
+        raise HTTPException(400, "这张图片尚未绑定到指定角色、场景或道具")
+    linked = db.query(StoryAssetLink).filter(
+        StoryAssetLink.project_id == project.id,
+        StoryAssetLink.asset_id == data.asset_id,
+    ).first()
+    asset = db.query(VisualAsset).filter(VisualAsset.id == data.asset_id).first()
+    if linked is None or asset is None:
+        raise HTTPException(404, "指定素材不属于当前漫剧项目")
+    media = db.query(MediaFile).filter(
+        MediaFile.id == data.media_file_id,
+        MediaFile.category == "image",
+    ).first()
+    if media is None:
+        raise HTTPException(404, "绑定的本地图片素材不存在")
+    uploaded = _upload_reference_to_local_comfyui(media, project.id, data.category, data.asset_id)
+    settings = dict(project.settings) if isinstance(project.settings, dict) else {}
+    uploaded_refs = dict(settings.get("comfyui_reference_uploads", {})) if isinstance(settings.get("comfyui_reference_uploads", {}), dict) else {}
+    reference_key = f"{data.category}:{data.asset_id}:{media.id}"
+    uploaded_refs[reference_key] = {
+        **uploaded,
+        "asset_id": data.asset_id,
+        "media_file_id": media.id,
+        "category": data.category,
+    }
+    settings["comfyui_reference_uploads"] = uploaded_refs
+    project.settings = settings
+    db.add(project)
+    db.commit()
+    return {
+        "project_id": project.id,
+        "asset_id": data.asset_id,
+        "media_file_id": media.id,
+        "category": data.category,
+        "comfyui_image": uploaded,
+        "local_only": True,
+        "user_confirmed": True,
+        "generation_started": False,
+        "message": "参考图已由你确认上传到本机 ComfyUI 输入目录；尚未启动图片生成。",
+    }
+
+
+@router.post("/projects/{project_id}/consistency/reference-preflight")
+def preflight_reference_conditioning(
+    project_id: int,
+    data: ReferenceConditioningPreflightInput,
+    db: Session = Depends(get_db),
+):
+    """Validate bound references and local ComfyUI support without uploading or generating."""
+    project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
+    if project is None:
+        raise HTTPException(404, "漫剧项目不存在")
+    query = db.query(StoryboardShot).filter(StoryboardShot.project_id == project.id)
+    if data.shot_ids:
+        query = query.filter(StoryboardShot.id.in_(data.shot_ids))
+    shots = query.order_by(StoryboardShot.sort_order, StoryboardShot.shot_number).limit(200).all()
+    if data.shot_ids and {shot.id for shot in shots} != set(data.shot_ids):
+        raise HTTPException(404, "所选分镜中包含不存在或不属于当前项目的镜头")
+    if not shots:
+        raise HTTPException(404, "当前项目没有可检查的分镜")
+
+    profile = _get_visual_consistency(project)
+    groups = (
+        ("character_reference_images", "characters", "角色", lambda shot: shot.character_ids if isinstance(shot.character_ids, list) else []),
+        ("scene_reference_images", "scenes", "场景", lambda shot: [shot.scene_asset_id] if shot.scene_asset_id else []),
+        ("prop_reference_images", "props", "道具", lambda shot: shot.prop_ids if isinstance(shot.prop_ids, list) else []),
+    )
+    references = {}
+    missing_bindings = []
+    for field_name, category, label, get_ids in groups:
+        bindings = profile.get(field_name, {})
+        if not isinstance(bindings, dict):
+            bindings = {}
+        for shot in shots:
+            for asset_id in get_ids(shot):
+                media_id = bindings.get(str(asset_id))
+                if not media_id:
+                    missing_bindings.append({
+                        "category": category, "asset_id": int(asset_id), "label": label,
+                        "shot_ids": [shot.id], "ready": False, "reason": "尚未绑定参考图",
+                    })
+                    continue
+                key = (category, str(asset_id), int(media_id))
+                references.setdefault(key, {
+                    "category": category, "asset_id": int(asset_id), "media_file_id": int(media_id),
+                    "label": label, "shot_ids": [],
+                })
+                references[key]["shot_ids"].append(shot.id)
+
+    asset_ids = {item["asset_id"] for item in references.values()}
+    linked_asset_ids = {
+        row.asset_id for row in db.query(StoryAssetLink).filter(
+            StoryAssetLink.project_id == project.id,
+            StoryAssetLink.asset_id.in_(asset_ids or {-1}),
+        ).all()
+    }
+    visual_assets = {
+        row.id: row for row in db.query(VisualAsset).filter(VisualAsset.id.in_(asset_ids or {-1})).all()
+    }
+    media_ids = {item["media_file_id"] for item in references.values()}
+    media_rows = {
+        row.id: row for row in db.query(MediaFile).filter(
+            MediaFile.id.in_(media_ids or {-1}), MediaFile.category == "image"
+        ).all()
+    }
+
+    checked = []
+    failures = list(missing_bindings)
+    for item in references.values():
+        asset = visual_assets.get(item["asset_id"])
+        media = media_rows.get(item["media_file_id"])
+        reason = None
+        if item["asset_id"] not in linked_asset_ids or asset is None:
+            reason = "该角色、场景或道具不属于当前项目"
+        elif media is None:
+            reason = "绑定的参考图不存在或不是图片素材"
+        else:
+            file_check = _inspect_reference_media_file(media)
+            if not file_check["ready"]:
+                reason = file_check["reason"]
+        result = {**item, "ready": reason is None}
+        if reason is not None:
+            result["reason"] = reason
+            failures.append(result)
+        else:
+            result.update({"mime_type": file_check["mime_type"], "size": file_check["size"]})
+        checked.append(result)
+
+    capabilities = inspect_local_reference_capabilities()
+    references_ready = not failures and bool(checked)
+    ready = references_ready and capabilities.get("reference_conditioning_ready", False)
+    return {
+        "project_id": project.id,
+        "checked_reference_count": len(checked),
+        "references_ready": references_ready,
+        "reference_conditioning_ready": ready,
+        "references": checked,
+        "failures": failures,
+        "comfyui": capabilities,
+        "upload_started": False,
+        "generation_started": False,
+        "local_only": True,
+        "network_used": False,
+        "message": "参考图文件和本机 ComfyUI 条件生图能力均已通过预检；本次没有上传图片或提交生成任务。" if ready else "预检发现参考图文件、项目归属或 ComfyUI 节点/模型尚未满足条件；本次没有上传图片或提交生成任务。",
     }
 
 
@@ -1254,7 +1526,7 @@ def apply_storyboard_consistency(project_id: int, data: StoryboardConsistencyPre
         marker_end = "【项目一致性规则结束】"
         if marker_start in original and marker_end in original:
             original = original.split(marker_start, 1)[0].rstrip()
-        shot.image_prompt = (original + "\\n\\n" if original else "") + marker_start + "\\n" + rules + "\\n" + marker_end
+        shot.image_prompt = (original + "\n\n" if original else "") + marker_start + "\n" + rules + "\n" + marker_end
         updated += 1
     db.commit()
     return {"success": True, "updated_shot_count": updated, "preflight": preflight, "local_only": True, "cloud_api_used": False}
