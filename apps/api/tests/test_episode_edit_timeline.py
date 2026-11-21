@@ -275,7 +275,7 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as caught:
                 save_episode_edit_timeline(self.episode_id, payload, self.db)
         self.assertEqual(caught.exception.status_code, 422)
-        self.assertIn("其他项目", caught.exception.detail)
+        self.assertIn("不属于当前项目或分集", caught.exception.detail)
 
     def test_allows_legacy_shared_audio_without_project_metadata(self):
         from pathlib import Path
