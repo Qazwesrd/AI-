@@ -229,6 +229,19 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
       <button type="button" onClick={() => void runPreflight(true)} disabled={busy} className="rounded-lg border border-emerald-300/30 px-4 py-2 text-sm text-emerald-100 disabled:opacity-40">应用到全部分镜提示词</button>
     </div>
     {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
+    {history.length > 0 && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/10 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">本地持久化任务历史（最近 {history.length} 条）</p>
+        <button type="button" onClick={() => void refreshHistory().catch((err) => setError(err instanceof Error ? err.message : "刷新历史失败"))} disabled={busy} className="rounded-lg border border-white/20 px-3 py-2 text-xs disabled:opacity-40">刷新历史</button>
+      </div>
+      {history.map((item) => <div key={item.history_id} className="rounded-lg bg-black/20 p-2 text-xs">
+        <div className="flex flex-wrap justify-between gap-2"><span>镜头 {item.shot_number} · {item.style} · {item.width}×{item.height}</span><span>{item.status === "completed" ? "已完成" : item.status === "failed" ? "失败" : item.status === "unavailable" ? "暂不可查询" : item.status === "running" ? "生成中" : "排队中"}</span></div>
+        <p className="mt-1 break-all text-white/50">任务 {item.prompt_id} · 种子 {item.seed} · {item.created_at ? new Date(item.created_at).toLocaleString() : "时间未知"}</p>
+        {item.images.length > 0 && <p className="mt-1 text-emerald-200">输出图片：{item.images.map((image) => image.filename).join("、")}</p>}
+        {item.error && <p className="mt-1 text-rose-200">{item.error}</p>}
+      </div>)}
+    </div>}
+
     {notice && <p className="text-sm text-emerald-200">{notice}</p>}
     {result && <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
       <p className="text-sm">检查了 {result.shot_count} 个分镜；缺失外观档案 {result.missing_profile_count} 项。</p>
@@ -309,6 +322,12 @@ type BatchPreflight = {
   missing_shots: Array<{ shot_id: number; shot_number?: number; reason: string }>;
   message: string;
 };
+type BatchHistoryTask = {
+  history_id: number; shot_id: number; shot_number: number; prompt_id: string; status: string;
+  seed: number; checkpoint: string; style: string; width: number; height: number;
+  steps: number; cfg: number; images: Array<{ filename: string; subfolder: string; type: string }>;
+  error: string | null; created_at: string | null; updated_at: string | null;
+};
 type BatchSubmitResult = {
   submitted_count: number; skipped_count: number; failed_count: number;
   tasks: Array<{ shot_id: number; shot_number: number; prompt_id: string; seed: number; status: string }>;
@@ -326,12 +345,34 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   const [selected, setSelected] = useState<number[]>([]);
   const [preflight, setPreflight] = useState<BatchPreflight | null>(null);
   const [result, setResult] = useState<BatchSubmitResult | null>(null);
+  const [history, setHistory] = useState<BatchHistoryTask[]>([]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const project = projects.find((item) => String(item.id) === projectId);
   const episode = project?.episodes.find((item) => String(item.id) === episodeId);
   const shots = episode?.shots || [];
+  async function refreshHistory() {
+    if (!projectId || !episodeId) { setHistory([]); return; }
+    const response = await fetch(\`\${API}/api/local-ai/images/batch/history?project_id=\${projectId}&episode_id=\${episodeId}&limit=100\`, { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
+    setHistory(Array.isArray(data.tasks) ? data.tasks : []);
+  }
+
+  useEffect(() => {
+    if (!projectId || !episodeId) { setHistory([]); return; }
+    let active = true;
+    fetch(\`\${API}/api/local-ai/images/batch/history?project_id=\${projectId}&episode_id=\${episodeId}&limit=100\`, { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取本地批量生图历史失败");
+        if (active) setHistory(Array.isArray(data.tasks) ? data.tasks : []);
+      })
+      .catch((err) => { if (active) setError(err instanceof Error ? err.message : "读取本地批量生图历史失败"); });
+    return () => { active = false; };
+  }, [projectId, episodeId]);
+
 
   function toggleShot(id: number) {
     setSelected((current) => current.includes(id) ? current.filter((value) => value !== id) : current.length >= 20 ? current : [...current, id]);
@@ -367,6 +408,7 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
         const updated = data.tasks.find((item: { prompt_id: string }) => item.prompt_id === task.prompt_id);
         return updated ? { ...task, status: updated.status } : task;
       }) } : current);
+      await refreshHistory();
     } catch (err) { setError(err instanceof Error ? err.message : "批量任务状态刷新失败"); }
     finally { setBusy(false); }
   }
@@ -382,6 +424,7 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "批量任务提交失败");
       setResult(data); setConfirmed(false);
+      await refreshHistory();
     } catch (err) { setError(err instanceof Error ? err.message : "批量任务提交失败；没有切换到云端。"); }
     finally { setBusy(false); }
   }
