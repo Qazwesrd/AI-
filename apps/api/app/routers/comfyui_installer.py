@@ -25,8 +25,27 @@ ALLOWED_ASSET_NAMES = {
 
 
 
+def _is_supported_amd_gpu_name(gpu_name: str | None) -> bool:
+    label = (gpu_name or "").lower()
+    return bool(
+        re.search(r"rx\s*(?:6|7|9)[0-9]{3}", label)
+        or "ryzen ai max" in label
+        or "radeon ai pro r9700" in label
+    )
+
+
+def recommend_runtime_mode(vendor: str, gpu_name: str | None = None) -> str:
+    """Use GPU acceleration only for explicitly recognized supported device families."""
+    label = (gpu_name or "").lower()
+    if vendor == "AMD" and not _is_supported_amd_gpu_name(label):
+        return "cpu"
+    if vendor == "Intel" and not re.search(r"\barc\b", label):
+        return "cpu"
+    return "gpu"
+
+
 def recommend_official_asset(vendor: str, gpu_name: str | None = None, architecture: str | None = None):
-    """Select the official Windows portable by vendor; only legacy GTX 10 and older use cu126."""
+    """Select an official portable; unsupported integrated AMD/Intel devices use CPU mode."""
     arch = (architecture or "").lower().replace("-", "").replace("_", "")
     if arch not in {"amd64", "x8664", "x64"}:
         return None
@@ -37,17 +56,11 @@ def recommend_official_asset(vendor: str, gpu_name: str | None = None, architect
             return "ComfyUI_windows_portable_nvidia_cu126.7z"
         return "ComfyUI_windows_portable_nvidia.7z"
     if vendor == "AMD":
-        if (
-            re.search(r"rx\s*(?:6|7|9)[0-9]{3}", label)
-            or "ryzen ai max" in label
-            or "radeon ai pro r9700" in label
-        ):
-            return "ComfyUI_windows_portable_amd.7z"
-        return None
+        # The official AMD portable can also run CPU-only with --cpu. This is
+        # the safe path for older Vega APUs such as Ryzen 7 4800U.
+        return "ComfyUI_windows_portable_amd.7z"
     if vendor == "Intel":
-        if re.search(r"\barc\b", label):
-            return "ComfyUI_windows_portable_intel.7z"
-        return None
+        return "ComfyUI_windows_portable_intel.7z"
     return None
 
 def parse_official_release(payload: dict):
@@ -178,6 +191,12 @@ def parse_windows_video_adapters(payload):
             "vendor": classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None),
             "vram_bytes": None,
             "recommended_asset": recommend_official_asset(classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None), name, platform.machine()),
+            "runtime_mode": recommend_runtime_mode(classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None), name),
+            "runtime_note": (
+                "该 AMD/Intel 集成显卡型号未列入已确认的 Windows GPU 加速支持范围；将使用官方便携包的 --cpu 模式，不会冒充 GPU 加速。"
+                if recommend_runtime_mode(classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None), name) == "cpu"
+                else "已匹配受支持的 GPU 运行包；实际加速能力仍需在目标电脑实测。"
+            ),
             "vram_note": "Windows CIM 的 AdapterRAM 字段可能被 32 位截断，因此不作为显存依据；显存需由对应厂商工具单独验证。",
         })
     return adapters
