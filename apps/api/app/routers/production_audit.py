@@ -544,7 +544,7 @@ def _probe_final_video(path: Path):
                 })
         except subprocess.TimeoutExpired:
             decode_check = "timeout"
-            issues.append({"code": "decode_timeout", "severity": "warning", "message": "完整解码检查超过 180 秒，未判定文件完整。"})
+            issues.append({"code": "decode_timeout", "severity": "warning", "message": "完整解码检查超过 240 秒，已停止本次扫描，未判定文件完整。"})
     elif not ffmpeg:
         issues.append({"code": "ffmpeg_unavailable", "severity": "warning", "message": "未找到 FFmpeg，跳过完整解码检查。"})
     return {
