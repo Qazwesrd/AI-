@@ -240,7 +240,6 @@ def execute_edit_plan(
     work.mkdir(parents=True, exist_ok=True)
     output = VIDEO_DIR / f"ai_edit_{uuid.uuid4().hex}.mp4"
     temporary_output = output.with_name(output.stem + ".partial" + output.suffix)
-    keep_work = False
 
     def report(progress):
         if progress_callback:
@@ -396,14 +395,19 @@ def execute_edit_plan(
         report({"percent": 100.0, "stage": "completed"})
         return str(output), output.stat().st_size
     except FFmpegCancelledError as exc:
-        keep_work = True
-        exc.partial_output = str(temporary_output) if temporary_output.exists() else None
-        exc.work_directory = str(work) if work.exists() else None
-        raise
-    except Exception:
+        # A cancelled render is never a deliverable. Remove its partial MP4
+        # and temporary segments so repeated cancellations cannot fill disk.
+        if temporary_output.exists():
+            temporary_output.unlink()
         if output.exists():
             output.unlink()
+        exc.partial_output = None
+        exc.work_directory = None
+        raise
+    except Exception:
+        for candidate in (temporary_output, output):
+            if candidate.exists():
+                candidate.unlink()
         raise
     finally:
-        if not keep_work:
-            shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
