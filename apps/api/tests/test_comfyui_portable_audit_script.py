@@ -57,6 +57,13 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
         self.assertIn('$existingPython', installer)
         self.assertIn('Stop-Transcript', installer)
 
+        nsis_path = REPO_ROOT / "apps" / "desktop" / "build-resources" / "installer.nsh"
+        nsis = nsis_path.read_text(encoding="utf-8")
+        self.assertIn("install-comfyui-offline.ps1", nsis)
+        self.assertIn("install-local-ai-offline.ps1", nsis)
+        self.assertNotIn('IfFileExists "$PROFILE\\AIComicStudio\\ComfyUI\\ComfyUI\\main.py"', nsis)
+        self.assertNotIn('Remove-Item "$PROFILE\\AIComicStudio', nsis)
+
 
 if __name__ == "__main__":
     unittest.main()
