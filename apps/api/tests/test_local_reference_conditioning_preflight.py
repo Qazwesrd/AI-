@@ -12,7 +12,7 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image = root / "reference.png"
-            image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
+            image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
             media = SimpleNamespace(file_path=str(image), mime_type="image/png")
             with patch.object(local_images, "STORAGE", root):
                 result = local_images._inspect_reference_media_file(media)
@@ -24,7 +24,7 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
             root = Path(directory) / "storage"
             root.mkdir()
             outside = Path(directory) / "outside.png"
-            outside.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
+            outside.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
             media = SimpleNamespace(file_path=str(outside), mime_type="image/png")
             with patch.object(local_images, "STORAGE", root):
                 result = local_images._inspect_reference_media_file(media)
@@ -35,7 +35,7 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image = root / "reference.png"
-            image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
+            image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
             media = SimpleNamespace(file_path=str(image), mime_type="image/jpeg")
             with patch.object(local_images, "STORAGE", root):
                 result = local_images._inspect_reference_media_file(media)
@@ -46,7 +46,7 @@ class ReferenceMediaFileValidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             image = root / "reference.png"
-            image.write_bytes(b"\\x89PNG\\r\\n\\x1a\\n" + b"test")
+            image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"test")
             media = SimpleNamespace(file_path=str(image), mime_type="image/png")
             with patch.object(local_images, "STORAGE", root), patch.object(local_images, "MAX_IMAGE_BYTES", 4):
                 result = local_images._inspect_reference_media_file(media)
