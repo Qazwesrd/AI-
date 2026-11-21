@@ -68,6 +68,7 @@ const navigation = [
     title: "AI创作中心",
     items: [
       ["🎬", "AI漫剧制作", "/novels"],
+      ["🖼️", "本地图片生成", "/local-image-studio"],
       ["✂️", "AI视频剪辑", "/video-editor"],
       ["📜", "剧本与分镜", "/storyboard"],
       ["🧊", "三维素材生成", "/visual-studio"],
