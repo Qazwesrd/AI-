@@ -325,7 +325,84 @@ try {
         throw "ComfyUI 升级/重复安装测试失败：现有用户数据被覆盖。"
     }
 
-    Write-Host "ComfyUI 集成测试通过：真实 7zr 目录清点、许可证证据提取、AMD Vega CPU 模式安装、运行清单、重复安装数据保护。"
+
+    # Fault-injection integration test: create a valid archive whose portable
+    # root contains a directory named runtime-manifest.json. Extraction and
+    # executable discovery succeed, Move-Item publishes the new destination,
+    # then writing the runtime manifest must fail because the path is a directory.
+    # The installer must roll back only this newly-created destination.
+    $failureFixtureRoot = Join-Path $temp "failure-fixture"
+    $failurePortableRoot = Join-Path $failureFixtureRoot "ComfyUI"
+    $failureArchive = Join-Path $temp "ComfyUI_windows_portable_amd-failure.7z"
+    Copy-Item -LiteralPath $comfyRoot -Destination $failurePortableRoot -Recurse
+    New-Item -ItemType Directory -Path (Join-Path $failurePortableRoot "runtime-manifest.json") -Force | Out-Null
+    Push-Location $failureFixtureRoot
+    try {
+        & $sevenZip a -t7z -mx=1 $failureArchive "ComfyUI\*" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "无法创建 ComfyUI 安装回滚故障注入归档。"
+        }
+    } finally {
+        Pop-Location
+    }
+
+    $failureBundleRoot = Join-Path $temp "failure-bundle"
+    Copy-Item -LiteralPath $bundleRoot -Destination $failureBundleRoot -Recurse
+    $failurePayloadRoot = Join-Path $failureBundleRoot "ComfyUI-Payload"
+    $failureArchiveName = "ComfyUI_windows_portable_amd.7z"
+    $failurePayloadArchive = Join-Path $failurePayloadRoot $failureArchiveName
+    Copy-Item -LiteralPath $failureArchive -Destination $failurePayloadArchive -Force
+    $failureArchiveHash = Get-Sha256 $failurePayloadArchive
+    $failureArchiveSize = [long](Get-Item -LiteralPath $failurePayloadArchive).Length
+
+    $failureManifestPath = Join-Path $failurePayloadRoot "manifest.json"
+    $failureManifest = Get-Content -LiteralPath $failureManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $failureManifestAsset = @($failureManifest.assets | Where-Object { $_.name -ceq $failureArchiveName })
+    if ($failureManifestAsset.Count -ne 1) { throw "回滚测试清单缺少 AMD 资产记录。" }
+    $failureManifestAsset[0].sha256 = $failureArchiveHash
+    $failureManifestAsset[0].size_bytes = $failureArchiveSize
+    Write-Utf8 $failureManifestPath ($failureManifest | ConvertTo-Json -Depth 10)
+
+    $failureInventoryPath = Join-Path $failureBundleRoot "THIRD_PARTY_NOTICES\comfyui-portable-dependency-inventory.json"
+    $failureInventory = Get-Content -LiteralPath $failureInventoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $failureInventoryVariant = @($failureInventory.portable_variants | Where-Object { $_.asset -ceq $failureArchiveName })
+    if ($failureInventoryVariant.Count -ne 1) { throw "回滚测试依赖清点报告缺少 AMD 变体。" }
+    $failureInventoryVariant[0].sha256 = $failureArchiveHash
+    $failureInventoryVariant[0].archive_size_bytes = $failureArchiveSize
+    Write-Utf8 $failureInventoryPath ($failureInventory | ConvertTo-Json -Depth 12)
+
+    $failureRegisterPath = Join-Path $failureBundleRoot "THIRD_PARTY_NOTICES\comfyui-portable-dependency-audit.json"
+    $failureRegister = Get-Content -LiteralPath $failureRegisterPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $failureRegisterVariant = @($failureRegister.portable_variants | Where-Object { $_.asset -ceq $failureArchiveName })
+    if ($failureRegisterVariant.Count -ne 1) { throw "回滚测试第三方审查登记表缺少 AMD 变体。" }
+    $failureRegisterVariant[0].sha256 = $failureArchiveHash
+    Write-Utf8 $failureRegisterPath ($failureRegister | ConvertTo-Json -Depth 10)
+
+    $failureInstallRoot = Join-Path $temp "rollback-installed\ComfyUI"
+    $postMoveFailureObserved = $false
+    try {
+        & $installScript -PayloadRoot $failurePayloadRoot -InstallRoot $failureInstallRoot -LogPath (Join-Path $temp "comfyui-rollback.log") -DetectedAdapters $detectedAdapters
+    } catch {
+        if ($_.Exception.Message -match "runtime-manifest\.json|目录|directory|路径") {
+            $postMoveFailureObserved = $true
+        } else {
+            throw
+        }
+    }
+    if (!$postMoveFailureObserved) {
+        throw "故障注入未能触发 ComfyUI 移动部署后的运行清单写入失败。"
+    }
+    if (Test-Path -LiteralPath $failureInstallRoot) {
+        throw "ComfyUI 安装失败回滚测试失败：部署目标目录仍残留半成品。"
+    }
+    $rollbackParent = Split-Path -Parent $failureInstallRoot
+    $leftoverStages = @(Get-ChildItem -LiteralPath $rollbackParent -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like ".ComfyUI-stage-*" -or $_.Name -like ".ComfyUI-backup-*" })
+    if ($leftoverStages.Count -gt 0) {
+        throw "ComfyUI 安装失败回滚测试失败：临时部署目录未清理。"
+    }
+
+    Write-Host "ComfyUI 集成测试通过：真实 7zr 清点、许可证证据提取、AMD Vega CPU 模式、重复安装数据保护、部署后故障注入及目标目录回滚。"
 }
 finally {
     if (Test-Path -LiteralPath $temp) {
