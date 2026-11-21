@@ -10,6 +10,7 @@ from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
     EpisodePlan,
+    StoryAssetLink,
     StoryboardMediaLink,
     StoryboardShot,
     StoryProject,
@@ -67,6 +68,9 @@ def build_production_readiness_report(project_id: int, db: Session):
     media_links = db.query(StoryboardMediaLink).filter(
         StoryboardMediaLink.project_id == project.id
     ).all()
+    asset_links = db.query(StoryAssetLink).filter(
+        StoryAssetLink.project_id == project.id
+    ).all()
 
     media_ids = sorted({item.media_file_id for item in media_links})
     media_files = db.query(MediaFile).filter(MediaFile.id.in_(media_ids or [-1])).all()
@@ -75,12 +79,11 @@ def build_production_readiness_report(project_id: int, db: Session):
     for link in media_links:
         links_by_shot.setdefault(link.shot_id, []).append(link)
 
-    asset_ids = set()
+    asset_ids = {item.asset_id for item in asset_links if item.asset_id}
     for shot in shots:
         asset_ids.update(_as_int_ids(shot.character_ids or []))
         asset_ids.update(_as_int_ids(shot.prop_ids or []))
-        if shot.scene_asset_id:
-            asset_ids.add(int(shot.scene_asset_id))
+        asset_ids.update(_as_int_ids([shot.scene_asset_id]))
     assets = db.query(VisualAsset).filter(
         VisualAsset.id.in_(sorted(asset_ids) or [-1])
     ).all()
@@ -102,6 +105,15 @@ def build_production_readiness_report(project_id: int, db: Session):
             "shot_id": shot_id,
         })
 
+    if not novel:
+        add_issue("blocker", "source_novel_missing", "项目关联的原著不存在")
+    elif not chapters:
+        add_issue("blocker", "source_chapters_missing", "原著尚无章节内容，无法核对剧情覆盖")
+    if not episodes:
+        add_issue("blocker", "project_episodes_missing", "项目尚未建立任何分集")
+    if project.status == "source_changed":
+        add_issue("blocker", "source_changed", "原著内容已变更，旧分集和分镜必须复核后才能继续制作")
+
     chapter_ids = {item.id for item in chapters}
     covered_chapter_ids = set()
     invalid_chapter_ids = set()
@@ -113,8 +125,11 @@ def build_production_readiness_report(project_id: int, db: Session):
             add_issue("blocker", "episode_missing_source", f"第 {episode.episode_number} 集没有关联原著章节", episode.id)
         if not (episode.screenplay or "").strip() or "待 AI 改编" in (episode.screenplay or ""):
             add_issue("blocker", "episode_missing_screenplay", f"第 {episode.episode_number} 集尚未形成正式剧本", episode.id)
-        if episode.duration_seconds < project.min_duration or episode.duration_seconds > project.max_duration:
-            add_issue("warning", "episode_duration_out_of_range", f"第 {episode.episode_number} 集计划时长 {episode.duration_seconds} 秒，超出项目设定范围", episode.id)
+        duration = int(episode.duration_seconds or 0)
+        minimum = int(project.min_duration or 0)
+        maximum = int(project.max_duration or 0)
+        if duration <= 0 or duration < minimum or duration > maximum:
+            add_issue("warning", "episode_duration_out_of_range", f"第 {episode.episode_number} 集计划时长 {duration} 秒，超出项目设定范围或尚未设置", episode.id)
         episode_shots = shots_by_episode.get(episode.id, [])
         if not episode_shots:
             add_issue("blocker", "episode_missing_shots", f"第 {episode.episode_number} 集没有分镜", episode.id)
@@ -186,10 +201,15 @@ def build_production_readiness_report(project_id: int, db: Session):
         voice_state = _local_file_state(data.get("voice_path"))
         music_state = _local_file_state(data.get("music_path"))
         effect_tracks = data.get("sound_effect_tracks") if isinstance(data.get("sound_effect_tracks"), list) else []
-        valid_effects = sum(
-            1 for track in effect_tracks
-            if isinstance(track, dict) and _local_file_state(track.get("path"))["exists"]
-        )
+        valid_effects = 0
+        for track in effect_tracks:
+            if not isinstance(track, dict):
+                continue
+            effect_state = _local_file_state(track.get("path"))
+            if effect_state["exists"]:
+                valid_effects += 1
+            else:
+                add_issue("warning", "sound_effect_file_missing", f"第 {episode.episode_number} 集有音效轨道无法读取", episode.id)
         subtitle_cues = data.get("subtitle_cues") if isinstance(data.get("subtitle_cues"), list) else []
         episode_has_dialogue = any(
             (shot.dialogue or "").strip() for shot in shots_by_episode.get(episode.id, [])
