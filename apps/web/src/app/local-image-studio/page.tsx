@@ -98,6 +98,15 @@ function formatReferenceBindings(value: unknown): string {
     .filter(Boolean).join("\n");
 }
 
+type ReferencePreflightResult = {
+  checked_reference_count: number;
+  references_ready: boolean;
+  reference_conditioning_ready: boolean;
+  failures: Array<{ label: string; asset_id: number; reason: string }>;
+  comfyui?: { message?: string };
+  message?: string;
+};
+
 function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
   const [visualStyle, setVisualStyle] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
@@ -110,7 +119,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
   const [sceneRefs, setSceneRefs] = useState("");
   const [propRefs, setPropRefs] = useState("");
   const [result, setResult] = useState<ConsistencyResult | null>(null);
-  const [referencePreflight, setReferencePreflight] = useState<any>(null);
+  const [referencePreflight, setReferencePreflight] = useState<ReferencePreflightResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
@@ -260,7 +269,7 @@ function StoryboardConsistencyPanel({ projectId }: { projectId: string }) {
         <div className="mt-2 max-h-64 space-y-2 overflow-auto">{result.shots.map((shot) => <div key={shot.shot_id} className="rounded bg-black/20 p-2"><p className="font-medium">镜头 {shot.shot_number} · #{shot.shot_id}</p><pre className="mt-1 whitespace-pre-wrap break-words">{shot.prompt_preview || "尚无图片提示词或一致性规则"}</pre></div>)}</div>
       </details>
     </div>}
-    {referencePreflight && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs"><p>已检查参考图 {referencePreflight.checked_reference_count} 张；文件与项目归属：{referencePreflight.references_ready ? "通过" : "未通过"}；ComfyUI 条件生图：{referencePreflight.reference_conditioning_ready ? "已具备节点和模型" : "尚未具备完整条件"}。</p>{referencePreflight.failures?.map((item: any, index: number) => <p key={index} className="text-amber-200">{item.label}素材 #{item.asset_id}：{item.reason}</p>)}<p className="text-white/50">{referencePreflight.comfyui?.message}</p><p className="text-white/40">本次仅检查，没有上传参考图，也没有开始生成。</p></div>}
+    {referencePreflight && <div className="space-y-2 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs"><p>已检查参考图 {referencePreflight.checked_reference_count} 张；文件与项目归属：{referencePreflight.references_ready ? "通过" : "未通过"}；ComfyUI 条件生图：{referencePreflight.reference_conditioning_ready ? "已具备节点和模型" : "尚未具备完整条件"}。</p>{referencePreflight.failures?.map((item, index: number) => <p key={index} className="text-amber-200">{item.label}素材 #{item.asset_id}：{item.reason}</p>)}<p className="text-white/50">{referencePreflight.comfyui?.message}</p><p className="text-white/40">本次仅检查，没有上传参考图，也没有开始生成。</p></div>}
     <p className="text-xs text-amber-200/80">本阶段新增参考图文件安全与项目归属预检，以及本机 ComfyUI 节点/模型检测；尚未将图片上传为 ComfyUI 条件输入。不会自动下载插件或模型。</p>
     <p className="text-xs text-white/40">本功能仅生成和保存本地提示词规则，不会调用云端 AI，也不会自动开始生图；ComfyUI 仍需用户单独确认生成。</p>
   </section>;
