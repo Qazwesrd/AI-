@@ -93,7 +93,31 @@ export default function LocalModelsPage() {
     }
   }, []);
 
-  const refreshInstaller = useCallback(async () => {\n    try {\n      const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });\n      const result = await response.json();\n      if (!response.ok) throw new Error(result.detail || "无法读取模型安装状态");\n      setInstallerInfo(result);\n    } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }\n  }, []);\n\n  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); }, [refresh, refreshInstaller]);\n\n  useEffect(() => {\n    if (!installerInfo || !["downloading", "verifying"].includes(installerInfo.job.status)) return;\n    const timer = window.setInterval(async () => {\n      try {\n        const response = await fetch(`${API}/api/local-ai/model-installer/status`, { cache: "no-store" });\n        const result = await response.json();\n        if (response.ok) setInstallerInfo(current => current ? { ...current, job: result } : current);\n        if (["success", "failed", "cancelled"].includes(result.status)) {\n          window.clearInterval(timer); setInstallingBaseModel(false); void refreshRuntime(); void refreshInstaller();\n        }\n      } catch { /* transient polling errors are retried on the next tick */ }\n    }, 1200);\n    return () => window.clearInterval(timer);\n  }, [installerInfo?.job.status, refreshInstaller]);
+  const refreshInstaller = useCallback(async () => {
+    try {
+      const response = await fetch(`${API}/api/local-ai/model-installer/info`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "无法读取模型安装状态");
+      setInstallerInfo(result);
+    } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
+  }, []);
+
+  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); }, [refresh, refreshInstaller]);
+
+  useEffect(() => {
+    if (!installerInfo || !["downloading", "verifying"].includes(installerInfo.job.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const response = await fetch(`${API}/api/local-ai/model-installer/status`, { cache: "no-store" });
+        const result = await response.json();
+        if (response.ok) setInstallerInfo(current => current ? { ...current, job: result } : current);
+        if (["success", "failed", "cancelled"].includes(result.status)) {
+          window.clearInterval(timer); setInstallingBaseModel(false); void refreshRuntime(); void refreshInstaller();
+        }
+      } catch { /* transient polling errors are retried on the next tick */ }
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [installerInfo?.job.status, refreshInstaller]);
 
   const refreshRuntime = async () => {
     try {
