@@ -38,6 +38,33 @@ def _local_file_state(raw_path):
     return {"exists": True, "size_bytes": path.stat().st_size}
 
 
+def _project_media_file_state(db, raw_path, project_id):
+    """Resolve a managed media path and reject rows explicitly owned by another project."""
+    state = _local_file_state(raw_path)
+    if not state.get("exists"):
+        return state
+    try:
+        normalized = str(safe_storage_file(raw_path))
+    except (ValueError, FileNotFoundError, OSError):
+        return state
+    media = db.query(MediaFile).filter(MediaFile.file_path == normalized).first()
+    if not media:
+        return state
+    metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+    owner = metadata.get("project_id")
+    if owner in (None, "", 0, "0"):
+        return state
+    if isinstance(owner, bool):
+        return {"exists": False, "reason": "素材项目归属元数据无效"}
+    try:
+        matches = int(owner) == int(project_id)
+    except (TypeError, ValueError):
+        matches = False
+    if not matches:
+        return {"exists": False, "reason": "素材明确归属于其他项目"}
+    return state
+
+
 def _as_int_ids(values):
     result = set()
     if not isinstance(values, list):
@@ -331,16 +358,16 @@ def build_production_readiness_report(project_id: int, db: Session):
             })
             continue
         data = timeline.edit_data if isinstance(timeline.edit_data, dict) else {}
-        voice_state = _local_file_state(data.get("voice_path"))
+        voice_state = _project_media_file_state(db, data.get("voice_path"), project.id)
         if not voice_state["exists"] and speech_task:
-            voice_state = _local_file_state(speech_task.result_path)
-        music_state = _local_file_state(data.get("music_path"))
+            voice_state = _project_media_file_state(db, speech_task.result_path, project.id)
+        music_state = _project_media_file_state(db, data.get("music_path"), project.id)
         effect_tracks = data.get("sound_effect_tracks") if isinstance(data.get("sound_effect_tracks"), list) else []
         valid_effects = 0
         for track in effect_tracks:
             if not isinstance(track, dict):
                 continue
-            effect_state = _local_file_state(track.get("path"))
+            effect_state = _project_media_file_state(db, track.get("path"), project.id)
             if effect_state["exists"]:
                 valid_effects += 1
             else:
@@ -356,7 +383,7 @@ def build_production_readiness_report(project_id: int, db: Session):
         if subtitle_track_id > 0:
             subtitle_track = db.query(SubtitleTrack).filter(SubtitleTrack.id == subtitle_track_id).first()
         subtitle_path = data.get("subtitle_path") or (subtitle_track.file_path if subtitle_track else None)
-        subtitle_file_state = _local_file_state(subtitle_path)
+        subtitle_file_state = _project_media_file_state(db, subtitle_path, project.id)
         subtitles_available = bool(subtitle_cues) or subtitle_file_state["exists"]
         if episode_has_dialogue and not voice_state["exists"]:
             add_issue("warning", "episode_voice_track_missing", f"第 {episode.episode_number} 集有对白，但没有可读取的独立配音轨", episode.id)
