@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.database import DATA_ROOT, get_db
-from app.models.media import MediaFile, MediaTask
+from app.models.media import MediaFile, MediaTask, SubtitleTrack
 from app.models.novel import Chapter, Novel
 from app.models.story import (
     EpisodeEditTimeline,
@@ -201,6 +201,19 @@ def _collect_project_records(db: Session, project: StoryProject):
     timelines = db.query(EpisodeEditTimeline).filter(
         EpisodeEditTimeline.episode_id.in_(episode_ids or [-1])
     ).all()
+    subtitle_ids = set()
+    for timeline in timelines:
+        edit_data = timeline.edit_data if isinstance(timeline.edit_data, dict) else {}
+        for key in ("subtitle_track_id", "subtitle_id"):
+            try:
+                subtitle_id = int(edit_data.get(key) or 0)
+            except (TypeError, ValueError):
+                subtitle_id = 0
+            if subtitle_id > 0:
+                subtitle_ids.add(subtitle_id)
+    subtitle_tracks = db.query(SubtitleTrack).filter(
+        SubtitleTrack.id.in_(sorted(subtitle_ids) or [-1])
+    ).all()
 
     asset_ids = {link.asset_id for link in asset_links}
     for shot in shots:
@@ -270,6 +283,7 @@ def _collect_project_records(db: Session, project: StoryProject):
         "media_files": media_files,
         "media_tasks": media_tasks,
         "episode_timelines": timelines,
+        "subtitle_tracks": subtitle_tracks,
         "image_tasks": image_tasks,
     }
 
@@ -298,6 +312,8 @@ def build_project_archive(project_id: int, db: Session, export_dir: Path | None 
         all_path_values.append(row.result_path or "")
     for row in records["episode_timelines"]:
         all_path_values.extend(_walk_path_values(row.edit_data or {}))
+    for row in records["subtitle_tracks"]:
+        all_path_values.append(row.file_path or "")
 
     unique_paths = list(dict.fromkeys(item for item in all_path_values if item))
     if len(unique_paths) > MAX_PROJECT_EXPORT_FILES:
