@@ -8,7 +8,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
-try { Start-Transcript -Path $LogPath -Append -ErrorAction Stop | Out-Null } catch {}
+$transcriptStarted = $false
+try {
+    Start-Transcript -Path $LogPath -Append -ErrorAction Stop | Out-Null
+    $transcriptStarted = $true
+} catch {}
+trap {
+    if ($transcriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+        $transcriptStarted = $false
+    }
+    break
+}
 
 function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -117,7 +128,11 @@ if (Test-Path -LiteralPath $installFullPath) {
     if ((Test-Path -LiteralPath $existingOllama -PathType Leaf) -and
         (Test-Path -LiteralPath $existingManifest -PathType Leaf)) {
         Write-Host "检测到已有本地 Ollama 运行环境和 Qwen3 模型，为保护已有模型及配置，本次不覆盖。"
-        exit 0
+        if ($transcriptStarted) {
+            Stop-Transcript | Out-Null
+            $transcriptStarted = $false
+        }
+        return
     }
     throw "检测到已有本地 AI 目录但未找到完整的 Ollama/Qwen3 安装。为保护已有数据，安装已停止；请先备份并手动处理该目录。"
 }
@@ -191,5 +206,8 @@ finally {
     if (Test-Path -LiteralPath $stage) {
         Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     }
-    try { Stop-Transcript | Out-Null } catch {}
+    if ($transcriptStarted) {
+        try { Stop-Transcript | Out-Null } catch {}
+        $transcriptStarted = $false
+    }
 }
