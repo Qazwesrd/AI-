@@ -77,8 +77,8 @@ class SubtitleToolsTests(unittest.TestCase):
             segment = job_dir / "cue-1.wav"
             segment.write_bytes(b"RIFF" + b"0" * 20 + b"WAVE")
             db = Mock()
-            def write_output(*args):
-                Path(args[-1]).write_bytes(b"mp3-output")
+            def write_output(command):
+                Path(command[-1]).write_bytes(b"mp3-output")
             with (
                 patch("app.routers.subtitle_tools.AUDIO_DIR", root),
                 patch("app.routers.subtitle_tools.safe_storage_file", return_value=source),
