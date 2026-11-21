@@ -23,6 +23,7 @@ ROUTER_MODULES = [
     "app.routers.backups",
     "app.routers.system",
     "app.routers.local_models",
+    "app.routers.local_ai_runtime",
     "app.routers.workspace_backups",
     "app.routers.ai_novel_analysis",
     "app.routers.publishing",
