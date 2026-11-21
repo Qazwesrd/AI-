@@ -1,5 +1,8 @@
+import ctypes
+import os
 import shutil
 import sqlite3
+import subprocess
 import platform
 from pathlib import Path
 
@@ -92,6 +95,128 @@ def _check_local_ai_tools():
         "note": "仅检查电脑 PATH 中是否存在本地命令，不启动程序、不连接网络、不下载模型。检测到软件不代表已安装模型或可以立即生成内容。",
     }
 
+
+def _physical_memory_bytes():
+    """Return physical RAM in bytes where the OS exposes it, otherwise None."""
+    try:
+        if os.name == "nt":
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            status = MEMORYSTATUSEX()
+            status.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.ullTotalPhys)
+        if hasattr(os, "sysconf"):
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            if pages > 0 and page_size > 0:
+                return int(pages * page_size)
+    except (AttributeError, OSError, ValueError):
+        return None
+    return None
+
+
+def _detect_nvidia_gpu():
+    """Read NVIDIA GPU metadata from nvidia-smi; never contacts a network service."""
+    executable = shutil.which("nvidia-smi")
+    if not executable:
+        return {
+            "status": "not_detected",
+            "vendor": None,
+            "name": None,
+            "vram_bytes": None,
+            "note": "未检测到 nvidia-smi。可能没有 NVIDIA 显卡，也可能是驱动或检测工具未安装；不能据此判断没有 GPU。",
+        }
+    try:
+        result = subprocess.run(
+            [executable, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=3, check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return {
+                "status": "unavailable", "vendor": "NVIDIA", "name": None,
+                "vram_bytes": None, "note": "找到 nvidia-smi，但无法读取显卡信息；请检查显卡驱动。",
+            }
+        first = result.stdout.strip().splitlines()[0]
+        parts = [part.strip() for part in first.split(",")]
+        name = parts[0] if parts else "NVIDIA GPU"
+        vram_bytes = int(float(parts[1]) * 1024 * 1024) if len(parts) > 1 else None
+        return {
+            "status": "detected", "vendor": "NVIDIA", "name": name,
+            "vram_bytes": vram_bytes,
+            "note": "显卡信息来自本机 nvidia-smi；未访问网络。",
+        }
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {
+            "status": "unavailable", "vendor": "NVIDIA", "name": None,
+            "vram_bytes": None, "note": "读取 NVIDIA 显卡信息失败；请检查驱动。",
+        }
+
+
+def _recommend_local_model_tier(ram_bytes, vram_bytes):
+    gib = 1024 ** 3
+    ram_gib = ram_bytes / gib if ram_bytes else None
+    vram_gib = vram_bytes / gib if vram_bytes else None
+    if vram_gib is not None and vram_gib >= 12:
+        tier = "gpu_7b_14b_quantized"
+        label = "优先考虑 7B–14B 量化模型（仍需核对显存占用）"
+    elif vram_gib is not None and vram_gib >= 6:
+        tier = "gpu_3b_7b_quantized"
+        label = "优先考虑 3B–7B 量化模型"
+    elif ram_gib is not None and ram_gib >= 16:
+        tier = "cpu_3b_7b_quantized"
+        label = "可尝试 3B–7B 量化模型，CPU 推理可能较慢"
+    elif ram_gib is not None and ram_gib >= 8:
+        tier = "cpu_1b_3b_quantized"
+        label = "建议从 1B–3B 小型量化模型开始"
+    elif ram_gib is not None:
+        tier = "very_small_or_not_recommended"
+        label = "内存较紧张，建议先使用轻量工具，不建议直接运行大型模型"
+    else:
+        tier = "unknown"
+        label = "无法读取内存信息，暂不推荐模型规格"
+    return {
+        "tier": tier,
+        "label": label,
+        "ram_gib": round(ram_gib, 2) if ram_gib is not None else None,
+        "vram_gib": round(vram_gib, 2) if vram_gib is not None else None,
+        "caution": "这是粗略筛选建议，不是性能保证；实际还取决于模型量化、上下文长度、系统占用和显存共享情况。",
+    }
+
+
+def _get_hardware_profile():
+    ram_bytes = _physical_memory_bytes()
+    gpu = _detect_nvidia_gpu()
+    try:
+        cpu_count = os.cpu_count()
+    except Exception:
+        cpu_count = None
+    return {
+        "cpu": {
+            "logical_cores": cpu_count,
+            "architecture": platform.machine() or None,
+            "processor": platform.processor() or None,
+        },
+        "memory": {
+            "total_bytes": ram_bytes,
+            "total_gib": round(ram_bytes / (1024 ** 3), 2) if ram_bytes else None,
+        },
+        "gpu": gpu,
+        "model_sizing": _recommend_local_model_tier(ram_bytes, gpu.get("vram_bytes")),
+        "network_used": False,
+        "note": "仅读取本机 CPU、物理内存和可选 NVIDIA 驱动信息；不进行压力测试、不改变系统设置、不下载模型。",
+    }
+
 def _health_status(checks):
     values = [item.get("status") for item in checks]
     if "error" in values:
@@ -141,6 +266,7 @@ def system_diagnostics(db: Session = Depends(get_db)):
         "storage": {"path": str(STORAGE_DIR), "disk": disk},
         "media_tools": {"ffmpeg": ffmpeg, "ffprobe": ffprobe},
         "local_ai": _check_local_ai_tools(),
+        "hardware": _get_hardware_profile(),
         "ai_permissions": {
             "network_enabled": bool(runtime and runtime.network_enabled),
             "paid_api_allowed": bool(runtime and runtime.paid_api_allowed),
