@@ -57,6 +57,7 @@ try {
         bundle_type = "internal-offline-local-ai-runtime-and-model"
         distribution_approved = $false
         audit_status = "pending"
+        cloud_features_disabled = $true
         ollama = @{
             version = "v0.1.0"
             asset = "ollama-windows-amd64.zip"
@@ -87,6 +88,7 @@ try {
             payload_manifest_sha256 = $payloadManifestHash
             runtime_sha256 = $runtimeHash
             model_manifest_sha256 = $modelManifestHash
+            cloud_features_disabled = $true
         }
     }
     Write-Utf8 (Join-Path $bundleComfyui "manifest.json") ($bundleManifest | ConvertTo-Json -Depth 6)
