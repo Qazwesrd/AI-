@@ -84,7 +84,7 @@
 
 - 项目级归档导出：新增 `POST /api/story/projects/{project_id}/export` 创建归档，随后通过 `GET /api/story/projects/{project_id}/exports/{filename}/download` 流式下载；`GET /api/story/projects/{project_id}/exports` 列出该项目的归档，导出所选剧本项目、原著章节、分集、分镜、视觉素材、剪辑时间轴及已关联的本地媒体文件；生成 manifest 和逐文件 SHA-256；拒绝素材目录外路径；不包含服务商密钥、本地加密密钥或整个工作空间数据库。
 - 项目归档前检查：限制关联素材文件数、总字节数和结构化 JSON 大小；预检目标磁盘空间；归档写入临时文件，完成 ZIP CRC 检查后原子替换。
-- 完整生产链路检查：新增 `GET /api/story/projects/{project_id}/production-readiness`，只读检查原著章节覆盖、分集剧本、分镜字段、视觉素材引用、镜头视频关联、配音轨、音乐音效和字幕线索；不联网、不调用 AI、不自动生成。
+- 完整生产链路检查：新增 `GET /api/story/projects/{project_id}/production-readiness`，只读检查原著章节覆盖、分集剧本、分镜字段、视觉素材引用、镜头视频关联、逐集最终合成视频、配音轨、音乐音效和字幕线索；不联网、不调用 AI、不自动生成。
 - 分集工作台增加“导出完整项目包”和“检查完整生产链路”入口，并显示归档素材数、缺失引用、生产阻断项和人工复核提醒。
 - 以上能力已加入统一开发分支，自动化测试和 Windows 桌面端实机验证尚待最终统一验收；不得提前视为正式版已交付。
 
