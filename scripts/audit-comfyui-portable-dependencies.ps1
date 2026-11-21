@@ -179,8 +179,13 @@ function Get-ExtractedEvidence {
     $relativeEntryPath = $normalizedEntryPath.Replace("/", [System.IO.Path]::DirectorySeparatorChar)
     $extracted = Join-Path $Destination $relativeEntryPath
     if (!(Test-Path -LiteralPath $extracted -PathType Leaf)) {
-        $outputText = [string]::Join(" ", [string[]]$output)
-        throw "7-Zip 未生成预期的证据文件：$EntryPath；7-Zip 输出：$outputText"
+        # Do not reference the removed per-file extraction output variable here:
+        # extraction now happens once per archive. Include a bounded diagnostic
+        # of same-leaf candidates to distinguish path-prefix issues from omissions.
+        $candidates = @(Get-ChildItem -LiteralPath $Destination -File -Recurse -Filter $leaf -ErrorAction SilentlyContinue |
+            Select-Object -First 5 | ForEach-Object { $_.FullName.Substring($Destination.Length).TrimStart("\", "/") })
+        $candidateText = if ($candidates.Count -gt 0) { [string]::Join("; ", [string[]]$candidates) } else { "<no same-name file found>" }
+        throw "已解压归档但未找到预期证据文件：$EntryPath；期望路径：$extracted；同名候选：$candidateText"
     }
     $item = Get-Item -LiteralPath $extracted
     if ($item.Length -gt $MaximumBytes) {
