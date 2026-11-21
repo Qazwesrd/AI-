@@ -1,3 +1,4 @@
+!pragma codepage 65001
 !macro customInstall
   ${ifNot} ${isUpdated}
     IfFileExists "$EXEDIR\ComfyUI-Payload\install-comfyui-offline.ps1" 0 comfyui_payload_missing
