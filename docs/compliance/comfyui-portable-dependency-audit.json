@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "AI漫剧制作大师",
-  "component": "ComfyUI Windows portable offline payload",
+  "component": "ComfyUI Windows portable, Ollama Windows runtime, and bundled Qwen3 4B model",
   "audit_status": "pending",
   "distribution_approved": false,
   "reviewed_at_utc": null,
@@ -13,7 +13,11 @@
     "Collect upstream license texts, copyright notices, attribution requirements, and source-offer/source-code obligations where applicable.",
     "Review 7-Zip executable and source archive licensing for the exact selected release.",
     "Check trademark, redistribution, export, and model-license issues separately from software package licenses.",
-    "Have the completed inventory and obligations reviewed before any public or customer distribution."
+    "Have the completed inventory and obligations reviewed before any public or customer distribution.",
+    "Inventory every dependency and redistribution notice in the exact Ollama Windows amd64 standalone runtime release.",
+    "Record the exact Qwen3 4B Ollama manifest digest and verify every referenced model blob SHA-256.",
+    "Review the Qwen3 model license and attribution for the exact model revision, and retain the upstream license and model notice.",
+    "Confirm the combined offline installer includes the correct runtime, model store, and third-party notices without relying on post-install network downloads."
   ],
   "portable_variants": [
     {
@@ -57,11 +61,36 @@
       "license": "See upstream release license; do not assume a single SPDX identifier covers every component",
       "evidence": "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt and corresponding source archive",
       "status": "license_text_and_source_archive_included_exact_component_review_pending"
+    },
+    {
+      "name": "Ollama Windows amd64 standalone runtime",
+      "license": "MIT for Ollama project; bundled runtime dependencies require separate inventory",
+      "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Ollama-MIT-LICENSE.txt and exact release archive manifest",
+      "status": "runtime_release_digest_verified_dependency_audit_pending"
+    },
+    {
+      "name": "Qwen3 4B model",
+      "license": "Apache-2.0 as declared by Qwen3 upstream and Ollama model catalog",
+      "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt; Qwen3-MODEL-NOTICE.txt; exact Ollama manifest and blob SHA-256 inventory",
+      "status": "model_digest_verification_implemented_license_review_pending"
     }
   ],
   "policy": {
-    "no_unverified_license_claims": true,
-    "no_model_download_or_inclusion_by_default": true,
-    "public_distribution_blocked_until_approved": true
+    "no_unreviewed_model_payloads": true,
+    "approved_local_text_model_bundle": "qwen3:4b",
+    "local_ai_payload_included_in_full_offline_installer": true,
+    "public_distribution_blocked_until_approved": true,
+    "no_unverified_license_claims": true
+  },
+  "local_ai_payload": {
+    "runtime_asset": "ollama-windows-amd64.zip",
+    "runtime_version": null,
+    "runtime_sha256": null,
+    "runtime_audit_status": "not_started",
+    "model": "qwen3:4b",
+    "model_manifest_sha256": null,
+    "model_blob_inventory_status": "not_started",
+    "model_license": "Apache-2.0",
+    "model_license_review_status": "pending"
   }
 }
