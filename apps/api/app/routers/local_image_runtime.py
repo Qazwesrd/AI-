@@ -304,34 +304,50 @@ def start_local_image_runtime():
 
 
 @router.post("/image-runtime/stop")
-def stop_local_image_runtime():
-    """Stop only the exact process handle launched by this API process."""
+def _stop_managed_process():
+    """Terminate only the process object created by this module."""
     global _COMFYUI_PROCESS, _COMFYUI_RUNTIME_MODE, _COMFYUI_STARTED_AT
     with _PROCESS_LOCK:
         process = _COMFYUI_PROCESS
         if process is None:
-            raise HTTPException(status_code=409, detail="当前没有由本软件启动且可安全管理的 ComfyUI 进程；不会结束其他程序。")
-        if process.poll() is not None:
-            _COMFYUI_PROCESS = None
-            _COMFYUI_RUNTIME_MODE = None
-            _COMFYUI_STARTED_AT = None
-            _close_log_handle()
-            return {"status": "stopped", "message": "ComfyUI 进程已经退出。"}
-        try:
+            return False
+        if process.poll() is None:
             process.terminate()
-            process.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            # This still targets the same Popen process handle, never taskkill
-            # by image name or a user-supplied PID.
-            process.kill()
-            process.wait(timeout=5)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"停止 ComfyUI 失败：{exc}") from exc
+            try:
+                process.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
         _COMFYUI_PROCESS = None
         _COMFYUI_RUNTIME_MODE = None
         _COMFYUI_STARTED_AT = None
         _close_log_handle()
-        return {"status": "stopped", "message": "已安全停止本软件启动的 ComfyUI 进程；没有结束其他 Python 程序。"}
+        return True
+
+
+def shutdown_managed_comfyui():
+    """Best-effort graceful cleanup when the local API service shuts down."""
+    try:
+        _stop_managed_process()
+    except (OSError, subprocess.SubprocessError):
+        # Do not prevent the rest of the application from shutting down.
+        pass
+
+
+def stop_local_image_runtime():
+    """Stop only the exact process handle launched by this API process."""
+    if _COMFYUI_PROCESS is None:
+        raise HTTPException(status_code=409, detail="当前没有由本软件启动且可安全管理的 ComfyUI 进程；不会结束其他程序。")
+    try:
+        stopped = _stop_managed_process()
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=500, detail="ComfyUI 进程在停止等待时间内未能退出。") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"停止 ComfyUI 失败：{exc}") from exc
+    return {
+        "status": "stopped",
+        "message": "已安全停止本软件启动的 ComfyUI 进程；没有结束其他 Python 程序。" if stopped else "ComfyUI 进程已经退出。",
+    }
 
 
 @router.get("/image-runtime/logs")
