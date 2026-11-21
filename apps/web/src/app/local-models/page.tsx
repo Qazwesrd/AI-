@@ -217,21 +217,24 @@ export default function LocalModelsPage() {
       setError("自动安装本地运行环境需要 Windows 桌面安装版。请安装桌面版后再使用此功能。");
       return;
     }
-    if (!window.confirm("即将从 Ollama 官方网站下载并安装本地运行环境。安装程序可能需要较大网络流量，安装至少需要约 4 GB 磁盘空间（建议预留 5 GiB）。之后还需单独下载约 2.5 GB 的 Qwen3 4B 模型，并为模型预留至少 6 GiB 空间。不会产生 API 费用，也不会连接云端模型。是否继续？")) return;
+    if (!window.confirm("将一键安装本地 AI 运行环境，并继续下载 Qwen3 4B 中文创作模型（约 2.5 GB）。整个过程需要联网，建议安装前预留至少 10 GiB 磁盘空间；下载完成后，文本创作模型可在本机离线运行。不收取 API 费用，不调用云端 AI，也不会自动购买或充值。是否开始？")) return;
     setInstallingRuntime(true); setError(""); setMessage("");
     setRuntimeInstallProgress({ status: "starting", stage: "准备下载", percent: 0, message: "正在启动安装流程" });
     try {
       const result = await desktop.install(true);
       if (result.status === "already_installed") {
-        setMessage("检测到 Ollama 已安装并运行。");
+        setMessage("检测到 Ollama 已安装，正在检查并准备配套创作模型。");
         setInstallingRuntime(false);
       } else {
-        setMessage("已启动 Ollama 本地运行环境安装。");
+        setMessage("本地运行环境已安装，正在准备配套 Qwen3 4B 创作模型。");
       }
       const status = await desktop.getStatus();
       setRuntimeInstallStatus(status);
       await refreshRuntime();
       await refreshInstaller();
+      // The single confirmation above covers both the official runtime and the fixed local model.
+      // The model installer independently verifies available disk space and skips an existing model.
+      await startBaseModelInstall(true);
     } catch (err) {
       setInstallingRuntime(false);
       setError(err instanceof Error ? err.message : "Ollama 本地运行环境安装失败");
@@ -249,9 +252,14 @@ export default function LocalModelsPage() {
     }
   };
 
-  const startBaseModelInstall = async () => {
-    if (!installerInfo?.enough_space || installerInfo.installed) return;
-    if (!window.confirm("即将从 Ollama 官方模型库下载 Qwen3 4B（约 2.5 GB）。需要至少 6 GiB 可用磁盘空间，并会消耗网络流量；模型本身不收 API 费用。请先阅读模型许可证。是否继续？")) return;
+  const startBaseModelInstall = async (alreadyConfirmed = false) => {
+    if (installerInfo?.installed) {
+      setInstallingBaseModel(false);
+      setMessage("Qwen3 4B 已安装，无需重复下载。");
+      return;
+    }
+    if (!alreadyConfirmed && !installerInfo?.enough_space) return;
+    if (!alreadyConfirmed && !window.confirm("即将从 Ollama 官方模型库下载 Qwen3 4B（约 2.5 GB）。需要至少 6 GiB 可用磁盘空间，并会消耗网络流量；模型本身不收 API 费用。请先阅读模型许可证。是否继续？")) return;
     setInstallingBaseModel(true); setError(""); setMessage("");
     try {
       const response = await fetch(`${API}/api/local-ai/model-installer/start`, {
@@ -260,7 +268,12 @@ export default function LocalModelsPage() {
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "模型下载启动失败");
-      setMessage(result.status === "already_installed" ? "Qwen3 4B 已安装。" : "已开始下载 Qwen3 4B。下载期间可以查看实时进度。");
+      if (result.status === "already_installed") {
+        setInstallingBaseModel(false);
+        setMessage("Qwen3 4B 已安装，无需重复下载。");
+      } else {
+        setMessage("已开始下载 Qwen3 4B。下载期间可以查看实时进度。");
+      }
       await refreshInstaller();
     } catch (err) { setInstallingBaseModel(false); setError(err instanceof Error ? err.message : "模型下载启动失败"); }
   };
@@ -353,12 +366,12 @@ export default function LocalModelsPage() {
           <div className="font-semibold text-emerald-100">严格本地管理模式</div>
           <p className="mt-2 text-sm leading-6 text-white/65">
             本页面不会自动联网或下载。只有在你明确确认后，才会下载官方运行环境或模型文件；不会调用云端 API，也不会产生模型服务费。
-            本地运行仍会使用电脑硬件和电力。许可证信息需要你自行查阅官方来源，软件不会把用户填写的状态当作法律核验结果。
+            本地运行仍会使用电脑硬件和电力。首次一键安装需要联网下载运行环境和模型；完成后文本模型可离线使用。许可证信息需要你自行查阅官方来源。
           </p>
         </section>
 
         <section className="rounded-2xl border border-cyan-300/25 bg-slate-950/70 p-5">
-          <h2 className="text-xl font-semibold">一键安装本地创作模型</h2>
+          <h2 className="text-xl font-semibold">一键安装本地 AI 运行环境与创作模型</h2>
           <p className="mt-2 text-sm leading-6 text-white/60">推荐文字模型：Qwen3 4B（Q4_K_M，约 2.5 GB）。用于小说理解、剧本、人物设定、剧情分析、分镜和图片提示词；它本身不生成图片、视频或配音。</p>
           {installerInfo ? (
             <div className="mt-4 space-y-3">
@@ -384,10 +397,23 @@ export default function LocalModelsPage() {
               )}
               {installerInfo.job.status === "failed" && <p className="text-sm text-rose-200">{installerInfo.job.error || "下载失败，可重试。"}</p>}
               {installerInfo.job.status === "success" && <p className="text-sm text-emerald-200">模型下载并通过本机模型清单核验。可前往本地创作工作台测试。</p>}
+              {hasDesktopInstaller && installerInfo.installed !== true && (
+                <button type="button" disabled={installingRuntime || installingBaseModel} onClick={() => void installOllamaRuntime()} className="rounded-xl bg-emerald-400 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
+                  {installingRuntime || installingBaseModel ? "正在准备本地 AI…" : installerInfo.engine_status === "ready" ? "一键安装 Qwen3 4B 创作模型" : "一键安装运行环境和 Qwen3 4B 模型"}
+                </button>
+              )}
+              {runtimeInstallProgress && ["downloading", "verifying", "installing", "checking"].includes(runtimeInstallProgress.status) && (
+                <div className="rounded-xl border border-emerald-300/20 p-3 text-sm">
+                  <div className="flex justify-between gap-3"><span>{runtimeInstallProgress.stage}</span><span>{runtimeInstallProgress.percent ?? 0}%</span></div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-emerald-400 transition-all" style={{ width: `${runtimeInstallProgress.percent ?? 0}%` }} /></div>
+                  <p className="mt-1 text-xs text-white/50">{runtimeInstallProgress.message}</p>
+                  {runtimeInstallProgress.status === "downloading" && <button type="button" onClick={() => void cancelOllamaDownload()} className="mt-2 rounded-lg border border-rose-300/30 px-3 py-2 text-xs text-rose-100">取消运行环境下载</button>}
+                </div>
+              )}
               <button type="button" disabled={installerInfo.engine_status !== "ready" || !installerInfo.enough_space || installerInfo.installed === true || ["downloading", "verifying"].includes(installerInfo.job.status) || installingBaseModel} onClick={() => void startBaseModelInstall()} className="rounded-xl bg-cyan-500 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">
                 {installerInfo.installed ? "模型已安装" : installingBaseModel ? "正在准备…" : "确认并下载 Qwen3 4B"}
               </button>
-              {installerInfo.engine_status !== "ready" && <p className="text-xs text-amber-100/80">尚未检测到 Ollama。当前步骤只负责安装模型，Ollama 运行引擎的自动安装将在后续安装向导阶段接入；请勿从不明网站下载运行环境。</p>}
+              {installerInfo.engine_status !== "ready" && <p className="text-xs text-amber-100/80">{hasDesktopInstaller ? "尚未检测到 Ollama。点击绿色按钮，一次确认后会依次安装官方运行环境和 Qwen3 4B 模型。" : "尚未检测到 Ollama。请使用 Windows 桌面安装版的一键安装功能；当前环境不能自动安装运行环境。"}</p>}
               {!installerInfo.enough_space && <p className="text-xs text-amber-100/80">可用空间不足，暂不能下载。至少需要 6 GiB 可用空间。</p>}
             </div>
           ) : <p className="mt-3 text-sm text-white/50">正在检查本地引擎和磁盘空间…</p>}
