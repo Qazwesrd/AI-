@@ -44,6 +44,7 @@ jobs:
           PORTABLE_ASSET_NAME: ${{ matrix.asset }}
         run: |
           $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
           $headers = @{ 'User-Agent' = 'AI-Comic-Studio-License-Audit'; 'Accept' = 'application/vnd.github+json' }
           if ([string]::IsNullOrWhiteSpace($env:REQUESTED_RELEASE_TAG)) {
             $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest' -Headers $headers -TimeoutSec 30
@@ -111,6 +112,7 @@ jobs:
           RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
           PORTABLE_PATH: ${{ steps.assets.outputs.portable_path }}
           SEVEN_ZIP_PATH: ${{ steps.assets.outputs.seven_zip_path }}
+          PORTABLE_ASSET_NAME: ${{ matrix.asset }}
         run: |
           $ErrorActionPreference = 'Stop'
           $reportPath = Join-Path $env:RUNNER_TEMP 'comfyui-license-audit/dependency-inventory.json'
@@ -120,10 +122,15 @@ jobs:
           if ($report.audit_status -ne 'pending' -or $report.distribution_approved -ne $false -or $report.release_tag -ne $env:RELEASE_TAG -or @($report.portable_variants).Count -ne 1) {
             throw 'Inventory report is invalid or does not remain blocked for human review.'
           }
-          if (@($report.portable_variants)[0].asset -cne $env:PORTABLE_ASSET_NAME) { throw 'Inventory report asset name does not match the requested matrix variant.' }
+          $variant = @($report.portable_variants)[0]
+          if ($variant.asset -cne $env:PORTABLE_ASSET_NAME) { throw 'Inventory report asset name does not match the requested matrix variant.' }
           $verificationPath = Join-Path $env:RUNNER_TEMP 'comfyui-license-audit/source-verification.json'
           $verification = Get-Content -LiteralPath $verificationPath -Raw -Encoding UTF8 | ConvertFrom-Json
           if ($verification.audit_status -ne 'pending' -or $verification.distribution_approved -ne $false) { throw 'Source verification metadata must remain pending and unapproved.' }
+          if ($variant.sha256 -cne $verification.portable_sha256) { throw 'Inventory archive SHA-256 differs from the verified official release digest.' }
+          $variant.archive_path = "ComfyUI-Payload/$($variant.asset)"
+          $report.portable_variants = @($variant)
+          $report | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $reportPath -Encoding UTF8
 
       - name: Upload inventory report only (no runtime binaries)
         uses: actions/upload-artifact@v4
