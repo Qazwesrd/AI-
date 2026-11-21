@@ -124,7 +124,7 @@ def _rewrite_paths(value, path_map, key=""):
 
 def _safe_archive_name(filename: str) -> str:
     name = Path(filename).name
-    name = re.sub(r"[^A-Za-z0-9._-\u4e00-\u9fff]+", "_", name).strip("._")
+    name = re.sub(r"[^A-Za-z0-9._\-\u4e00-\u9fff]+", "_", name).strip("._")
     return (name or "asset.bin")[:180]
 
 
