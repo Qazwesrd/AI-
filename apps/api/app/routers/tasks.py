@@ -13,7 +13,7 @@ from app.models.story import StoryProject, EpisodePlan, StoryAssetLink
 from app.models.studio import AIUsageLog
 from app.models.visual import ImageTask, VisualAsset
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
-from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task
+from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task, enqueue_task
 from app.services.task_diagnostics import classify_task_error
 from app.routers.visual import (
     pause_image_task,
@@ -541,14 +541,46 @@ def control_unified_task(
         return handler(task_id, db)
 
     if source == "media":
-        if action not in ("retry", "refresh"):
+        if action not in ("pause", "resume", "retry", "refresh"):
             raise HTTPException(
                 409,
-                "媒体任务暂不支持本地强制暂停或取消；图片/视频任务请刷新状态，配音任务请走人工核实流程",
+                "媒体任务仅支持暂停/恢复本地等待任务、刷新远程状态或按安全规则人工核实配音任务",
             )
         task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
         if not task:
             raise HTTPException(404, "媒体任务不存在")
+        if action in ("pause", "resume"):
+            # Only scheduler-queued tasks without a remote ID can be paused.
+            # Once a provider/ComfyUI has accepted a request, pausing locally
+            # would falsely imply that remote execution had stopped.
+            if task.remote_task_id:
+                raise HTTPException(409, "服务商/ComfyUI 已接受该任务；本地暂停不会停止远程执行，请刷新任务状态。")
+            if task.task_type not in ("video", "storyboard_video", "speech", "episode_speech"):
+                raise HTTPException(409, "该媒体任务类型不支持统一等待队列暂停/恢复")
+            lease = db.query(TaskExecutionLease).filter(
+                TaskExecutionLease.source == "media",
+                TaskExecutionLease.task_id == task_id,
+                TaskExecutionLease.status == "active",
+            ).first()
+            if lease:
+                raise HTTPException(409, "任务仍持有活动执行租约，不能暂停或恢复排队状态")
+            if action == "pause":
+                if task.status != "queued":
+                    raise HTTPException(409, "只有尚未提交服务商的 queued 等待任务可以暂停")
+                remove_queued_task(db, "media", task_id)
+                task.status = "paused"
+                task.error = "用户已暂停本地等待队列；尚未提交服务商，不会产生新的 AI 请求。"
+                db.commit()
+                return {"success": True, "task_id": task_id, "status": task.status,
+                        "message": "已暂停本地等待任务；没有中断任何远程任务。"}
+            if task.status != "paused":
+                raise HTTPException(409, "只有 paused 状态的本地等待任务可以恢复")
+            task.status = "queued"
+            task.error = ""
+            db.commit()
+            queue_info = enqueue_task(db, "media", task_id, priority=0, reason="用户手动恢复媒体等待任务")
+            return {"success": True, "task_id": task_id, "status": task.status,
+                    "queue": queue_info, "message": "已恢复到本地等待队列；不会自动提交 AI 请求。"}
         if action == "retry":
             if task.task_type not in ("speech", "episode_speech"):
                 raise HTTPException(409, "只有独立配音或分镜对白配音任务支持人工核实后重新生成")
