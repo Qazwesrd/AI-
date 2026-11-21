@@ -88,12 +88,15 @@ def build_production_readiness_report(project_id: int, db: Session):
         except (TypeError, ValueError):
             media_episode_id = 0
         for episode_id in episode_ids:
-            is_episode_video = (
-                media_episode_id == episode_id
-                or (media.category or "").lower() in {"video", "视频"}
-                and media.name.startswith(f"episode_{episode_id}_")
+            category = (media.category or "").lower()
+            is_episode_video = category in {"video", "视频"} and (
+                (metadata.get("rendered_output") is True and media_episode_id == episode_id)
+                or (
+                    not metadata.get("shot_id")
+                    and (media.name or "").startswith(f"episode_{episode_id}_")
+                )
             )
-            if is_episode_video and (media.category or "").lower() in {"video", "视频"}:
+            if is_episode_video:
                 state = _local_file_state(media.file_path)
                 if state["exists"]:
                     final_outputs_by_episode.setdefault(episode_id, []).append(media)
