@@ -217,6 +217,46 @@ def _get_hardware_profile():
         "note": "仅读取本机 CPU、物理内存和可选 NVIDIA 驱动信息；不进行压力测试、不改变系统设置、不下载模型。",
     }
 
+
+def _scan_local_model_files():
+    """List model-like files directly inside the app-managed models folder; never recurse."""
+    model_dir = Path(STORAGE_DIR) / "models"
+    supported = {".gguf", ".ggml", ".safetensors", ".onnx", ".pt", ".pth", ".bin", ".model"}
+    files = []
+    total_bytes = 0
+    if model_dir.is_dir():
+        try:
+            for item in sorted(model_dir.iterdir(), key=lambda path: path.name.lower()):
+                if not item.is_file() or item.is_symlink() or item.suffix.lower() not in supported:
+                    continue
+                try:
+                    size_bytes = item.stat().st_size
+                except OSError:
+                    continue
+                total_bytes += size_bytes
+                if len(files) < 100:
+                    files.append({
+                        "name": item.name,
+                        "format": item.suffix.lower().lstrip("."),
+                        "size_bytes": size_bytes,
+                    })
+        except OSError:
+            return {
+                "directory": str(model_dir), "directory_exists": True,
+                "status": "unavailable", "count": 0, "total_bytes": 0,
+                "files": [], "note": "无法读取模型目录，请检查文件夹权限。",
+            }
+    return {
+        "directory": str(model_dir),
+        "directory_exists": model_dir.is_dir(),
+        "status": "found" if total_bytes else "empty",
+        "count": len(files),
+        "total_bytes": total_bytes,
+        "truncated": total_bytes > 0 and len(files) >= 100,
+        "files": files,
+        "note": "仅列出应用模型目录第一层的常见模型文件；文件存在不代表模型可运行、来源可信或许可证允许商用。",
+    }
+
 def _health_status(checks):
     values = [item.get("status") for item in checks]
     if "error" in values:
@@ -267,6 +307,7 @@ def system_diagnostics(db: Session = Depends(get_db)):
         "media_tools": {"ffmpeg": ffmpeg, "ffprobe": ffprobe},
         "local_ai": _check_local_ai_tools(),
         "hardware": _get_hardware_profile(),
+        "local_models": _scan_local_model_files(),
         "ai_permissions": {
             "network_enabled": bool(runtime and runtime.network_enabled),
             "paid_api_allowed": bool(runtime and runtime.paid_api_allowed),
