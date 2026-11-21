@@ -238,6 +238,31 @@ class EpisodeEditingTimelineTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 422)
         self.assertIn("属于其他项目", caught.exception.detail)
 
+    def test_rejects_audio_owned_by_another_episode_in_same_project(self):
+        from pathlib import Path
+        from unittest.mock import patch
+
+        audio_path = "/managed/audio/other-episode.mp3"
+        self.db.add(MediaFile(
+            name="other-episode.mp3",
+            category="audio",
+            file_path=audio_path,
+            metadata_json={"project_id": 1, "episode_id": 999},
+        ))
+        self.db.commit()
+        payload = EpisodeTimelineInput(
+            shot_order=[self.shot_a.id, self.shot_b.id],
+            voice_path=audio_path,
+        )
+        with (
+            patch("app.routers.media.safe_storage_file", return_value=Path(audio_path)),
+            patch("app.routers.media.probe_media", return_value={"streams": [{"codec_type": "audio"}]}),
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                save_episode_edit_timeline(self.episode_id, payload, self.db)
+        self.assertEqual(caught.exception.status_code, 422)
+        self.assertIn("其他项目", caught.exception.detail)
+
     def test_allows_legacy_shared_audio_without_project_metadata(self):
         from pathlib import Path
         from unittest.mock import patch
