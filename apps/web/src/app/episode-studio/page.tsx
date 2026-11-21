@@ -78,6 +78,14 @@ export default function EpisodeReadinessPage() {
   const [projectId, setProjectId] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
   const [archiveBusy, setArchiveBusy] = useState(false);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [productionAudit, setProductionAudit] = useState<{
+    status: string;
+    summary: { chapter_count: number; covered_chapter_count: number; episode_count: number; shot_count: number; shots_with_video: number; shots_missing_video: number; shots_with_image: number; dialogue_shot_count: number; blocker_count: number; warning_count: number };
+    issues: { severity: string; code: string; message: string; episode_id: number | null; shot_id: number | null }[];
+    limitations: string[];
+    message: string;
+  } | null>(null);
   const [batchReport, setBatchReport] = useState<{
     project_id: number; project_title: string;
     summary: { episodes: number; ready_episodes: number; incomplete_episodes: number; total_shots: number; ready_shots: number; missing_shots: number; processing_shots: number; broken_shots: number; scan_errors: number };
@@ -362,6 +370,28 @@ export default function EpisodeReadinessPage() {
     }
   }
 
+  async function checkProductionReadiness() {
+    const id = Number(projectId);
+    if (!Number.isInteger(id) || id <= 0) {
+      setMessage("请输入有效的项目 ID（正整数）。");
+      return;
+    }
+    setAuditBusy(true);
+    setProductionAudit(null);
+    setMessage("正在检查原著章节、分集、剧本、分镜、视觉素材、视频、配音和字幕关联；不会调用 AI 或联网……");
+    try {
+      const response = await fetch(`${API}/api/story/projects/${id}/production-readiness`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "完整生产链路检查失败");
+      setProductionAudit(data);
+      setMessage(data.message || "完整生产链路检查完成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "完整生产链路检查失败");
+    } finally {
+      setAuditBusy(false);
+    }
+  }
+
   async function exportProjectArchive() {
     const id = Number(projectId);
     if (!Number.isInteger(id) || id <= 0) {
@@ -522,7 +552,44 @@ export default function EpisodeReadinessPage() {
             <input value={projectId} onChange={event => setProjectId(event.target.value)} inputMode="numeric" placeholder="输入项目 ID，例如 1" className="min-w-0 flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-3" />
             <button disabled={batchBusy} onClick={() => void checkProjectQuality()} className="rounded-lg border border-cyan-300/40 bg-cyan-900/40 px-5 py-3 font-semibold text-cyan-100 disabled:opacity-50">{batchBusy ? "批量扫描中…" : "扫描项目全部分集"}</button>
             <button disabled={archiveBusy || batchBusy} onClick={() => void exportProjectArchive()} className="rounded-lg border border-violet-300/40 bg-violet-900/40 px-5 py-3 font-semibold text-violet-100 disabled:opacity-50">{archiveBusy ? "正在生成项目包…" : "导出完整项目包"}</button>
+            <button disabled={auditBusy || batchBusy} onClick={() => void checkProductionReadiness()} className="rounded-lg border border-amber-300/40 bg-amber-900/30 px-5 py-3 font-semibold text-amber-100 disabled:opacity-50">{auditBusy ? "正在检查链路…" : "检查完整生产链路"}</button>
           </div>
+          {productionAudit && (
+            <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold text-white">完整生产链路报告</h3>
+                <span className={productionAudit.status === "ready" ? "text-emerald-300" : productionAudit.status === "blocked" ? "text-rose-300" : "text-amber-200"}>
+                  {productionAudit.status === "ready" ? "检查通过" : productionAudit.status === "blocked" ? "存在阻断项" : "有待复核项目"}
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+                <p>原著章节：{productionAudit.summary.covered_chapter_count}/{productionAudit.summary.chapter_count}</p>
+                <p>分集：{productionAudit.summary.episode_count}</p>
+                <p>分镜：{productionAudit.summary.shot_count}</p>
+                <p>已关联视频：{productionAudit.summary.shots_with_video}/{productionAudit.summary.shot_count}</p>
+                <p>已关联图片：{productionAudit.summary.shots_with_image}</p>
+                <p>对白镜头：{productionAudit.summary.dialogue_shot_count}</p>
+                <p className="text-rose-200">阻断项：{productionAudit.summary.blocker_count}</p>
+                <p className="text-amber-200">提醒：{productionAudit.summary.warning_count}</p>
+              </div>
+              {!!productionAudit.issues.length && (
+                <ul className="mt-4 max-h-72 space-y-2 overflow-y-auto border-t border-white/10 pt-3 text-sm">
+                  {productionAudit.issues.map((issue, index) => (
+                    <li key={issue.code + "-" + (issue.episode_id ?? "p") + "-" + (issue.shot_id ?? "s") + "-" + index} className="flex gap-2">
+                      <span className={issue.severity === "blocker" ? "shrink-0 text-rose-300" : "shrink-0 text-amber-200"}>{issue.severity === "blocker" ? "阻断" : "提醒"}</span>
+                      <span className="text-white/75">{issue.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="mt-3 border-t border-white/10 pt-3">
+                <p className="text-xs font-semibold text-white/70">检查范围说明</p>
+                <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-white/45">
+                  {productionAudit.limitations.map((item, index) => <li key={index}>{item}</li>)}
+                </ul>
+              </div>
+            </div>
+          )}
           {batchReport && (
             <div className="mt-4 space-y-3">
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
