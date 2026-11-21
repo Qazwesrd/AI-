@@ -55,7 +55,10 @@ jobs:
           ]
           missing = [item for item in required if item not in script]
           assert not missing, f"Dependency inventory safety checks missing: {missing}"
-          print("ComfyUI dependency inventory tool safeguards are present.")
+          packer = Path("scripts/prepare-comfyui-offline-bundle.ps1").read_text(encoding="utf-8")
+          assert "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" in packer
+          assert "dependency_inventory_tool" in packer
+          print("ComfyUI dependency inventory tool safeguards and offline-bundle inclusion are present.")
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
