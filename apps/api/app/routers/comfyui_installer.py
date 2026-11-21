@@ -297,3 +297,119 @@ def comfyui_official_release_catalog():
         return fetch_official_release_catalog()
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+# The following limits are guardrails for a future installer, not an active
+# downloader. No endpoint currently invokes these checks or transfers files.
+MAX_ENGINE_ARCHIVE_BYTES = 12 * GIB
+MAX_ARCHIVE_ENTRIES = 100_000
+MAX_ARCHIVE_MEMBER_BYTES = 20 * GIB
+MAX_ARCHIVE_TOTAL_UNPACKED_BYTES = 80 * GIB
+
+
+def validate_official_asset_for_install(asset: dict, release_tag: str):
+    """Fail closed unless an asset has an exact official URL, size, and SHA-256."""
+    if not isinstance(asset, dict) or not isinstance(release_tag, str) or not release_tag:
+        raise ValueError("安装包信息无效")
+    name = asset.get("name")
+    if name not in ALLOWED_ASSET_NAMES:
+        raise ValueError("安装包名称不在官方允许列表中")
+    url = asset.get("download_url") or asset.get("browser_download_url")
+    if not isinstance(url, str):
+        raise ValueError("缺少官方安装包下载地址")
+    parsed = urlsplit(url)
+    expected_path = f"/Comfy-Org/ComfyUI/releases/download/{release_tag}/{name}"
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "github.com"
+        or parsed.port is not None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path != expected_path
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("下载地址不是匹配版本的 Comfy-Org 官方 Release 资产")
+    size_bytes = asset.get("size_bytes", asset.get("size"))
+    if not isinstance(size_bytes, int) or isinstance(size_bytes, bool) or not 0 < size_bytes <= MAX_ENGINE_ARCHIVE_BYTES:
+        raise ValueError("安装包大小缺失或超出安全上限")
+    digest = asset.get("sha256")
+    if digest is None and isinstance(asset.get("digest"), str) and asset["digest"].startswith("sha256:"):
+        digest = asset["digest"][7:]
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+        raise ValueError("官方资产缺少有效 SHA-256，已停止自动安装")
+    return {"name": name, "url": url, "size_bytes": size_bytes, "sha256": digest.lower()}
+
+
+def validate_download_response(status_code: int, headers: dict, expected_size: int,
+                                resume_offset: int = 0, expected_etag: str | None = None):
+    """Validate HTTP response metadata before a future downloader writes bytes."""
+    if not isinstance(headers, dict) or not isinstance(expected_size, int):
+        raise ValueError("下载响应信息无效")
+    normalized = {str(key).lower(): str(value).strip() for key, value in headers.items()}
+    if "content-encoding" in normalized and normalized["content-encoding"].lower() not in {"", "identity"}:
+        raise ValueError("服务器返回了非 identity 编码，不能安全校验文件长度")
+    if resume_offset < 0 or resume_offset >= expected_size:
+        if resume_offset != 0 or expected_size <= 0:
+            raise ValueError("断点续传位置无效")
+    if resume_offset == 0:
+        if status_code != 200:
+            raise ValueError("首次下载必须返回 HTTP 200")
+        expected_length = expected_size
+    else:
+        if status_code != 206:
+            raise ValueError("断点续传必须返回 HTTP 206")
+        content_range = normalized.get("content-range", "")
+        expected_range = f"bytes {resume_offset}-{expected_size - 1}/{expected_size}"
+        if content_range != expected_range:
+            raise ValueError("服务器返回的 Content-Range 与本地断点不一致")
+        etag = normalized.get("etag")
+        if not expected_etag or not etag or etag != expected_etag:
+            raise ValueError("断点续传的 ETag 不匹配，必须重新下载")
+        expected_length = expected_size - resume_offset
+    content_length = normalized.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) != expected_length:
+                raise ValueError("服务器声明的文件长度与官方资产大小不一致")
+        except (TypeError, ValueError) as exc:
+            if isinstance(exc, ValueError) and str(exc).startswith("服务器声明"):
+                raise
+            raise ValueError("服务器 Content-Length 无效") from exc
+    return {"expected_response_bytes": expected_length, "resume_allowed": resume_offset > 0}
+
+
+def validate_archive_entries(entries):
+    """Reject unsafe archive manifests before extraction; does not extract files."""
+    if not isinstance(entries, list) or len(entries) > MAX_ARCHIVE_ENTRIES:
+        raise ValueError("压缩包文件数量无效或超过安全上限")
+    total_size = 0
+    checked = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("压缩包目录项格式无效")
+        raw_path = entry.get("path")
+        size = entry.get("size")
+        if not isinstance(raw_path, str) or not raw_path or "\\x00" in raw_path:
+            raise ValueError("压缩包包含无效路径")
+        # Check both path syntaxes because archives may be crafted for Windows.
+        windows_path = __import__("pathlib").PureWindowsPath(raw_path)
+        normalized = raw_path.replace("\\\\", "/")
+        parts = normalized.split("/")
+        if (
+            raw_path.startswith(("/", "\\\\"))
+            or windows_path.is_absolute()
+            or windows_path.drive
+            or any(part in {"", ".", ".."} for part in parts)
+            or ":" in raw_path
+        ):
+            raise ValueError("压缩包包含绝对路径、盘符或路径穿越")
+        if entry.get("is_symlink") or entry.get("is_hardlink"):
+            raise ValueError("压缩包包含不允许的链接文件")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 0 or size > MAX_ARCHIVE_MEMBER_BYTES:
+            raise ValueError("压缩包单个文件大小无效或超过安全上限")
+        total_size += size
+        if total_size > MAX_ARCHIVE_TOTAL_UNPACKED_BYTES:
+            raise ValueError("压缩包解压总大小超过安全上限")
+        checked.append({"path": "/".join(parts), "size": size})
+    return checked
