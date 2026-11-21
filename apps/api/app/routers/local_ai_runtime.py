@@ -194,3 +194,50 @@ def generate_local_creative_content(payload: LocalCreativeInput):
         "saved_automatically": False,
         "message": "本地生成完成。内容尚未自动保存，请检查后手动复制到对应创作模块。",
     }
+
+
+@router.get("/novel-context/{novel_id}/{chapter_id}")
+def get_local_novel_context(novel_id: int, chapter_id: int):
+    """Read a chapter and confirmed continuity notes for local creative workflows."""
+    from app.database import SessionLocal
+    from app.models.novel import AnalysisItem, Chapter, Novel
+
+    db = SessionLocal()
+    try:
+        novel = db.query(Novel).filter(Novel.id == novel_id).first()
+        if not novel:
+            raise HTTPException(404, "小说不存在")
+        chapter = db.query(Chapter).filter(
+            Chapter.id == chapter_id, Chapter.novel_id == novel_id
+        ).first()
+        if not chapter:
+            raise HTTPException(404, "章节不存在或不属于当前小说")
+        confirmed = db.query(AnalysisItem).filter(
+            AnalysisItem.novel_id == novel_id, AnalysisItem.confirmed.is_(True)
+        ).order_by(AnalysisItem.category, AnalysisItem.name).limit(300).all()
+        continuity = []
+        for item in confirmed:
+            data = item.data if isinstance(item.data, dict) else {}
+            if data.get("source_stale"):
+                continue
+            continuity.append({
+                "category": item.category,
+                "name": item.name,
+                "description": item.description,
+                "data": data,
+            })
+        return {
+            "novel_id": novel.id,
+            "novel_title": novel.title,
+            "chapter_id": chapter.id,
+            "chapter_number": chapter.chapter_number,
+            "chapter_title": chapter.title,
+            "content": chapter.content,
+            "word_count": chapter.word_count,
+            "confirmed_continuity": continuity,
+            "continuity_count": len(continuity),
+            "source_text_truncated": False,
+            "message": "已读取章节正文及未过期的已确认人物、场景、道具和剧情资料。",
+        }
+    finally:
+        db.close()
