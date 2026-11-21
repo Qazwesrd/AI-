@@ -202,7 +202,7 @@ export default function LocalCreatorPage() {
 
       {packageStages.length > 0 && <section className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">整章创作包 · 五阶段结果</h2><button onClick={() => void navigator.clipboard.writeText(packageStages.map((item) => `# ${item.title}\n\n${item.content}`).join("\n\n---\n\n"))} className="rounded-lg border border-cyan-200/30 px-3 py-2 text-sm">复制完整创作包</button></div>{packageStages.map((item) => <details key={item.stage} open className="mt-3 rounded-xl border border-white/10 bg-slate-950/50 p-3"><summary className="cursor-pointer font-semibold">{item.title}</summary><pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-7">{item.content}</pre></details>)}<p className="mt-3 text-xs text-white/50">内容只保存在当前页面，刷新页面后不会保留；检查后请自行复制保存。</p></section>}
 
-      {result && <section> className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-4">
+      {result && <section className="rounded-2xl border border-cyan-300/20 bg-cyan-300/5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">生成结果</h2><button onClick={() => void copyResult()} className="rounded-lg border border-cyan-200/30 px-3 py-2 text-sm">复制全部内容</button></div>
         <pre className="mt-3 whitespace-pre-wrap break-words font-sans text-sm leading-7">{result}</pre>
         <p className="mt-4 text-xs text-white/50">结果尚未写入小说或剧本文件。请检查后再复制保存。</p>
