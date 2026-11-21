@@ -6,6 +6,7 @@ hardware and storage constraints before the user chooses an installation plan.
 import json
 import re
 import shutil
+import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
@@ -108,6 +109,79 @@ from app.routers.system import _get_hardware_profile
 
 router = APIRouter(prefix="/api/local-ai/comfyui-installer", tags=["本地图片引擎安装"])
 
+
+def classify_gpu_vendor(name: str | None, pnp_device_id: str | None = None) -> str:
+    """Classify a display adapter conservatively; never infer VRAM from AdapterRAM."""
+    device_id = (pnp_device_id or "").upper()
+    if "VEN_10DE" in device_id:
+        return "NVIDIA"
+    if "VEN_1002" in device_id or "VEN_1022" in device_id:
+        return "AMD"
+    if "VEN_8086" in device_id:
+        return "Intel"
+    label = (name or "").lower()
+    if "nvidia" in label or "geforce" in label or "quadro" in label:
+        return "NVIDIA"
+    if "amd" in label or "radeon" in label:
+        return "AMD"
+    if "intel" in label or "arc graphics" in label:
+        return "Intel"
+    return "unknown"
+
+
+def parse_windows_video_adapters(payload):
+    """Parse fixed PowerShell CIM output without trusting reported AdapterRAM."""
+    if isinstance(payload, dict):
+        entries = [payload]
+    elif isinstance(payload, list):
+        entries = payload
+    else:
+        return []
+    adapters = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("Name")
+        pnp_id = entry.get("PNPDeviceID")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        adapters.append({
+            "name": name.strip()[:200],
+            "vendor": classify_gpu_vendor(name, pnp_id if isinstance(pnp_id, str) else None),
+            "vram_bytes": None,
+            "vram_note": "Windows CIM 的 AdapterRAM 字段可能被 32 位截断，因此不作为显存依据；显存需由对应厂商工具单独验证。",
+        })
+    return adapters
+
+
+def detect_windows_video_adapters():
+    """Read display-adapter names locally on Windows; no network, install, or mutation."""
+    if os.name != "nt":
+        return {"status": "unsupported_platform", "adapters": [], "network_used": False}
+    powershell = shutil.which("powershell.exe") or shutil.which("powershell")
+    if not powershell:
+        return {"status": "unavailable", "adapters": [], "network_used": False}
+    command = (
+        "Get-CimInstance -ClassName Win32_VideoController | "
+        "Select-Object Name,PNPDeviceID | ConvertTo-Json -Compress"
+    )
+    try:
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return {"status": "unavailable", "adapters": [], "network_used": False}
+        parsed = json.loads(result.stdout)
+        adapters = parse_windows_video_adapters(parsed)
+        return {
+            "status": "detected" if adapters else "not_detected",
+            "adapters": adapters,
+            "network_used": False,
+        }
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+        return {"status": "unavailable", "adapters": [], "network_used": False}
+
 GIB = 1024 ** 3
 # Conservative planning reserves, not claims about a specific release archive.
 ENGINE_RESERVE_BYTES = 8 * GIB
@@ -183,6 +257,7 @@ def comfyui_install_readiness():
         free_disk = None
     result = assess_comfyui_install(hardware, free_disk)
     result.update({
+        "gpu_adapters": detect_windows_video_adapters(),
         "engine": "ComfyUI",
         "install_target": str(home / "AIComicStudio" / "ComfyUI"),
         "hardware": hardware,
