@@ -67,3 +67,9 @@ The current offline bundle builder selects the official source archive matching 
 - AMD ROCm component licensing: https://rocm.docs.amd.com/en/docs-7.2.3/about/license.html
 - AMD Windows HIP SDK install/license acceptance: https://rocm.docs.amd.com/projects/install-on-windows/en/develop/install/install.html
 - 7-Zip license: https://github.com/ip7z/7zip/blob/main/DOC/License.txt
+
+
+## Follow-up change: standalone GPL notices
+
+The offline bundle builder now fetches and validates the exact upstream GPL-3.0 license texts for comfy-aimdo v0.6.0 (source commit 68088de9dce9f5e32231fccf230938769c5562da) and ComfyUI Frontend v1.59.6 (source commit c62d747f378e0fa277cbb5137bffaf282598c64c). It adds those license files to THIRD_PARTY_NOTICES, includes the frontend repository's THIRD_PARTY_NOTICES.md, and the installer copies all three notices into the installed ComfyUI engine's licenses directory. The installer source checks were extended accordingly.
+This does not yet supply the corresponding comfy-aimdo or frontend source archives, prove the exact installed wheel digests match those source commits, or complete the frontend's transitive npm asset/license inventory. Those remain explicit release blockers. The standalone license files are notice improvements, not GPL source-compliance sign-off.
