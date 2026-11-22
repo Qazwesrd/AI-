@@ -334,6 +334,7 @@ jobs:
           Write-Host ("Verified offline bundle: {0:N2} GiB" -f ($zip.Length / 1GB))
           Get-Content -LiteralPath "$outputZip.sha256"
 
+      # Checksum manifest is ASCII hash-only; never decode or compare the Chinese archive filename.
       - name: Build standalone offline AI resource pack
         if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[build-offline-bundle]'))
         shell: pwsh
