@@ -8,7 +8,7 @@
   "reviewer": null,
   "release_blockers": [
     "Review the completed v0.46.0 inventory evidence for all four official Windows portable variants; automated inventory is not legal approval.",
-    "Resolve packages with missing or ambiguous METADATA license fields (14 in NVIDIA, 14 in NVIDIA CUDA 12.6, 17 in AMD, 14 in Intel) using upstream license texts and notices.",
+    "Resolve remaining packages with missing or ambiguous METADATA license fields (initial inventory: 14 in NVIDIA, 14 in NVIDIA CUDA 12.6, 17 in AMD, 14 in Intel); comfy-aimdo 0.6.0 upstream GPL-3.0 is now identified, but exact bundled wheel/source and notice inclusion still require verification.",
     "Review copyleft and notice obligations identified in the inventories, including comfyui-embedded-docs GPL-3.0, pygit2 GPLv2 with linking exception, autocommand LGPLv3, certifi MPL-2.0, and tqdm MPL-2.0 AND MIT.",
     "Review Intel Simplified Software License terms for the Intel oneAPI/MKL/TBB/Tcmlib components in the Intel portable variant.",
     "Review every redistributable native runtime binary and its owner/license; the automated inventory now filters by native-binary extensions and known runtime-library filename markers, but this heuristic is not a complete binary ownership or license determination.",
@@ -116,6 +116,12 @@
       "license": "CreativeML Open RAIL-M (restricted use and redistribution conditions)",
       "evidence": "ComfyUI-Payload/models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors; THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt",
       "status": "pinned_upstream_size_and_sha256_verified_builder_integration_added_local_payload_digest_and_end_to_end_validation_pending"
+    },
+    {
+      "name": "comfy-aimdo 0.6.0",
+      "license": "GPL-3.0 (confirmed by upstream LICENSE; original author reserves the right to offer alternative licenses)",
+      "evidence": "https://github.com/Comfy-Org/comfy-aimdo/blob/master/LICENSE; PyPI 0.6.0 Windows x64 wheel SHA-256 45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c",
+      "status": "upstream_gpl_3_0_confirmed_exact_bundled_wheel_hash_and_corresponding_source_and_notice_inclusion_pending"
     }
   ],
   "policy": {
