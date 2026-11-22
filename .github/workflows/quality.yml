@@ -67,6 +67,23 @@ jobs:
           packer = Path("scripts/prepare-comfyui-offline-bundle.ps1").read_text(encoding="utf-8")
           assert "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" in packer
           assert "dependency_inventory_tool" in packer
+          frontend_audit = Path("scripts/audit-comfyui-frontend-npm-licenses.ps1").read_text(encoding="utf-8")
+          frontend_required = [
+              'version -cne "1.59.6"',
+              'packageManager -cne "pnpm@11.13.1"',
+              '26.8.2',
+              '--prod --frozen-lockfile --ignore-scripts',
+              'node_modules/.pnpm',
+              'license_expression_missing_manual_review_required',
+              'inventory_generated_manual_license_review_pending',
+              'distribution_approved = $false',
+              'Get-FileHash',
+          ]
+          frontend_missing = [item for item in frontend_required if item not in frontend_audit]
+          assert not frontend_missing, f"Frontend npm license inventory safeguards missing: {frontend_missing}"
+          assert "audit-comfyui-frontend-npm-licenses.ps1" in packer
+          assert "npm_dependency_audit" in packer
+          print("Pinned ComfyUI Frontend production npm dependency license inventory is included and remains unapproved pending review.")
           print("ComfyUI dependency inventory tool safeguards and offline-bundle inclusion are present.")
           PY
       - uses: actions/setup-python@v5
