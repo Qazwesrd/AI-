@@ -43,6 +43,17 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIn('$manifest.comfyui_frontend.source_archive_sha256', install)
         self.assertIn('Copy-Item -LiteralPath $comfyAimdoSourcePath', install)
         self.assertIn('Copy-Item -LiteralPath $frontendSourcePath', install)
+        frontend_audit = (root / "scripts" / "audit-comfyui-frontend-npm-licenses.ps1").read_text(encoding="utf-8")
+        self.assertIn('packageManager -cne "pnpm@11.13.1"', frontend_audit)
+        self.assertIn('--prod --frozen-lockfile --ignore-scripts', frontend_audit)
+        self.assertIn('node_modules/.pnpm', frontend_audit)
+        self.assertIn('license_expression_missing_manual_review_required', frontend_audit)
+        self.assertIn('inventory_generated_manual_license_review_pending', frontend_audit)
+        self.assertIn('$frontendNpmAuditManifest', prepare)
+        self.assertIn('$manifest.comfyui_frontend.npm_dependency_audit', install)
+        self.assertIn('$frontendNpmAudit.report_sha256', install)
+        self.assertIn('$frontendNpmAudit.summary_sha256', install)
+        self.assertIn('Copy-Item -LiteralPath $bundleSource', install)
 
     def test_low_disk_blocks_engine_install(self):
         result = assess_comfyui_install(
