@@ -10,6 +10,8 @@ from app.services.model_license_acceptance import (
     OPENRAIL_MODEL_FILENAME,
     OPENRAIL_TERMS_VERSION,
     get_openrail_acceptance,
+    get_openrail_license_text,
+    is_openrail_checkpoint,
     require_openrail_acceptance,
     set_openrail_acceptance,
 )
@@ -55,6 +57,24 @@ class OpenRailAcceptanceTests(unittest.TestCase):
 
     def test_other_checkpoints_are_not_gated_by_sd15_license(self):
         require_openrail_acceptance("my-own-model.safetensors")
+
+    def test_windows_checkpoint_path_is_recognized(self):
+        self.assertTrue(is_openrail_checkpoint(r"models\\checkpoints\\v1-5-pruned-emaonly-fp16.safetensors"))
+
+    def test_full_license_is_read_from_installed_engine(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "license.txt"
+            path.write_text("CreativeML Open RAIL-M\\nAttachment A", encoding="utf-8")
+            with patch("app.services.model_license_acceptance.license_path", return_value=path):
+                self.assertIn("Attachment A", get_openrail_license_text())
+
+    def test_missing_full_license_is_not_silently_accepted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "missing-license.txt"
+            with patch("app.services.model_license_acceptance.license_path", return_value=path):
+                with self.assertRaises(HTTPException) as caught:
+                    get_openrail_license_text()
+                self.assertEqual(caught.exception.status_code, 503)
 
 
 if __name__ == "__main__":
