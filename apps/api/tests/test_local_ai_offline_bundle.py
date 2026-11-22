@@ -107,6 +107,9 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         self.assertIn(r"\.part\d{3}$", workflow)
         wrapper = (ROOT / "scripts" / "create-comfyui-offline-installer.ps1").read_text(encoding="utf-8")
         self.assertIn(r"\.part\d{3}$", wrapper)
+        volume_test = (ROOT / "scripts" / "tests" / "test-offline-bundle-volumes.ps1").read_text(encoding="utf-8")
+        self.assertIn("-ManifestPath $collisionManifest -JoinerPath $collisionJoiner", volume_test)
+        self.assertIn("-ManifestPath $artifactManifest -JoinerPath $artifactJoiner", volume_test)
         for artifact in (
             "AI-Comic-Studio-Offline-Bundle-Volumes-1",
             "AI-Comic-Studio-Offline-Bundle-Volumes-2",
