@@ -145,39 +145,16 @@ class ChatInput(BaseModel):
     task: str = "chat"
 
 @router.get("/ai/providers")
-def list_providers(db: Session = Depends(get_db)):
-    items = db.query(AIProviderConfig).order_by(AIProviderConfig.id).all()
-    return {"items": [provider_dict(x) for x in items]}
+def list_providers():
+    # Third-party cloud API providers are no longer configurable in this product.
+    return {"items": []}
 
 @router.post("/ai/providers")
-def save_provider(payload: ProviderInput, db: Session = Depends(get_db)):
-    provider_id = payload.provider.strip().lower()
-    if not provider_id:
-        raise HTTPException(400, "服务商标识不能为空")
-
-    item = db.query(AIProviderConfig).filter(
-        AIProviderConfig.provider == provider_id
-    ).first()
-
-    if not item:
-        item = AIProviderConfig(provider=provider_id)
-        db.add(item)
-
-    item.display_name = payload.display_name
-    item.base_url = payload.base_url.rstrip("/")
-    item.model = payload.model
-    item.enabled = payload.enabled
-    # Billing mode is explicitly selected by the local user for this provider.
-    # Paid remains the safe default; free mode is an intentional user decision.
-    item.paid = bool(payload.paid)
-    item.purpose = payload.purpose
-
-    if payload.api_key.strip():
-        item.encrypted_api_key = encrypt_key(payload.api_key.strip())
-
-    db.commit()
-    db.refresh(item)
-    return provider_dict(item)
+def save_provider():
+    raise HTTPException(
+        410,
+        "第三方云端 AI API 配置已移除。本软件只保留网页版 AI 手动协作和本地模型接入，不接受 API 地址或 API Key。",
+    )
 
 @router.delete("/ai/providers/{provider}")
 def delete_provider(provider: str, db: Session = Depends(get_db)):
@@ -191,29 +168,15 @@ def delete_provider(provider: str, db: Session = Depends(get_db)):
     return {"success": True}
 
 @router.get("/ai/runtime")
-def get_runtime(db: Session = Depends(get_db)):
-    x = runtime(db)
-    return {
-        "network_enabled": x.network_enabled,
-        "paid_api_allowed": x.paid_api_allowed,
-    }
+def get_runtime():
+    return {"network_enabled": False, "paid_api_allowed": False}
 
 @router.put("/ai/runtime")
-def update_runtime(payload: RuntimeInput, db: Session = Depends(get_db)):
-    if STRICT_ZERO_COST_MODE and (payload.network_enabled or payload.paid_api_allowed):
-        raise HTTPException(
-            403,
-            "严格零费用模式已锁定：云端 AI API 网络调用和付费 API 授权均不可开启。",
-        )
-    x = runtime(db)
-    x.network_enabled = False if STRICT_ZERO_COST_MODE else payload.network_enabled
-    x.paid_api_allowed = False if STRICT_ZERO_COST_MODE else payload.paid_api_allowed
-    db.commit()
-    return {
-        "success": True,
-        "network_enabled": x.network_enabled,
-        "paid_api_allowed": x.paid_api_allowed,
-    }
+def update_runtime():
+    raise HTTPException(
+        410,
+        "第三方云端 AI API 开关已移除。请使用本地模型或网页版 AI 协作中心。",
+    )
 
 @router.get("/ai/usage-logs")
 def usage_logs(db: Session = Depends(get_db)):
