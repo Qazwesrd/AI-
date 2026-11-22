@@ -13,10 +13,10 @@
     "Review Intel Simplified Software License terms for the Intel oneAPI/MKL/TBB/Tcmlib components in the Intel portable variant.",
     "Review every redistributable native runtime binary and its owner/license; the automated inventory now filters by native-binary extensions and known runtime-library filename markers, but this heuristic is not a complete binary ownership or license determination.",
     "Collect exact license texts, copyright notices, attribution requirements, and source-offer/source-code obligations for each bundled component.",
-    "Review the exact 7-Zip executable and corresponding source archive licensing for the selected release.",
+    "Review the exact 7-Zip executable's included components against the composite LGPL, unRAR restriction, BSD and public-domain terms; the matching source archive and license text are included and hash-checked by the installer.",
     "Complete Ollama Windows amd64 runtime dependency inventory and exact Qwen3 4B manifest/blob digest and license review.",
     "Have all software, model, trademark, export, and redistribution obligations reviewed before any public or customer distribution.",
-    "Review Stable Diffusion 1.5 FP16 checkpoint redistribution under CreativeML Open RAIL-M, provide its full license and enforceable use restrictions to downstream users, and complete legal review before public/customer distribution."
+    "Verify the installed-app CreativeML Open RAIL-M full-text display and persisted click-through acceptance gate, preserve paragraph 5 restrictions for every model user, and complete legal review before any public/customer distribution."
   ],
   "portable_variants": [
     {
@@ -66,8 +66,8 @@
     {
       "name": "7-Zip",
       "license": "See upstream release license; do not assume a single SPDX identifier covers every component",
-      "evidence": "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt and corresponding source archive",
-      "status": "license_text_and_source_archive_included_exact_component_review_pending"
+      "evidence": "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt; THIRD_PARTY_NOTICES/7z*-src.7z; source archive SHA-256 and size verified by offline installer",
+      "status": "license_text_and_matching_source_archive_included_and_hash_checked_exact_binary_component_license_review_pending"
     },
     {
       "name": "Ollama Windows amd64 standalone runtime",
@@ -168,14 +168,14 @@
       "sha256_source": "Hugging Face pinned file page and upstream Git LFS pointer",
       "license": "CreativeML Open RAIL-M",
       "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
-      "license_review_status": "restricted_license_terms_identified_full_license_bundled_in_builder_checkpoint_included_end_user_enforceable_acceptance_not_implemented_legal_review_pending",
+      "license_review_status": "full_license_bundled_and_installed_clickthrough_acceptance_gate_implemented_and_api_enforced_legal_review_and_exact_payload_hash_pending",
       "sha256_verified_locally": false,
       "included_in_offline_bundle": true,
       "hardware_status": "cpu_fallback_available_per_comfyui_runtime; performance_on_target_integrated_amd_gpu_not_verified",
       "hardware_validation_status": "pending_target_device_test",
       "use_restrictions_must_be_passed_to_users": true,
       "distribution_approved": false,
-      "status": "bundled_by_offline_builder_for_internal_validation_only_exact_payload_hash_and_end_user_restriction_acceptance_pending",
+      "status": "bundled_for_internal_validation_only_clickthrough_acceptance_gate_implemented_exact_payload_hash_and_legal_review_pending",
       "license_obligations": [
         "Provide the complete CreativeML Open RAIL-M license to each recipient when redistributing the checkpoint.",
         "Make paragraph 5 use-based restrictions and Attachment A enforceable in the user agreement governing model use/distribution.",
@@ -193,7 +193,16 @@
         "review_note": "The license grants reproduction/distribution subject to pass-through and use restrictions; it is not an unrestricted permissive license. No model redistribution approval is granted."
       },
       "size_bytes": 2132696762,
-      "configured_for_offline_bundle": true
+      "configured_for_offline_bundle": true,
+      "acceptance_gate": {
+        "ui": "apps/web/src/app/local-image-studio/page.tsx",
+        "api": "apps/api/app/routers/local_image_generation.py",
+        "persistence": "APP_DATA_DIR/legal/creativeml-openrail-m-acceptance.json",
+        "full_license_display": "APP_DATA_DIR/engines/ComfyUI/licenses/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt",
+        "enforcement": "generation endpoints reject the bundled SD 1.5 checkpoint until current terms version is accepted",
+        "terms_version": "2022-08-22",
+        "legal_enforceability_review": "pending"
+      }
     }
   ],
   "inventory_evidence": {
