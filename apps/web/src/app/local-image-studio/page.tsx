@@ -417,6 +417,21 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [styleNegativePrompt, setStyleNegativePrompt] = useState("低质量、模糊、畸形肢体、多余手指、文字、水印");
+  const [styleGuidance, setStyleGuidance] = useState("");
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ai-comic-prompt-style-library-v1");
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { activeId?: string; templates?: Array<Record<string, unknown> & { id?: string; name?: string }> };
+      const template = saved.templates?.find((item) => item.id === saved.activeId);
+      if (!template) return;
+      const fields: Array<[string, unknown]> = [["整体画风", template.visual], ["人物", template.character], ["服装材质", template.clothing], ["场景", template.scene], ["镜头构图", template.camera], ["光线", template.lighting], ["色彩", template.color], ["画质", template.quality]];
+      const guidance = fields.filter(([, value]) => typeof value === "string" && value.trim()).map(([label, value]) => label + "：" + String(value).trim()).join("；");
+      if (guidance) setStyleGuidance("已选风格：" + (template.name || "自定义") + "。" + guidance);
+      if (typeof template.negative === "string" && template.negative.trim()) setStyleNegativePrompt(template.negative.trim());
+    } catch { /* keep built-in defaults */ }
+  }, []);
   const project = projects.find((item) => String(item.id) === projectId);
   const episode = project?.episodes.find((item) => String(item.id) === episodeId);
   const shots = episode?.shots || [];
@@ -489,7 +504,7 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
     try {
       const response = await fetch(`${API}/api/local-ai/images/batch/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: Number(projectId), episode_id: Number(episodeId), shot_ids: selected, checkpoint, style, width: Number(width), height: Number(height), steps: Number(steps), confirm_local_generation: true }),
+        body: JSON.stringify({ project_id: Number(projectId), episode_id: Number(episodeId), shot_ids: selected, checkpoint, style, negative_prompt: styleNegativePrompt, visual_style_guidance: styleGuidance, width: Number(width), height: Number(height), steps: Number(steps), confirm_local_generation: true }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "批量任务提交失败");
