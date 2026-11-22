@@ -168,8 +168,8 @@ try {
         if (@($variant.runtime_files | Where-Object { $_ -match "cudart64_130\.dll$" }).Count -ne 1) {
             throw "依赖清点脚本没有识别 CUDA 运行库文件：$($variant.asset)"
         }
-        if (@($variant.runtime_files | Where-Object { $_ -match "torch\\include\\torch\\.h$" }).Count -ne 0 -or
-            @($variant.runtime_files | Where-Object { $_ -match "\\.(dll|pyd|exe|so|dylib|lib|a)$" }).Count -lt 2) {
+        if (@($variant.runtime_files | Where-Object { $_ -match "(?i)torch[/\\]include[/\\]torch\.h$" }).Count -ne 0 -or
+            @($variant.runtime_files | Where-Object { $_ -match "(?i)\.(dll|pyd|exe|so|dylib|lib|a)$" }).Count -lt 2) {
             throw "依赖清点脚本必须只将原生二进制文件列为运行时证据，不得把头文件计入。"
         }
         if (@($variant.evidence_files | Where-Object { $_.extraction_status -eq "extracted" }).Count -lt 2) {
