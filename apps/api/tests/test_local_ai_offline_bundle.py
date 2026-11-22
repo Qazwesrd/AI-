@@ -98,6 +98,12 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         self.assertIn("必须下载全部三个产物", manual)
         self.assertIn("分别解压这三个 ZIP", manual)
         self.assertIn("AI漫剧制作大师-离线套件合并工具.ps1", manual)
+        self.assertNotIn("AI-Comic-Studio-Windows-Setup", workflow)
+        self.assertEqual(workflow.count("- name: Upload offline bundle volumes 1-4"), 1)
+        self.assertEqual(workflow.count("- name: Upload offline bundle volumes 5-8"), 1)
+        self.assertEqual(workflow.count("- name: Upload offline bundle remaining volumes and assembly manifest"), 1)
+        self.assertEqual(workflow.count("  audit-comfyui-portable-dependencies:"), 1)
+        self.assertIn("$stagedChecksum -notmatch", workflow)
         for artifact in (
             "AI-Comic-Studio-Offline-Bundle-Volumes-1",
             "AI-Comic-Studio-Offline-Bundle-Volumes-2",
