@@ -304,7 +304,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $release = Join-Path $PWD "apps/desktop/release"
           $base = "AI漫剧制作大师-完整离线安装套件.zip"
-          $parts = @(Get-ChildItem -LiteralPath $release -File -Filter "$base.part*" | Sort-Object Name)
+          $parts = @(Get-ChildItem -LiteralPath $release -File -Filter "$base.part*" | Where-Object { $_.Name -match ('^' + [regex]::Escape($base) + '\.part\d{3}$') } | Sort-Object Name)
           if ($parts.Count -lt 1) { throw "没有找到完整离线套件分卷。" }
           if (!(Test-Path -LiteralPath (Join-Path $release "$base.parts.json")) -or !(Test-Path -LiteralPath (Join-Path $release "$base.sha256"))) {
             throw "分卷清单或原始 ZIP SHA-256 文件缺失，不能删除原始 ZIP。"
