@@ -386,6 +386,7 @@ def init_database():
 
     # Strict zero-cost mode: purge any encrypted third-party cloud AI API
     # credentials left by older versions during every successful startup.
+    # This is a one-time complete-offline-bundle acceptance build trigger.
     from app.models.studio import AIProviderConfig
 
     with SessionLocal() as session:
