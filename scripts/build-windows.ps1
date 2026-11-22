@@ -314,52 +314,7 @@ if ($Installers.Count -eq 0) {
     throw "No installer EXE was generated."
 }
 
-# Assemble the single-click local testing ZIP with installer, checksums and illustrated manual.
-$DesktopPackage = Get-Content (Join-Path $Desktop "package.json") -Raw | ConvertFrom-Json
-$BundleName = "AI漫剧制作大师-本地测试包-$($DesktopPackage.version)"
-$BundleZip = Join-Path $Release "$BundleName.zip"
-$BundleStage = Join-Path $Release ("bundle-stage-" + [guid]::NewGuid().ToString("N"))
-$InstallFolder = Join-Path $BundleStage "安装程序"
-$GuideFolder = Join-Path $BundleStage "使用说明书"
-New-Item -ItemType Directory -Path $InstallFolder -Force | Out-Null
-New-Item -ItemType Directory -Path $GuideFolder -Force | Out-Null
-$InstallerForBundle = $Installers | Where-Object { $_.Name -match "Setup" } | Select-Object -First 1
-if (!$InstallerForBundle) { throw "The Windows Setup installer is missing from the release folder." }
-Copy-Item $InstallerForBundle.FullName $InstallFolder -Force
-$InstallerHashFile = Join-Path $Release ($InstallerForBundle.Name + ".sha256")
-$InstallerHash = (Get-FileHash -LiteralPath $InstallerForBundle.FullName -Algorithm SHA256).Hash
-"$InstallerHash  $($InstallerForBundle.Name)" | Set-Content -LiteralPath $InstallerHashFile -Encoding ascii
-Copy-Item $InstallerHashFile $InstallFolder -Force
-Copy-Item $ManualPdf $GuideFolder -Force
-Copy-Item (Join-Path $ManualDir "manual.html") $GuideFolder -Force
-Copy-Item $ManualImageDir (Join-Path $GuideFolder "images") -Recurse -Force
-$BundleReadme = @"
-AI漫剧制作大师 Windows 本地测试包 $($DesktopPackage.version)
-
-1. 先打开“使用说明书\AI漫剧制作大师-使用说明书.pdf”阅读安装与首次启动说明。
-2. 运行“安装程序\$($InstallerForBundle.Name)”并按向导安装。
-3. 安装完成后从桌面快捷方式打开软件。
-4. 首次使用请配置 AI 服务商；第三方 AI 费用、账号权限和额度由用户自行确认。
-5. 建议先用少量测试小说和素材验证流程，再导入重要项目。
-6. “使用说明书\images”包含本次构建时从实际软件页面采集的界面截图。
-7. 安装程序 SHA-256：$InstallerHash
-
-重要提醒：
-- 此 ZIP 是 Windows 安装程序和使用说明书的组合包，不是源码包。
-- 正式使用前请在“项目数据备份与恢复中心”创建完整工作空间备份。
-- 网页版第三方 AI 需要用户手动提交任务并导回结果；不会自动控制第三方网页。
-- 若付费任务状态不确定，先在服务商后台核实，避免重复扣费。
-"@
-Set-Content -LiteralPath (Join-Path $BundleStage "测试前必读.txt") -Value $BundleReadme -Encoding utf8
-if (Test-Path $BundleZip) { Remove-Item $BundleZip -Force }
-Compress-Archive -Path (Join-Path $BundleStage "*") -DestinationPath $BundleZip -CompressionLevel Optimal -Force
-Remove-Item $BundleStage -Recurse -Force
-if (!(Test-Path $BundleZip) -or (Get-Item $BundleZip).Length -lt 1MB) { throw "The combined installer and manual ZIP was not created correctly." }
-$BundleHash = (Get-FileHash -LiteralPath $BundleZip -Algorithm SHA256).Hash
-"$BundleHash  $([System.IO.Path]::GetFileName($BundleZip))" | Set-Content -LiteralPath "$BundleZip.sha256" -Encoding ascii
-Write-Host "Testing bundle: $BundleZip"
-Write-Host ("Bundle size: {0} MB" -f [math]::Round((Get-Item $BundleZip).Length / 1MB, 2))
-Write-Host "Bundle SHA256: $BundleHash"
+Write-Host "Setup.exe is ready for inclusion in the complete offline ZIP; no standalone test package is created or uploaded."
 
 Write-Host "========== BUILD SUCCESS =========="
 
