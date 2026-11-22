@@ -218,6 +218,20 @@ $imageLicenseText = Get-Content -LiteralPath $imageLicensePath -Raw -Encoding UT
 if ($imageLicenseText -notmatch "CreativeML Open RAIL-M" -or $imageLicenseText -notmatch "Attachment A") {
     throw "Stable Diffusion CreativeML OpenRAIL-M 许可证文本不完整。"
 }
+$comfyAimdoLicensePath = Join-Path $bundleRoot ([string]$manifest.comfy_aimdo.license_file)
+$frontendLicensePath = Join-Path $bundleRoot ([string]$manifest.comfyui_frontend.license_file)
+$frontendNoticePath = Join-Path $bundleRoot ([string]$manifest.comfyui_frontend.third_party_notice_file)
+if (!(Test-Path -LiteralPath $comfyAimdoLicensePath -PathType Leaf) -or
+    (Get-Content -LiteralPath $comfyAimdoLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE") {
+    throw "缺少 comfy-aimdo GPL-3.0 许可证文本。"
+}
+if (!(Test-Path -LiteralPath $frontendLicensePath -PathType Leaf) -or
+    (Get-Content -LiteralPath $frontendLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE") {
+    throw "缺少 ComfyUI Frontend GPL-3.0 许可证文本。"
+}
+if (!(Test-Path -LiteralPath $frontendNoticePath -PathType Leaf)) {
+    throw "缺少 ComfyUI Frontend 第三方通知文件。"
+}
 if (!$imageModel -or
     $imageModel.name -cne "Stable Diffusion 1.5 FP16" -or
     $imageModel.file -cne "ComfyUI-Payload/$imageModelRelative" -or
@@ -454,6 +468,9 @@ try {
         New-Item -ItemType Directory -Path $installedLicenseDir -Force | Out-Null
         $installedImageLicense = Join-Path $installedLicenseDir "Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
         Copy-Item -LiteralPath $imageLicensePath -Destination $installedImageLicense
+        Copy-Item -LiteralPath $comfyAimdoLicensePath -Destination (Join-Path $installedLicenseDir "comfy-aimdo-GPL-3.0-LICENSE.txt")
+        Copy-Item -LiteralPath $frontendLicensePath -Destination (Join-Path $installedLicenseDir "ComfyUI-Frontend-GPL-3.0-LICENSE.txt")
+        Copy-Item -LiteralPath $frontendNoticePath -Destination (Join-Path $installedLicenseDir "ComfyUI-Frontend-THIRD-PARTY-NOTICES.md")
         if ((Get-Content -LiteralPath $installedImageLicense -Raw -Encoding UTF8) -notmatch "Attachment A") {
             throw "Stable Diffusion 模型许可证未能完整部署。"
         }
@@ -489,6 +506,15 @@ try {
             image_generation_model_sha256 = $imageModelHash
             image_generation_model_license = [string]$imageModel.license
             image_generation_model_license_file = "licenses/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
+            comfy_aimdo_license = "GPL-3.0"
+            comfy_aimdo_license_file = "licenses/comfy-aimdo-GPL-3.0-LICENSE.txt"
+            comfy_aimdo_source_commit = [string]$manifest.comfy_aimdo.source_commit
+            comfy_aimdo_source_code_status = [string]$manifest.comfy_aimdo.source_code_status
+            comfyui_frontend_license = "GPL-3.0-only"
+            comfyui_frontend_license_file = "licenses/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"
+            comfyui_frontend_third_party_notice_file = "licenses/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"
+            comfyui_frontend_source_commit = [string]$manifest.comfyui_frontend.source_commit
+            comfyui_frontend_source_code_status = [string]$manifest.comfyui_frontend.source_code_status
             selection_reason = $selection.selection_reason
             installed_utc = [DateTime]::UtcNow.ToString("o")
             distribution_approved = $false
