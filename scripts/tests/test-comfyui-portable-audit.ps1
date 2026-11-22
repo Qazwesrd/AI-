@@ -238,6 +238,57 @@ try {
     $imageLicenseRelative = "THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
     Write-Utf8 (Join-Path $bundleRoot ($imageLicenseRelative.Replace("/", "\\"))) "CreativeML Open RAIL-M Attachment A fixture"
 
+    # Current installer requires pinned GPL notices/source archives and a hash-verified npm inventory.
+    $aimdoLicenseRelative = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"
+    $frontendLicenseRelative = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"
+    $frontendNoticeRelative = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"
+    $aimdoSourceRelative = "THIRD_PARTY_NOTICES/source-code/comfy-aimdo-v0.6.0-68088de9.zip"
+    $frontendSourceRelative = "THIRD_PARTY_NOTICES/source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip"
+    Write-Utf8 (Join-Path $bundleRoot $aimdoLicenseRelative) "GNU GENERAL PUBLIC LICENSE Version 3 - comfy-aimdo fixture"
+    Write-Utf8 (Join-Path $bundleRoot $frontendLicenseRelative) "GNU GENERAL PUBLIC LICENSE Version 3 - frontend fixture"
+    Write-Utf8 (Join-Path $bundleRoot $frontendNoticeRelative) "Third-party notices fixture"
+    Write-Utf8 (Join-Path $bundleRoot $aimdoSourceRelative) "comfy-aimdo source fixture"
+    Write-Utf8 (Join-Path $bundleRoot $frontendSourceRelative) "frontend source fixture"
+    $aimdoLicenseHash = Get-Sha256 (Join-Path $bundleRoot $aimdoLicenseRelative)
+    $frontendLicenseHash = Get-Sha256 (Join-Path $bundleRoot $frontendLicenseRelative)
+    $frontendNoticeHash = Get-Sha256 (Join-Path $bundleRoot $frontendNoticeRelative)
+    $aimdoSourceHash = Get-Sha256 (Join-Path $bundleRoot $aimdoSourceRelative)
+    $frontendSourceHash = Get-Sha256 (Join-Path $bundleRoot $frontendSourceRelative)
+    $npmRootRelative = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM"
+    $npmRoot = Join-Path $bundleRoot $npmRootRelative
+    New-Item -ItemType Directory -Path $npmRoot -Force | Out-Null
+    $npmReportRelative = "$npmRootRelative/frontend-npm-dependency-licenses.json"
+    $npmSummaryRelative = "$npmRootRelative/frontend-npm-dependency-summary.json"
+    $npmLicenseRelative = "$npmRootRelative/licenses/audit-fixture-MIT.txt"
+    Write-Utf8 (Join-Path $bundleRoot $npmReportRelative) (@{ package_count = 1; packages = @(@{ name = "audit-fixture"; version = "1.0.0"; license = "MIT" }) } | ConvertTo-Json -Depth 5)
+    Write-Utf8 (Join-Path $bundleRoot $npmSummaryRelative) (@{ source_commit = "fixture-frontend-commit"; distribution_approved = $false; package_count = 1; license_file_count = 1 } | ConvertTo-Json -Depth 5)
+    Write-Utf8 (Join-Path $bundleRoot $npmLicenseRelative) "MIT License - npm fixture"
+    $npmFiles = @()
+    foreach ($entry in @(
+        @{ path = $npmReportRelative; installed_path = "licenses/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json" },
+        @{ path = $npmSummaryRelative; installed_path = "licenses/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json" },
+        @{ path = $npmLicenseRelative; installed_path = "licenses/ComfyUI-Frontend-NPM/licenses/audit-fixture-MIT.txt" }
+    )) {
+        $entryPath = Join-Path $bundleRoot $entry.path
+        $npmFiles += @{
+            path = $entry.path
+            installed_path = $entry.installed_path
+            size_bytes = [long](Get-Item -LiteralPath $entryPath).Length
+            sha256 = Get-Sha256 $entryPath
+        }
+    }
+    $npmAuditManifest = @{
+        report_file = $npmReportRelative
+        summary_file = $npmSummaryRelative
+        report_sha256 = Get-Sha256 (Join-Path $bundleRoot $npmReportRelative)
+        summary_sha256 = Get-Sha256 (Join-Path $bundleRoot $npmSummaryRelative)
+        status = "inventory_generated_manual_license_review_pending"
+        distribution_approved = $false
+        package_count = 1
+        license_file_count = 1
+        files = $npmFiles
+    }
+
     $manifestAssets = @()
     foreach ($name in $assetNames) {
         $assetPath = Join-Path $payloadRoot $name
@@ -268,6 +319,25 @@ try {
             distribution_approved = $false
         }
         license = @{ license_file = $comfyLicenseRelative }
+        comfy_aimdo = @{
+            license_file = $aimdoLicenseRelative
+            license_sha256 = $aimdoLicenseHash
+            source_archive = $aimdoSourceRelative
+            source_archive_sha256 = $aimdoSourceHash
+            source_commit = "68088de9dce9f5e32231fccf230938769c5562da"
+            source_code_status = "upstream_commit_pinned_source_archive_included"
+        }
+        comfyui_frontend = @{
+            license_file = $frontendLicenseRelative
+            license_sha256 = $frontendLicenseHash
+            third_party_notice_file = $frontendNoticeRelative
+            third_party_notice_sha256 = $frontendNoticeHash
+            source_archive = $frontendSourceRelative
+            source_archive_sha256 = $frontendSourceHash
+            source_commit = "fixture-frontend-commit"
+            source_code_status = "upstream_commit_pinned_source_archive_included"
+            npm_dependency_audit = $npmAuditManifest
+        }
         seven_zip = @{
             version = $fixtureSevenZipVersion
             license_file = $sevenZipLicenseRelative
