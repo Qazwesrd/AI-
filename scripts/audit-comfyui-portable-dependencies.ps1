@@ -364,11 +364,32 @@ try {
             components = $components.ToArray()
             runtime_files = @($runtimeFiles.ToArray() | Sort-Object -Unique)
             runtime_file_entries = @($entries | Where-Object { !$_.IsFolder -and $_.Path -match $RuntimePattern } | ForEach-Object {
+                $runtimeRelativePath = ([string]$_.Path).Replace("/", [System.IO.Path]::DirectorySeparatorChar)
+                $runtimeFullPath = Join-Path $variantRoot $runtimeRelativePath
+                if (!(Test-Path -LiteralPath $runtimeFullPath -PathType Leaf)) {
+                    throw "原生运行库清单中的文件在已解压归档中缺失：$($_.Path)"
+                }
+                $runtimeItem = Get-Item -LiteralPath $runtimeFullPath
+                $runtimeExtension = [System.IO.Path]::GetExtension([string]$_.Path).ToLowerInvariant()
+                $binaryKind = switch ($runtimeExtension) {
+                    ".dll" { "windows-dll" }
+                    ".pyd" { "windows-python-extension" }
+                    ".exe" { "windows-executable" }
+                    ".lib" { "windows-library-or-import-library" }
+                    ".a" { "static-library-archive" }
+                    ".so" { "shared-library" }
+                    ".dylib" { "macos-dynamic-library" }
+                    default { "runtime-candidate" }
+                }
                 [pscustomobject]@{
                     path = $_.Path
-                    size_bytes = [long]$_.Size
+                    size_bytes = [long]$runtimeItem.Length
+                    sha256 = (Get-FileHash -LiteralPath $runtimeFullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                    extension = $runtimeExtension
+                    binary_kind = $binaryKind
                     review_status = "pending"
                     license_owner = $null
+                    component_mapping = $null
                 }
             })
             evidence_files = $evidence.ToArray()
