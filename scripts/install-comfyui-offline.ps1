@@ -362,12 +362,14 @@ if (!(Test-Path -LiteralPath $frontendSourcePath -PathType Leaf) -or
     throw "ComfyUI Frontend GPL 对应源代码包缺失或 SHA-256 校验失败。"
 }
 $frontendNpmAudit = $manifest.comfyui_frontend.npm_dependency_audit
+if ($null -eq $frontendNpmAudit) {
+    throw "ComfyUI Frontend npm 许可证清点清单缺失。"
+}
 if ([string]$frontendNpmAudit.report_file -cne "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json" -or
     [string]$frontendNpmAudit.summary_file -cne "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json") {
     throw "ComfyUI Frontend npm 许可证报告路径或版本不匹配。"
 }
-if ($null -eq $frontendNpmAudit -or
-    $frontendNpmAudit.status -cne "inventory_generated_manual_license_review_pending" -or
+if ($frontendNpmAudit.status -cne "inventory_generated_manual_license_review_pending" -or
     $frontendNpmAudit.distribution_approved -ne $false -or
     [int]$frontendNpmAudit.package_count -lt 1) {
     throw "ComfyUI Frontend npm 依赖许可证清点状态或清点数量无效。"
