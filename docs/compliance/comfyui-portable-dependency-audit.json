@@ -11,7 +11,7 @@
     "Resolve packages with missing or ambiguous METADATA license fields (14 in NVIDIA, 14 in NVIDIA CUDA 12.6, 17 in AMD, 14 in Intel) using upstream license texts and notices.",
     "Review copyleft and notice obligations identified in the inventories, including comfyui-embedded-docs GPL-3.0, pygit2 GPLv2 with linking exception, autocommand LGPLv3, certifi MPL-2.0, and tqdm MPL-2.0 AND MIT.",
     "Review Intel Simplified Software License terms for the Intel oneAPI/MKL/TBB/Tcmlib components in the Intel portable variant.",
-    "Identify and review all redistributable native runtime binaries and their owners; the current runtime path matcher also includes headers and Python files and is not a complete binary-only license inventory.",
+    "Review every redistributable native runtime binary and its owner/license; the automated inventory now filters by native-binary extensions and known runtime-library filename markers, but this heuristic is not a complete binary ownership or license determination.",
     "Collect exact license texts, copyright notices, attribution requirements, and source-offer/source-code obligations for each bundled component.",
     "Review the exact 7-Zip executable and corresponding source archive licensing for the selected release.",
     "Complete Ollama Windows amd64 runtime dependency inventory and exact Qwen3 4B manifest/blob digest and license review.",
