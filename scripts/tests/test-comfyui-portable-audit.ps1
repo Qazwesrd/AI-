@@ -105,6 +105,9 @@ try {
         Pop-Location
     }
 
+    $expectedCudaRuntimeHash = Get-Sha256 (Join-Path $torchLib "cudart64_130.dll")
+    $expectedPythonRuntimeHash = Get-Sha256 (Join-Path $pythonRoot "python.exe")
+
     $archivePaths = @()
     foreach ($name in $assetNames) {
         $archivePath = Join-Path $temp $name
@@ -174,6 +177,18 @@ try {
         }
         if (@($variant.runtime_files | Where-Object { $_ -match "cudart64_130\.dll$" }).Count -ne 1) {
             throw "依赖清点脚本没有识别 CUDA 运行库文件：$($variant.asset)"
+        }
+        $cudaEvidence = @($variant.runtime_file_entries | Where-Object { $_.path -match "cudart64_130\.dll$" })
+        $pythonEvidence = @($variant.runtime_file_entries | Where-Object { $_.path -match "python_embeded[/\\]python\.exe$" })
+        if ($cudaEvidence.Count -ne 1 -or $pythonEvidence.Count -ne 1 -or
+            $cudaEvidence[0].sha256 -ne $expectedCudaRuntimeHash -or
+            $pythonEvidence[0].sha256 -ne $expectedPythonRuntimeHash -or
+            $cudaEvidence[0].size_bytes -ne (Get-Item -LiteralPath (Join-Path $torchLib "cudart64_130.dll")).Length -or
+            $pythonEvidence[0].size_bytes -ne (Get-Item -LiteralPath (Join-Path $pythonRoot "python.exe")).Length -or
+            $cudaEvidence[0].review_status -ne "pending" -or
+            $null -ne $cudaEvidence[0].license_owner -or
+            $null -ne $cudaEvidence[0].component_mapping) {
+            throw "依赖清点脚本未生成正确的原生运行库 SHA-256/大小证据，或错误地预先批准组件：$($variant.asset)"
         }
         if (@($variant.runtime_files | Where-Object { $_ -match "(?i)torch[/\\]include[/\\]torch\.h$" }).Count -ne 0 -or
             @($variant.runtime_files | Where-Object { $_ -match "(?i)\.(dll|pyd|exe|so|dylib|lib|a)$" }).Count -lt 2) {
