@@ -21,7 +21,7 @@ from app.models.story import StoryProject, EpisodePlan, StoryboardShot, Storyboa
 from app.models.visual import VisualAsset
 from app.services.media_service import STORAGE
 from app.services.model_license_acceptance import (
-    OPENRAIL_TERMS_VERSION, get_openrail_acceptance,
+    get_openrail_acceptance, get_openrail_license_text,
     require_openrail_acceptance, set_openrail_acceptance,
 )
 from pydantic import BaseModel, Field, field_validator
@@ -224,6 +224,11 @@ def _node_input_choices(node_info: dict, input_name: str):
         if isinstance(spec, list) and spec and isinstance(spec[0], list):
             return [value for value in spec[0] if isinstance(value, str)]
     return []
+
+
+@router.get("/license/creativeml-openrail-m/text")
+def read_openrail_license_text():
+    return {"license_text": get_openrail_license_text()}
 
 
 @router.get("/license/creativeml-openrail-m/acceptance")
