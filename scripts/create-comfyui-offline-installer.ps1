@@ -139,15 +139,15 @@ $archiveHash = (Get-FileHash -LiteralPath $OutputZip -Algorithm SHA256).Hash.ToL
 if ($manifest.archive_sha256 -cne $archiveHash) {
     throw "分卷清单中的原始 ZIP SHA-256 与实际文件不一致。"
 }
-$checksumLine = (Get-Content -LiteralPath $checksumPath -Raw -Encoding ASCII).Trim()
-$checksumMatch = [regex]::Match($checksumLine, '^([0-9a-fA-F]{64})[ \t]+(.+)$')
-$expectedArchiveName = [IO.Path]::GetFileName($OutputZip)
+# SHA-256 is the integrity authority. The optional filename in common
+# checksum files is informational only: ASCII readers may replace Chinese
+# characters with '?', even when the recorded digest is perfectly valid.
+$checksumLine = [IO.File]::ReadAllText($checksumPath, [Text.Encoding]::UTF8).Trim()
+$checksumMatch = [regex]::Match($checksumLine, '^([0-9a-fA-F]{64})')
 if (!$checksumMatch.Success -or
-    ![StringComparer]::OrdinalIgnoreCase.Equals($checksumMatch.Groups[1].Value, $archiveHash) -or
-    ![StringComparer]::Ordinal.Equals($checksumMatch.Groups[2].Value.Trim(), $expectedArchiveName)) {
+    ![StringComparer]::OrdinalIgnoreCase.Equals($checksumMatch.Groups[1].Value, $archiveHash)) {
     $recordedHash = if ($checksumMatch.Success) { $checksumMatch.Groups[1].Value } else { '<unparseable>' }
-    $recordedName = if ($checksumMatch.Success) { $checksumMatch.Groups[2].Value.Trim() } else { '<unparseable>' }
-    throw "原始 ZIP SHA-256 校验文件不匹配。实际哈希：$archiveHash；记录哈希：$recordedHash；预期文件名：$expectedArchiveName；记录文件名：$recordedName。"
+    throw "原始 ZIP SHA-256 校验文件不匹配。实际哈希：$archiveHash；记录哈希：$recordedHash。"
 }
 
 $manifestParts = @($manifest.parts)
@@ -159,7 +159,7 @@ $seenNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordina
 $partFiles = @()
 for ($i = 0; $i -lt $manifestParts.Count; $i++) {
     $entry = $manifestParts[$i]
-    $expectedName = "$([IO.Path]::GetFileName($OutputZip)).part$('{0:D3}' -f ($i + 1))"
+    $expectedName = [IO.Path]::GetFileName($OutputZip) + ".part" + ('{0:D3}' -f ($i + 1))
     if ($entry.name -cne $expectedName -or !$seenNames.Add([string]$entry.name)) {
         throw "分卷清单中的文件名重复、缺失或顺序异常：$($entry.name)"
     }
