@@ -32,6 +32,8 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIn('ComfyUI-Frontend-GPL-3.0-LICENSE.txt', prepare)
         self.assertIn('source_code_status = "upstream_commit_pinned_source_archive_included"', prepare)
         self.assertIn('Add-PinnedSourceEntry', prepare)
+        self.assertIn('"/zip/$PinnedCommit$"', prepare)
+        self.assertIn('https://codeload.github.com/Comfy-Org/comfy-aimdo/zip/$comfyAimdoSourceCommit', prepare)
         self.assertIn('source-code/comfy-aimdo-v0.6.0-68088de9.zip', prepare)
         self.assertIn('source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip', prepare)
         self.assertIn('$manifest.comfy_aimdo.source_archive_sha256', install)
