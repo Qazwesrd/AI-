@@ -174,7 +174,7 @@ def get_runtime():
     return {"network_enabled": False, "paid_api_allowed": False}
 
 @router.put("/ai/runtime")
-def update_runtime():
+def update_runtime(payload: RuntimeInput, db: Session = Depends(get_db)):
     raise HTTPException(
         410,
         "第三方云端 AI API 开关已移除。请使用本地模型或网页版 AI 协作中心。",
