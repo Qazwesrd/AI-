@@ -140,63 +140,16 @@ if ($manifest.archive_sha256 -cne $archiveHash) {
     throw "分卷清单中的原始 ZIP SHA-256 与实际文件不一致。"
 }
 $checksumLine = (Get-Content -LiteralPath $checksumPath -Raw -Encoding ASCII).Trim()
-$checksumMatch = [regex]::Match($checksumLine, '^([0-9a-fA-F]{64})\s+(.+?)\s*
-$manifestParts = @($manifest.parts)
-if ($manifestParts.Count -lt 5 -or $manifestParts.Count -gt 12) {
-    throw "完整离线套件分卷数量必须为 5 至 12 卷，实际为 $($manifestParts.Count) 卷；拒绝生成不完整的上传分组。"
-}
-$seenNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-[long]$partTotal = 0
-$partFiles = @()
-for ($i = 0; $i -lt $manifestParts.Count; $i++) {
-    $entry = $manifestParts[$i]
-    $expectedName = "$([IO.Path]::GetFileName($OutputZip)).part$('{0:D3}' -f ($i + 1))"
-    if ($entry.name -cne $expectedName -or !$seenNames.Add([string]$entry.name)) {
-        throw "分卷清单中的文件名重复、缺失或顺序异常：$($entry.name)"
-    }
-    $partPath = Join-Path $outputDirectory $entry.name
-    if (!(Test-Path -LiteralPath $partPath -PathType Leaf)) {
-        throw "缺少清单声明的分卷：$partPath"
-    }
-    $part = Get-Item -LiteralPath $partPath
-    if ([long]$part.Length -ne [long]$entry.size_bytes -or $part.Length -gt 1900000000) {
-        throw "分卷大小与清单不符或超过上传限制：$($entry.name)"
-    }
-    $partHash = (Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($partHash -cne ([string]$entry.sha256).ToLowerInvariant()) {
-        throw "分卷 SHA-256 校验失败：$($entry.name)"
-    }
-    $partTotal += [long]$part.Length
-    $partFiles += $part
-}
-if ($partTotal -ne [long]$zip.Length) {
-    throw "分卷总大小与原始 ZIP 不一致。"
-}
-$actualParts = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$([IO.Path]::GetFileName($OutputZip)).part*" | Where-Object { $_.Name -match ('^' + [regex]::Escape([IO.Path]::GetFileName($OutputZip)) + '\.part\d{3}$') })
-if ($actualParts.Count -ne $manifestParts.Count) {
-    throw "输出目录存在清单之外的额外分卷或缺失分卷。"
-}
-
-Write-Host ""
-Write-Host "完整离线安装套件制作完成并通过分卷清单、逐卷大小和 SHA-256 校验："
-Write-Host $OutputZip
-Write-Host ("文件大小：{0:N2} GiB" -f ($zip.Length / 1GB))
-Write-Host "SHA-256："
-Get-Content -LiteralPath $checksumPath
-Write-Host ("分卷数量：{0}" -f $partFiles.Count)
-Write-Host ("分卷清单：{0}" -f $partsManifest)
-Write-Host ("合并工具：{0}" -f $joinerTool)
-Write-Host "分发时上传全部 .part 分卷、.parts.json 清单和合并工具；完整 ZIP 本身不要作为单个 Release 附件上传。"
-Write-Host "用户下载全部文件后，运行合并工具并选择 .parts.json 清单；校验通过后再解压 ZIP 并运行 Setup.exe。"
-)
+$checksumMatch = [regex]::Match($checksumLine, '^([0-9a-fA-F]{64})[ \t]+(.+)$')
 $expectedArchiveName = [IO.Path]::GetFileName($OutputZip)
 if (!$checksumMatch.Success -or
     ![StringComparer]::OrdinalIgnoreCase.Equals($checksumMatch.Groups[1].Value, $archiveHash) -or
-    ![StringComparer]::Ordinal.Equals($checksumMatch.Groups[2].Value, $expectedArchiveName)) {
+    ![StringComparer]::Ordinal.Equals($checksumMatch.Groups[2].Value.Trim(), $expectedArchiveName)) {
     $recordedHash = if ($checksumMatch.Success) { $checksumMatch.Groups[1].Value } else { '<unparseable>' }
-    $recordedName = if ($checksumMatch.Success) { $checksumMatch.Groups[2].Value } else { '<unparseable>' }
+    $recordedName = if ($checksumMatch.Success) { $checksumMatch.Groups[2].Value.Trim() } else { '<unparseable>' }
     throw "原始 ZIP SHA-256 校验文件不匹配。实际哈希：$archiveHash；记录哈希：$recordedHash；预期文件名：$expectedArchiveName；记录文件名：$recordedName。"
 }
+
 $manifestParts = @($manifest.parts)
 if ($manifestParts.Count -lt 5 -or $manifestParts.Count -gt 12) {
     throw "完整离线套件分卷数量必须为 5 至 12 卷，实际为 $($manifestParts.Count) 卷；拒绝生成不完整的上传分组。"
