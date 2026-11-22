@@ -37,7 +37,9 @@ concurrency:
 jobs:
   build-installer:
     runs-on: windows-latest
-    timeout-minutes: 120
+    # The offline bundle downloads and assembles several large model/runtime payloads.
+    # Keep the job timeout above the 300-minute bundle step timeout.
+    timeout-minutes: 360
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
