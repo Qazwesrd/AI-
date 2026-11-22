@@ -193,6 +193,15 @@ try {
     $sourceHash = Get-Sha256 $sourceArchive
     $fixtureComfyVersion = "fixture-v1.0.0"
     $fixtureSevenZipVersion = "fixture-7zip-v1.0.0"
+    $imageModelRelative = "models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors"
+    $imageModelPath = Join-Path $payloadRoot ($imageModelRelative.Replace("/", "\\"))
+    New-Item -ItemType Directory -Path (Split-Path -Parent $imageModelPath) -Force | Out-Null
+    Write-Utf8 $imageModelPath "fixture image model bytes"
+    $imageModelHash = Get-Sha256 $imageModelPath
+    $imageModelSize = [long](Get-Item -LiteralPath $imageModelPath).Length
+    $imageLicenseRelative = "THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
+    Write-Utf8 (Join-Path $bundleRoot ($imageLicenseRelative.Replace("/", "\\"))) "CreativeML Open RAIL-M Attachment A fixture"
+
     $manifestAssets = @()
     foreach ($name in $assetNames) {
         $assetPath = Join-Path $payloadRoot $name
@@ -213,6 +222,15 @@ try {
         comfyui_version = $fixtureComfyVersion
         dependency_inventory_report = "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json"
         assets = $manifestAssets
+        image_generation_model = @{
+            name = "Stable Diffusion 1.5 FP16"
+            file = "ComfyUI-Payload/$imageModelRelative"
+            size_bytes = $imageModelSize
+            sha256 = $imageModelHash
+            license = "CreativeML OpenRAIL-M"
+            license_review_status = "pending"
+            distribution_approved = $false
+        }
         license = @{ license_file = $comfyLicenseRelative }
         seven_zip = @{
             version = $fixtureSevenZipVersion
