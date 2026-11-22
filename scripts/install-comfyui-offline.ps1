@@ -206,6 +206,23 @@ if ($manifest.target_architecture -ne "windows-x64" -or
     $manifest.distribution_status -ne "blocked-pending-third-party-dependency-audit") {
     throw "离线引擎数据包版本、系统架构或内部验证/分发门禁状态不匹配。"
 }
+$imageModel = $manifest.image_generation_model
+$imageModelRelative = "models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors"
+$imageModelPath = Join-Path $payload $imageModelRelative
+if (!$imageModel -or
+    $imageModel.name -cne "Stable Diffusion 1.5 FP16" -or
+    $imageModel.file -cne "ComfyUI-Payload/$imageModelRelative" -or
+    $imageModel.license -cne "CreativeML OpenRAIL-M" -or
+    $imageModel.license_review_status -cne "pending" -or
+    $imageModel.distribution_approved -ne $false -or
+    !(Test-Path -LiteralPath $imageModelPath -PathType Leaf)) {
+    throw "离线数据包缺少已登记的 Stable Diffusion 图片模型或许可证状态不正确。"
+}
+$imageModelHash = (Get-FileHash -LiteralPath $imageModelPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($imageModelHash -cne ([string]$imageModel.sha256).ToLowerInvariant() -or
+    (Get-Item -LiteralPath $imageModelPath).Length -ne [long]$imageModel.size_bytes) {
+    throw "Stable Diffusion 图片模型的文件大小或 SHA-256 校验失败。"
+}
 $expectedAssetNames = @(
     "ComfyUI_windows_portable_nvidia.7z",
     "ComfyUI_windows_portable_nvidia_cu126.7z",
@@ -418,6 +435,16 @@ try {
         Move-Item -LiteralPath $portableRoot -Destination $installFullPath
         $deploymentOwned = $true
 
+        # Install the pinned image checkpoint into ComfyUI's standard checkpoint folder.
+        # The source is part of the extracted offline suite; no network request is made.
+        $installedCheckpointDir = Join-Path $installFullPath "ComfyUI\models\checkpoints"
+        New-Item -ItemType Directory -Path $installedCheckpointDir -Force | Out-Null
+        $installedCheckpoint = Join-Path $installedCheckpointDir (Split-Path -Leaf $imageModelPath)
+        Copy-Item -LiteralPath $imageModelPath -Destination $installedCheckpoint
+        if ((Get-FileHash -LiteralPath $installedCheckpoint -Algorithm SHA256).Hash.ToLowerInvariant() -cne $imageModelHash) {
+            throw "Stable Diffusion 图片模型部署后的 SHA-256 校验失败。"
+        }
+
         # Provide an explicit CPU launcher for integrated/unsupported GPU devices.
         # This follows the official ComfyUI portable CPU invocation and does not
         # install extra runtimes or download anything.
@@ -442,6 +469,9 @@ try {
             gpu_vendor = $selection.vendor
             detected_gpu = $selection.detected_gpu
             runtime_mode = $selection.runtime_mode
+            image_generation_model = [string]$imageModel.name
+            image_generation_model_sha256 = $imageModelHash
+            image_generation_model_license = [string]$imageModel.license
             selection_reason = $selection.selection_reason
             installed_utc = [DateTime]::UtcNow.ToString("o")
             distribution_approved = $false
