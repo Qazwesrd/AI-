@@ -702,6 +702,8 @@ try {
         "ComfyUI-Payload/install-local-engines-transaction.ps1",
         "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1",
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
+        "THIRD_PARTY_NOTICES/source-code/comfy-aimdo-v0.6.0-68088de9.zip",
+        "THIRD_PARTY_NOTICES/source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip",
         "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
         "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json",
         "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json",
