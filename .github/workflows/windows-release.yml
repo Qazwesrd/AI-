@@ -27,6 +27,7 @@ on:
 permissions:
   contents: write
 
+# Full offline bundle requested for this build; see [build-offline-bundle] marker.
 # Serialize master release builds so two commits cannot upload the same
 # versioned assets to one GitHub Release at the same time. PR validation
 # builds remain independent per pull request and never publish releases.
