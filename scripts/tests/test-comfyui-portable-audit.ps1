@@ -186,6 +186,10 @@ try {
             $cudaEvidence[0].size_bytes -ne (Get-Item -LiteralPath (Join-Path $torchLib "cudart64_130.dll")).Length -or
             $pythonEvidence[0].size_bytes -ne (Get-Item -LiteralPath (Join-Path $pythonRoot "python.exe")).Length -or
             $cudaEvidence[0].review_status -ne "pending" -or
+            $cudaEvidence[0].binary_kind -ne "windows-dll" -or
+            $pythonEvidence[0].binary_kind -ne "windows-executable" -or
+            $cudaEvidence[0].sha256 -notmatch "^[0-9a-f]{64}$" -or
+            $pythonEvidence[0].sha256 -notmatch "^[0-9a-f]{64}$" -or
             $null -ne $cudaEvidence[0].license_owner -or
             $null -ne $cudaEvidence[0].component_mapping) {
             throw "依赖清点脚本未生成正确的原生运行库 SHA-256/大小证据，或错误地预先批准组件：$($variant.asset)"
@@ -193,6 +197,16 @@ try {
         if (@($variant.runtime_files | Where-Object { $_ -match "(?i)torch[/\\]include[/\\]torch\.h$" }).Count -ne 0 -or
             @($variant.runtime_files | Where-Object { $_ -match "(?i)\.(dll|pyd|exe|so|dylib|lib|a)$" }).Count -lt 2) {
             throw "依赖清点脚本必须只将原生二进制文件列为运行时证据，不得把头文件计入。"
+        }
+        if (@($variant.runtime_file_entries).Count -lt 2 -or
+            @($variant.runtime_file_entries | Where-Object {
+                $_.sha256 -notmatch "^[0-9a-f]{64}$" -or
+                $_.size_bytes -lt 0 -or
+                $_.review_status -ne "pending" -or
+                $null -ne $_.license_owner -or
+                $null -ne $_.component_mapping
+            }).Count -ne 0) {
+            throw "原生运行库清单存在缺少 SHA-256/大小证据或错误标记审核通过的条目：$($variant.asset)"
         }
         if (@($variant.evidence_files | Where-Object { $_.extraction_status -eq "extracted" }).Count -lt 2) {
             throw "依赖清点脚本没有实际提取 METADATA 和许可证证据：$($variant.asset)"
