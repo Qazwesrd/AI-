@@ -7,8 +7,8 @@ Unicode true
   DetailPrint "正在预检并部署 ComfyUI、Ollama 和 Qwen3 4B 本地引擎..."
   ; Keep large AI runtimes and models on the same drive selected on the installer directory page.
   ; AIComicStudio-Data is intentionally outside electron-builder's file manifest so uninstall preserves projects and models.
-  CreateDirectory "$INSTDIR\AIComicStudio-Data\engines"
-  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$EXEDIR\ComfyUI-Payload\install-local-engines-transaction.ps1" -ComfyPayloadRoot "$EXEDIR\ComfyUI-Payload" -LocalAIPayloadRoot "$EXEDIR\LocalAI-Payload" -ComfyInstallRoot "$INSTDIR\AIComicStudio-Data\engines\ComfyUI" -LocalAIInstallRoot "$INSTDIR\AIComicStudio-Data\engines\Ollama" -LogDirectory "$TEMP\AIComicStudio-install"' $0
+  CreateDirectory "$INSTDIR-Data\engines"
+  ExecWait '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$EXEDIR\ComfyUI-Payload\install-local-engines-transaction.ps1" -ComfyPayloadRoot "$EXEDIR\ComfyUI-Payload" -LocalAIPayloadRoot "$EXEDIR\LocalAI-Payload" -ComfyInstallRoot "$INSTDIR-Data\engines\ComfyUI" -LocalAIInstallRoot "$INSTDIR-Data\engines\Ollama" -LogDirectory "$TEMP\AIComicStudio-install"' $0
   IntCmp $0 0 engines_install_success engines_install_failed engines_install_failed
 
   engines_install_failed:
