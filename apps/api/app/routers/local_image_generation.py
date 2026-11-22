@@ -105,6 +105,7 @@ class LocalImageBatchInput(BaseModel):
     checkpoint: str = Field(min_length=1, max_length=240)
     style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
     negative_prompt: str = Field(default="low quality, blurry, distorted anatomy, extra fingers, text, watermark", max_length=3000)
+    visual_style_guidance: str = Field(default="", max_length=3000)
     width: int = Field(default=768, ge=512, le=1536)
     height: int = Field(default=768, ge=512, le=1536)
     steps: int = Field(default=24, ge=1, le=40)
@@ -459,6 +460,8 @@ def _prepare_batch_shots(data: LocalImageBatchInput, db: Session):
             missing.append({"shot_id": shot_id, "reason": "分镜不存在或不属于所选项目/分集"})
             continue
         prompt = (shot.image_prompt or "").strip()
+        if data.visual_style_guidance.strip():
+            prompt = prompt + "\n\n" + data.visual_style_guidance.strip()
         if len(prompt) < 3:
             missing.append({"shot_id": shot_id, "shot_number": shot.shot_number, "reason": "该分镜尚未填写图片提示词"})
             continue
