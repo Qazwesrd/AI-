@@ -322,12 +322,15 @@ try {
     $cpuLauncher = Join-Path $installRoot "AI漫剧大师-CPU模式启动.bat"
     $runtimeManifestPath = Join-Path $installRoot "runtime-manifest.json"
     $installedImageModel = Join-Path $installRoot "ComfyUI\models\checkpoints\v1-5-pruned-emaonly-fp16.safetensors"
+    $installedImageLicense = Join-Path $installRoot "licenses\Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
     if (!(Test-Path -LiteralPath $installedMain -PathType Leaf) -or
         !(Test-Path -LiteralPath $installedPython -PathType Leaf) -or
         !(Test-Path -LiteralPath $cpuLauncher -PathType Leaf) -or
         !(Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf) -or
         !(Test-Path -LiteralPath $installedImageModel -PathType Leaf) -or
-        (Get-Sha256 $installedImageModel) -ne $imageModelHash) {
+        (Get-Sha256 $installedImageModel) -ne $imageModelHash -or
+        !(Test-Path -LiteralPath $installedImageLicense -PathType Leaf) -or
+        (Get-Content -LiteralPath $installedImageLicense -Raw -Encoding UTF8) -notmatch "Attachment A") {
         throw "ComfyUI 离线安装测试失败：运行环境、CPU 启动器或运行清单缺失。"
     }
     $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
