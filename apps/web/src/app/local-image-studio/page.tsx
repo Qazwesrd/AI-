@@ -696,6 +696,24 @@ export default function LocalImageStudioPage() {
   }, [refreshRuntime]);
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ai-comic-local-image-draft-v1");
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { prompt?: string; negative_prompt?: string; style?: string };
+      if (typeof draft.prompt === "string" && draft.prompt.trim()) setPrompt(draft.prompt.slice(0, 6000));
+      if (typeof draft.negative_prompt === "string" && draft.negative_prompt.trim()) setNegative(draft.negative_prompt.slice(0, 3000));
+      const selectedStyle = String(draft.style || "");
+      const mapped = selectedStyle.includes("真人") || selectedStyle.includes("仿真") ? "仿真人"
+        : selectedStyle.includes("3D") ? "3D漫"
+        : selectedStyle.includes("2D") ? "2D漫" : "国漫";
+      setStyle(mapped);
+      localStorage.removeItem("ai-comic-local-image-draft-v1");
+      setMessage("已载入视觉素材工作台交接的提示词和风格。确认模型与本地生成设置后即可生成。");
+    } catch {
+      setError("读取视觉素材工作台交接数据失败，请返回重新准备提示词。");
+    }
+  }, []);
   const isOpenRailCheckpoint = checkpoint.replace(/\\/g, "/").split("/").pop()?.toLowerCase() === "v1-5-pruned-emaonly-fp16.safetensors";
 
   useEffect(() => {
