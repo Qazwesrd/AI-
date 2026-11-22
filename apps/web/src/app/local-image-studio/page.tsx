@@ -418,7 +418,8 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   const [openRailAccepted, setOpenRailAccepted] = useState(false);
   const [openRailBusy, setOpenRailBusy] = useState(false);
   const [openRailError, setOpenRailError] = useState("");
-  const [openRailLoading, setOpenRailLoading] = useState(true);
+  const [openRailLoading, setOpenRailLoading] = useState(false);
+  const [openRailLicenseText, setOpenRailLicenseText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const project = projects.find((item) => String(item.id) === projectId);
@@ -680,20 +681,33 @@ export default function LocalImageStudioPage() {
   }, [refreshRuntime]);
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
+  const isOpenRailCheckpoint = checkpoint.replaceAll("\\", "/").split("/").pop()?.toLowerCase() === "v1-5-pruned-emaonly-fp16.safetensors";
+
   useEffect(() => {
+    if (!isOpenRailCheckpoint) { setOpenRailLoading(false); return; }
     let active = true;
-    fetch(`${API}/api/local-ai/images/license/creativeml-openrail-m/acceptance`, { cache: "no-store" })
-      .then(async (response) => {
+    setOpenRailLoading(true);
+    Promise.all([
+      fetch(`${API}/api/local-ai/images/license/creativeml-openrail-m/acceptance`, { cache: "no-store" }).then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "读取模型许可证确认状态失败");
-        if (active) setOpenRailAccepted(data.accepted === true);
-      })
-      .catch((err) => { if (active) setOpenRailError(err instanceof Error ? err.message : "读取许可证状态失败"); })
+        return data;
+      }),
+      fetch(`${API}/api/local-ai/images/license/creativeml-openrail-m/text`, { cache: "no-store" }).then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取本机完整许可证失败");
+        return data;
+      }),
+    ]).then(([acceptance, license]) => {
+      if (!active) return;
+      setOpenRailAccepted(acceptance.accepted === true);
+      setOpenRailLicenseText(typeof license.license_text === "string" ? license.license_text : "");
+      setOpenRailError("");
+    }).catch((err) => { if (active) setOpenRailError(err instanceof Error ? err.message : "读取许可证失败"); })
       .finally(() => { if (active) setOpenRailLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [isOpenRailCheckpoint]);
 
-  const isOpenRailCheckpoint = checkpoint.replaceAll("\\", "/").split("/").pop()?.toLowerCase() === "v1-5-pruned-emaonly-fp16.safetensors";
 
   async function updateOpenRailAcceptance(accepted: boolean) {
     setOpenRailBusy(true); setOpenRailError("");
@@ -939,7 +953,7 @@ export default function LocalImageStudioPage() {
           <div><h2 className="text-lg font-semibold text-amber-100">Stable Diffusion 1.5 使用许可确认</h2>
             <p className="mt-1 text-sm text-amber-100/70">该模型采用 CreativeML Open RAIL-M（2022-08-22）。完整许可证及附件 A 具有约束力，以下为受限用途摘要。</p>
           </div>
-          <a href="https://huggingface.co/spaces/CompVis/stable-diffusion-license" target="_blank" rel="noreferrer" className="text-sm text-cyan-200 underline">阅读完整官方许可证</a>
+          <a href="https://huggingface.co/spaces/CompVis/stable-diffusion-license" target="_blank" rel="noreferrer" className="text-sm text-cyan-200 underline">官方许可证来源</a>
         </div>
         <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-6 text-amber-50/90">
           <li>不得违反任何适用的国家、联邦、州、地方或国际法律法规。</li>
@@ -955,8 +969,12 @@ export default function LocalImageStudioPage() {
           <li>不得生成或传播用于司法、执法、移民或庇护程序的信息，包括以文本画像等方式预测个人欺诈或犯罪。</li>
         </ul>
         <p className="mt-3 text-xs leading-5 text-amber-100/65">许可证第 4、5 条还要求将上述限制作为适用于模型及其衍生模型的可执行条款，并要求所有使用模型的用户遵守。模型输出也不得违反许可证。此处摘要不能替代完整许可证。</p>
+        <details className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+          <summary className="cursor-pointer text-sm text-cyan-100">展开阅读本机安装的完整 CreativeML Open RAIL-M 许可证</summary>
+          {openRailLicenseText ? <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-5 text-white/75">{openRailLicenseText}</pre> : <p className="mt-3 text-sm text-rose-200">完整许可证文件尚不可用。请修复本地引擎安装后再确认。</p>}
+        </details>
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          {openRailLoading ? <span className="text-sm text-white/60">正在读取本机确认记录…</span> : openRailAccepted ? <span className="text-sm text-emerald-200">已在本机确认（再次安装或条款版本更新后需重新确认）</span> : <button type="button" onClick={() => void updateOpenRailAcceptance(true)} disabled={openRailBusy} className="rounded-lg bg-amber-200 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{openRailBusy ? "保存中…" : "我已阅读完整许可证并同意上述使用限制"}</button>}
+          {openRailLoading ? <span className="text-sm text-white/60">正在读取本机完整许可证及确认记录…</span> : !openRailLicenseText ? <span className="text-sm text-rose-200">完整许可证不可用，暂不能确认</span> : openRailAccepted ? <span className="text-sm text-emerald-200">已在本机确认（再次安装或条款版本更新后需重新确认）</span> : <button type="button" onClick={() => void updateOpenRailAcceptance(true)} disabled={openRailBusy} className="rounded-lg bg-amber-200 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{openRailBusy ? "保存中…" : "我已阅读完整许可证并同意上述使用限制"}</button>}
           {openRailAccepted && <button type="button" onClick={() => void updateOpenRailAcceptance(false)} disabled={openRailBusy} className="rounded-lg border border-white/20 px-3 py-2 text-sm text-white/70 disabled:opacity-50">撤销确认</button>}
         </div>
         {openRailError && <p role="alert" className="mt-3 text-sm text-rose-200">{openRailError}</p>}
