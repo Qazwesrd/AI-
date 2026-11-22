@@ -827,7 +827,7 @@ try {
 $zipHash = (Get-FileHash -LiteralPath $stagingTarget -Algorithm SHA256).Hash
 $zipName = [System.IO.Path]::GetFileName($target)
 $checksumText = "$zipHash  $zipName" + [Environment]::NewLine
-[System.IO.File]::WriteAllText($stagingChecksum, $checksumText, [System.Text.Encoding]::ASCII)
+[System.IO.File]::WriteAllText($stagingChecksum, $checksumText, [System.Text.UTF8Encoding]::new($false))
 if ((Test-Path -LiteralPath $target) -or (Test-Path -LiteralPath $checksumTarget)) {
     Remove-Item -LiteralPath $stagingTarget, $stagingChecksum -Force -ErrorAction SilentlyContinue
     throw "发布前检测到目标 ZIP 或校验文件已出现；为保护已有文件，取消发布。"
