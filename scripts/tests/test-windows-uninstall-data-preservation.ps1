@@ -20,10 +20,8 @@ $main = Get-Content -LiteralPath $mainPath -Raw -Encoding UTF8
 $database = Get-Content -LiteralPath $databasePath -Raw -Encoding UTF8
 $comfyRuntime = Get-Content -LiteralPath $comfyRuntimePath -Raw -Encoding UTF8
 
-# The chosen install directory is mirrored into a sibling persistent data root.
-# All application-owned data and engines must resolve from that one root.
-$installRootPattern = 'path\.join\(path\.dirname\(installRoot\), path\.basename\(installRoot\) \+ "-Data"\)'
-if ($main -notmatch $installRootPattern -or
+# The selected installation root and its sibling data directory must agree.
+if ($main -notmatch 'path\.join\(path\.dirname\(installRoot\), path\.basename\(installRoot\) \+ "-Data"\)' -or
     $main -notmatch 'app\.setPath\("userData", persistentDataRoot\)' -or
     $main -notmatch 'APP_DATA_DIR:\s*dataDir' -or
     $database -notmatch 'DATA_ROOT = Path\(os\.environ\.get\("APP_DATA_DIR"' -or
