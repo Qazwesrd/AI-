@@ -30,3 +30,13 @@
 - storage：本地素材
 - docs：项目文档
 - scripts：自动化脚本
+
+
+## Windows 完整离线安装
+
+完整离线套件的构建、第三方依赖审查、三组下载产物合并、SHA-256 校验和安装步骤见：
+
+- [Windows 完整离线安装套件说明](docs/manual/COMFYUI-OFFLINE-BUNDLE.md)
+- [正式版功能范围与最终验收标准](docs/FINAL_RELEASE_SCOPE_AND_ACCEPTANCE.md)
+
+注意：在第三方依赖及模型许可审查、Windows 实机安装和目标设备验证全部通过前，完整离线套件仅用于内部验证，不作为公开正式下载。
