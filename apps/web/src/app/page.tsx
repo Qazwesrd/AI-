@@ -61,7 +61,8 @@ const navigation = [
       ["🧬", "人物与素材状态追踪", "/asset-timeline"],
       ["🏞️", "场景设定", "/visual-studio"],
       ["💎", "道具素材", "/visual-studio"],
-      ["🌌", "世界观设定", "/novels"]
+      ["🌌", "世界观设定", "/novels"],
+      ["🎨", "提示词管理与视觉风格库", "/prompt-studio"]
     ]
   },
   {
@@ -75,7 +76,8 @@ const navigation = [
       ["🧭", "统一任务中心", "/tasks"],
       ["🌐", "AI网页工具协同中心", "/ai-tools"],
       ["🤝", "网页版 AI 协作执行中心", "/ai-collaboration"],
-      ["🧠", "小说深度分析与剧情审核", "/ai-analysis"]
+      ["🧠", "小说深度分析与剧情审核", "/ai-analysis"],
+      ["🪄", "提示词管理中心", "/prompt-studio"]
     ]
   },
   {
