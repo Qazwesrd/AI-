@@ -376,7 +376,124 @@ jobs:
             if ($sourceHash -cne $stagedHash) { throw "暂存上传元数据 SHA-256 不一致：$required" }
           }
           $stagedChecksum = (Get-Content -LiteralPath (Join-Path $group3 "$base.sha256") -Raw).Trim()
-          if ($stagedChecksum -notmatch ('^' + [regex]::Escape($archiveHash) + '\s+' + [regex]::Escape($base) + '
+          if ($stagedChecksum -notmatch ('^' + [regex]::Escape($archiveHash) + '\s+' + [regex]::Escape($base) + '          if (@(Get-ChildItem -LiteralPath (Join-Path $stage "group1") -File).Count -ne [math]::Min(4, $parts.Count) -or
+              @(Get-ChildItem -LiteralPath (Join-Path $stage "group2") -File).Count -ne [math]::Max(0, [math]::Min(4, $parts.Count - 4)) -or
+              @(Get-ChildItem -LiteralPath $group3 -File).Count -ne ([math]::Max(0, $parts.Count - 8) + 3)) {
+            throw "三个上传分组的文件数量校验失败。"
+          }
+
+          # Delete the bulky original only after every part and assembly file is
+          # present in staging and all copied volume hashes have been verified.
+          Remove-Item -LiteralPath $archive -Force
+          "group1=$stage/group1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "group2=$stage/group2" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "group3=$stage/group3" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Prepared and verified $($parts.Count) parts plus assembly metadata in three upload groups."
+
+      - name: Upload offline bundle volumes 1-4
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-1
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group1/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload offline bundle volumes 5-8
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-2
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group2/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload offline bundle remaining volumes and assembly manifest
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-3
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group3/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Hold public release until the complete offline bundle is distributable
+        if: github.ref == 'refs/heads/master'
+        shell: pwsh
+        run: |
+          Write-Host "Public release is intentionally paused."
+          Write-Host "The standalone Setup.exe requires the adjacent ComfyUI-Payload folder."
+          Write-Host "Do not publish Setup.exe alone; publish only after the complete offline ZIP has a verified, size-compatible distribution host and all third-party license checks are complete."
+  # Run the expensive real upstream archive inventory only when explicitly
+  # requested by a one-time PR-body marker; no ComfyUI payload is modified.
+  # requested in the draft PR body. The marker is removed after the audit.
+  audit-comfyui-portable-dependencies:
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, '<!-- run-comfyui-portable-license-audit -->')
+    uses: ./.github/workflows/comfyui-portable-license-audit.yml
+    with:
+      release_tag: ''
+)) {
+            throw "暂存的原始 ZIP SHA-256 文件内容不正确。"
+          }
+          if (@(Get-ChildItem -LiteralPath (Join-Path $stage "group1") -File).Count -ne [math]::Min(4, $parts.Count) -or
+              @(Get-ChildItem -LiteralPath (Join-Path $stage "group2") -File).Count -ne [math]::Max(0, [math]::Min(4, $parts.Count - 4)) -or
+              @(Get-ChildItem -LiteralPath $group3 -File).Count -ne ([math]::Max(0, $parts.Count - 8) + 3)) {
+            throw "三个上传分组的文件数量校验失败。"
+          }
+
+          # Delete the bulky original only after every part and assembly file is
+          # present in staging and all copied volume hashes have been verified.
+          Remove-Item -LiteralPath $archive -Force
+          "group1=$stage/group1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "group2=$stage/group2" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "group3=$stage/group3" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Prepared and verified $($parts.Count) parts plus assembly metadata in three upload groups."
+
+      - name: Upload offline bundle volumes 1-4
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-1
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group1/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload offline bundle volumes 5-8
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-2
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group2/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload offline bundle remaining volumes and assembly manifest
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-3
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group3/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Hold public release until the complete offline bundle is distributable
+        if: github.ref == 'refs/heads/master'
+        shell: pwsh
+        run: |
+          Write-Host "Public release is intentionally paused."
+          Write-Host "The standalone Setup.exe requires the adjacent ComfyUI-Payload folder."
+          Write-Host "Do not publish Setup.exe alone; publish only after the complete offline ZIP has a verified, size-compatible distribution host and all third-party license checks are complete."
+  # Run the expensive real upstream archive inventory only when explicitly
+  # requested by a one-time PR-body marker; no ComfyUI payload is modified.
+  # requested in the draft PR body. The marker is removed after the audit.
+  audit-comfyui-portable-dependencies:
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, '<!-- run-comfyui-portable-license-audit -->')
+    uses: ./.github/workflows/comfyui-portable-license-audit.yml
+    with:
+      release_tag: ''
+)) {
+            throw "暂存的原始 ZIP SHA-256 文件内容不正确。"
+          }
           if (@(Get-ChildItem -LiteralPath (Join-Path $stage "group1") -File).Count -ne [math]::Min(4, $parts.Count) -or
               @(Get-ChildItem -LiteralPath (Join-Path $stage "group2") -File).Count -ne [math]::Max(0, [math]::Min(4, $parts.Count - 4)) -or
               @(Get-ChildItem -LiteralPath $group3 -File).Count -ne ([math]::Max(0, $parts.Count - 8) + 3)) {
