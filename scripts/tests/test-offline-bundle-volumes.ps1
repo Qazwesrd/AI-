@@ -103,7 +103,33 @@ try {
         throw "模拟下载的完整 ZIP SHA-256 文件内容不正确。"
     }
 
-    Write-Host "离线安装套件分卷与合并测试通过。"
+    # Reproduce a Windows code-page filename corruption: the recorded hash
+    # remains authoritative even if a legacy tool rewrites the Chinese name.
+    $unicodeChecksumPath = Join-Path $downloaded "AI漫剧制作大师-完整离线安装套件.zip.sha256"
+    $unicodeChecksumLine = "$($artifactHash.ToUpperInvariant())  AI漫剧制作大师-完整离线安装套件.zip"
+    [IO.File]::WriteAllText($unicodeChecksumPath, $unicodeChecksumLine, [Text.UTF8Encoding]::new($false))
+    $unicodeChecksumRead = [IO.File]::ReadAllText($unicodeChecksumPath, [Text.Encoding]::UTF8).Trim()
+    $unicodeChecksumMatch = [regex]::Match($unicodeChecksumRead, '^([0-9a-fA-F]{64})(?:[ \t]+.*)?
+} finally {
+    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+}
+)
+    if (!$unicodeChecksumMatch.Success -or
+        ![StringComparer]::OrdinalIgnoreCase.Equals($unicodeChecksumMatch.Groups[1].Value, $artifactHash)) {
+        throw "中文文件名 SHA-256 校验记录无法按 UTF-8 正确读取。"
+    }
+    $legacyQuestionName = "$($artifactHash.ToUpperInvariant())  AI??????-????????.zip"
+    $legacyQuestionMatch = [regex]::Match($legacyQuestionName, '^([0-9a-fA-F]{64})(?:[ \t]+.*)?
+} finally {
+    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+}
+)
+    if (!$legacyQuestionMatch.Success -or
+        ![StringComparer]::OrdinalIgnoreCase.Equals($legacyQuestionMatch.Groups[1].Value, $artifactHash)) {
+        throw "兼容旧版问号文件名的 SHA-256 校验失败。"
+    }
+
+    Write-Host "离线安装套件分卷、合并及中文文件名 SHA-256 测试通过。"
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
