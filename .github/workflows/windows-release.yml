@@ -316,29 +316,68 @@ jobs:
           if (!(Test-Path -LiteralPath (Join-Path $release "$base.parts.json")) -or !(Test-Path -LiteralPath (Join-Path $release "$base.sha256"))) {
             throw "分卷清单或原始 ZIP SHA-256 文件缺失，不能删除原始 ZIP。"
           }
-          # The ZIP has already passed full read-back verification and was split
-          # with per-volume SHA-256 values. Keep only the verified volumes for
-          # upload to avoid storing both the complete offline ZIP and all its copies.
+          # Preserve the original ZIP until every staged upload file has been
+          # been copied and independently verified. A staging/copy failure must
+          # never destroy the only complete archive in the runner workspace.
           $archive = Join-Path $release $base
           if (!(Test-Path -LiteralPath $archive -PathType Leaf)) { throw "完整离线 ZIP 不存在。" }
-          Remove-Item -LiteralPath $archive -Force
+          $archiveInfo = Get-Item -LiteralPath $archive
+          $manifestPath = Join-Path $release "$base.parts.json"
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($manifest.schema_version -ne 1 -or $manifest.archive_name -cne $base -or [long]$manifest.archive_size_bytes -ne [long]$archiveInfo.Length) {
+            throw "分卷清单与原始 ZIP 元数据不匹配。"
+          }
+          $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($manifest.archive_sha256 -cne $archiveHash) { throw "原始 ZIP SHA-256 与分卷清单不匹配。" }
+          if ($parts.Count -ne @($manifest.parts).Count -or $parts.Count -lt 5 -or $parts.Count -gt 12) {
+            throw "分卷数量与清单不一致，或超出 5 至 12 卷的上传分组范围。"
+          }
+
           $stage = Join-Path $env:RUNNER_TEMP "offline-bundle-artifacts"
+          if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
           foreach ($group in 1..3) {
             $folder = Join-Path $stage "group$group"
             New-Item -ItemType Directory -Path $folder -Force | Out-Null
           }
+          [long]$stagedTotal = 0
           for ($i = 0; $i -lt $parts.Count; $i++) {
+            $entry = $manifest.parts[$i]
+            $expectedName = "$base.part$('{0:D3}' -f ($i + 1))"
+            if ($entry.name -cne $expectedName -or $parts[$i].Name -cne $expectedName) {
+              throw "分卷文件名或顺序与清单不一致：$expectedName"
+            }
             $group = [math]::Floor($i / 4) + 1
             if ($group -gt 3) { throw "分卷超过预设的 12 卷上限，需要扩展分组后再上传。" }
-            Copy-Item -LiteralPath $parts[$i].FullName -Destination (Join-Path $stage "group$group")
+            $destination = Join-Path (Join-Path $stage "group$group") $expectedName
+            Copy-Item -LiteralPath $parts[$i].FullName -Destination $destination
+            $staged = Get-Item -LiteralPath $destination
+            if ([long]$staged.Length -ne [long]$entry.size_bytes) { throw "暂存分卷大小校验失败：$expectedName" }
+            $stagedHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($stagedHash -cne ([string]$entry.sha256).ToLowerInvariant()) { throw "暂存分卷 SHA-256 校验失败：$expectedName" }
+            $stagedTotal += [long]$staged.Length
           }
-          Copy-Item -LiteralPath (Join-Path $release "$base.parts.json") -Destination (Join-Path $stage "group3")
-          Copy-Item -LiteralPath (Join-Path $release "AI漫剧制作大师-离线套件合并工具.ps1") -Destination (Join-Path $stage "group3")
-          Copy-Item -LiteralPath (Join-Path $release "$base.sha256") -Destination (Join-Path $stage "group3")
+          if ($stagedTotal -ne [long]$archiveInfo.Length) { throw "暂存分卷总大小与原始 ZIP 不一致。" }
+
+          $group3 = Join-Path $stage "group3"
+          Copy-Item -LiteralPath $manifestPath -Destination $group3
+          Copy-Item -LiteralPath (Join-Path $release "AI漫剧制作大师-离线套件合并工具.ps1") -Destination $group3
+          Copy-Item -LiteralPath (Join-Path $release "$base.sha256") -Destination $group3
+          foreach ($required in @("$base.parts.json", "AI漫剧制作大师-离线套件合并工具.ps1", "$base.sha256")) {
+            if (!(Test-Path -LiteralPath (Join-Path $group3 $required) -PathType Leaf)) { throw "暂存上传元数据缺失：$required" }
+          }
+          if (@(Get-ChildItem -LiteralPath (Join-Path $stage "group1") -File).Count -ne [math]::Min(4, $parts.Count) -or
+              @(Get-ChildItem -LiteralPath (Join-Path $stage "group2") -File).Count -ne [math]::Max(0, [math]::Min(4, $parts.Count - 4)) -or
+              @(Get-ChildItem -LiteralPath $group3 -File).Count -ne ([math]::Max(0, $parts.Count - 8) + 3)) {
+            throw "三个上传分组的文件数量校验失败。"
+          }
+
+          # Delete the bulky original only after every part and assembly file is
+          # present in staging and all copied volume hashes have been verified.
+          Remove-Item -LiteralPath $archive -Force
           "group1=$stage/group1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "group2=$stage/group2" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "group3=$stage/group3" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Prepared $($parts.Count) verified parts in three upload groups."
+          Write-Host "Prepared and verified $($parts.Count) parts plus assembly metadata in three upload groups."
 
       - name: Upload offline bundle volumes 1-4
         if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
