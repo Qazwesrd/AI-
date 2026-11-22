@@ -231,7 +231,7 @@ export default function VisualStudioPage() {
       : "专业影视资产设定稿，细节完整，材质可信，结构准确，画面清晰，视觉统一。";
     const positive = `${base}${subject}。${viewGuide}${continuity}视觉风格：${style}。${quality}保持项目内视觉一致性，不添加原设定中不存在的关键特征。`;
     const negative = "负面约束：身份或外观漂移、视角间结构不一致、比例错误、额外肢体或零件、重复主体、错误服装、错误颜色、透视畸变、主体裁切、模糊、低清晰度、文字、字幕、水印、Logo、边框、无关装饰。";
-    return `正向提示词：${positive}\n\n${negative}`;
+    return applySavedVisualStyle(`正向提示词：${positive}\n\n${negative}`);
   }
 
   async function createTask() {
@@ -289,7 +289,7 @@ export default function VisualStudioPage() {
       const response = await fetch(API + "/api/visual/assets/" + assetId + "/prompt");
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "提示词生成失败");
-      setGeneratedPrompt("正向提示词：" + result.positive_prompt + (prompt.trim() ? "\n\n用户补充要求：" + prompt.trim() : "") + "\n\n负面提示词：" + result.negative_prompt);
+      setGeneratedPrompt(applySavedVisualStyle("正向提示词：" + result.positive_prompt + (prompt.trim() ? "\n\n用户补充要求：" + prompt.trim() : "") + "\n\n负面提示词：" + result.negative_prompt));
       setSelectedAsset(assetId);
       setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
     } catch (error) {
