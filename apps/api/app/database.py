@@ -390,10 +390,11 @@ def init_database():
     from app.models.studio import AIProviderConfig
 
     removed_provider_configs = 0
-    # Some legacy/test databases intentionally predate this table. Do not
-    # fail startup or migrations when the optional table is absent.
-    if inspect(engine).has_table(AIProviderConfig.__tablename__):
-        with SessionLocal() as session:
+    # Use the actual session bind: tests and embedded deployments may replace
+    # SessionLocal with an isolated/legacy database distinct from the module
+    # engine. Inspect and delete against the same database connection.
+    with SessionLocal() as session:
+        if inspect(session.get_bind()).has_table(AIProviderConfig.__tablename__):
             removed_provider_configs = session.query(AIProviderConfig).delete(
                 synchronize_session=False
             )
