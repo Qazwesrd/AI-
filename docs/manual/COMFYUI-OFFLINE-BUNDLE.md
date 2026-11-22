@@ -138,7 +138,7 @@ if ($actual -ne $expected) { throw "完整离线 ZIP SHA-256 不匹配，请重�
 "SHA-256 校验通过"
 ~~~
 
-只有合并工具和 SHA-256 双重校验均通过后，才解压完整 ZIP；再进入解压后的根目录，运行其中的 `Setup.exe`。不要单独运行 GitHub 上另行上传的普通 Setup artifact：它不是完整离线套件，缺少离线引擎与模型载荷。
+只有合并工具和 SHA-256 双重校验均通过后，才解压完整 ZIP；再进入解压后的根目录，运行其中的 `Setup.exe`。CI 不会单独发布普通 Setup.exe artifact；Setup.exe 只作为完整离线 ZIP 的内部组成部分。不要从其他旧构建记录中单独下载或运行 Setup.exe，因为它缺少离线引擎与模型载荷。
 
 GitHub Actions artifact 当前保留 14 天，下载链接过期后需要重新生成产物。三组 artifact 只有在手动启动 `windows-release.yml` 且 `build_offline_bundle=true` 时才会生成；普通 PR 检查不会自动生成完整离线包。
 
