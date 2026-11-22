@@ -332,6 +332,36 @@ jobs:
           Write-Host ("Verified offline bundle: {0:N2} GiB" -f ($zip.Length / 1GB))
           Get-Content -LiteralPath "$outputZip.sha256"
 
+      - name: Build standalone offline AI resource pack
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[build-offline-bundle]'))
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Join-Path $PWD "apps/desktop/release"
+          $bundle = Join-Path $release "AI漫剧制作大师-完整离线安装套件.zip"
+          $resourcePack = Join-Path $release "AI漫剧大师-AI资源包.zip"
+          if (!(Test-Path -LiteralPath $bundle -PathType Leaf)) { throw "完整离线套件不存在，不能拆分 AI 资源包。" }
+          & (Join-Path $PWD "scripts/create-ai-resource-pack.ps1") -InputBundle $bundle -OutputZip $resourcePack
+          if (!(Test-Path -LiteralPath "$resourcePack.sha256" -PathType Leaf)) { throw "独立 AI 资源包 SHA-256 文件缺失。" }
+          $hashLine = (Get-Content -LiteralPath "$resourcePack.sha256" -Raw).Trim()
+          $actualHash = (Get-FileHash -LiteralPath $resourcePack -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hashLine -notmatch ('^' + [regex]::Escape($actualHash) + '\\s+' + [regex]::Escape([IO.Path]::GetFileName($resourcePack)) + '$')) {
+            throw "独立 AI 资源包 SHA-256 校验失败。"
+          }
+          Write-Host ("Standalone AI resource pack: {0:N2} GiB" -f ((Get-Item $resourcePack).Length / 1GB))
+          Write-Host "AI resource pack checksum verified."
+
+      - name: Upload standalone offline AI resource pack
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[build-offline-bundle]'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-AI-Resource-Pack
+          path: |
+            apps/desktop/release/AI漫剧大师-AI资源包.zip
+            apps/desktop/release/AI漫剧大师-AI资源包.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Prepare split bundle artifact groups
         if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[build-offline-bundle]'))
         shell: pwsh
