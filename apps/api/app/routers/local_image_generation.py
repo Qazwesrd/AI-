@@ -104,6 +104,7 @@ class LocalImageBatchInput(BaseModel):
     shot_ids: list[int] = Field(min_length=1, max_length=20)
     checkpoint: str = Field(min_length=1, max_length=240)
     style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
+    negative_prompt: str = Field(default="low quality, blurry, distorted anatomy, extra fingers, text, watermark", max_length=3000)
     width: int = Field(default=768, ge=512, le=1536)
     height: int = Field(default=768, ge=512, le=1536)
     steps: int = Field(default=24, ge=1, le=40)
@@ -506,8 +507,8 @@ def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends
     for row in rows:
         seed = uuid.uuid4().int % (2 ** 32)
         payload = LocalImageGenerateInput(
-            checkpoint=data.checkpoint, prompt=row["prompt"], style=data.style,
-            width=data.width, height=data.height, steps=data.steps, cfg=data.cfg,
+            checkpoint=data.checkpoint, prompt=row["prompt"], negative_prompt=data.negative_prompt,
+            style=data.style, width=data.width, height=data.height, steps=data.steps, cfg=data.cfg,
             seed=seed, confirm_local_generation=True,
         )
         try:
