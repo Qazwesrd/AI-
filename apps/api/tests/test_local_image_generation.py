@@ -1,4 +1,6 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -9,6 +11,7 @@ from app.routers.local_image_generation import (
     generate_local_image, get_local_image_task, LocalImageArchiveInput,
     _safe_output_image, _download_comfyui_output, archive_local_image_task_output,
     _attach_media_to_shot, _remove_media_link_from_shot, _replace_shot_media,
+    inspect_local_image_model_library,
 )
 
 
@@ -24,6 +27,46 @@ class LocalImageGenerationTests(unittest.TestCase):
         self.assertEqual(workflow["3"]["inputs"]["seed"], 123)
         self.assertEqual(workflow["8"]["inputs"]["samples"], ["3", 0])
         self.assertEqual(workflow["9"]["class_type"], "SaveImage")
+
+    def test_model_library_scans_only_supported_local_checkpoint_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install_root = Path(temporary)
+            checkpoint_dir = install_root / "ComfyUI" / "models" / "checkpoints"
+            checkpoint_dir.mkdir(parents=True)
+            (checkpoint_dir / "comic-model.safetensors").write_bytes(b"weights")
+            (checkpoint_dir / "readme.txt").write_text("not a model", encoding="utf-8")
+            (checkpoint_dir / "empty.ckpt").write_bytes(b"")
+            with (
+                patch("app.routers.local_image_runtime._install_root", return_value=install_root),
+                patch("app.routers.local_image_runtime._runtime_mode", return_value=("cpu", "AMD Radeon Graphics")),
+                patch("app.routers.system._get_hardware_profile", return_value={
+                    "memory": {"total_bytes": 8 * 1024 ** 3},
+                    "gpu": {"vram_bytes": None},
+                }),
+            ):
+                result = inspect_local_image_model_library()
+        self.assertTrue(result["engine_installed"])
+        self.assertEqual(result["model_count"], 1)
+        self.assertEqual(result["models"][0]["name"], "comic-model.safetensors")
+        self.assertEqual(result["models"][0]["compatibility"], "manual_check")
+        self.assertEqual(result["runtime_mode"], "cpu")
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["downloaded"])
+        self.assertFalse(result["installation_started"])
+
+    def test_model_library_reports_missing_engine_without_network_access(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            install_root = Path(temporary) / "not-installed"
+            with (
+                patch("app.routers.local_image_runtime._install_root", return_value=install_root),
+                patch("app.routers.local_image_runtime._runtime_mode", return_value=("cpu", "unknown")),
+                patch("app.routers.system._get_hardware_profile", return_value={}),
+            ):
+                result = inspect_local_image_model_library()
+        self.assertEqual(result["status"], "engine_not_installed")
+        self.assertEqual(result["model_count"], 0)
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["downloaded"])
 
     def test_generation_requires_explicit_confirmation(self):
         payload = LocalImageGenerateInput(checkpoint="model.safetensors", prompt="A cinematic mountain", confirm_local_generation=False)

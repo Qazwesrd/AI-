@@ -5,9 +5,18 @@ const assert = require("node:assert/strict");
 const {
   INSTALLER_URL,
   REQUIRED_FREE_BYTES,
+  getApiUrl,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
 } = require("./ollama-runtime-installer.cjs");
+
+test("runtime API uses the app-managed local Ollama endpoint when configured", () => {
+  const previous = process.env.OLLAMA_BASE_URL;
+  process.env.OLLAMA_BASE_URL = "http://127.0.0.1:11435/";
+  assert.equal(getApiUrl(), "http://127.0.0.1:11435/api/tags");
+  if (previous === undefined) delete process.env.OLLAMA_BASE_URL;
+  else process.env.OLLAMA_BASE_URL = previous;
+});
 
 test("installer source is the fixed official HTTPS URL", () => {
   assert.equal(INSTALLER_URL, "https://ollama.com/download/OllamaSetup.exe");

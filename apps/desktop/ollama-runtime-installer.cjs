@@ -17,7 +17,10 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "release-assets.githubusercontent.com",
 ]);
 const REQUIRED_FREE_BYTES = 5 * 1024 ** 3;
-const API_URL = "http://127.0.0.1:11434/api/tags";
+function getApiUrl() {
+  const base = (process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434").replace(/\/+$/, "");
+  return base + "/api/tags";
+}
 
 function isAllowedDownloadUrl(value) {
   try {
@@ -121,7 +124,7 @@ function runInstaller(filePath) {
 async function waitForOllama(timeoutMs = 90000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const data = await requestJson(API_URL);
+    const data = await requestJson(getApiUrl());
     if (data && Array.isArray(data.models)) return true;
     await new Promise(resolve => setTimeout(resolve, 1500));
   }
@@ -144,7 +147,7 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const home = app.getPath("home");
     let freeBytes = null;
     try { freeBytes = getFreeBytes(home); } catch {}
-    const api = await requestJson(API_URL);
+    const api = await requestJson(getApiUrl());
     return {
       installed: Boolean(api),
       status: api ? "ready" : "not_installed",
@@ -162,7 +165,7 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const home = app.getPath("home");
     const freeBytes = getFreeBytes(home);
     if (freeBytes < REQUIRED_FREE_BYTES) throw new Error("系统盘可用空间不足。Ollama 官方 Windows 安装至少需要约 4 GB，请预留 5 GiB 后重试。");
-    if (await requestJson(API_URL)) return { status: "already_installed" };
+    if (await requestJson(getApiUrl())) return { status: "already_installed" };
 
     cancelRequested = false;
     const installerPath = path.join(app.getPath("temp"), "AI-Comic-Studio-OllamaSetup.exe");
@@ -210,6 +213,7 @@ module.exports = {
   INSTALLER_URL,
   ALLOWED_DOWNLOAD_HOSTS,
   REQUIRED_FREE_BYTES,
+  getApiUrl,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
   getFreeBytes,

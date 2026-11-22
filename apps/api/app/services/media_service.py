@@ -6,6 +6,7 @@ import urllib.error
 import ipaddress
 import socket
 import re
+import tempfile
 from urllib.parse import urlparse
 from pathlib import Path
 from cryptography.fernet import Fernet
@@ -131,6 +132,107 @@ def run_ffmpeg(args):
     if result.returncode != 0:
         raise RuntimeError("FFmpeg 执行失败：" + result.stderr[-3000:])
     return result
+
+
+
+class FFmpegCancelledError(RuntimeError):
+    """Raised when a local FFmpeg render is intentionally stopped."""
+
+
+def run_ffmpeg_with_progress(
+    args,
+    duration_seconds=None,
+    progress_callback=None,
+    cancel_event=None,
+    process_callback=None,
+):
+    """Run FFmpeg with parseable progress and cooperative cancellation.
+
+    The output path must be the final argument. Callers should render to a
+    temporary path and atomically publish it only after validation succeeds.
+    """
+    if not args:
+        raise ValueError("FFmpeg 参数不能为空")
+    executable = _bundled_media_path("ffmpeg.exe")
+    command = [executable, "-y", *[str(item) for item in args[:-1]],
+               "-progress", "pipe:1", "-nostats", str(args[-1])]
+    with tempfile.TemporaryFile(mode="w+t", encoding="utf-8") as error_output:
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=error_output,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("未找到 FFmpeg，请检查软件媒体组件是否完整安装") from exc
+        if process_callback:
+            process_callback(process)
+
+        latest = {"percent": 0.0, "out_time_seconds": 0.0, "stage": "rendering"}
+        try:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=5)
+                    raise FFmpegCancelledError("用户已请求停止本地 FFmpeg 渲染")
+                line = process.stdout.readline() if process.stdout else ""
+                if not line:
+                    if process.poll() is not None:
+                        break
+                    continue
+                key, separator, value = line.strip().partition("=")
+                if not separator:
+                    continue
+                if key == "out_time_ms":
+                    try:
+                        latest["out_time_seconds"] = max(0.0, int(value) / 1_000_000)
+                    except (TypeError, ValueError):
+                        pass
+                elif key == "out_time":
+                    try:
+                        hours, minutes, seconds = value.split(":")
+                        latest["out_time_seconds"] = (
+                            int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                elif key in {"frame", "fps", "speed", "total_size", "bitrate"}:
+                    latest[key] = value
+                elif key == "progress":
+                    total = float(duration_seconds or 0)
+                    if total > 0:
+                        latest["percent"] = min(
+                            99.9, max(0.0, latest["out_time_seconds"] / total * 100)
+                        )
+                    latest["stage"] = "rendering"
+                    if value == "end":
+                        # FFmpeg has finished writing, but the output is not
+                        # complete until the caller validates and publishes it.
+                        latest["percent"] = 99.9
+                        latest["stage"] = "validating"
+                    if progress_callback:
+                        progress_callback(dict(latest))
+            return_code = process.wait()
+            if return_code != 0:
+                error_output.seek(0)
+                detail = error_output.read()[-3000:]
+                raise RuntimeError("FFmpeg 执行失败：" + detail)
+            if cancel_event is not None and cancel_event.is_set():
+                raise FFmpegCancelledError("用户已请求停止本地 FFmpeg 渲染")
+            return latest
+        finally:
+            if process.stdout:
+                process.stdout.close()
+            if process_callback:
+                process_callback(None)
 
 
 def probe_media(path):

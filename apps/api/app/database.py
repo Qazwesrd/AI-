@@ -10,7 +10,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 schema_migrations = Table(
     "schema_migrations",
     Base.metadata,
@@ -90,6 +90,30 @@ MODEL_MODULES = [
 ]
 
 
+def _assert_sqlite_connection_integrity(connection, label):
+    """Raise when a SQLite database fails its full integrity check."""
+    result = connection.execute("PRAGMA integrity_check").fetchone()
+    if not result or result[0] != "ok":
+        raise RuntimeError(f"{label}完整性检查失败：{result}")
+    return True
+
+
+def _assert_sqlite_integrity(path: Path, label):
+    """Validate a snapshot read-only before it is trusted for rollback."""
+    path = Path(path).resolve()
+    if not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError(f"{label}不存在或为空，拒绝继续")
+    uri = path.as_uri() + "?mode=ro"
+    connection = sqlite3.connect(uri, uri=True, timeout=30)
+    try:
+        _assert_sqlite_connection_integrity(connection, label)
+    except sqlite3.DatabaseError as exc:
+        raise RuntimeError(f"{label}不是有效的 SQLite 数据库：{exc}") from exc
+    finally:
+        connection.close()
+    return True
+
+
 def _backup_database_before_migration():
     if not DATABASE_PATH.exists() or DATABASE_PATH.stat().st_size == 0:
         return None
@@ -104,9 +128,20 @@ def _backup_database_before_migration():
     try:
         source.backup(destination)
         destination.commit()
-    finally:
+    except Exception:
         destination.close()
         source.close()
+        target.unlink(missing_ok=True)
+        raise
+    else:
+        destination.close()
+        source.close()
+
+    try:
+        _assert_sqlite_integrity(target, "迁移前备份")
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
 
     return target
 
@@ -116,6 +151,9 @@ def _restore_database_backup(backup_path: Path):
     """Restore a pre-migration SQLite snapshot without replacing an open Windows file."""
     if not backup_path or not Path(backup_path).is_file():
         raise RuntimeError("找不到迁移前数据库备份，无法自动回滚")
+
+    backup_path = Path(backup_path).resolve()
+    _assert_sqlite_integrity(backup_path, "迁移回滚备份")
 
     engine.dispose()
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -129,9 +167,7 @@ def _restore_database_backup(backup_path: Path):
         destination.execute("PRAGMA journal_mode=DELETE")
         source.backup(destination)
         destination.commit()
-        integrity = destination.execute("PRAGMA integrity_check").fetchone()
-        if not integrity or integrity[0] != "ok":
-            raise RuntimeError(f"恢复后的数据库完整性检查失败：{integrity}")
+        _assert_sqlite_connection_integrity(destination, "恢复后的数据库")
     finally:
         destination.close()
         source.close()
@@ -262,6 +298,17 @@ def get_schema_version():
     return int(value or 0)
 
 
+def _assert_supported_schema_version():
+    """Refuse newer databases before any schema mutation."""
+    current = get_schema_version()
+    if current > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"数据库结构版本 {current} 高于当前软件支持版本 {SCHEMA_VERSION}，"
+            "为防止旧版软件修改新版数据库，已在任何结构变更前停止启动。"
+        )
+    return current
+
+
 def _record_schema_version():
     with engine.begin() as connection:
         current = connection.execute(
@@ -273,10 +320,14 @@ def _record_schema_version():
                 f"数据库结构版本 {current} 高于当前软件支持版本 {SCHEMA_VERSION}，"
                 "为防止降级破坏数据，已停止启动。"
             )
-        if current < 1:
+        migrations = {
+            1: "baseline_schema",
+            2: "subtitle_track_project_episode_ownership",
+        }
+        for version in range(current + 1, SCHEMA_VERSION + 1):
             connection.execute(schema_migrations.insert().values(
-                version=1,
-                name="baseline_schema",
+                version=version,
+                name=migrations.get(version, f"schema_v{version}"),
                 applied_at=datetime.utcnow().isoformat(timespec="seconds") + "Z",
             ))
 
@@ -293,6 +344,9 @@ def init_database():
             else:
                 print(f"[模型依赖错误] {module_name}: {exc}")
                 raise
+
+    # Check compatibility before backups or schema mutations.
+    _assert_supported_schema_version()
 
     # Snapshot an existing database before create_all can add any tables.
     # The old order backed up only after create_all, which meant the backup

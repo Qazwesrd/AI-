@@ -185,36 +185,6 @@ export default function StoryboardPage() {
     }
   }
 
-  async function planEpisodesAI() {
-    if (!projectId) return setMessage("请先选择剧本项目");
-    const approved = window.confirm("AI 将按每批最多3章的方式分析剧情；每章完成后立即保存。886章小说需要多批处理，过程中可关闭软件，之后再次点击会从上次进度继续。若当前模型为付费服务，可能产生费用。是否开始/继续？");
-    if (!approved) return;
-    setBusy(true);
-    try {
-      let done = false;
-      let latest: { episodes?: Episode[]; message?: string; processed_chapters?: number; total_chapters?: number } | null = null;
-      let batches = 0;
-      while (!done && batches < 400) {
-        const batchResult = await request(`/api/story/projects/${projectId}/plan-ai`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            confirm_paid: true,
-            prompt_style: promptStyle,
-            additional_instructions: additionalPromptInstructions,
-          }),
-        });
-        latest = batchResult;
-        done = Boolean(batchResult.done);
-        setEpisodes(batchResult.episodes || []);
-        setMessage(batchResult.message || "AI分集规划处理中");
-        batches += 1;
-      }
-      if (!done) throw new Error("已达到单次连续执行批次数上限；当前进度已保存，再次点击即可继续。");
-      setMessage(latest?.message || "AI分集规划完成");
-    } catch (error) {
-      setMessage((error instanceof Error ? error.message : "AI分集规划暂停") + "。已完成章节会保留，再次点击可继续。");
-    } finally { setBusy(false); }
-  }
   async function planEpisodes() {
     if (!projectId) return setMessage("请先选择剧本项目");
     setBusy(true);
@@ -229,26 +199,6 @@ export default function StoryboardPage() {
     }
   }
 
-  async function generateEpisodeScriptAI(episode: Episode) {
-    const approved = window.confirm("将调用已启用的文本 AI，根据本集原著生成影视剧本和对应分镜。若当前模型属于付费服务，可能产生 API 费用。是否继续？");
-    if (!approved) return;
-    setBusy(true);
-    try {
-      const result = await request(`/api/story/episodes/${episode.id}/generate-ai`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            confirm_paid: true,
-            prompt_style: promptStyle,
-            additional_instructions: additionalPromptInstructions,
-          }),
-      });
-      if (projectId) await loadProject(projectId);
-      await loadShots(episode.id);
-      setMessage(result.message || "AI剧本与分镜生成完成");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "AI生成失败");
-    } finally { setBusy(false); }
-  }
   async function loadEpisodeVideoTasks(id: number) {
     try { const rows = await request("/api/media/video/episodes/" + id + "/tasks"); setVideoTasks(rows); }
     catch (error) { setMessage(error instanceof Error ? error.message : "读取视频任务失败"); }
@@ -534,6 +484,8 @@ export default function StoryboardPage() {
         <div className="text-sm text-purple-300">AI COMIC STUDIO / STORYBOARD</div>
         <h1 className="mt-2 text-3xl font-bold">剧本改编与智能分镜中心</h1>
         <p className="mt-2 text-sm text-slate-300">小说 → 分集规划 → 影视剧本 → 镜头分镜 → 视觉素材匹配</p>
+        <p className="mt-2 text-xs text-slate-400">视频生成可在 AI 网页协作中心手动准备任务；本地 FFmpeg 合成仍可使用已下载的视频素材。云端 TTS 已禁用，本地离线配音引擎尚待接入。</p>
+        <p className="mt-3 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs text-cyan-100">严格零费用模式：云端 AI API 统一拦截，不会因误点产生 API 费用。剧本与分镜请使用已安装的本地模型，或到 AI 网页协作中心手动操作；第三方网站的免费额度和收费规则由网站本身决定。</p>
       </header>
 
       {message && <div className="rounded-xl border border-purple-300/20 bg-purple-950/50 p-3 text-sm text-purple-100">{message}</div>}
@@ -583,7 +535,7 @@ export default function StoryboardPage() {
           <p className="mt-2 text-xs text-slate-400">点击 AI 任务时，软件会自动组合基础提示词、所选方案和补充要求；无需先单独生成提示词。不会自动把内容发送给网页版 AI。</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodesAI}>AI智能分集规划</button>
+          <a href="/local-creator" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-4 py-2 text-sm text-cyan-100">使用本地 AI 创作工作台</a>
           <button className="rounded-xl border border-purple-300/20 px-4 py-2 text-sm" disabled={!projectId || busy || Boolean(selectedProject?.generation_blocked)} onClick={planEpisodes}>按章节建立草案</button>
           <button className="rounded-xl border border-sky-300/30 bg-sky-800/60 px-4 py-2 text-sm" disabled={episodes.length < 2} onClick={mergeEpisodes}>合并前两集</button>
         </div>
@@ -599,9 +551,9 @@ export default function StoryboardPage() {
               </div>
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
-                <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
-                <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
+                <a href="/local-creator" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-3 py-1.5 text-xs text-cyan-100">前往本地 AI 生成剧本与分镜</a>
+                <a href="/ai-tools" className="rounded-lg border border-cyan-300/30 bg-cyan-800/40 px-3 py-1.5 text-xs text-cyan-100">准备网页视频生成任务</a>
+                <button type="button" disabled title="严格零费用模式已拦截云端 TTS；本地离线配音引擎仍在开发中。" className="rounded-lg border border-amber-300/20 bg-amber-900/20 px-3 py-1.5 text-xs text-amber-100/60 cursor-not-allowed">本地离线配音引擎待接入</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
                 <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs" disabled={busy} onClick={() => checkEpisodeConsistency(ep.id)}>检查视觉一致性</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>

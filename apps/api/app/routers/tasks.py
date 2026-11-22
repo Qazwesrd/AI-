@@ -13,7 +13,7 @@ from app.models.story import StoryProject, EpisodePlan, StoryAssetLink
 from app.models.studio import AIUsageLog
 from app.models.visual import ImageTask, VisualAsset
 from app.models.task_runtime import TaskRuntimeControl, TaskExecutionLog, TaskExecutionLease
-from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task
+from app.services.task_runtime import runtime_snapshot, release_task_lease, queue_snapshot, remove_queued_task, enqueue_task
 from app.services.task_diagnostics import classify_task_error
 from app.routers.visual import (
     pause_image_task,
@@ -21,7 +21,12 @@ from app.routers.visual import (
     retry_image_task,
     cancel_image_task,
 )
-from app.routers.media import refresh_video_task
+from app.routers.media import refresh_video_task, get_local_render_job
+from app.routers.local_image_generation import (
+    LocalImageBatchStatusInput,
+    LocalImageBatchStatusItem,
+    get_local_image_batch_status,
+)
 
 router = APIRouter(prefix="/api/tasks", tags=["统一任务中心"])
 
@@ -63,7 +68,7 @@ def _status_group(status: str) -> str:
         return "paused"
     if value in {"submission_unknown", "awaiting_video_url", "submitting", "interrupted_unknown"}:
         return "attention"
-    if value in {"pending", "queued", "submitted", "processing", "running"}:
+    if value in {"pending", "queued", "submitted", "processing", "running", "queued_or_running"}:
         return "active"
     if value == "partial":
         return "partial"
@@ -106,6 +111,10 @@ def _counts_from_task_items(items):
 def cancel_queued_task(source: str, task_id: int, db: Session = Depends(get_db)):
     if source not in {"image", "image3d_asset", "media", "analysis"}:
         raise HTTPException(400, "不支持的任务来源")
+    if source == "media":
+        submitted_task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if submitted_task and submitted_task.task_type in ("local_image_batch", "local_image_reference") and submitted_task.remote_task_id:
+            raise HTTPException(409, "本机 ComfyUI 已接受该生成任务；不能通过本地等待队列取消，请刷新任务状态。")
     if not remove_queued_task(db, source, task_id):
         raise HTTPException(404, "等待队列中不存在该任务")
     if source == "image":
@@ -300,6 +309,7 @@ def list_unified_tasks(
     items = []
     for task in media_rows:
         meta = task.request_data if isinstance(task.request_data, dict) else {}
+        result_data = task.result_data if isinstance(task.result_data, dict) else {}
         kind = task.task_type or "media"
         raw_episode_id = meta.get("episode_id")
         try:
@@ -315,9 +325,12 @@ def list_unified_tasks(
             continue
         title_map = {
             "storyboard_video": "分镜视频生成",
+            "local_image_batch": "本地分镜图片生成",
+            "local_image_reference": "本地参考图条件生图",
             "video": "独立视频生成",
             "speech": "独立配音",
             "episode_speech": "分镜对白配音",
+            "local_render": "本地视频合成",
         }
         items.append({
             "id": f"media:{task.id}", "source": "media", "source_id": task.id,
@@ -329,7 +342,8 @@ def list_unified_tasks(
             "context": f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
                 f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
             ),
-            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path),
+            "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path) and task.status == "completed" or bool(result_data.get("images")),
+            "progress": (result_data.get("progress") or {}).get("percent") if isinstance(result_data.get("progress"), dict) else None,
             "created_at": _iso(task.created_at), "updated_at": _iso(task.updated_at),
             "can_open": True,
         })
@@ -529,9 +543,48 @@ def control_unified_task(
         return handler(task_id, db)
 
     if source == "media":
+        if action not in ("pause", "resume", "retry", "refresh"):
+            raise HTTPException(
+                409,
+                "媒体任务仅支持暂停/恢复本地等待任务、刷新远程状态或按安全规则人工核实配音任务",
+            )
+        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if not task:
+            raise HTTPException(404, "媒体任务不存在")
+        if action in ("pause", "resume"):
+            # Only scheduler-queued tasks without a remote ID can be paused.
+            # Once a provider/ComfyUI has accepted a request, pausing locally
+            # would falsely imply that remote execution had stopped.
+            if task.remote_task_id:
+                raise HTTPException(409, "服务商/ComfyUI 已接受该任务；本地暂停不会停止远程执行，请刷新任务状态。")
+            if task.task_type not in ("video", "storyboard_video", "speech", "episode_speech"):
+                raise HTTPException(409, "该媒体任务类型不支持统一等待队列暂停/恢复")
+            lease = db.query(TaskExecutionLease).filter(
+                TaskExecutionLease.source == "media",
+                TaskExecutionLease.task_id == task_id,
+                TaskExecutionLease.status == "active",
+            ).first()
+            if lease:
+                raise HTTPException(409, "任务仍持有活动执行租约，不能暂停或恢复排队状态")
+            if action == "pause":
+                if task.status != "queued":
+                    raise HTTPException(409, "只有尚未提交服务商的 queued 等待任务可以暂停")
+                remove_queued_task(db, "media", task_id)
+                task.status = "paused"
+                task.error = "用户已暂停本地等待队列；尚未提交服务商，不会产生新的 AI 请求。"
+                db.commit()
+                return {"success": True, "task_id": task_id, "status": task.status,
+                        "message": "已暂停本地等待任务；没有中断任何远程任务。"}
+            if task.status != "paused":
+                raise HTTPException(409, "只有 paused 状态的本地等待任务可以恢复")
+            task.status = "queued"
+            task.error = ""
+            db.commit()
+            queue_info = enqueue_task(db, "media", task_id, priority=0, reason="用户手动恢复媒体等待任务")
+            return {"success": True, "task_id": task_id, "status": task.status,
+                    "queue": queue_info, "message": "已恢复到本地等待队列；不会自动提交 AI 请求。"}
         if action == "retry":
-            task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-            if not task or task.task_type not in ("speech", "episode_speech"):
+            if task.task_type not in ("speech", "episode_speech"):
                 raise HTTPException(409, "只有独立配音或分镜对白配音任务支持人工核实后重新生成")
             if task.status not in ("submission_unknown", "interrupted_unknown", "submitting"):
                 raise HTTPException(409, "只有提交结果不确定的配音任务需要人工核实")
@@ -557,11 +610,44 @@ def control_unified_task(
                 "success": True, "task_id": task_id, "status": task.status,
                 "message": "已完成配音任务人工核实并解除重试保护；请返回配音页面重新发起，系统不会自动调用 AI。",
             }
-        if action != "refresh":
-            raise HTTPException(
-                409,
-                "媒体任务暂不支持本地强制暂停或取消；视频请刷新远程状态，配音任务请走人工核实流程",
-            )
+        if task.task_type == "local_render":
+            local_status = get_local_render_job(task_id, db)
+            progress = local_status.get("progress") or {}
+            return {
+                "task_id": task_id,
+                "status": local_status.get("status", task.status),
+                "progress": progress.get("percent", 0),
+                "stage": progress.get("stage", "unknown"),
+                "result_available": local_status.get("status") == "completed" and bool(local_status.get("output")),
+                "result_path": local_status.get("output"),
+                "error": local_status.get("error"),
+                "polling_skipped": False,
+                "message": "本地渲染状态已读取；不会调用 AI 服务商，也不会自动重新渲染。",
+            }
+        if task.task_type in ("local_image_batch", "local_image_reference"):
+            metadata = task.request_data if isinstance(task.request_data, dict) else {}
+            if not task.remote_task_id:
+                raise HTTPException(409, "本机 ComfyUI 任务没有有效编号；请先核对队列，不要自动重试。")
+            try:
+                status_payload = LocalImageBatchStatusInput(tasks=[LocalImageBatchStatusItem(
+                    shot_id=int(metadata.get("shot_id") or 1),
+                    shot_number=int(metadata.get("shot_number") or 1),
+                    prompt_id=task.remote_task_id,
+                )])
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(409, "本机图片任务记录缺少有效分镜或任务编号。") from exc
+            refreshed = get_local_image_batch_status(status_payload, db)
+            outcome = (refreshed.get("tasks") or [{}])[0]
+            refreshed_task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+            result_data = refreshed_task.result_data if refreshed_task and isinstance(refreshed_task.result_data, dict) else {}
+            return {
+                "task_id": task_id,
+                "status": outcome.get("status", "unknown"),
+                "result_available": bool(result_data.get("images")) or bool(refreshed_task and refreshed_task.result_path),
+                "images": result_data.get("images", []),
+                "error": outcome.get("error"),
+                "polling_skipped": False,
+            }
         result = refresh_video_task(task_id, db)
         return {
             "task_id": task_id,

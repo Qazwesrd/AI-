@@ -16,7 +16,7 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertFalse(is_known_remote_3d_task(task))
 
     def test_active_provider_statuses_are_normalized(self):
-        for value in ("pending", "queued", "submitted", "processing", "running"):
+        for value in ("pending", "queued", "submitted", "processing", "running", "queued_or_running"):
             with self.subTest(status=value):
                 self.assertEqual(_status_group(value), "active")
 
@@ -86,10 +86,54 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
         db.commit.assert_not_called()
 
+    def test_unified_local_reference_image_refreshes_comfyui_history(self):
+        task = Mock(
+            task_type="local_image_reference",
+            remote_task_id="a" * 32,
+            request_data={"shot_id": 7, "shot_number": 3},
+            result_data={"images": []},
+            result_path="",
+        )
+        refreshed = Mock(
+            result_data={"images": [{"filename": "reference-output.png", "subfolder": "", "type": "output"}]},
+            result_path="",
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, refreshed]
+        with patch(
+            "app.routers.tasks.get_local_image_batch_status",
+            return_value={"tasks": [{"status": "completed", "images": [{"filename": "reference-output.png"}]}]},
+        ) as refresh:
+            result = control_unified_task("media", 77, "refresh", db=db)
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["result_available"])
+        self.assertEqual(result["images"][0]["filename"], "reference-output.png")
+        refresh.assert_called_once()
+
     def test_unified_media_does_not_allow_local_force_cancel(self):
         with self.assertRaises(HTTPException) as raised:
             control_unified_task("media", 4, "cancel", db=object())
         self.assertEqual(raised.exception.status_code, 409)
+
+    def test_unified_local_render_refresh_returns_saved_progress_without_provider_call(self):
+        task = Mock(
+            task_type="local_render",
+            status="processing",
+            result_data={"progress": {"percent": 54.5, "stage": "rendering"}},
+            result_path="",
+            error=None,
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        with patch.dict(
+            "app.routers.media._LOCAL_RENDER_RUNTIME",
+            {91: {"cancel": object(), "process": object()}},
+        ):
+            result = control_unified_task("media", 91, "refresh", db=db)
+        self.assertEqual(result["status"], "processing")
+        self.assertEqual(result["progress"], 54.5)
+        self.assertEqual(result["stage"], "rendering")
+        self.assertFalse(result["result_available"])
 
     def test_analysis_retry_requires_explicit_provider_reconciliation(self):
         job = Mock(
@@ -182,6 +226,57 @@ class UnifiedTaskStatusTests(unittest.TestCase):
                 "image", 25, "retry", confirm_no_remote_job=True, db=db
             )
         self.assertEqual(raised.exception.status_code, 409)
+
+
+    def test_media_pause_only_pauses_local_queued_task_without_remote_id(self):
+        task = Mock(task_type="storyboard_video", status="queued", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        with patch("app.routers.tasks.remove_queued_task", return_value=True) as remove:
+            result = control_unified_task("media", 61, "pause", db=db)
+        self.assertEqual(task.status, "paused")
+        self.assertTrue(result["success"])
+        remove.assert_called_once_with(db, "media", 61)
+        db.commit.assert_called_once()
+
+    def test_media_resume_requeues_without_submitting_ai(self):
+        task = Mock(task_type="video", status="paused", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        with patch("app.routers.tasks.enqueue_task", return_value={"queue_id": 8, "position": 1}) as enqueue:
+            result = control_unified_task("media", 62, "resume", db=db)
+        self.assertEqual(task.status, "queued")
+        self.assertEqual(result["queue"]["position"], 1)
+        enqueue.assert_called_once_with(db, "media", 62, priority=0, reason="用户手动恢复媒体等待任务")
+        db.commit.assert_called_once()
+
+    def test_media_pause_refuses_task_already_accepted_by_remote_engine(self):
+        task = Mock(task_type="storyboard_video", status="submitted", remote_task_id="remote-123")
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 63, "pause", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+    def test_media_pause_refuses_active_local_execution_lease(self):
+        task = Mock(task_type="speech", status="queued", remote_task_id=None)
+        lease = Mock(status="active")
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, lease]
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 64, "pause", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
+
+    def test_media_resume_requires_paused_state(self):
+        task = Mock(task_type="video", status="queued", remote_task_id=None)
+        db = Mock()
+        db.query.return_value.filter.return_value.first.side_effect = [task, None]
+        with self.assertRaises(HTTPException) as raised:
+            control_unified_task("media", 65, "resume", db=db)
+        self.assertEqual(raised.exception.status_code, 409)
+        db.commit.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -9,8 +9,12 @@ type Tool = { id: string; name: string; category: ToolCategory; url: string; not
 type ResultFile = { id: number; filename: string; size: number; downloadUrl: string; classification?: string; classificationStatus?: string; classificationReason?: string; visualAssetId?: number | null };
 type Task = {
   id: string;
+  projectId?: number;
   novelId?: number;
   chapterId?: number;
+  characterId?: number;
+  sceneId?: number;
+  sourceText?: string;
   title: string;
   category: ToolCategory;
   toolId: string;
@@ -435,12 +439,27 @@ export default function AIToolsPage() {
       if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
         throw new Error("只允许 HTTP 或 HTTPS 网站地址");
       }
-      const embedded = (window as Window & { aiBrowserDesktop?: { openTask?: (taskId: string, url: string) => Promise<{ opened: boolean }> } }).aiBrowserDesktop;
+      const embedded = (window as Window & { aiBrowserDesktop?: {
+        openTask?: (taskId: string, url: string) => Promise<{ opened: boolean }>;
+        fillPrompt?: (taskId: string, prompt: string) => Promise<{ filled: boolean; length: number; submitted: boolean }>;
+        captureTextResult?: (taskId: string) => Promise<{ captured: boolean; text: string; length: number; saved: boolean }>;
+      } }).aiBrowserDesktop;
       const desktop = (window as Window & { desktopAPI?: { openExternal?: (url: string) => Promise<boolean> } }).desktopAPI;
       await copyText(task.prompt);
       if (embedded?.openTask) {
-        await embedded.openTask(task.id, parsed.toString());
-        setNotice(`已在软件内打开 ${target.name}。请在网页中粘贴提示词并生成；支持的下载文件会自动归档到当前任务。`);
+        const opened = await embedded.openTask(task.id, parsed.toString());
+        if (!opened?.opened) throw new Error("内嵌 AI 网页未能打开");
+        if (embedded.fillPrompt) {
+          try {
+            const filled = await embedded.fillPrompt(task.id, task.prompt);
+            if (!filled?.filled || filled.submitted) throw new Error("自动填入状态未通过校验");
+            setNotice(`已在软件内打开 ${target.name}，并自动填入完整提示词（${filled.length} 字）。请先检查网页内容，再由你手动点击发送；软件不会自动提交或触发付费。`);
+          } catch {
+            setNotice(`已在软件内打开 ${target.name}，提示词已复制到剪贴板，但该网页暂未能自动定位输入框。请手动粘贴后检查并发送。`);
+          }
+        } else {
+          setNotice(`已在软件内打开 ${target.name}，提示词已复制到剪贴板。请手动粘贴、检查并发送。`);
+        }
       } else {
         const opening = desktop?.openExternal
           ? desktop.openExternal(parsed.toString())
@@ -449,6 +468,9 @@ export default function AIToolsPage() {
         setNotice(`已打开 ${target.name}。提示词已复制；当前运行环境不支持内嵌浏览器自动收集，请手动导入结果。`);
       }
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "opened" } : item));
+      setActiveTaskId(task.id);
+      setResultText(task.resultText || "");
+      setResultUrl(task.resultUrl || "");
     } catch {
       setNotice("打开网页失败，请检查工具网址或默认浏览器设置。");
     }
@@ -484,7 +506,31 @@ export default function AIToolsPage() {
     }
   }
 
-  function saveResult(task: Task) {
+  async function captureWebResult(task: Task) {
+    const embedded = (window as Window & {
+      aiBrowserDesktop?: {
+        captureTextResult?: (taskId: string) => Promise<{ captured: boolean; text: string; length: number; saved: boolean }>;
+      };
+    }).aiBrowserDesktop;
+    if (!embedded?.captureTextResult) {
+      setNotice("当前环境不支持自动读取网页回答，请手动复制到结果框。");
+      return;
+    }
+    try {
+      const captured = await embedded.captureTextResult(task.id);
+      if (!captured?.captured || !captured.text?.trim() || captured.saved) {
+        throw new Error("没有读取到可保存的网页回答。");
+      }
+      setResultText(captured.text);
+      setResultUrl("");
+      setActiveTaskId(task.id);
+      setNotice(`已读取网页最新回答（${captured.length} 字），尚未保存。请检查内容后点击“保存结果”。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "自动读取失败，请手动复制网页回答。");
+    }
+  }
+
+  async function saveResult(task: Task) {
     let normalizedResultUrl = "";
     if (resultUrl.trim()) {
       try {
@@ -499,11 +545,52 @@ export default function AIToolsPage() {
         return;
       }
     }
-    setTasks((current) => current.map((item) => item.id === task.id
-      ? { ...item, status: "completed", resultText, resultUrl: normalizedResultUrl }
-      : item));
-    setActiveTaskId(null);
-    setNotice("结果已保存到本机任务记录。图片和视频文件请先从 AI 网站下载，再到素材库导入。");
+    const updated = {
+      id: task.id,
+      title: task.title,
+      category: task.category,
+      toolId: task.toolId,
+      status: "completed",
+      prompt: task.prompt,
+      sourceText: task.sourceText || "",
+      resultText,
+      resultUrl: normalizedResultUrl,
+      projectId: task.projectId ?? null,
+      novelId: task.novelId ?? null,
+      chapterId: task.chapterId ?? null,
+      characterId: task.characterId ?? null,
+      sceneId: task.sceneId ?? null,
+    };
+    try {
+      let response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+      if (response.status === 404) {
+        response = await fetch(apiBase + "/api/web-ai/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated),
+        });
+        if (response.status === 409) {
+          response = await fetch(apiBase + "/api/web-ai/tasks/" + encodeURIComponent(task.id), {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updated),
+          });
+        }
+      }
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || "任务结果保存失败");
+      setTasks((current) => current.map((item) => item.id === task.id
+        ? { ...item, status: "completed", resultText, resultUrl: normalizedResultUrl }
+        : item));
+      setActiveTaskId(null);
+      setNotice("结果已保存到本机数据库和任务记录。图片、视频和音频文件请从网页下载后导入素材库。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "结果保存失败，请检查本地 API。");
+    }
   }
 
 
@@ -754,7 +841,8 @@ export default function AIToolsPage() {
                         <input value={resultUrl} onChange={(event) => setResultUrl(event.target.value)} className="mt-2 w-full rounded-lg border border-white/10 bg-slate-900 px-3 py-2 text-sm text-white" placeholder="https://..." />
                       </label>
                       <div className="flex flex-wrap gap-2">
-                        <button onClick={() => saveResult(task)} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold hover:bg-emerald-600">保存结果</button>
+                        <button onClick={() => void captureWebResult(task)} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-xs text-cyan-100">从网页读取最新回答</button>
+                        <button onClick={() => void saveResult(task)} className="rounded-lg bg-emerald-700 px-4 py-2 text-xs font-semibold hover:bg-emerald-600">检查后保存结果</button>
                         <button onClick={() => setActiveTaskId(null)} className="rounded-lg border border-white/15 px-4 py-2 text-xs">取消</button>
                       </div>
                     </div>
@@ -768,9 +856,9 @@ export default function AIToolsPage() {
 
         <section className="grid gap-3 md:grid-cols-3">
           {[
-            ["网页由你控制", "本阶段通过系统默认浏览器打开 AI 网站，不读取网站密码、Cookie 或验证码。"],
+            ["网页由你控制", "支持站点在软件内嵌浏览器打开；不会读取网站密码、Cookie 或验证码。"],
             ["不自动触发付费", "打开网站不等于提交生成任务；复制提示词、提交生成和付费均由你确认。"],
-            ["结果可追溯", "任务提示词、工具名称、结果文字和链接保存在本机浏览器；下载文件由你导入素材库。"],
+            ["结果可追溯", "支持站点可读取当前最新回答供你检查后保存；下载文件按任务归档到本机素材库。"],
           ].map(([heading, description]) => <div key={heading} className="rounded-xl border border-white/10 bg-slate-950/50 p-4"><h3 className="text-sm font-semibold text-purple-100">{heading}</h3><p className="mt-2 text-xs leading-5 text-slate-400">{description}</p></div>)}
         </section>
       </div>

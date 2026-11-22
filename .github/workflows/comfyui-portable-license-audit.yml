@@ -1,0 +1,151 @@
+name: ComfyUI portable dependency license inventory
+
+# Each matrix leg downloads and audits exactly one official upstream portable archive.
+# Manual inventory only. This workflow does not upgrade the installed runtime,
+# build an installer, publish binaries, or approve third-party redistribution.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Optional pinned ComfyUI release tag (blank means latest official release)'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Optional pinned ComfyUI release tag (blank means latest official release)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    name: 'Inventory ${{ matrix.variant }} portable'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - variant: nvidia
+            asset: ComfyUI_windows_portable_nvidia.7z
+          - variant: nvidia-cu126
+            asset: ComfyUI_windows_portable_nvidia_cu126.7z
+          - variant: amd
+            asset: ComfyUI_windows_portable_amd.7z
+          - variant: intel
+            asset: ComfyUI_windows_portable_intel.7z
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve official release assets and verify SHA-256
+        id: assets
+        shell: pwsh
+        env:
+          REQUESTED_RELEASE_TAG: ${{ inputs.release_tag }}
+          PORTABLE_ASSET_NAME: ${{ matrix.asset }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $headers = @{ 'User-Agent' = 'AI-Comic-Studio-License-Audit'; 'Accept' = 'application/vnd.github+json' }
+          if ([string]::IsNullOrWhiteSpace($env:REQUESTED_RELEASE_TAG)) {
+            $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest' -Headers $headers -TimeoutSec 30
+          } else {
+            $tag = [Uri]::EscapeDataString($env:REQUESTED_RELEASE_TAG)
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/tags/$tag" -Headers $headers -TimeoutSec 30
+          }
+          if (!$release.tag_name -or !$release.assets) { throw 'Official ComfyUI release metadata is incomplete.' }
+          $asset = @($release.assets | Where-Object { $_.name -ceq $env:PORTABLE_ASSET_NAME }) | Select-Object -First 1
+          if (!$asset -or $asset.state -ne 'uploaded') { throw "Official portable asset is missing: $env:PORTABLE_ASSET_NAME" }
+          if ($asset.size -le 0 -or $asset.size -gt 12GB) { throw 'Portable asset size is invalid or exceeds the 12 GiB audit limit.' }
+          if ($asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') { throw 'Official portable asset has no trusted SHA-256 digest; refusing download.' }
+          $expectedHash = $Matches[1].ToLowerInvariant()
+          $assetUri = [Uri]$asset.browser_download_url
+          $expectedPath = "/Comfy-Org/ComfyUI/releases/download/$($release.tag_name)/$($asset.name)"
+          if ($assetUri.Scheme -ne 'https' -or $assetUri.Host -ne 'github.com' -or $assetUri.AbsolutePath -cne $expectedPath -or $assetUri.Query -or $assetUri.Fragment) {
+            throw 'Portable asset URL is not the exact official GitHub release URL.'
+          }
+
+          $sevenZipRelease = Invoke-RestMethod -Uri 'https://api.github.com/repos/ip7z/7zip/releases/latest' -Headers $headers -TimeoutSec 30
+          $sevenZip = @($sevenZipRelease.assets | Where-Object { $_.name -ceq '7zr.exe' }) | Select-Object -First 1
+          if (!$sevenZip -or $sevenZip.state -ne 'uploaded' -or $sevenZip.size -le 0 -or $sevenZip.size -gt 20MB) { throw 'Official 7-Zip release lacks a valid 7zr.exe asset.' }
+          if ($sevenZip.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') { throw 'Official 7zr.exe has no trusted SHA-256 digest.' }
+          $sevenZipHash = $Matches[1].ToLowerInvariant()
+          $sevenZipUri = [Uri]$sevenZip.browser_download_url
+          $expectedSevenZipPath = "/ip7z/7zip/releases/download/$($sevenZipRelease.tag_name)/7zr.exe"
+          if ($sevenZipUri.Scheme -ne 'https' -or $sevenZipUri.Host -ne 'github.com' -or $sevenZipUri.AbsolutePath -cne $expectedSevenZipPath -or $sevenZipUri.Query -or $sevenZipUri.Fragment) {
+            throw '7-Zip tool URL is not the exact official GitHub release URL.'
+          }
+
+          $tempRoot = Join-Path $env:RUNNER_TEMP 'comfyui-license-audit'
+          New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+          $portablePath = Join-Path $tempRoot $asset.name
+          $sevenZipPath = Join-Path $tempRoot '7zr.exe'
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $portablePath -TimeoutSec 1800
+          Invoke-WebRequest -Uri $sevenZip.browser_download_url -OutFile $sevenZipPath -TimeoutSec 180
+          if ((Get-Item -LiteralPath $portablePath).Length -ne [long]$asset.size) { throw 'Downloaded portable archive size does not match official release metadata.' }
+          if ((Get-FileHash -LiteralPath $portablePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedHash) { throw 'Portable archive SHA-256 verification failed.' }
+          if ((Get-Item -LiteralPath $sevenZipPath).Length -ne [long]$sevenZip.size) { throw 'Downloaded 7zr.exe size does not match official release metadata.' }
+          if ((Get-FileHash -LiteralPath $sevenZipPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sevenZipHash) { throw '7zr.exe SHA-256 verification failed.' }
+
+          $metadata = [ordered]@{
+            generated_utc = [DateTime]::UtcNow.ToString('o')
+            comfyui_release_tag = [string]$release.tag_name
+            portable_asset = [string]$asset.name
+            portable_size_bytes = [long]$asset.size
+            portable_sha256 = $expectedHash
+            portable_source = [string]$asset.browser_download_url
+            seven_zip_release_tag = [string]$sevenZipRelease.tag_name
+            seven_zip_size_bytes = [long]$sevenZip.size
+            seven_zip_sha256 = $sevenZipHash
+            seven_zip_source = [string]$sevenZip.browser_download_url
+            audit_status = 'pending'
+            distribution_approved = $false
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $tempRoot 'source-verification.json') -Encoding UTF8
+          "release_tag=$($release.tag_name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "portable_path=$portablePath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "seven_zip_path=$sevenZipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "metadata_path=$(Join-Path $tempRoot 'source-verification.json')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Generate dependency and license evidence inventory
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.assets.outputs.release_tag }}
+          PORTABLE_PATH: ${{ steps.assets.outputs.portable_path }}
+          SEVEN_ZIP_PATH: ${{ steps.assets.outputs.seven_zip_path }}
+          PORTABLE_ASSET_NAME: ${{ matrix.asset }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $reportPath = Join-Path $env:RUNNER_TEMP 'comfyui-license-audit/dependency-inventory.json'
+          ./scripts/audit-comfyui-portable-dependencies.ps1 -SevenZipPath $env:SEVEN_ZIP_PATH -ArchivePaths @($env:PORTABLE_PATH) -ReleaseTag $env:RELEASE_TAG -OutputPath $reportPath
+          if (!(Test-Path -LiteralPath $reportPath -PathType Leaf)) { throw 'Dependency inventory report was not created.' }
+          $report = Get-Content -LiteralPath $reportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($report.audit_status -ne 'pending' -or $report.distribution_approved -ne $false -or $report.release_tag -ne $env:RELEASE_TAG -or @($report.portable_variants).Count -ne 1) {
+            throw 'Inventory report is invalid or does not remain blocked for human review.'
+          }
+          $variant = @($report.portable_variants)[0]
+          if ($variant.asset -cne $env:PORTABLE_ASSET_NAME) { throw 'Inventory report asset name does not match the requested matrix variant.' }
+          $verificationPath = Join-Path $env:RUNNER_TEMP 'comfyui-license-audit/source-verification.json'
+          $verification = Get-Content -LiteralPath $verificationPath -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($verification.audit_status -ne 'pending' -or $verification.distribution_approved -ne $false) { throw 'Source verification metadata must remain pending and unapproved.' }
+          if ($variant.sha256 -cne $verification.portable_sha256) { throw 'Inventory archive SHA-256 differs from the verified official release digest.' }
+          $variant.archive_path = "ComfyUI-Payload/$($variant.asset)"
+          $report.portable_variants = @($variant)
+          $report | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $reportPath -Encoding UTF8
+
+      - name: Upload inventory report only (no runtime binaries)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ComfyUI-license-inventory-${{ matrix.variant }}
+          path: |
+            ${{ runner.temp }}\comfyui-license-audit\dependency-inventory.json
+            ${{ runner.temp }}\comfyui-license-audit\source-verification.json
+          if-no-files-found: error
+          retention-days: 30

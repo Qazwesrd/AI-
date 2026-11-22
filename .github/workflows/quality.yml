@@ -12,6 +12,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate ComfyUI third-party audit gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("docs/compliance/comfyui-portable-dependency-audit.json")
+          audit = json.loads(path.read_text(encoding="utf-8"))
+          assert audit["schema_version"] == 1
+          assert audit["audit_status"] == "pending"
+          assert audit["distribution_approved"] is False
+          variants = audit["portable_variants"]
+          expected = {
+              "ComfyUI_windows_portable_nvidia.7z",
+              "ComfyUI_windows_portable_nvidia_cu126.7z",
+              "ComfyUI_windows_portable_amd.7z",
+              "ComfyUI_windows_portable_intel.7z",
+          }
+          assert {item["asset"] for item in variants} == expected
+          assert all(item["inventory_status"] != "approved" for item in variants)
+          assert audit["local_ai_payload"]["runtime_audit_status"] == "not_started"
+          assert audit["local_ai_payload"]["model_license_review_status"] == "upstream_license_confirmed_exact_payload_digest_and_dependency_audit_pending"
+          assert audit["policy"]["approved_local_text_model_bundle"] == "qwen3:4b"
+          assert audit["policy"]["local_ai_payload_included_in_full_offline_installer"] is True
+          assert audit["policy"]["public_distribution_blocked_until_approved"] is True
+          print("ComfyUI, Ollama, and Qwen3 third-party dependency audits are correctly blocked pending review.")
+          PY
+      - name: Test ComfyUI portable dependency audit utility safety guards
+        run: python -m unittest apps/api/tests/test_comfyui_portable_audit_script.py -v
+      - name: Validate ComfyUI dependency inventory tool safeguards
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          script = Path("scripts/audit-comfyui-portable-dependencies.ps1").read_text(encoding="utf-8")
+          required = [
+              "7zr.exe",
+              "l -slt",
+              "METADATA",
+              "PKG-INFO",
+              'license_review_status = "pending"',
+              'inventory_status = "inventory_generated_review_pending"',
+              "distribution_approved = $false",
+              "MaximumEvidenceFiles",
+              "MaximumMetadataBytes",
+              "MaximumLicenseBytes",
+              "MaximumTotalEvidenceBytes",
+              "finally {",
+              "Remove-Item -LiteralPath $temporaryRoot",
+          ]
+          missing = [item for item in required if item not in script]
+          assert not missing, f"Dependency inventory safety checks missing: {missing}"
+          packer = Path("scripts/prepare-comfyui-offline-bundle.ps1").read_text(encoding="utf-8")
+          assert "ComfyUI-Payload/audit-comfyui-portable-dependencies.ps1" in packer
+          assert "dependency_inventory_tool" in packer
+          print("ComfyUI dependency inventory tool safeguards and offline-bundle inclusion are present.")
+          PY
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

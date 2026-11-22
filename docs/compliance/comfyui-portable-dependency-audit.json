@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "product": "AI漫剧制作大师",
+  "component": "ComfyUI Windows portable, Ollama Windows runtime, and bundled Qwen3 4B model",
+  "audit_status": "pending",
+  "distribution_approved": false,
+  "reviewed_at_utc": null,
+  "reviewer": null,
+  "release_blockers": [
+    "Review the completed v0.46.0 inventory evidence for all four official Windows portable variants; automated inventory is not legal approval.",
+    "Resolve packages with missing or ambiguous METADATA license fields (14 in NVIDIA, 14 in NVIDIA CUDA 12.6, 17 in AMD, 14 in Intel) using upstream license texts and notices.",
+    "Review copyleft and notice obligations identified in the inventories, including comfyui-embedded-docs GPL-3.0, pygit2 GPLv2 with linking exception, autocommand LGPLv3, certifi MPL-2.0, and tqdm MPL-2.0 AND MIT.",
+    "Review Intel Simplified Software License terms for the Intel oneAPI/MKL/TBB/Tcmlib components in the Intel portable variant.",
+    "Review every redistributable native runtime binary and its owner/license; the automated inventory now filters by native-binary extensions and known runtime-library filename markers, but this heuristic is not a complete binary ownership or license determination.",
+    "Collect exact license texts, copyright notices, attribution requirements, and source-offer/source-code obligations for each bundled component.",
+    "Review the exact 7-Zip executable and corresponding source archive licensing for the selected release.",
+    "Complete Ollama Windows amd64 runtime dependency inventory and exact Qwen3 4B manifest/blob digest and license review.",
+    "Resolve Stable Diffusion 1.5 Open RAIL-M distribution restrictions and enforceable end-user agreement before distributing its checkpoint.",
+    "Have all software, model, trademark, export, and redistribution obligations reviewed before any public or customer distribution."
+  ],
+  "portable_variants": [
+    {
+      "asset": "ComfyUI_windows_portable_nvidia.7z",
+      "inventory_status": "inventory_generated_review_pending",
+      "sha256": "6a5255c7ec01fdc54bdbd8e4507073cf6acda2fbeea74ae1829a50681af5fac6",
+      "release_tag": "v0.46.0",
+      "components": [],
+      "archive_size_bytes": 2085169944,
+      "python_package_count": 99
+    },
+    {
+      "asset": "ComfyUI_windows_portable_nvidia_cu126.7z",
+      "inventory_status": "inventory_generated_review_pending",
+      "sha256": "06ef2069702a7d7db7262e29a70ec524207f86c7bc4212f9dfcb7c977bf3e9ed",
+      "release_tag": "v0.46.0",
+      "components": [],
+      "archive_size_bytes": 1976423950,
+      "python_package_count": 99
+    },
+    {
+      "asset": "ComfyUI_windows_portable_amd.7z",
+      "inventory_status": "inventory_generated_review_pending",
+      "sha256": "00f42ed58381e194892b74e9085d4d5666fac1aab8f021094c3a745e9b52ad97",
+      "release_tag": "v0.46.0",
+      "components": [],
+      "archive_size_bytes": 1702415528,
+      "python_package_count": 102
+    },
+    {
+      "asset": "ComfyUI_windows_portable_intel.7z",
+      "inventory_status": "inventory_generated_review_pending",
+      "sha256": "db902d46c7ccf9627e4e0b7a45d52a2fc2b0b4d5dccb7052acfbc3d6124dc4d8",
+      "release_tag": "v0.46.0",
+      "components": [],
+      "archive_size_bytes": 1517732941,
+      "python_package_count": 119
+    }
+  ],
+  "known_components": [
+    {
+      "name": "ComfyUI",
+      "license": "GPL-3.0",
+      "evidence": "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
+      "status": "license_text_included_dependency_audit_pending"
+    },
+    {
+      "name": "7-Zip",
+      "license": "See upstream release license; do not assume a single SPDX identifier covers every component",
+      "evidence": "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt and corresponding source archive",
+      "status": "license_text_and_source_archive_included_exact_component_review_pending"
+    },
+    {
+      "name": "Ollama Windows amd64 standalone runtime",
+      "license": "MIT for Ollama project; bundled runtime dependencies require separate inventory",
+      "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Ollama-MIT-LICENSE.txt and exact release archive manifest",
+      "status": "runtime_release_digest_verified_dependency_audit_pending"
+    },
+    {
+      "name": "Qwen3 4B model",
+      "license": "Apache-2.0 as declared by Qwen3 upstream and Ollama model catalog",
+      "evidence": "LocalAI-Payload/THIRD_PARTY_NOTICES/Qwen3-APACHE-2.0-LICENSE.txt; Qwen3-MODEL-NOTICE.txt; exact Ollama manifest and blob SHA-256 inventory",
+      "status": "upstream_apache_2_0_license_confirmed_exact_ollama_payload_and_runtime_dependencies_pending"
+    },
+    {
+      "name": "comfyui-embedded-docs",
+      "license": "GPL-3.0 (as reported in v0.46.0 package metadata)",
+      "evidence": "ComfyUI portable v0.46.0 embedded Python dist-info inventory",
+      "status": "identified_review_obligations_pending"
+    },
+    {
+      "name": "pygit2",
+      "license": "GPLv2 with linking exception (as reported in package metadata)",
+      "evidence": "ComfyUI portable v0.46.0 embedded Python dist-info inventory",
+      "status": "identified_review_obligations_pending"
+    },
+    {
+      "name": "autocommand",
+      "license": "LGPLv3 (as reported in package metadata)",
+      "evidence": "ComfyUI portable v0.46.0 embedded Python dist-info inventory",
+      "status": "identified_review_obligations_pending"
+    },
+    {
+      "name": "certifi and tqdm",
+      "license": "MPL-2.0; tqdm also declares MIT",
+      "evidence": "ComfyUI portable v0.46.0 embedded Python dist-info inventory",
+      "status": "identified_review_obligations_pending"
+    },
+    {
+      "name": "Intel oneAPI components",
+      "license": "Intel Simplified Software License (including MKL, oneMKL, TBB and Tcmlib package metadata)",
+      "evidence": "ComfyUI portable v0.46.0 Intel variant inventory",
+      "status": "exact terms and redistribution review pending"
+    }
+  ],
+  "policy": {
+    "no_unreviewed_model_payloads": true,
+    "approved_local_text_model_bundle": "qwen3:4b",
+    "local_ai_payload_included_in_full_offline_installer": true,
+    "public_distribution_blocked_until_approved": true,
+    "no_unverified_license_claims": true
+  },
+  "local_ai_payload": {
+    "runtime_asset": "ollama-windows-amd64.zip",
+    "runtime_version": null,
+    "runtime_sha256": null,
+    "runtime_audit_status": "not_started",
+    "model": "qwen3:4b",
+    "model_manifest_sha256": null,
+    "model_blob_inventory_status": "not_started",
+    "model_license": "Apache-2.0",
+    "model_license_review_status": "upstream_license_confirmed_exact_payload_digest_and_dependency_audit_pending",
+    "upstream_license_evidence": {
+      "model_repository": "Qwen/Qwen3-4B",
+      "model_card_url": "https://huggingface.co/Qwen/Qwen3-4B",
+      "license": "Apache-2.0",
+      "ollama_model_page": "https://ollama.com/library/qwen3:4b",
+      "ollama_model_page_license": "Apache License Version 2.0",
+      "exact_ollama_manifest_sha256": null,
+      "review_note": "Upstream license identity is confirmed. This is not approval of the exact bundled Ollama conversion or its runtime dependencies; preserve the exact manifest, layer hashes, model attribution, and Apache-2.0 notice for each built payload.",
+      "exact_blob_hash_verification_implemented_in_builder": true,
+      "exact_blob_hashes_verified_for_current_release_payload": false
+    }
+  },
+  "image_model_candidates": [
+    {
+      "id": "comfy-org-sd15-fp16",
+      "name": "Stable Diffusion 1.5 FP16",
+      "publisher": "Comfy-Org",
+      "repository": "Comfy-Org/stable-diffusion-1.5",
+      "revision": "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f",
+      "asset": "v1-5-pruned-emaonly-fp16.safetensors",
+      "size_label": "约 2.13 GB；构建时必须取得精确字节数",
+      "sha256": "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916",
+      "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
+      "sha256_source": "Hugging Face pinned file page",
+      "license": "CreativeML Open RAIL-M",
+      "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+      "license_review_status": "restricted_license_terms_identified_user_agreement_and_acceptance_not_implemented",
+      "sha256_verified_locally": false,
+      "included_in_offline_bundle": false,
+      "hardware_status": "cpu_not_recommended",
+      "hardware_validation_status": "pending_target_device_test",
+      "use_restrictions_must_be_passed_to_users": true,
+      "distribution_approved": false,
+      "status": "candidate_only_not_downloaded",
+      "license_obligations": [
+        "Provide the complete CreativeML Open RAIL-M license to each recipient when redistributing the checkpoint.",
+        "Make paragraph 5 use-based restrictions and Attachment A enforceable in the user agreement governing model use/distribution.",
+        "Notify downstream recipients that the checkpoint and derivatives are subject to paragraph 5 restrictions.",
+        "Retain applicable copyright, patent, trademark, and attribution notices; do not imply upstream endorsement."
+      ],
+      "license_review_evidence": {
+        "license": "CreativeML Open RAIL-M dated August 22, 2022",
+        "source_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+        "key_sections": [
+          "4. Distribution and Redistribution",
+          "5. Use-based restrictions",
+          "Attachment A"
+        ],
+        "review_note": "The license grants reproduction/distribution subject to pass-through and use restrictions; it is not an unrestricted permissive license. No model redistribution approval is granted."
+      }
+    }
+  ],
+  "inventory_evidence": {
+    "release_tag": "v0.46.0",
+    "workflow_run_id": 44963877336,
+    "generated_from_verified_official_archives": true,
+    "automated_inventory_status": "completed_review_pending",
+    "distribution_approved": false,
+    "python_package_counts": {
+      "nvidia": 99,
+      "nvidia_cu126": 99,
+      "amd": 102,
+      "intel": 119
+    },
+    "missing_metadata_license_field_counts": {
+      "nvidia": 14,
+      "nvidia_cu126": 14,
+      "amd": 17,
+      "intel": 14
+    },
+    "note": "The inventory reports package metadata and evidence file paths; it is not a legal opinion and does not yet contain a complete binary-license determination."
+  }
+}

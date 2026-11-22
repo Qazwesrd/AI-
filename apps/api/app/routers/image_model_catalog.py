@@ -25,18 +25,18 @@ _CATALOG = [
         "name": "Stable Diffusion 1.5 FP16（基础模型）",
         "publisher": "Comfy-Org",
         "repository": "Comfy-Org/stable-diffusion-1.5",
-        "revision": "4fddeb7",
+        "revision": "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f",
         "filename": "v1-5-pruned-emaonly-fp16.safetensors",
         "format": "safetensors",
         "size_bytes": None,
         "size_label": "约 2.13 GB（上游页面显示值，非精确字节数）",
         "sha256": "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916",
-        "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/blob/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors",
-        "download_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors",
+        "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/blob/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
+        "download_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
         "license": "CreativeML OpenRAIL-M",
-        "license_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/blob/4fddeb7/LICENSE",
-        "license_status": "review_required",
-        "license_note": "OpenRAIL-M 含使用限制；不能据此直接承诺所有商业用途均获许可，发布作品前需阅读许可证及模型卡。",
+        "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
+        "license_status": "restricted_license_review_required",
+        "license_note": "CreativeML OpenRAIL-M 不是无条件的宽松许可证。第 4 条要求再分发时向接收者提供完整许可证、保留相关版权/专利/商标/归属声明，并将第 5 条用途限制作为可执行条款纳入管理模型使用/分发的协议，同时通知后续接收者。第 5 条及附件 A 禁止特定违法、伤害未成年人、隐私侵害、诽谤骚扰、歧视等用途。不得将其描述为无条件商业授权；本软件在提供可下载功能前还必须落实用户可见的许可接受和限制条款。",
         "hardware_status": "cpu_not_recommended",
         "hardware_note": "当前设备按 CPU 模式运行。该模型可作为 ComfyUI SD1.x 检查候选，但 CPU 生图预计较慢；文件大小不等于运行内存需求，必须先做小分辨率实机测试。",
         "recommended_directory": "ComfyUI/models/checkpoints",
@@ -45,9 +45,16 @@ _CATALOG = [
         "catalog_status": "preview_only",
         "download_eligible": False,
         "install_eligible": False,
+        "license_obligations": [
+            "随模型提供完整 CreativeML Open RAIL-M 许可证文本。",
+            "在用户下载/使用前展示许可证并取得明确接受记录。",
+            "将许可证第 5 条及附件 A 的用途限制写入可执行的用户协议，并向后续接收者传递。",
+            "保留模型相关版权、专利、商标和归属声明；不得暗示上游背书。",
+        ],
         "eligibility_blockers": [
             "尚未在本机完成下载后 SHA-256 复核。",
-            "CreativeML OpenRAIL-M 商用及内容限制尚待逐项审核。",
+            "尚未将 OpenRAIL-M 第 5 条/附件 A 用途限制落实为可执行用户条款并加入用户接受流程。",
+            "尚未将完整许可证、版权和归属声明纳入该模型的交付清单。",
             "尚未在目标 CPU-only 设备上完成 ComfyUI 实机性能测试。",
         ],
     }
@@ -91,7 +98,7 @@ def _parse_positive_int(value):
 def _head_pinned_file_metadata(url, opener=None):
     # The catalog is static and pinned; never accept a URL from the request.
     if not isinstance(url, str) or not url.startswith(
-        "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/"
+        "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/"
     ):
         raise ValueError("模型来源地址不在固定白名单中")
     client = opener or build_opener(_NoRedirectHandler())
@@ -140,7 +147,7 @@ def _head_pinned_file_metadata(url, opener=None):
             raise ValueError("无法取得精确文件大小；范围查询失败，未开始下载") from exc
         with ranged_response:
             range_header = ranged_response.headers.get("Content-Range", "")
-            match = __import__("re").fullmatch(r"bytes\\s+0-0/(\\d+)", range_header.strip(), flags=__import__("re").IGNORECASE)
+            match = __import__("re").fullmatch(r"bytes\s+0-0/(\d+)", range_header.strip(), flags=__import__("re").IGNORECASE)
             if match:
                 size = _parse_positive_int(match.group(1))
             # Consume at most one byte. A server ignoring Range is rejected.

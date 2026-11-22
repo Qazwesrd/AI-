@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("publishingDesktop", {
 contextBridge.exposeInMainWorld("aiBrowserDesktop", {
   openTask: (taskId, url) => ipcRenderer.invoke("ai-browser:open", { taskId, url }),
   fillPrompt: (taskId, prompt) => ipcRenderer.invoke("ai-browser:fill-prompt", { taskId, prompt }),
+  captureTextResult: (taskId) => ipcRenderer.invoke("ai-browser:capture-text-result", { taskId }),
   listOpenTasks: () => ipcRenderer.invoke("ai-browser:list-open-tasks"),
   uploadReferenceFiles: (taskId, fileIds) => ipcRenderer.invoke("ai-browser:upload-reference-files", { taskId, fileIds }),
   onDownloaded: (callback) => {
