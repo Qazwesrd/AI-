@@ -17,7 +17,7 @@ $AssetNames = @(
     "ComfyUI_windows_portable_amd.7z",
     "ComfyUI_windows_portable_intel.7z"
 )
-$AllowedRedirectHosts = @("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com")
+$AllowedRedirectHosts = @("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "huggingface.co", "cdn-lfs.huggingface.co", "cas-bridge.xethub.hf.co", "us.aws.cdn.hf.co")
 $ReleaseApi = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
 $SevenZipApi = "https://api.github.com/repos/ip7z/7zip/releases/latest"
 $MaxAssetBytes = 12GB
@@ -79,7 +79,7 @@ function Add-VerifiedRemoteEntry(
         throw "官方资产缺少有效 SHA-256：$EntryName"
     }
 
-    $currentUri = Assert-OfficialUri $Url @("github.com")
+    $currentUri = Assert-OfficialUri $Url @("github.com", "huggingface.co")
     $response = $null
     for ($redirect = 0; $redirect -le 5; $redirect++) {
         $response = $Client.GetAsync($currentUri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
@@ -283,6 +283,16 @@ try {
     $sevenZipTempPath = Join-Path $inventoryTempRoot "7zr.exe"
     $toolResult = Add-VerifiedRemoteEntry $archive $client "ComfyUI-Payload/7zr.exe" $sevenZipTool.browser_download_url ([long]$sevenZipTool.size) $sevenZipToolDigest $sevenZipTempPath
 
+    # Pinned Comfy-Org Stable Diffusion 1.5 FP16 checkpoint for first-run offline image generation.
+    # The source revision, exact byte length and SHA-256 are pinned to prevent mutable-branch drift.
+    $imageModelName = "v1-5-pruned-emaonly-fp16.safetensors"
+    $imageModelRevision = "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f"
+    $imageModelUrl = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/$imageModelRevision/$imageModelName"
+    $imageModelSize = [long]2132696762
+    $imageModelSha256 = "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916"
+    $imageModelEntry = "ComfyUI-Payload/models/checkpoints/$imageModelName"
+    $imageModelResult = Add-VerifiedRemoteEntry $archive $client $imageModelEntry $imageModelUrl $imageModelSize $imageModelSha256 $null
+
     foreach ($asset in $manifestAssets) {
         $assetTempPath = Join-Path $inventoryTempRoot $asset.name
         $reportTempPath = Join-Path $inventoryTempRoot ($asset.name + ".inventory.json")
@@ -333,6 +343,7 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
     $bundleAuditRegister.release_blockers[2] = "Review PyTorch, torchvision, torchaudio, CUDA/ROCm/XPU runtime libraries and their separate license and notice obligations for each GPU variant."
     $bundleAuditRegister.release_blockers[8] = "Manually review the recorded Qwen3 4B manifest digest and blob SHA-256 inventory against the exact upstream model revision and license."
     $bundleAuditRegister.release_blockers[10] = "Run a clean Windows installation and verify the included runtime, model store, third-party notices, and post-install offline operation."
+    $bundleAuditRegister.release_blockers += "Review Stable Diffusion 1.5 checkpoint provenance, CreativeML OpenRAIL-M downstream restriction notice, and model distribution obligations before public release."
     $bundleAuditRegister.known_components[0].status = "license_text_included_inventory_generated_manual_license_review_pending"
     $bundleAuditRegister.local_ai_payload.runtime_version = [string]$localAIManifest.ollama.version
     $bundleAuditRegister.local_ai_payload.runtime_sha256 = [string]$localAIManifest.ollama.sha256
@@ -346,6 +357,18 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
         Add-FileEntry $archive ("LocalAI-Payload/" + $relative) $localAIFile.FullName
     }
     $sevenZipSourceResult = Add-VerifiedRemoteEntry $archive $client "THIRD_PARTY_NOTICES/$($sevenZipSource.name)" $sevenZipSource.browser_download_url ([long]$sevenZipSource.size) $sevenZipSourceDigest
+
+    $imageLicenseUrl = "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE"
+    $imageLicenseUri = Assert-OfficialUri $imageLicenseUrl @("raw.githubusercontent.com")
+    $imageLicenseResponse = $client.GetAsync($imageLicenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$imageLicenseResponse.IsSuccessStatusCode) { throw "无法读取 Stable Diffusion CreativeML OpenRAIL-M 许可证。" }
+        $imageLicenseText = $imageLicenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($imageLicenseText -notmatch "CreativeML Open RAIL-M" -or $imageLicenseText -notmatch "Attachment A") {
+            throw "Stable Diffusion 模型许可证文本校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt" $imageLicenseText
+    } finally { $imageLicenseResponse.Dispose() }
 
     $licenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI/$($release.tag_name)/LICENSE"
     $licenseUri = Assert-OfficialUri $licenseUrl @("raw.githubusercontent.com")
@@ -391,7 +414,19 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
             intel = "Intel Arc only: ComfyUI_windows_portable_intel.7z"
             unknown = "stop-installation-no-network-fallback"
         }
-        model_policy = "ComfyUI image-generation checkpoints remain optional and are not included; the selected local text model qwen3:4b and its Ollama runtime are included in LocalAI-Payload for offline installation. Model redistribution review remains pending."
+        model_policy = "The pinned Stable Diffusion 1.5 FP16 checkpoint is included for offline image generation. CreativeML OpenRAIL-M use restrictions and distribution review remain pending; this bundle is internal validation only."
+        image_generation_model = @{
+            name = "Stable Diffusion 1.5 FP16"
+            file = $imageModelEntry
+            source = $imageModelUrl
+            revision = $imageModelRevision
+            size_bytes = $imageModelSize
+            sha256 = $imageModelSha256
+            license = "CreativeML OpenRAIL-M"
+            license_file = "THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
+            license_review_status = "pending"
+            distribution_approved = $false
+        }
         local_ai = @{
             runtime_version = $localAIManifest.ollama.version
             runtime_asset = "LocalAI-Payload/ollama-windows-amd64.zip"
@@ -478,6 +513,7 @@ try {
         }
     }
     $expectedEntries += @{ path = "ComfyUI-Payload/7zr.exe"; size = [long]$toolResult.size_bytes; sha256 = [string]$toolResult.sha256 }
+    $expectedEntries += @{ path = $imageModelEntry; size = [long]$imageModelResult.size_bytes; sha256 = [string]$imageModelResult.sha256 }
     $transactionInstaller = Join-Path $PSScriptRoot "install-local-engines-transaction.ps1"
     if (!(Test-Path -LiteralPath $transactionInstaller -PathType Leaf)) { throw "整套本地引擎事务安装脚本不存在：$transactionInstaller" }
     $expectedEntries += @{ path = "ComfyUI-Payload/install-local-engines-transaction.ps1"; size = (Get-Item -LiteralPath $transactionInstaller).Length; sha256 = (Get-FileHash -LiteralPath $transactionInstaller -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -510,6 +546,8 @@ try {
 
     foreach ($requiredName in @(
         "ComfyUI-Payload/manifest.json",
+        "ComfyUI-Payload/models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors",
+        "THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt",
         "LocalAI-Payload/manifest.json",
         "LocalAI-Payload/ollama-windows-amd64.zip",
         "LocalAI-Payload/install-local-ai-offline.ps1",
