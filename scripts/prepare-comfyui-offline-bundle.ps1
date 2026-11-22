@@ -612,7 +612,7 @@ AI漫剧制作大师 - 完整离线安装套件（内部验证版）
 5. 安装时不需要联网下载 ComfyUI、Ollama 或 Qwen3 4B；上述运行环境和文本模型均已包含在 ZIP 中。
 6. 本套件已包含 Stable Diffusion 1.5 FP16 图片生成检查点（约 2.13 GB）及 CreativeML Open RAIL-M 完整许可证。桌面端已加入本地完整许可证展示、使用限制确认记录和生图 API 门禁；该机制仍需法律审查，整套依赖审查完成前仅供内部验证，不得公开或客户分发。
 7. 本套件面向 Windows x64。ComfyUI 只对官方文档明确覆盖的 GPU 型号启用加速；未确认的设备使用 CPU 模式或停止安装。
-8. ComfyUI、ComfyUI Frontend、comfy-aimdo、7-Zip、Ollama 和 Qwen3 及其依赖许可证均须逐项审核；Frontend 与 comfy-aimdo 的 GPL-3.0 许可证文本已附带，但对应源代码和前端依赖通知仍需核实。审查完成前本套件仅供内部验证，不得公开或客户分发。
+8. ComfyUI、ComfyUI Frontend、comfy-aimdo、7-Zip、Ollama 和 Qwen3 及其依赖许可证均须逐项审核；Frontend 与 comfy-aimdo 的 GPL-3.0 许可证文本及固定提交源代码压缩包已附带，但二进制与源代码对应关系、前端传递依赖通知仍需核实。审查完成前本套件仅供内部验证，不得公开或客户分发。
 9. ComfyUI 依赖清点工具位于 ComfyUI-Payload\\audit-comfyui-portable-dependencies.ps1；本地 AI 安装脚本位于 LocalAI-Payload\\install-local-ai-offline.ps1。自动清点不等于许可证批准。
 
 本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
