@@ -464,6 +464,61 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
     $comfyAimdoSourceResult = Add-PinnedSourceEntry $archive $client "THIRD_PARTY_NOTICES/source-code/comfy-aimdo-v0.6.0-68088de9.zip" "https://codeload.github.com/Comfy-Org/comfy-aimdo/zip/$comfyAimdoSourceCommit" $comfyAimdoSourceCommit (Join-Path $inventoryTempRoot "comfy-aimdo-source.zip")
     $frontendSourceResult = Add-PinnedSourceEntry $archive $client "THIRD_PARTY_NOTICES/source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip" "https://codeload.github.com/Comfy-Org/ComfyUI_frontend/zip/$frontendSourceCommit" $frontendSourceCommit (Join-Path $inventoryTempRoot "comfyui-frontend-source.zip")
 
+    # Resolve the pinned frontend workspace's production dependency tree and retain
+    # every detected package LICENSE/COPYING/NOTICE file with a hash inventory.
+    $frontendExtractRoot = Join-Path $inventoryTempRoot "comfyui-frontend-source-extracted"
+    New-Item -ItemType Directory -Path $frontendExtractRoot -Force | Out-Null
+    Expand-Archive -LiteralPath (Join-Path $inventoryTempRoot "comfyui-frontend-source.zip") -DestinationPath $frontendExtractRoot -Force
+    $frontendRootCandidates = @(Get-ChildItem -LiteralPath $frontendExtractRoot -Directory | Where-Object {
+        Test-Path -LiteralPath (Join-Path $_.FullName "package.json") -PathType Leaf
+    })
+    if ($frontendRootCandidates.Count -ne 1) { throw "固定版本 ComfyUI Frontend 源代码包根目录数量异常。" }
+    $frontendSourceRoot = $frontendRootCandidates[0].FullName
+    $frontendAuditScript = Join-Path $PSScriptRoot "audit-comfyui-frontend-npm-licenses.ps1"
+    if (!(Test-Path -LiteralPath $frontendAuditScript -PathType Leaf)) { throw "ComfyUI Frontend npm 许可证清点脚本不存在。" }
+    $frontendAuditOutput = Join-Path $inventoryTempRoot "comfyui-frontend-npm-license-audit"
+    & $frontendAuditScript -SourceRoot $frontendSourceRoot -OutputRoot $frontendAuditOutput -SourceCommit $frontendSourceCommit
+    $frontendAuditReportPath = Join-Path $frontendAuditOutput "frontend-npm-dependency-licenses.json"
+    $frontendAuditSummaryPath = Join-Path $frontendAuditOutput "frontend-npm-dependency-summary.json"
+    if (!(Test-Path -LiteralPath $frontendAuditReportPath -PathType Leaf) -or !(Test-Path -LiteralPath $frontendAuditSummaryPath -PathType Leaf)) {
+        throw "ComfyUI Frontend npm 许可证清点未生成完整报告。"
+    }
+    $frontendAuditSummary = Get-Content -LiteralPath $frontendAuditSummaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($frontendAuditSummary.source_commit -cne $frontendSourceCommit -or
+        $frontendAuditSummary.distribution_approved -ne $false -or
+        [int]$frontendAuditSummary.package_count -lt 1) {
+        throw "ComfyUI Frontend npm 许可证清点报告的来源或审核状态无效。"
+    }
+    $frontendAuditLicenseFiles = @(Get-ChildItem -LiteralPath (Join-Path $frontendAuditOutput "licenses") -File -Recurse)
+    $frontendAuditBundleFiles = @()
+    foreach ($auditFile in @(Get-ChildItem -LiteralPath $frontendAuditOutput -File -Recurse)) {
+        $relative = $auditFile.FullName.Substring($frontendAuditOutput.Length).TrimStart("\", "/").Replace("\", "/")
+        $entryName = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/$relative"
+        Add-FileEntry $archive $entryName $auditFile.FullName
+        $fileHash = (Get-FileHash -LiteralPath $auditFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        $frontendAuditBundleFiles += @{
+            path = $entryName
+            installed_path = "licenses/ComfyUI-Frontend-NPM/$relative"
+            size_bytes = [long]$auditFile.Length
+            sha256 = $fileHash
+        }
+    }
+    if ($frontendAuditLicenseFiles.Count -lt 1) { throw "ComfyUI Frontend npm 依赖未发现任何许可证/NOTICE 文件，停止打包以便调查。" }
+    $frontendNpmAuditManifest = @{
+        report_file = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json"
+        summary_file = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json"
+        package_count = [int]$frontendAuditSummary.package_count
+        license_file_count = [int]$frontendAuditSummary.license_file_count
+        packages_missing_license_expression = [int]$frontendAuditSummary.packages_missing_license_expression
+        packages_without_detected_license_or_notice_file = [int]$frontendAuditSummary.packages_without_detected_license_or_notice_file
+        source_lockfile_sha256 = [string]$frontendAuditSummary.source_lockfile_sha256
+        status = "inventory_generated_manual_license_review_pending"
+        distribution_approved = $false
+        report_sha256 = (Get-FileHash -LiteralPath $frontendAuditReportPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        summary_sha256 = (Get-FileHash -LiteralPath $frontendAuditSummaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        files = $frontendAuditBundleFiles
+    }
+
     # GPL source licenses for the exact ComfyUI frontend and comfy-aimdo versions
     # found in the v0.46.0 portable archives. Immutable source commits prevent tag drift.
     $comfyAimdoCommit = "68088de9dce9f5e32231fccf230938769c5562da"
@@ -586,6 +641,7 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
             exact_wheel_sha256 = "7564e716da2d1e122612f067bcffda6c3b9bc766f3b9f8c85fc44cf1d9c54f85"
             exact_wheel_hash_match_status = "pending"
             frontend_dependency_notice_review_status = "pending"
+            npm_dependency_audit = $frontendNpmAuditManifest
         }
         seven_zip = @{
             version = $sevenZipRelease.tag_name
@@ -662,6 +718,13 @@ try {
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($comfyAimdoLicenseText); sha256 = (Get-TextSha256 $comfyAimdoLicenseText) }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendLicenseText); sha256 = (Get-TextSha256 $frontendLicenseText) }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendNoticeText); sha256 = (Get-TextSha256 $frontendNoticeText) }
+    foreach ($frontendAuditFile in $frontendAuditBundleFiles) {
+        $expectedEntries += @{
+            path = [string]$frontendAuditFile.path
+            size = [long]$frontendAuditFile.size_bytes
+            sha256 = [string]$frontendAuditFile.sha256
+        }
+    }
     $expectedEntries += @{ path = "Setup.exe"; size = [long]$setupItem.Length; sha256 = $setupHash }
     foreach ($localAIFile in $localAIPayloadFiles) {
         $relative = $localAIFile.FullName.Substring($LocalAIPayloadRoot.Length).TrimStart("\", "/").Replace("\", "/")
@@ -704,6 +767,8 @@ try {
         "THIRD_PARTY_NOTICES/ComfyUI-GPL-3.0-LICENSE.txt",
         "THIRD_PARTY_NOTICES/source-code/comfy-aimdo-v0.6.0-68088de9.zip",
         "THIRD_PARTY_NOTICES/source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip",
+        "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json",
+        "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json",
         "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt",
         "THIRD_PARTY_NOTICES/comfyui-portable-dependency-audit.json",
         "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json",
