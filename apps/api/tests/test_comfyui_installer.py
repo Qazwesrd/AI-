@@ -21,6 +21,13 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIn('$maximumEntries = 50000', install)
         self.assertIn('$maximumListingLines = ([long]$maximumEntries * 12) + 1000', install)
         self.assertIn('System.Collections.Generic.List[string]', install)
+        self.assertIn('$manifest.comfy_aimdo.license_file', install)
+        self.assertIn('$manifest.comfyui_frontend.license_file', install)
+        self.assertIn('Copy-Item -LiteralPath $comfyAimdoLicensePath', install)
+        self.assertIn('Copy-Item -LiteralPath $frontendLicensePath', install)
+        self.assertIn('comfy-aimdo-GPL-3.0-LICENSE.txt', prepare)
+        self.assertIn('ComfyUI-Frontend-GPL-3.0-LICENSE.txt', prepare)
+        self.assertIn('source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"', prepare)
 
     def test_low_disk_blocks_engine_install(self):
         result = assess_comfyui_install(
