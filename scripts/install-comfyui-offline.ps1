@@ -333,6 +333,14 @@ $bundleRoot = Split-Path -Parent $payload
 $comfyLicensePath = Join-Path $bundleRoot ([string]$manifest.license.license_file)
 $sevenZipLicensePath = Join-Path $bundleRoot ([string]$manifest.seven_zip.license_file)
 $sevenZipSourcePath = Join-Path $bundleRoot (([string]$manifest.seven_zip.source_archive).Replace("/", "\"))
+$comfyAimdoSourceRelative = [string]$manifest.comfy_aimdo.source_archive
+$frontendSourceRelative = [string]$manifest.comfyui_frontend.source_archive
+if ($comfyAimdoSourceRelative -cne "THIRD_PARTY_NOTICES/source-code/comfy-aimdo-v0.6.0-68088de9.zip" -or
+    $frontendSourceRelative -cne "THIRD_PARTY_NOTICES/source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip") {
+    throw "GPL 对应源代码包路径或版本不匹配。"
+}
+$comfyAimdoSourcePath = Join-Path $bundleRoot $comfyAimdoSourceRelative
+$frontendSourcePath = Join-Path $bundleRoot $frontendSourceRelative
 if (!(Test-Path -LiteralPath $comfyLicensePath -PathType Leaf) -or
     (Get-Content -LiteralPath $comfyLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE") {
     throw "缺少 ComfyUI GPL-3.0 许可证文件。"
@@ -344,6 +352,14 @@ if (!(Test-Path -LiteralPath $sevenZipLicensePath -PathType Leaf) -or
 if (!(Test-Path -LiteralPath $sevenZipSourcePath -PathType Leaf) -or
     (Get-Sha256 $sevenZipSourcePath) -ne ([string]$manifest.seven_zip.source_sha256).ToLowerInvariant()) {
     throw "7-Zip 对应源代码包缺失或 SHA-256 校验失败。"
+}
+if (!(Test-Path -LiteralPath $comfyAimdoSourcePath -PathType Leaf) -or
+    (Get-Sha256 $comfyAimdoSourcePath) -ne ([string]$manifest.comfy_aimdo.source_archive_sha256).ToLowerInvariant()) {
+    throw "comfy-aimdo GPL 对应源代码包缺失或 SHA-256 校验失败。"
+}
+if (!(Test-Path -LiteralPath $frontendSourcePath -PathType Leaf) -or
+    (Get-Sha256 $frontendSourcePath) -ne ([string]$manifest.comfyui_frontend.source_archive_sha256).ToLowerInvariant()) {
+    throw "ComfyUI Frontend GPL 对应源代码包缺失或 SHA-256 校验失败。"
 }
 $cpuArchitecture = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture | Select-Object -Unique)
 if ([Environment]::Is64BitOperatingSystem -ne $true -or $cpuArchitecture.Count -ne 1 -or $cpuArchitecture[0] -ne 9) {
@@ -474,6 +490,10 @@ try {
         Copy-Item -LiteralPath $comfyAimdoLicensePath -Destination (Join-Path $installedLicenseDir "comfy-aimdo-GPL-3.0-LICENSE.txt")
         Copy-Item -LiteralPath $frontendLicensePath -Destination (Join-Path $installedLicenseDir "ComfyUI-Frontend-GPL-3.0-LICENSE.txt")
         Copy-Item -LiteralPath $frontendNoticePath -Destination (Join-Path $installedLicenseDir "ComfyUI-Frontend-THIRD-PARTY-NOTICES.md")
+        $installedSourceCodeDir = Join-Path $installedLicenseDir "source-code"
+        New-Item -ItemType Directory -Path $installedSourceCodeDir -Force | Out-Null
+        Copy-Item -LiteralPath $comfyAimdoSourcePath -Destination (Join-Path $installedSourceCodeDir "comfy-aimdo-v0.6.0-source.zip")
+        Copy-Item -LiteralPath $frontendSourcePath -Destination (Join-Path $installedSourceCodeDir "ComfyUI-Frontend-v1.59.6-source.zip")
         if ((Get-Content -LiteralPath $installedImageLicense -Raw -Encoding UTF8) -notmatch "Attachment A") {
             throw "Stable Diffusion 模型许可证未能完整部署。"
         }
@@ -513,11 +533,15 @@ try {
             comfy_aimdo_license_file = "licenses/comfy-aimdo-GPL-3.0-LICENSE.txt"
             comfy_aimdo_source_commit = [string]$manifest.comfy_aimdo.source_commit
             comfy_aimdo_source_code_status = [string]$manifest.comfy_aimdo.source_code_status
+            comfy_aimdo_source_archive = "licenses/source-code/comfy-aimdo-v0.6.0-source.zip"
+            comfy_aimdo_source_archive_sha256 = [string]$manifest.comfy_aimdo.source_archive_sha256
             comfyui_frontend_license = "GPL-3.0-only"
             comfyui_frontend_license_file = "licenses/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"
             comfyui_frontend_third_party_notice_file = "licenses/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"
             comfyui_frontend_source_commit = [string]$manifest.comfyui_frontend.source_commit
             comfyui_frontend_source_code_status = [string]$manifest.comfyui_frontend.source_code_status
+            comfyui_frontend_source_archive = "licenses/source-code/ComfyUI-Frontend-v1.59.6-source.zip"
+            comfyui_frontend_source_archive_sha256 = [string]$manifest.comfyui_frontend.source_archive_sha256
             selection_reason = $selection.selection_reason
             installed_utc = [DateTime]::UtcNow.ToString("o")
             distribution_approved = $false
