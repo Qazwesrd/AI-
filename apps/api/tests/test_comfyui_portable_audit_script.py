@@ -14,7 +14,7 @@ class ComfyUIPortableAuditScriptTests(unittest.TestCase):
             "maximumListingLines", "System.Collections.Generic.List[string]",
             "MaximumLicenseBytes", "MaximumTotalEvidenceBytes", "skipped_total_evidence_limit", "license_review_status = \"pending\"",
             "distribution_approved = $false", "audit_status = \"pending\"",
-            "runtime_files", "runtime_file_entries", "license_files", "triton", "onnxruntime", "avcodec", "finally", "Remove-Item -LiteralPath $temporaryRoot",
+            "runtime_files", "runtime_file_entries", "sha256", "binary_kind", "component_mapping", "Get-FileHash -LiteralPath $runtimeFullPath", "license_files", "triton", "onnxruntime", "avcodec", "finally", "Remove-Item -LiteralPath $temporaryRoot",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, source)
