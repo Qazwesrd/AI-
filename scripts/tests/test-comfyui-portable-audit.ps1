@@ -69,9 +69,12 @@ try {
     $sitePackages = Join-Path $comfyRoot "python_embeded\Lib\site-packages"
     $metadataDir = Join-Path $sitePackages "audit_fixture-1.0.dist-info"
     $torchLib = Join-Path $sitePackages "torch\lib"
+    $torchInclude = Join-Path $sitePackages "torch\include"
     $pythonRoot = Join-Path $comfyRoot "python_embeded"
     $comfyAppRoot = Join-Path $comfyRoot "ComfyUI"
     New-Item -ItemType Directory -Path $metadataDir, $torchLib, $pythonRoot, $comfyAppRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $torchInclude -Force | Out-Null
+    "header fixture" | Set-Content -LiteralPath (Join-Path $torchInclude "torch.h") -Encoding ASCII
     @(
         "Metadata-Version: 2.1",
         "Name: audit-fixture-package",
@@ -164,6 +167,10 @@ try {
         }
         if (@($variant.runtime_files | Where-Object { $_ -match "cudart64_130\.dll$" }).Count -ne 1) {
             throw "依赖清点脚本没有识别 CUDA 运行库文件：$($variant.asset)"
+        }
+        if (@($variant.runtime_files | Where-Object { $_ -match "torch\\include\\torch\\.h$" }).Count -ne 0 -or
+            @($variant.runtime_files | Where-Object { $_ -match "\\.(dll|pyd|exe|so|dylib|lib|a)$" }).Count -lt 2) {
+            throw "依赖清点脚本必须只将原生二进制文件列为运行时证据，不得把头文件计入。"
         }
         if (@($variant.evidence_files | Where-Object { $_.extraction_status -eq "extracted" }).Count -lt 2) {
             throw "依赖清点脚本没有实际提取 METADATA 和许可证证据：$($variant.asset)"
