@@ -392,7 +392,7 @@ if (Test-Path -LiteralPath $installFullPath) {
 }
 $installDrive = [System.IO.Path]::GetPathRoot($installFullPath)
 $driveInfo = [System.IO.DriveInfo]::new($installDrive)
-$requiredFree = [Math]::Max(8GB, [long]$archiveInfo.ExpandedBytes + 1GB)
+$requiredFree = [Math]::Max(8GB, [long]$archiveInfo.ExpandedBytes + [long]$imageModel.size_bytes + 1GB)
 if ($driveInfo.AvailableFreeSpace -lt $requiredFree) {
     throw ("安装盘空间不足。至少需要 {0:N2} GiB，可用 {1:N2} GiB。" -f ($requiredFree / 1GB), ($driveInfo.AvailableFreeSpace / 1GB))
 }
