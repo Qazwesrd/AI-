@@ -32,9 +32,10 @@ permissions:
 # builds remain independent per pull request and never publish releases.
 concurrency:
   # Keep pull requests, push validation and manual offline-bundle builds
-  # independent; never cancel a long-running offline bundle build.
+  # independent. Superseded push validations may be cancelled; manual offline
+  # bundle builds run in their own group and are never cancelled by pushes.
   group: ${{ github.event_name == 'pull_request' && format('windows-installer-pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('windows-installer-offline-{0}', github.ref) || format('windows-installer-push-{0}', github.ref) }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   build-installer:
