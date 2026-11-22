@@ -362,6 +362,10 @@ if (!(Test-Path -LiteralPath $frontendSourcePath -PathType Leaf) -or
     throw "ComfyUI Frontend GPL 对应源代码包缺失或 SHA-256 校验失败。"
 }
 $frontendNpmAudit = $manifest.comfyui_frontend.npm_dependency_audit
+if ([string]$frontendNpmAudit.report_file -cne "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json" -or
+    [string]$frontendNpmAudit.summary_file -cne "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json") {
+    throw "ComfyUI Frontend npm 许可证报告路径或版本不匹配。"
+}
 if ($null -eq $frontendNpmAudit -or
     $frontendNpmAudit.status -cne "inventory_generated_manual_license_review_pending" -or
     $frontendNpmAudit.distribution_approved -ne $false -or
@@ -396,11 +400,11 @@ if (@($frontendNpmFiles | Where-Object { $_.path -ceq $frontendNpmExpectedReport
 foreach ($frontendNpmFile in $frontendNpmFiles) {
     $relativePath = [string]$frontendNpmFile.path
     $installedRelativePath = [string]$frontendNpmFile.installed_path
+    $expectedInstalledPath = "licenses/ComfyUI-Frontend-NPM/" + $relativePath.Substring("THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/".Length)
     if (!$relativePath.StartsWith("THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/", [System.StringComparison]::Ordinal) -or
         $relativePath -match '(^|/)\.\.(/|$)' -or
-        !$installedRelativePath.StartsWith("licenses/ComfyUI-Frontend-NPM/", [System.StringComparison]::Ordinal) -or
-        $installedRelativePath -match '(^|/)\.\.(/|$)') {
-        throw "ComfyUI Frontend npm 许可证文件路径不安全。"
+        $installedRelativePath -cne $expectedInstalledPath) {
+        throw "ComfyUI Frontend npm 许可证文件路径不安全或安装目标与来源不匹配。"
     }
     $sourceFile = Join-Path $bundleRoot $relativePath.Replace("/", "\")
     if (!(Test-Path -LiteralPath $sourceFile -PathType Leaf) -or
