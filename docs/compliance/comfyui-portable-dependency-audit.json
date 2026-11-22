@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "product": "AI漫剧制作大师",
-  "component": "ComfyUI Windows portable, Ollama Windows runtime, and bundled Qwen3 4B model",
+  "component": "ComfyUI Windows portable variants, Ollama Windows runtime, Qwen3 4B text model, and Stable Diffusion 1.5 FP16 image checkpoint",
   "audit_status": "pending",
   "distribution_approved": false,
   "reviewed_at_utc": null,
@@ -15,8 +15,8 @@
     "Collect exact license texts, copyright notices, attribution requirements, and source-offer/source-code obligations for each bundled component.",
     "Review the exact 7-Zip executable and corresponding source archive licensing for the selected release.",
     "Complete Ollama Windows amd64 runtime dependency inventory and exact Qwen3 4B manifest/blob digest and license review.",
-    "Resolve Stable Diffusion 1.5 Open RAIL-M distribution restrictions and enforceable end-user agreement before distributing its checkpoint.",
-    "Have all software, model, trademark, export, and redistribution obligations reviewed before any public or customer distribution."
+    "Have all software, model, trademark, export, and redistribution obligations reviewed before any public or customer distribution.",
+    "Review Stable Diffusion 1.5 FP16 checkpoint redistribution under CreativeML Open RAIL-M, provide its full license and enforceable use restrictions to downstream users, and complete legal review before public/customer distribution."
   ],
   "portable_variants": [
     {
@@ -110,14 +110,21 @@
       "license": "Intel Simplified Software License (including MKL, oneMKL, TBB and Tcmlib package metadata)",
       "evidence": "ComfyUI portable v0.46.0 Intel variant inventory",
       "status": "exact terms and redistribution review pending"
+    },
+    {
+      "name": "Stable Diffusion 1.5 FP16 image checkpoint",
+      "license": "CreativeML Open RAIL-M (restricted use and redistribution conditions)",
+      "evidence": "ComfyUI-Payload/models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors; THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt",
+      "status": "pinned_upstream_size_and_sha256_verified_builder_integration_added_local_payload_digest_and_end_to_end_validation_pending"
     }
   ],
   "policy": {
-    "no_unreviewed_model_payloads": true,
     "approved_local_text_model_bundle": "qwen3:4b",
     "local_ai_payload_included_in_full_offline_installer": true,
     "public_distribution_blocked_until_approved": true,
-    "no_unverified_license_claims": true
+    "no_unverified_license_claims": true,
+    "no_unreviewed_model_payloads_in_public_releases": true,
+    "unreviewed_model_payloads_allowed_for_internal_validation_only": true
   },
   "local_ai_payload": {
     "runtime_asset": "ollama-windows-amd64.zip",
@@ -149,20 +156,20 @@
       "repository": "Comfy-Org/stable-diffusion-1.5",
       "revision": "ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f",
       "asset": "v1-5-pruned-emaonly-fp16.safetensors",
-      "size_label": "约 2.13 GB；构建时必须取得精确字节数",
+      "size_label": "2,132,696,762 bytes (约 2.13 GB)",
       "sha256": "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916",
       "source_url": "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors",
-      "sha256_source": "Hugging Face pinned file page",
+      "sha256_source": "Hugging Face pinned file page and upstream Git LFS pointer",
       "license": "CreativeML Open RAIL-M",
       "license_url": "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/LICENSE",
-      "license_review_status": "restricted_license_terms_identified_user_agreement_and_acceptance_not_implemented",
+      "license_review_status": "restricted_license_terms_identified_full_license_bundled_in_builder_end_user_enforceable_acceptance_and_legal_review_pending",
       "sha256_verified_locally": false,
       "included_in_offline_bundle": false,
-      "hardware_status": "cpu_not_recommended",
+      "hardware_status": "cpu_fallback_available_per_comfyui_runtime; performance_on_target_integrated_amd_gpu_not_verified",
       "hardware_validation_status": "pending_target_device_test",
       "use_restrictions_must_be_passed_to_users": true,
       "distribution_approved": false,
-      "status": "candidate_only_not_downloaded",
+      "status": "pinned_and_configured_for_internal_offline_bundle_not_yet_built_or_locally_hash_verified",
       "license_obligations": [
         "Provide the complete CreativeML Open RAIL-M license to each recipient when redistributing the checkpoint.",
         "Make paragraph 5 use-based restrictions and Attachment A enforceable in the user agreement governing model use/distribution.",
@@ -178,7 +185,9 @@
           "Attachment A"
         ],
         "review_note": "The license grants reproduction/distribution subject to pass-through and use restrictions; it is not an unrestricted permissive license. No model redistribution approval is granted."
-      }
+      },
+      "size_bytes": 2132696762,
+      "configured_for_offline_bundle": true
     }
   ],
   "inventory_evidence": {
