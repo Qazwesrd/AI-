@@ -124,7 +124,21 @@ function buildProductionPrompt(input: {
       "不要假定网站支持特定控制参数；将参数建议与自然语言提示词分开。",
     ].join("\n");
   }
-  return [...common, specialist, "【最终交付】\n先给出可直接复制到所选 AI 网站的完整提示词；再给出简短执行注意事项。不要声称已经生成文件。"].join("\n\n");
+  const basePrompt = [...common, specialist, "【最终交付】\n先给出可直接复制到所选 AI 网站的完整提示词；再给出简短执行注意事项。不要声称已经生成文件。"].join("\n\n");
+  if (typeof window === "undefined") return basePrompt;
+  try {
+    const raw = window.localStorage.getItem("ai-comic-prompt-style-library-v1");
+    if (!raw) return basePrompt;
+    const saved = JSON.parse(raw) as { activeId?: string; templates?: Array<Record<string, unknown> & { id?: string; name?: string }>; prompts?: Record<string, string> };
+    const template = saved.templates?.find((item) => item.id === saved.activeId);
+    const stageKey = category === "text" ? "script" : category;
+    const customPrompt = saved.prompts?.[stageKey];
+    const fields: Array<[string, unknown]> = [["整体画风", template?.visual], ["人物设计", template?.character], ["服装材质", template?.clothing], ["场景设计", template?.scene], ["镜头构图", template?.camera], ["光线", template?.lighting], ["色彩", template?.color], ["画质", template?.quality]];
+    const styleText = fields.filter(([, value]) => typeof value === "string" && value.trim()).map(([label, value]) => label + "：" + String(value)).join("\n");
+    const negative = typeof template?.negative === "string" ? template.negative.trim() : "";
+    const sections = [customPrompt?.trim() ? "【提示词管理中心·" + stageKey + "专用规则】\n" + customPrompt.trim() : "", styleText ? "【已选视觉风格：" + (template?.name || "自定义风格") + "】\n" + styleText : "", negative && ["image", "storyboard", "video"].includes(category) ? "【统一负面约束】\n" + negative : ""].filter(Boolean);
+    return sections.length ? basePrompt + "\n\n" + sections.join("\n\n") + "\n\n严格执行以上项目风格与阶段规则；若与原著事实冲突，以原著事实为准。" : basePrompt;
+  } catch { return basePrompt; }
 }
 
 function makeId() {
