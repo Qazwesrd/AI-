@@ -11,10 +11,9 @@ try {
     $bytes = [byte[]]::new(5MB + 123)
     [Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
     [IO.File]::WriteAllBytes($source, $bytes)
-    & $split -InputZip $source -PartSizeBytes 2MB
-    $manifest = Join-Path $temp "sample.zip.parts.json"
     $copyJoiner = Join-Path $temp "join-offline-bundle.ps1"
-    Copy-Item $join $copyJoiner
+    & $split -InputZip $source -PartSizeBytes 2MB -JoinerPath $copyJoiner
+    $manifest = Join-Path $temp "sample.zip.parts.json"
     $result = Join-Path $temp "reassembled.zip"
     & $copyJoiner -ManifestPath $manifest -OutputPath $result
     if (!(Test-Path $result) -or (Get-FileHash $source -Algorithm SHA256).Hash -ne (Get-FileHash $result -Algorithm SHA256).Hash) { throw "分卷合并后的文件与源文件不一致。" }
