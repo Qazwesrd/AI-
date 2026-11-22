@@ -588,9 +588,9 @@ try {
     if (!(Test-Path -LiteralPath $transactionInstaller -PathType Leaf)) { throw "整套本地引擎事务安装脚本不存在：$transactionInstaller" }
     $expectedEntries += @{ path = "ComfyUI-Payload/install-local-engines-transaction.ps1"; size = (Get-Item -LiteralPath $transactionInstaller).Length; sha256 = (Get-FileHash -LiteralPath $transactionInstaller -Algorithm SHA256).Hash.ToLowerInvariant() }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"; size = [long]$sevenZipSourceResult.size_bytes; sha256 = [string]$sevenZipSourceResult.sha256 }
-    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($comfyAimdoLicenseText); sha256 = Get-TextSha256 $comfyAimdoLicenseText }
-    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendLicenseText); sha256 = Get-TextSha256 $frontendLicenseText }
-    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendNoticeText); sha256 = Get-TextSha256 $frontendNoticeText }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($comfyAimdoLicenseText); sha256 = (Get-TextSha256 $comfyAimdoLicenseText) }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendLicenseText); sha256 = (Get-TextSha256 $frontendLicenseText) }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendNoticeText); sha256 = (Get-TextSha256 $frontendNoticeText) }
     $expectedEntries += @{ path = "Setup.exe"; size = [long]$setupItem.Length; sha256 = $setupHash }
     foreach ($localAIFile in $localAIPayloadFiles) {
         $relative = $localAIFile.FullName.Substring($LocalAIPayloadRoot.Length).TrimStart("\", "/").Replace("\", "/")
