@@ -145,8 +145,10 @@ class ChatInput(BaseModel):
     task: str = "chat"
 
 @router.get("/ai/providers")
-def list_providers():
-    # Third-party cloud API providers are no longer configurable in this product.
+def list_providers(db: Session = Depends(get_db)):
+    # Remove legacy encrypted third-party API credentials from older installs.
+    db.query(AIProviderConfig).delete(synchronize_session=False)
+    db.commit()
     return {"items": []}
 
 @router.post("/ai/providers")
