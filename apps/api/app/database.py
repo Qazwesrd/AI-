@@ -384,6 +384,21 @@ def init_database():
             f"数据库结构升级失败：{migration_error}{rollback_message}"
         ) from migration_error
 
+    # Strict zero-cost mode: purge any encrypted third-party cloud AI API
+    # credentials left by older versions during every successful startup.
+    from app.models.studio import AIProviderConfig
+
+    with SessionLocal() as session:
+        removed_provider_configs = session.query(AIProviderConfig).delete(
+            synchronize_session=False
+        )
+        session.commit()
+    if removed_provider_configs:
+        print(
+            f"[安全清理] 已删除旧版第三方云端 AI API 配置 "
+            f"及其加密密钥记录：{removed_provider_configs} 条"
+        )
+
     print(f"[数据库初始化完成] {DATABASE_PATH}")
     return True
 
