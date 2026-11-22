@@ -47,3 +47,13 @@ Evidence:
 ## Release gate
 
 No approval is granted by this note. Keep `audit_status=pending`, `distribution_approved=false`, and public/customer distribution blocked until exact payload evidence and required legal review are complete.
+
+
+## Additional source verification and application safeguard
+
+- The current offline bundle builder selects the matching official 7-Zip source archive (7z*-src.7z) from the same release, includes it under THIRD_PARTY_NOTICES/, records its SHA-256 and size, and verifies the archive entry during bundle creation. The installer rechecks that source archive hash before extraction. This closes the earlier uncertainty about whether a corresponding source archive is included; it does not finish the exact 7zr.exe component-level review of the composite LGPL, unRAR restriction, BSD and public-domain terms.
+- The offline installer copies the complete Stable Diffusion CreativeML Open RAIL-M license into the installed ComfyUI engine's licenses/ directory.
+- The desktop image-generation screen now reads and displays that installed full license locally (so reading it does not depend on internet access), presents the Attachment A restrictions in Chinese, and records the user's click-through acceptance in the selected application data directory.
+- The local API rejects generation requests for the bundled SD 1.5 checkpoint until the current license version is accepted. The acceptance record can be revoked; other independently installed checkpoints are not blocked by this SD 1.5-specific gate.
+- Automated tests were added for acceptance persistence, revocation, stale terms, Windows checkpoint paths, and missing local license text. These are source-level safeguards; they still need to pass CI and be exercised in the packaged Windows app.
+- This is a technical click-through safeguard, not a legal opinion or a determination that the agreement is enforceable in every jurisdiction. Obtain legal review before redistribution. The exact checkpoint payload hash and target-device performance remain unverified.
