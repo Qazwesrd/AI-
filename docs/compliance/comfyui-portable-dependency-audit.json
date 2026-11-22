@@ -19,7 +19,8 @@
     "Verify the installed-app CreativeML Open RAIL-M full-text display and persisted click-through acceptance gate, preserve paragraph 5 restrictions for every model user, and complete legal review before any public/customer distribution.",
     "Review comfyui-frontend-package 1.59.6's exact 30.1 MB wheel frontend assets and embedded third-party licenses; the bundled METADATA has no license declaration, classifier, project URL or license files, and PyPI reports no provenance.",
     "For comfy-aimdo 0.6.0, verify the exact installed Windows wheel digest and include/provide corresponding GPL-3.0 source; the portable artifacts do contain the 36,091-byte dist-info LICENSE file, but that is not the corresponding source.",
-    "Resolve the AMD ROCm 7.2.1 rocm, rocm-sdk-core and rocm-sdk-libraries-custom packages' exact Windows component licenses and proprietary runtime terms; AMD licenses ROCm components individually."
+    "Resolve the AMD ROCm 7.2.1 rocm, rocm-sdk-core and rocm-sdk-libraries-custom packages' exact Windows component licenses and proprietary runtime terms; AMD licenses ROCm components individually.",
+    "For comfyui-frontend-package 1.59.6, retain the upstream GPL-3.0-only license and corresponding source, then enumerate all frontend npm dependency and asset notices from the exact wheel/build; the PyPI wheel and sdist have no provenance metadata."
   ],
   "portable_variants": [
     {
@@ -128,9 +129,9 @@
     },
     {
       "name": "comfyui-frontend-package 1.59.6",
-      "license": "Not declared in archived METADATA; exact frontend asset license set must be enumerated",
-      "evidence": "ComfyUI v0.46.0 inventory artifact: METADATA 117 bytes, no License/License-Expression/classifier/License-File/project URL; PyPI wheel SHA-256 7564e716da2d1e122612f067bcffda6c3b9bc766f3b9f8c85fc44cf1d9c54f85",
-      "status": "exact_wheel_asset_and_embedded_third_party_license_audit_pending"
+      "license": "GPL-3.0-only (confirmed by the exact upstream ComfyUI_frontend v1.59.6 package.json and LICENSE)",
+      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.",
+      "status": "upstream_gpl_3_0_only_confirmed_exact_pypi_wheel_provenance_and_embedded_frontend_dependency_notice_review_pending"
     },
     {
       "name": "AMD ROCm Windows SDK 7.2.1 packages",
@@ -235,6 +236,9 @@
       "amd": 12,
       "intel": 12
     },
-    "note": "These strict counts differ from earlier counts that included classifier-only records. Artifact review is evidence only, not approval."
+    "note": "These strict counts differ from earlier counts that included classifier-only records. Artifact review is evidence only, not approval.",
+    "frontend_upstream_tag": "v1.59.6",
+    "frontend_upstream_commit": "c62d747f378e0fa277cbb5137bffaf282598c64c",
+    "frontend_license": "GPL-3.0-only"
   }
 }
