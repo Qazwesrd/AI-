@@ -86,7 +86,7 @@ try {
         $actualCount = @(Get-ChildItem -LiteralPath (Join-Path $artifactStage "group$group") -File).Count
         if ($actualCount -ne $expectedGroupCounts[$group - 1]) { throw "模拟下载分组 $group 文件数量不正确。" }
         New-Item -ItemType Directory -Path $downloaded -Force | Out-Null
-        Copy-Item -LiteralPath (Join-Path $artifactStage "group$group/*") -Destination $downloaded
+        Get-ChildItem -LiteralPath (Join-Path $artifactStage "group$group") -File | Copy-Item -Destination $downloaded
     }
     $downloadedManifest = Join-Path $downloaded "artifact-layout.zip.parts.json"
     $downloadedJoiner = Join-Path $downloaded "AI漫剧制作大师-离线套件合并工具.ps1"
@@ -97,11 +97,7 @@ try {
         throw "三个下载分组无法还原与原始 ZIP 完全一致的文件。"
     }
     $downloadedChecksum = (Get-Content -LiteralPath (Join-Path $downloaded "artifact-layout.zip.sha256") -Raw).Trim()
-    if ($downloadedChecksum -notmatch ('^' + [regex]::Escape($artifactHash) + '\\s+artifact-layout\\.zip
-} finally {
-    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
-}
-)) {
+    if (!$downloadedChecksum.StartsWith("$artifactHash  artifact-layout.zip")) {
         throw "模拟下载的完整 ZIP SHA-256 文件内容不正确。"
     }
 
