@@ -23,7 +23,7 @@ const defaultPrompts: PromptSet = {
   voice: "根据角色身份、年龄感、情绪和场景生成自然中文配音。区分角色音色与说话习惯，控制语速、停顿、重音和情绪，不添加原文没有的台词。"
 };
 
-const styleSeeds: Array<Omit<StyleTemplate, "custom">> = [
+const styleSeeds = ([
   { id:"guoman-traditional",name:"传统国风",group:"国漫",description:"东方审美、传统服饰与含蓄典雅的画面",visual:"高品质中国风动画美术，东方审美，细腻线描与精致造型",character:"符合东方人物审美，五官自然耐看，神态含蓄生动",clothing:"传统服饰结构准确，织物纹理、刺绣与配饰细节清晰",scene:"亭台楼阁、山水庭院、古典器物，空间布局有秩序",camera:"电影构图，层次分明，主体突出",lighting:"柔和自然光，适度轮廓光",color:"雅致低饱和配色，朱红、黛青、暖金协调",quality:"精致国风动画质感，细节清楚，画面统一",negative:DEFAULT_NEGATIVE },
   { id:"guoman-modern",name:"现代国漫",group:"国漫",description:"现代商业国漫，鲜明角色设计与电影感",visual:"高完成度现代中国动画电影美术风格",character:"角色设计鲜明，面部结构稳定，表情自然",clothing:"服装设计有辨识度，材质与褶皱真实",scene:"具有空间纵深的现代或幻想场景",camera:"电影级镜头语言，动态构图",lighting:"体积光与环境反射自然",color:"层次丰富、对比明确的电影调色",quality:"高精度动画电影画面，主体清晰",negative:DEFAULT_NEGATIVE },
   { id:"xianxia",name:"仙侠玄幻",group:"国漫",description:"仙山、法术、灵气与东方幻想",visual:"东方仙侠幻想动画风格，宏大而精致",character:"角色气质鲜明，神态坚定或空灵",clothing:"飘逸多层衣袍，纹饰精细，布料动态自然",scene:"仙山云海、古殿、灵脉与奇幻地貌",camera:"大场面远景结合有张力的近景",lighting:"云隙光、灵性辉光，控制特效强度",color:"青蓝、银白、暖金等协调搭配",quality:"电影级东方奇幻动画质感",negative:DEFAULT_NEGATIVE },
@@ -46,7 +46,7 @@ const styleSeeds: Array<Omit<StyleTemplate, "custom">> = [
   { id:"cyberpunk",name:"赛博朋克",group:"特殊题材",description:"未来都市、霓虹与科技细节",visual:"高品质赛博朋克科幻视觉设计",character:"角色造型有科技感，人体结构自然",clothing:"功能性未来服装与机械细节",scene:"未来都市、全息界面、雨夜街道",camera:"电影级广角与纵深构图",lighting:"霓虹边缘光与潮湿反射",color:"青蓝与洋红霓虹对比",quality:"精细科幻电影美术",negative:DEFAULT_NEGATIVE },
   { id:"post-apoc",name:"末日废土",group:"特殊题材",description:"荒芜环境、磨损材质与生存氛围",visual:"末日废土电影概念美术",character:"坚韧真实的人物形象",clothing:"磨损、尘土与实用生存装备",scene:"荒废城市、残骸、沙尘与植被侵蚀",camera:"广阔环境镜头与紧张近景结合",lighting:"强烈自然光与尘雾散射",color:"土黄、灰褐与低饱和冷色",quality:"高细节电影概念画面",negative:DEFAULT_NEGATIVE },
   { id:"oriental-myth",name:"东方神话",group:"特殊题材",description:"神祇、古老神殿与东方神秘感",visual:"东方神话史诗视觉风格",character:"神性气质与清晰人物轮廓",clothing:"神话礼服、甲胄与象征性纹样",scene:"神殿、天界、古老遗迹与奇观",camera:"史诗尺度与人物情绪兼顾",lighting:"神圣体积光与层次阴影",color:"玉青、鎏金、朱红协调",quality:"宏大精致的神话电影美术",negative:DEFAULT_NEGATIVE }
-].map(item => ({ ...item, custom: false }));
+] satisfies Array<Omit<StyleTemplate, "custom">>).map((item): StyleTemplate => ({ ...item, custom: false }));
 
 const emptyTemplate = (): StyleTemplate => ({
   id: "custom-" + Date.now(), name: "我的自定义风格", group: "国漫", description: "自定义视觉风格",
