@@ -376,7 +376,7 @@ jobs:
             if ($sourceHash -cne $stagedHash) { throw "暂存上传元数据 SHA-256 不一致：$required" }
           }
           $stagedChecksum = (Get-Content -LiteralPath (Join-Path $group3 "$base.sha256") -Raw).Trim()
-          if ($stagedChecksum -notmatch ('^' + [regex]::Escape($archiveHash) + '\\s+' + [regex]::Escape($base) + '$')) {
+          if ($stagedChecksum -notmatch ('^' + [regex]::Escape($archiveHash) + '\s+' + [regex]::Escape($base) + '$')) {
             throw "暂存的原始 ZIP SHA-256 文件内容不正确。"
           }
           if (@(Get-ChildItem -LiteralPath (Join-Path $stage "group1") -File).Count -ne [math]::Min(4, $parts.Count) -or
