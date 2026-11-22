@@ -87,23 +87,29 @@ foreach ($storeEntry in $storeEntries) {
         } catch {
             throw "Invalid package metadata in pnpm store: $candidateManifest"
         }
-        $name = [string]$metadata.name
-        $version = [string]$metadata.version
+        $nameProperty = $metadata.PSObject.Properties["name"]
+        $versionProperty = $metadata.PSObject.Properties["version"]
+        $licenseProperty = $metadata.PSObject.Properties["license"]
+        $repositoryProperty = $metadata.PSObject.Properties["repository"]
+        $name = if ($nameProperty) { [string]$nameProperty.Value } else { "" }
+        $version = if ($versionProperty) { [string]$versionProperty.Value } else { "" }
         if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($version)) {
             throw "Installed npm dependency has no name or version: $candidateManifest"
         }
         $key = "$name@$version"
+        $licenseRaw = if ($licenseProperty) { $licenseProperty.Value } else { $null }
+        $repositoryRaw = if ($repositoryProperty) { $repositoryProperty.Value } else { $null }
         $licenseValue = $null
-        if ($metadata.license -is [string]) {
-            $licenseValue = [string]$metadata.license
-        } elseif ($null -ne $metadata.license) {
-            $licenseValue = $metadata.license | ConvertTo-Json -Compress -Depth 8
+        if ($licenseRaw -is [string]) {
+            $licenseValue = [string]$licenseRaw
+        } elseif ($null -ne $licenseRaw) {
+            $licenseValue = $licenseRaw | ConvertTo-Json -Compress -Depth 8
         }
         $repositoryValue = $null
-        if ($metadata.repository -is [string]) {
-            $repositoryValue = [string]$metadata.repository
-        } elseif ($null -ne $metadata.repository -and $metadata.repository.PSObject.Properties.Name -contains "url") {
-            $repositoryValue = [string]$metadata.repository.url
+        if ($repositoryRaw -is [string]) {
+            $repositoryValue = [string]$repositoryRaw
+        } elseif ($null -ne $repositoryRaw -and $repositoryRaw.PSObject.Properties.Name -contains "url") {
+            $repositoryValue = [string]$repositoryRaw.url
         }
         if (!$packages.ContainsKey($key)) {
             $packages[$key] = @{
@@ -114,7 +120,7 @@ foreach ($storeEntry in $storeEntries) {
                 package_json_sha256 = (Get-FileHash -LiteralPath $candidateManifest -Algorithm SHA256).Hash.ToLowerInvariant()
                 source_store_entry = $storeEntry.Name
                 license_files = @()
-                metadata_status = if ($metadata.license) { "license_expression_declared_review_pending" } else { "license_expression_missing_manual_review_required" }
+                metadata_status = if ($licenseValue) { "license_expression_declared_review_pending" } else { "license_expression_missing_manual_review_required" }
             }
         } else {
             $existing = $packages[$key]
