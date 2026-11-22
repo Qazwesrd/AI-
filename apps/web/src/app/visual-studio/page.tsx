@@ -160,6 +160,40 @@ export default function VisualStudioPage() {
     }
   }
 
+  function applySavedVisualStyle(promptText: string) {
+    try {
+      const raw = localStorage.getItem("ai-comic-prompt-style-library-v1");
+      if (!raw) return promptText;
+      const library = JSON.parse(raw) as {
+        activeId?: string;
+        templates?: Array<Record<string, unknown>>;
+      };
+      const template = library.templates?.find((item) => item.id === library.activeId);
+      if (!template) return promptText;
+      const fields = [
+        ["整体视觉风格", template.visual],
+        ["人物表现", template.character],
+        ["服装与材质", template.clothing],
+        ["场景环境", template.scene],
+        ["镜头与构图", template.camera],
+        ["光线与氛围", template.lighting],
+        ["色彩体系", template.color],
+        ["画质要求", template.quality],
+      ] as const;
+      const guidance = fields
+        .filter(([, value]) => typeof value === "string" && value.trim())
+        .map(([label, value]) => label + "：" + String(value).trim())
+        .join("。");
+      const negative = typeof template.negative === "string" ? template.negative.trim() : "";
+      const marker = "已应用本地视觉风格模板：" + String(template.name || "自定义风格");
+      if (promptText.includes(marker)) return promptText;
+      return promptText + "\\n\\n" + marker + "。\\n" + guidance
+        + (negative ? "\\n风格负面提示词：" + negative : "");
+    } catch {
+      return promptText;
+    }
+  }
+
   function buildPrompt() {
     const selected = assets.find((item) => item.id === selectedAsset);
     const base = selected
