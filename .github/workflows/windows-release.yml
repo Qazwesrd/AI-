@@ -282,6 +282,21 @@ jobs:
             throw "完整离线套件预计约 13 GiB，包含 ComfyUI 四种运行包、本地 Qwen3 和 Stable Diffusion 图片模型；打包过程建议至少 24 GiB 可用空间；当前仅 $freeGiB GiB。为避免生成损坏包，已在下载大文件前停止。"
           }
 
+      - name: Set up pinned Node.js and pnpm for frontend license audit
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        uses: actions/setup-node@v4
+        with:
+          node-version: "26.8.2"
+
+      - name: Install pinned pnpm for frontend license audit
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        shell: pwsh
+        run: |
+          npm install --global pnpm@11.13.1
+          if ($LASTEXITCODE -ne 0) { throw "Pinned pnpm installation failed." }
+          if ((node --version) -ne "v26.8.2") { throw "Unexpected Node.js version for ComfyUI Frontend audit." }
+          if ((pnpm --version) -ne "11.13.1") { throw "Unexpected pnpm version for ComfyUI Frontend audit." }
+
       - name: Build and verify complete offline bundle
         if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         shell: pwsh
