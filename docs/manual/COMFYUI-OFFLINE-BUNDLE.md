@@ -2,7 +2,7 @@
 
 本流程从项目源码制作一个完整的 Windows x64 离线 ZIP。套件包含桌面端 Setup.exe、四种 ComfyUI 官方 Portable 运行包、Ollama Windows x64 本地运行环境、Qwen3 4B 文本模型、安装脚本、SHA-256 清单和第三方许可证资料。
 
-安装目标机不需要联网下载 ComfyUI、Ollama 或 Qwen3 4B。ComfyUI 图片生成检查点仍是独立可选资源，不包含在本套件中。
+安装目标机不需要联网下载 ComfyUI、Ollama、Qwen3 4B 或套件内指定的 Stable Diffusion 1.5 FP16 图片检查点。注意：该图片模型采用 CreativeML Open RAIL-M 许可，当前再分发审批仍未通过，因此本套件只能用于内部构建与兼容性验证，不能作为公开分发或最终正式交付包。
 
 ## 构建环境和空间要求
 
@@ -101,9 +101,50 @@ $archives = @(
 
 Ollama 和 Qwen3 的自动清点结果随 LocalAI-Payload\manifest.json 保存。自动清点和哈希核验不等于法律审核；四种 ComfyUI 变体、Ollama 传递依赖及模型许可都必须经过人工复核后，才能考虑解除分发门禁。
 
+## GitHub Actions 三组下载与合并（内部验证产物）
+
+完整离线 ZIP 会被拆成最多 12 个分卷，每卷不超过 1,900,000,000 字节，再分成三个 GitHub Actions artifact：
+
+| GitHub 下载产物 | 内容 |
+| --- | --- |
+| `AI-Comic-Studio-Offline-Bundle-Volumes-1` | 第 1～4 卷 |
+| `AI-Comic-Studio-Offline-Bundle-Volumes-2` | 第 5～8 卷 |
+| `AI-Comic-Studio-Offline-Bundle-Volumes-3` | 第 9～12 卷（实际存在的剩余卷）、分卷清单、合并工具、完整 ZIP SHA-256 文件 |
+
+第三组中的文件名固定为：
+
+- `AI漫剧制作大师-完整离线安装套件.zip.parts.json`
+- `AI漫剧制作大师-离线套件合并工具.ps1`
+- `AI漫剧制作大师-完整离线安装套件.zip.sha256`
+
+**必须下载全部三个产物。** GitHub 下载得到的是三个 artifact ZIP；请分别解压这三个 ZIP，再把解压出来的所有文件复制到同一个新文件夹。不要把三个 artifact ZIP 原样放在一起，也不要只下载第一组。若某组下载或解压失败，重新下载该组，不要尝试用缺卷文件合并。
+
+在同一个文件夹中确认能看到所有 `.part001`、`.part002` 等分卷，以及上述清单、合并工具和 SHA-256 文件。然后在该文件夹空白处打开 PowerShell，执行：
+
+~~~powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ".\AI漫剧制作大师-离线套件合并工具.ps1" -ManifestPath ".\AI漫剧制作大师-完整离线安装套件.zip.parts.json"
+~~~
+
+合并工具会先检查每个分卷的文件名、大小和 SHA-256，再生成完整 ZIP，并再次核对完整 ZIP 的大小和 SHA-256。成功后会在当前目录生成：
+
+`AI漫剧制作大师-完整离线安装套件.zip`
+
+可额外核对完整 ZIP 的 SHA-256：
+
+~~~powershell
+$expected = (Get-Content -Raw ".\AI漫剧制作大师-完整离线安装套件.zip.sha256").Trim().Split()[0].ToLowerInvariant()
+$actual = (Get-FileHash ".\AI漫剧制作大师-完整离线安装套件.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "完整离线 ZIP SHA-256 不匹配，请重新下载相关分卷。" }
+"SHA-256 校验通过"
+~~~
+
+只有合并工具和 SHA-256 双重校验均通过后，才解压完整 ZIP；再进入解压后的根目录，运行其中的 `Setup.exe`。不要单独运行 GitHub 上另行上传的普通 Setup artifact：它不是完整离线套件，缺少离线引擎与模型载荷。
+
+GitHub Actions artifact 当前保留 14 天，下载链接过期后需要重新生成产物。三组 artifact 只有在手动启动 `windows-release.yml` 且 `build_offline_bundle=true` 时才会生成；普通 PR 检查不会自动生成完整离线包。
+
 ## 重要发布限制
 
-- 完整 ZIP 约 11 GiB，不能作为单个 GitHub Release 附件上传。必须先确定获批且不产生未经授权费用的分发渠道。
+- 完整 ZIP 预计约 13 GiB，不能作为单个 GitHub Release 附件上传。必须先确定获批且不产生未经授权费用的分发渠道。
 - ComfyUI、7-Zip、Ollama 和 Qwen3 的许可证资料随包提供，但这不代表全部依赖审核已经完成。
 - 模型权重许可与软件依赖许可分别审核。
 - 必须在真实 NVIDIA、AMD、Intel 目标设备上完成安装、启动、停止、健康检查及图片生成验收后，才能宣称正式版全面支持这些硬件。
