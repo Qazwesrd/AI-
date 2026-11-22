@@ -163,7 +163,7 @@ for ($i = 0; $i -lt $manifestParts.Count; $i++) {
 if ($partTotal -ne [long]$zip.Length) {
     throw "分卷总大小与原始 ZIP 不一致。"
 }
-$actualParts = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$([IO.Path]::GetFileName($OutputZip)).part*")
+$actualParts = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$([IO.Path]::GetFileName($OutputZip)).part*" | Where-Object { $_.Name -match ('^' + [regex]::Escape([IO.Path]::GetFileName($OutputZip)) + '\.part\d{3}$') })
 if ($actualParts.Count -ne $manifestParts.Count) {
     throw "输出目录存在清单之外的额外分卷或缺失分卷。"
 }
