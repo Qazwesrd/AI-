@@ -345,7 +345,7 @@ jobs:
           if (!(Test-Path -LiteralPath "$resourcePack.sha256" -PathType Leaf)) { throw "独立 AI 资源包 SHA-256 文件缺失。" }
           $hashLine = (Get-Content -LiteralPath "$resourcePack.sha256" -Raw).Trim()
           $actualHash = (Get-FileHash -LiteralPath $resourcePack -Algorithm SHA256).Hash.ToLowerInvariant()
-          if (if (!$hashLine.StartsWith($actualHash) -or !$hashLine.EndsWith([IO.Path]::GetFileName($resourcePack))) {
+          if (!$hashLine.StartsWith($actualHash) -or !$hashLine.EndsWith([IO.Path]::GetFileName($resourcePack))) {
             throw "独立 AI 资源包 SHA-256 校验失败。"
           }
           Write-Host ("Standalone AI resource pack: {0:N2} GiB" -f ((Get-Item $resourcePack).Length / 1GB))
