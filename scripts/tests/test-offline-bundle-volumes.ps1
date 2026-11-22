@@ -63,7 +63,7 @@ try {
     [IO.File]::WriteAllBytes($artifactSource, $artifactBytes)
     & $split -InputZip $artifactSource -PartSizeBytes 1MB
     $artifactManifest = Join-Path $temp "artifact-layout.zip.parts.json"
-    $artifactParts = @(Get-ChildItem -LiteralPath $temp -File -Filter "artifact-layout.zip.part*" | Sort-Object Name)
+    $artifactParts = @(Get-ChildItem -LiteralPath $temp -File -Filter "artifact-layout.zip.part*" | Where-Object { $_.Name -match '^artifact-layout\.zip\.part\d{3}$' } | Sort-Object Name)
     if ($artifactParts.Count -ne 10) { throw "三组下载布局测试未生成预期的 10 个分卷。" }
 
     $artifactStage = Join-Path $temp "artifact-stage"
