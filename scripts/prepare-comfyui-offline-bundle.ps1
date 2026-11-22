@@ -500,6 +500,7 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
             version = "0.6.0"
             license = "GPL-3.0"
             license_file = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"
+            license_sha256 = (Get-TextSha256 $comfyAimdoLicenseText)
             source_repository = "https://github.com/Comfy-Org/comfy-aimdo"
             source_commit = $comfyAimdoCommit
             source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"
@@ -510,7 +511,9 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
             version = "1.59.6"
             license = "GPL-3.0-only"
             license_file = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"
+            license_sha256 = (Get-TextSha256 $frontendLicenseText)
             third_party_notice_file = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"
+            third_party_notice_sha256 = (Get-TextSha256 $frontendNoticeText)
             source_repository = "https://github.com/Comfy-Org/ComfyUI_frontend"
             source_commit = $frontendCommit
             source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"
