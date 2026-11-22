@@ -138,14 +138,23 @@ foreach ($storeEntry in $storeEntries) {
             $safePackage = [regex]::Replace($key, '[^A-Za-z0-9._@+-]', '_')
             $destinationRelative = Join-Path $safePackage $relative
             $destination = Join-Path $licenseRoot $destinationRelative
+            $sourceHash = (Get-FileHash -LiteralPath $licenseFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $originalRelative = $relative.Replace("\", "/")
+            $existingLicenseFile = @($record.license_files | Where-Object { $_.original_path -ceq $originalRelative })
+            if ($existingLicenseFile.Count -gt 0) {
+                if ($existingLicenseFile[0].sha256 -cne $sourceHash) {
+                    throw "Conflicting license/NOTICE file contents for duplicate npm package $key : $originalRelative"
+                }
+                continue
+            }
             $destinationDirectory = Split-Path -Parent $destination
             New-Item -ItemType Directory -Path $destinationDirectory -Force | Out-Null
             Copy-Item -LiteralPath $licenseFile.FullName -Destination $destination -Force
             $record.license_files += @{
                 path = ("licenses/" + $destinationRelative.Replace("\", "/"))
                 size_bytes = [long]$licenseFile.Length
-                sha256 = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
-                original_path = $relative.Replace("\", "/")
+                sha256 = $sourceHash
+                original_path = $originalRelative
             }
         }
     }
