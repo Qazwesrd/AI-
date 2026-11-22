@@ -335,8 +335,11 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
         $registerVariant.sha256 = [string]$inventoryVariant[0].sha256
         $registerVariant.release_tag = [string]$inventoryVariant[0].release_tag
         $registerVariant.components = $inventoryVariant[0].components
-        $registerVariant.inventory_report_path = $inventoryReportPath
-        $registerVariant.inventory_generated_utc = [string]$inventoryBase.generated_utc
+        # The checked-in audit register intentionally has a stable schema and
+        # may not yet contain generated evidence fields. Add them safely rather
+        # than assigning a property that does not exist on a PSCustomObject.
+        $registerVariant | Add-Member -NotePropertyName inventory_report_path -NotePropertyValue $inventoryReportPath -Force
+        $registerVariant | Add-Member -NotePropertyName inventory_generated_utc -NotePropertyValue ([string]$inventoryBase.generated_utc) -Force
     }
     $bundleAuditRegister.release_blockers[0] = "Manually review the generated file inventory for each official Windows portable archive and identify bundled redistributable components not surfaced by automated metadata scanning."
     $bundleAuditRegister.release_blockers[1] = "Review embedded Python package metadata and license evidence for completeness; confirm package licenses and notices manually."
