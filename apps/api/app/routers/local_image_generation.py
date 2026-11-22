@@ -20,6 +20,10 @@ from app.models.media import MediaFile, MediaTask
 from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryboardMediaLink, StoryboardMediaRevision, StoryAssetLink
 from app.models.visual import VisualAsset
 from app.services.media_service import STORAGE
+from app.services.model_license_acceptance import (
+    OPENRAIL_TERMS_VERSION, get_openrail_acceptance,
+    require_openrail_acceptance, set_openrail_acceptance,
+)
 from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(prefix="/api/local-ai/images", tags=["本地图片生成"])
@@ -41,6 +45,11 @@ STYLE_GUIDANCE = {
     "3D漫": "high-quality 3D animated film still, detailed 3D character design, cinematic rendering, polished materials",
     "2D漫": "high-quality 2D anime illustration, clean line art, expressive cel shading, carefully composed animation frame",
 }
+
+
+class OpenRailAcceptanceInput(BaseModel):
+    accepted: bool
+    terms_version: str = Field(min_length=1, max_length=40)
 
 
 class LocalVisualAssetGenerateInput(BaseModel):
@@ -215,6 +224,16 @@ def _node_input_choices(node_info: dict, input_name: str):
         if isinstance(spec, list) and spec and isinstance(spec[0], list):
             return [value for value in spec[0] if isinstance(value, str)]
     return []
+
+
+@router.get("/license/creativeml-openrail-m/acceptance")
+def read_openrail_acceptance():
+    return get_openrail_acceptance()
+
+
+@router.post("/license/creativeml-openrail-m/acceptance")
+def update_openrail_acceptance(data: OpenRailAcceptanceInput):
+    return set_openrail_acceptance(data.accepted, data.terms_version)
 
 
 @router.get("/reference-capabilities")
@@ -468,6 +487,7 @@ def preflight_local_image_batch(data: LocalImageBatchInput, db: Session = Depend
 def generate_local_image_batch(data: LocalImageBatchInput, db: Session = Depends(get_db)):
     if not data.confirm_local_generation:
         raise HTTPException(400, "批量生成会连续占用本机 CPU/GPU；请明确确认后再提交。")
+    require_openrail_acceptance(data.checkpoint)
     if data.width % 64 or data.height % 64:
         raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
     rows, missing = _prepare_batch_shots(data, db)
@@ -886,6 +906,7 @@ def generate_local_visual_asset_image(
 def generate_local_image(payload: LocalImageGenerateInput):
     if not payload.confirm_local_generation:
         raise HTTPException(400, "本地图片生成会占用电脑资源；请勾选确认后再开始。")
+    require_openrail_acceptance(payload.checkpoint)
     if payload.width % 64 or payload.height % 64:
         raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
     object_info = _local_request("/object_info/CheckpointLoaderSimple")
@@ -1728,6 +1749,7 @@ def generate_reference_conditioned_shot(
 ):
     if not data.confirm_local_generation:
         raise HTTPException(400, "参考图条件生图会占用本机 CPU/GPU；请明确确认后再提交。")
+    require_openrail_acceptance(data.checkpoint)
     if data.width % 64 or data.height % 64:
         raise HTTPException(400, "图片宽度和高度必须是 64 的倍数。")
     project = db.query(StoryProject).filter(StoryProject.id == project_id).first()
