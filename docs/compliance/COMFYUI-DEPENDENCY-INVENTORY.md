@@ -57,3 +57,9 @@ The complete offline installer now prepares a separate `LocalAI-Payload` contain
 - Ollama's bundled transitive dependencies and the exact model revision still require manual license review. The central audit register remains `pending` and public/customer distribution remains blocked.
 
 The offline bundle includes both the Qwen3 4B local text model and the pinned Stable Diffusion 1.5 FP16 image checkpoint. The latter is included for internal validation only; its click-through acceptance gate is implemented, while exact payload hash verification and legal review remain release blockers.
+
+
+## ComfyUI Frontend npm dependency license inventory
+
+The complete offline builder runs `scripts/audit-comfyui-frontend-npm-licenses.ps1` against the source archive pinned to ComfyUI Frontend v1.59.6 commit `c62d747f378e0fa277cbb5137bffaf282598c64c`. The build pins Node.js 26.8.2 and pnpm 11.13.1, performs a frozen production-only workspace install with lifecycle scripts disabled, enumerates packages in the pnpm virtual store, and copies detected LICENSE/LICENCE/COPYING/NOTICE files into the offline bundle with SHA-256 entries. The installer verifies and installs the generated JSON inventory, summary, and all collected license/notice files.
+This is a conservative workspace-wide production inventory, not proof of the exact dependency closure embedded in the PyPI wheel. Missing or ambiguous license declarations and wheel/source correspondence still require manual review. The central audit register remains pending and distribution remains blocked until the generated first-build evidence is reviewed.
