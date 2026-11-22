@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from importlib import import_module
 
-from sqlalchemy import create_engine, Table, Column, Integer, String, select
+from sqlalchemy import create_engine, Table, Column, Integer, String, select, inspect
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -389,11 +389,15 @@ def init_database():
     # This is a one-time complete-offline-bundle acceptance build trigger.
     from app.models.studio import AIProviderConfig
 
-    with SessionLocal() as session:
-        removed_provider_configs = session.query(AIProviderConfig).delete(
-            synchronize_session=False
-        )
-        session.commit()
+    removed_provider_configs = 0
+    # Some legacy/test databases intentionally predate this table. Do not
+    # fail startup or migrations when the optional table is absent.
+    if inspect(engine).has_table(AIProviderConfig.__tablename__):
+        with SessionLocal() as session:
+            removed_provider_configs = session.query(AIProviderConfig).delete(
+                synchronize_session=False
+            )
+            session.commit()
     if removed_provider_configs:
         print(
             f"[安全清理] 已删除旧版第三方云端 AI API 配置 "
