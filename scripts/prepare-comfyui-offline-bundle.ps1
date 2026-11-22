@@ -731,7 +731,7 @@ Write-Host ("ZIP 大小：{0:N2} GiB" -f ($zipItem.Length / 1GB))
 Write-Host "ZIP SHA-256：$zipHash"
 ) { throw "源代码提交 SHA 无效：$EntryName" }
     $uri = Assert-OfficialUri $Url @("codeload.github.com")
-    if ($uri.AbsolutePath -notmatch "/archive/$PinnedCommit\.zip$" -or $uri.Query -or $uri.Fragment) {
+    if ($uri.AbsolutePath -notmatch "/zip/$PinnedCommit$" -or $uri.Query -or $uri.Fragment) {
         throw "源代码压缩包 URL 未固定到指定提交：$EntryName"
     }
     $response = $null
