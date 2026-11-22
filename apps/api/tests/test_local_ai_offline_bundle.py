@@ -71,6 +71,10 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, packer)
         self.assertIn("prepare-local-ai-offline-payload.ps1", wrapper)
+        build_script = (ROOT / "scripts" / "build-windows.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("本地测试包", build_script)
+        self.assertNotIn("测试前必读.txt", build_script)
+        self.assertIn("no standalone test package is created or uploaded", build_script)
         self.assertIn("-LocalAIPayloadRoot $localAIPayloadRoot", wrapper)
         self.assertIn("ComfyUI-Payload/install-local-engines-transaction.ps1", packer)
         self.assertIn("install-local-engines-transaction.ps1", nsis)
