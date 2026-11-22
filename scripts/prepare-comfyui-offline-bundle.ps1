@@ -56,7 +56,52 @@ function Add-PinnedSourceEntry(
     [string]$PinnedCommit,
     [string]$TempPath
 ) {
-    if ($PinnedCommit -notmatch '^[0-9a-f]{40}
+    if ($PinnedCommit.Length -ne 40 -or $PinnedCommit -notmatch '^[0-9a-f]+$') { throw "源代码提交 SHA 无效：$EntryName" }
+    $uri = Assert-OfficialUri $Url @("codeload.github.com")
+    if ($uri.AbsolutePath -notmatch ("/zip/" + [regex]::Escape($PinnedCommit) + "$") -or $uri.Query -or $uri.Fragment) {
+        throw "源代码压缩包 URL 未固定到指定提交：$EntryName"
+    }
+    $response = $null
+    for ($redirect = 0; $redirect -le 3; $redirect++) {
+        $response = $Client.GetAsync($uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+        if ([int]$response.StatusCode -in @(301, 302, 303, 307, 308)) {
+            $location = $response.Headers.Location
+            $response.Dispose()
+            if (!$location) { throw "源代码下载重定向缺少 Location：$EntryName" }
+            if (!$location.IsAbsoluteUri) { $location = [Uri]::new($uri, $location) }
+            $uri = Assert-OfficialUri $location.AbsoluteUri @("codeload.github.com")
+            continue
+        }
+        break
+    }
+    if (!$response) { throw "未取得固定提交源代码响应：$EntryName" }
+    try {
+        if (!$response.IsSuccessStatusCode) { throw "固定提交源代码下载失败：$EntryName HTTP $([int]$response.StatusCode)" }
+        $input = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $output = [System.IO.File]::Open($TempPath, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
+        $buffer = [byte[]]::new($ChunkBytes)
+        [long]$received = 0
+        try {
+            while (($read = $input.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $received += $read
+                if ($received -gt 2GB) { throw "固定提交源代码包超过 2 GiB：$EntryName" }
+                $output.Write($buffer, 0, $read)
+                $hasher.AppendData($buffer, 0, $read)
+            }
+            if ($received -lt 1024) { throw "固定提交源代码包大小异常：$EntryName" }
+            $digest = [BitConverter]::ToString($hasher.GetHashAndReset()).Replace("-", "").ToLowerInvariant()
+        } finally {
+            $hasher.Dispose()
+            $output.Dispose()
+            $input.Dispose()
+        }
+        Add-FileEntry $Archive $EntryName $TempPath
+        return @{ path = $EntryName; size_bytes = $received; sha256 = $digest; source_commit = $PinnedCommit }
+    } finally { $response.Dispose() }
+}
+
+function Get-TextSha256([string]$Text) {
     $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Text)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try { return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant() }
@@ -537,7 +582,7 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
             source_archive = $frontendSourceResult.path
             source_archive_sha256 = $frontendSourceResult.sha256
             source_archive_size_bytes = $frontendSourceResult.size_bytes
-            source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"
+            source_code_status = "upstream_commit_pinned_source_archive_included"
             exact_wheel_sha256 = "7564e716da2d1e122612f067bcffda6c3b9bc766f3b9f8c85fc44cf1d9c54f85"
             exact_wheel_hash_match_status = "pending"
             frontend_dependency_notice_review_status = "pending"
