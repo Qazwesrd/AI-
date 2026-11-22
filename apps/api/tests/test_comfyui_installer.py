@@ -30,7 +30,14 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         self.assertIn('$manifest.comfyui_frontend.third_party_notice_sha256', install)
         self.assertIn('comfy-aimdo-GPL-3.0-LICENSE.txt', prepare)
         self.assertIn('ComfyUI-Frontend-GPL-3.0-LICENSE.txt', prepare)
-        self.assertIn('source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"', prepare)
+        self.assertIn('source_code_status = "upstream_commit_pinned_source_archive_included"', prepare)
+        self.assertIn('Add-PinnedSourceEntry', prepare)
+        self.assertIn('source-code/comfy-aimdo-v0.6.0-68088de9.zip', prepare)
+        self.assertIn('source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip', prepare)
+        self.assertIn('$manifest.comfy_aimdo.source_archive_sha256', install)
+        self.assertIn('$manifest.comfyui_frontend.source_archive_sha256', install)
+        self.assertIn('Copy-Item -LiteralPath $comfyAimdoSourcePath', install)
+        self.assertIn('Copy-Item -LiteralPath $frontendSourcePath', install)
 
     def test_low_disk_blocks_engine_install(self):
         result = assess_comfyui_install(
