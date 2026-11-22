@@ -415,6 +415,10 @@ function StoryboardBatchImagePanel({ projects, checkpoint, style, width, height,
   const [result, setResult] = useState<BatchSubmitResult | null>(null);
   const [history, setHistory] = useState<BatchHistoryTask[]>([]);
   const [confirmed, setConfirmed] = useState(false);
+  const [openRailAccepted, setOpenRailAccepted] = useState(false);
+  const [openRailBusy, setOpenRailBusy] = useState(false);
+  const [openRailError, setOpenRailError] = useState("");
+  const [openRailLoading, setOpenRailLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const project = projects.find((item) => String(item.id) === projectId);
@@ -676,6 +680,35 @@ export default function LocalImageStudioPage() {
   }, [refreshRuntime]);
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
+  useEffect(() => {
+    let active = true;
+    fetch(`${API}/api/local-ai/images/license/creativeml-openrail-m/acceptance`, { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "读取模型许可证确认状态失败");
+        if (active) setOpenRailAccepted(data.accepted === true);
+      })
+      .catch((err) => { if (active) setOpenRailError(err instanceof Error ? err.message : "读取许可证状态失败"); })
+      .finally(() => { if (active) setOpenRailLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const isOpenRailCheckpoint = checkpoint.replaceAll("\\", "/").split("/").pop()?.toLowerCase() === "v1-5-pruned-emaonly-fp16.safetensors";
+
+  async function updateOpenRailAcceptance(accepted: boolean) {
+    setOpenRailBusy(true); setOpenRailError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/license/creativeml-openrail-m/acceptance`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accepted, terms_version: "2022-08-22" }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "保存许可证确认状态失败");
+      setOpenRailAccepted(data.accepted === true);
+      setMessage(data.accepted ? "已保存 Stable Diffusion 1.5 使用限制确认。该记录仅保存在本机。" : "已撤销 Stable Diffusion 1.5 使用限制确认。");
+    } catch (err) { setOpenRailError(err instanceof Error ? err.message : "保存许可证确认状态失败"); }
+    finally { setOpenRailBusy(false); }
+  }
 
 
   useEffect(() => {
@@ -783,6 +816,7 @@ export default function LocalImageStudioPage() {
     if (!checkpoint) { setError("请先安装并选择一个 ComfyUI 图片模型。"); return; }
     if (!prompt.trim()) { setError("请填写图片提示词。"); return; }
     if (!confirmed) { setError("请先确认本地生成会占用电脑资源。"); return; }
+    if (isOpenRailCheckpoint && !openRailAccepted) { setError("请先阅读并接受 Stable Diffusion 1.5 的 CreativeML Open RAIL-M 使用限制。"); return; }
     setLoading(true); setError(""); setMessage(""); setTask(null);
     try {
       const body: Record<string, unknown> = {
@@ -900,6 +934,33 @@ export default function LocalImageStudioPage() {
         </select>
       </section>
 
+      {isOpenRailCheckpoint && <section className="rounded-2xl border border-amber-300/30 bg-amber-950/25 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h2 className="text-lg font-semibold text-amber-100">Stable Diffusion 1.5 使用许可确认</h2>
+            <p className="mt-1 text-sm text-amber-100/70">该模型采用 CreativeML Open RAIL-M（2022-08-22）。完整许可证及附件 A 具有约束力，以下为受限用途摘要。</p>
+          </div>
+          <a href="https://huggingface.co/spaces/CompVis/stable-diffusion-license" target="_blank" rel="noreferrer" className="text-sm text-cyan-200 underline">阅读完整官方许可证</a>
+        </div>
+        <ul className="mt-4 list-disc space-y-2 pl-5 text-sm leading-6 text-amber-50/90">
+          <li>不得违反任何适用的国家、联邦、州、地方或国际法律法规。</li>
+          <li>不得以任何方式剥削、伤害或试图剥削、伤害未成年人。</li>
+          <li>不得为伤害他人而生成或传播可核实的虚假信息或内容。</li>
+          <li>不得生成或传播可用于伤害个人的个人身份信息。</li>
+          <li>不得诽谤、贬损或以其他方式骚扰他人。</li>
+          <li>不得用于会对个人法律权利产生不利影响，或创设、变更具有约束力义务的全自动决策。</li>
+          <li>不得基于个人或群体的线上/线下社会行为、已知或预测的个人/人格特征，实施歧视或伤害。</li>
+          <li>不得利用特定群体因年龄、身体或心理特征产生的脆弱性，实质性扭曲其行为并造成或可能造成身心伤害。</li>
+          <li>不得基于法律保护的特征或类别歧视个人或群体。</li>
+          <li>不得提供医疗建议或医疗结果解读。</li>
+          <li>不得生成或传播用于司法、执法、移民或庇护程序的信息，包括以文本画像等方式预测个人欺诈或犯罪。</li>
+        </ul>
+        <p className="mt-3 text-xs leading-5 text-amber-100/65">许可证第 4、5 条还要求将上述限制作为适用于模型及其衍生模型的可执行条款，并要求所有使用模型的用户遵守。模型输出也不得违反许可证。此处摘要不能替代完整许可证。</p>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          {openRailLoading ? <span className="text-sm text-white/60">正在读取本机确认记录…</span> : openRailAccepted ? <span className="text-sm text-emerald-200">已在本机确认（再次安装或条款版本更新后需重新确认）</span> : <button type="button" onClick={() => void updateOpenRailAcceptance(true)} disabled={openRailBusy} className="rounded-lg bg-amber-200 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50">{openRailBusy ? "保存中…" : "我已阅读完整许可证并同意上述使用限制"}</button>}
+          {openRailAccepted && <button type="button" onClick={() => void updateOpenRailAcceptance(false)} disabled={openRailBusy} className="rounded-lg border border-white/20 px-3 py-2 text-sm text-white/70 disabled:opacity-50">撤销确认</button>}
+        </div>
+        {openRailError && <p role="alert" className="mt-3 text-sm text-rose-200">{openRailError}</p>}
+      </section>}
       <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <h2 className="text-lg font-semibold">图片内容与画面参数</h2>
         <label className="mt-4 block text-sm text-white/70">正向提示词</label>
@@ -920,7 +981,7 @@ export default function LocalImageStudioPage() {
           <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1" />
           我确认使用本机 CPU/GPU 进行图片生成。生成会占用内存、显存、电力和时间；模型必须已安装，不会产生 API 费用，也不会上传提示词到云端。
         </label>
-        <button type="button" onClick={() => void generate()} disabled={loading || !models.length} className="mt-4 rounded-xl bg-fuchsia-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">{loading ? "正在提交本地任务…" : "确认并开始本地生成"}</button>
+        <button type="button" onClick={() => void generate()} disabled={loading || !models.length || (isOpenRailCheckpoint && !openRailAccepted)} className="mt-4 rounded-xl bg-fuchsia-300 px-5 py-3 font-semibold text-slate-950 disabled:opacity-40">{loading ? "正在提交本地任务…" : "确认并开始本地生成"}</button>
       </section>
 
       {error && <p role="alert" className="rounded-xl border border-rose-400/30 bg-rose-950/30 p-3 text-sm text-rose-100">{error}</p>}
