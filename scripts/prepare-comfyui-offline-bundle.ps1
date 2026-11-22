@@ -48,6 +48,13 @@ function Add-TextEntry([System.IO.Compression.ZipArchive]$Archive, [string]$Entr
     } finally { $output.Dispose() }
 }
 
+function Get-TextSha256([string]$Text) {
+    $bytes = [System.Text.UTF8Encoding]::new($false).GetBytes($Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant() }
+    finally { $sha.Dispose() }
+}
+
 function Get-ZipEntrySha256([System.IO.Compression.ZipArchiveEntry]$Entry) {
     $input = $Entry.Open()
     $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
@@ -397,6 +404,44 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
         Add-TextEntry $archive "THIRD_PARTY_NOTICES/7-Zip-LICENSE.txt" $sevenZipLicenseText
     } finally { $sevenZipLicenseResponse.Dispose() }
 
+    # GPL source licenses for the exact ComfyUI frontend and comfy-aimdo versions
+    # found in the v0.46.0 portable archives. Immutable source commits prevent tag drift.
+    $comfyAimdoCommit = "68088de9dce9f5e32231fccf230938769c5562da"
+    $comfyAimdoLicenseUrl = "https://raw.githubusercontent.com/Comfy-Org/comfy-aimdo/$comfyAimdoCommit/LICENSE"
+    $comfyAimdoLicenseUri = Assert-OfficialUri $comfyAimdoLicenseUrl @("raw.githubusercontent.com")
+    $comfyAimdoLicenseResponse = $client.GetAsync($comfyAimdoLicenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$comfyAimdoLicenseResponse.IsSuccessStatusCode) { throw "无法读取 comfy-aimdo v0.6.0 GPL-3.0 许可证。" }
+        $comfyAimdoLicenseText = $comfyAimdoLicenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($comfyAimdoLicenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or $comfyAimdoLicenseText -notmatch "Version 3") {
+            throw "comfy-aimdo GPL-3.0 许可证文本校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt" $comfyAimdoLicenseText
+    } finally { $comfyAimdoLicenseResponse.Dispose() }
+
+    $frontendCommit = "c62d747f378e0fa277cbb5137bffaf282598c64c"
+    $frontendLicenseUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI_frontend/$frontendCommit/LICENSE"
+    $frontendLicenseUri = Assert-OfficialUri $frontendLicenseUrl @("raw.githubusercontent.com")
+    $frontendLicenseResponse = $client.GetAsync($frontendLicenseUri).GetAwaiter().GetResult()
+    try {
+        if (!$frontendLicenseResponse.IsSuccessStatusCode) { throw "无法读取 ComfyUI Frontend v1.59.6 GPL-3.0 许可证。" }
+        $frontendLicenseText = $frontendLicenseResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($frontendLicenseText -notmatch "GNU GENERAL PUBLIC LICENSE" -or $frontendLicenseText -notmatch "Version 3") {
+            throw "ComfyUI Frontend GPL-3.0 许可证文本校验失败。"
+        }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt" $frontendLicenseText
+    } finally { $frontendLicenseResponse.Dispose() }
+
+    $frontendNoticeUrl = "https://raw.githubusercontent.com/Comfy-Org/ComfyUI_frontend/$frontendCommit/THIRD_PARTY_NOTICES.md"
+    $frontendNoticeUri = Assert-OfficialUri $frontendNoticeUrl @("raw.githubusercontent.com")
+    $frontendNoticeResponse = $client.GetAsync($frontendNoticeUri).GetAwaiter().GetResult()
+    try {
+        if (!$frontendNoticeResponse.IsSuccessStatusCode) { throw "无法读取 ComfyUI Frontend 第三方商标通知。" }
+        $frontendNoticeText = $frontendNoticeResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+        if ($frontendNoticeText -notmatch "AMD") { throw "ComfyUI Frontend 第三方通知文本校验失败。" }
+        Add-TextEntry $archive "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md" $frontendNoticeText
+    } finally { $frontendNoticeResponse.Dispose() }
+
     $manifest = @{
         schema_version = 1
         product = "AI漫剧制作大师"
@@ -451,6 +496,28 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
             upstream_source = "https://github.com/Comfy-Org/ComfyUI/tree/$($release.tag_name)"
             note = "This notice covers ComfyUI itself only. A full dependency/license audit is required before public distribution."
         }
+        comfy_aimdo = @{
+            version = "0.6.0"
+            license = "GPL-3.0"
+            license_file = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"
+            source_repository = "https://github.com/Comfy-Org/comfy-aimdo"
+            source_commit = $comfyAimdoCommit
+            source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"
+            exact_wheel_sha256 = "45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c"
+            exact_wheel_hash_match_status = "pending"
+        }
+        comfyui_frontend = @{
+            version = "1.59.6"
+            license = "GPL-3.0-only"
+            license_file = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"
+            third_party_notice_file = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"
+            source_repository = "https://github.com/Comfy-Org/ComfyUI_frontend"
+            source_commit = $frontendCommit
+            source_code_status = "upstream_commit_pinned_source_archive_not_yet_included"
+            exact_wheel_sha256 = "7564e716da2d1e122612f067bcffda6c3b9bc766f3b9f8c85fc44cf1d9c54f85"
+            exact_wheel_hash_match_status = "pending"
+            frontend_dependency_notice_review_status = "pending"
+        }
         seven_zip = @{
             version = $sevenZipRelease.tag_name
             executable = "ComfyUI-Payload/7zr.exe"
@@ -476,7 +543,7 @@ AI漫剧制作大师 - 完整离线安装套件（内部验证版）
 5. 安装时不需要联网下载 ComfyUI、Ollama 或 Qwen3 4B；上述运行环境和文本模型均已包含在 ZIP 中。
 6. 本套件已包含 Stable Diffusion 1.5 FP16 图片生成检查点（约 2.13 GB）及 CreativeML Open RAIL-M 完整许可证。桌面端已加入本地完整许可证展示、使用限制确认记录和生图 API 门禁；该机制仍需法律审查，整套依赖审查完成前仅供内部验证，不得公开或客户分发。
 7. 本套件面向 Windows x64。ComfyUI 只对官方文档明确覆盖的 GPU 型号启用加速；未确认的设备使用 CPU 模式或停止安装。
-8. ComfyUI、7-Zip、Ollama 和 Qwen3 及其依赖许可证均须逐项审核。审查完成前本套件仅供内部验证，不得公开或客户分发。
+8. ComfyUI、ComfyUI Frontend、comfy-aimdo、7-Zip、Ollama 和 Qwen3 及其依赖许可证均须逐项审核；Frontend 与 comfy-aimdo 的 GPL-3.0 许可证文本已附带，但对应源代码和前端依赖通知仍需核实。审查完成前本套件仅供内部验证，不得公开或客户分发。
 9. ComfyUI 依赖清点工具位于 ComfyUI-Payload\\audit-comfyui-portable-dependencies.ps1；本地 AI 安装脚本位于 LocalAI-Payload\\install-local-ai-offline.ps1。自动清点不等于许可证批准。
 
 本 ZIP 的构建过程会校验每个官方资产的文件长度和 SHA-256。任何一项校验失败都会终止构建并删除不完整 ZIP。
@@ -521,6 +588,9 @@ try {
     if (!(Test-Path -LiteralPath $transactionInstaller -PathType Leaf)) { throw "整套本地引擎事务安装脚本不存在：$transactionInstaller" }
     $expectedEntries += @{ path = "ComfyUI-Payload/install-local-engines-transaction.ps1"; size = (Get-Item -LiteralPath $transactionInstaller).Length; sha256 = (Get-FileHash -LiteralPath $transactionInstaller -Algorithm SHA256).Hash.ToLowerInvariant() }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"; size = [long]$sevenZipSourceResult.size_bytes; sha256 = [string]$sevenZipSourceResult.sha256 }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($comfyAimdoLicenseText); sha256 = Get-TextSha256 $comfyAimdoLicenseText }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendLicenseText); sha256 = Get-TextSha256 $frontendLicenseText }
+    $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md"; size = [System.Text.UTF8Encoding]::new($false).GetByteCount($frontendNoticeText); sha256 = Get-TextSha256 $frontendNoticeText }
     $expectedEntries += @{ path = "Setup.exe"; size = [long]$setupItem.Length; sha256 = $setupHash }
     foreach ($localAIFile in $localAIPayloadFiles) {
         $relative = $localAIFile.FullName.Substring($LocalAIPayloadRoot.Length).TrimStart("\", "/").Replace("\", "/")
