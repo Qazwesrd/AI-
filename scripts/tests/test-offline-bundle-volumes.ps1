@@ -43,6 +43,18 @@ try {
     try { & $copyJoiner -ManifestPath $manifest -OutputPath $existingOutput } catch { $existingFailed = $true }
     if (!$existingFailed -or [IO.File]::ReadAllText($existingOutput) -cne "keep") { throw "合并工具覆盖了已有目标文件。" }
 
+    # A collision on a later volume must not leave earlier volumes published.
+    $collisionSource = Join-Path $temp "collision.zip"
+    [IO.File]::WriteAllBytes($collisionSource, [byte[]]::new(5MB + 17))
+    [IO.File]::WriteAllText((Join-Path $temp "collision.zip.part002"), "keep-existing")
+    $collisionFailed = $false
+    try { & $split -InputZip $collisionSource -PartSizeBytes 2MB } catch { $collisionFailed = $true }
+    if (!$collisionFailed) { throw "遇到后续分卷文件冲突时，分卷脚本未失败。" }
+    if (Test-Path (Join-Path $temp "collision.zip.part001")) { throw "分卷失败后留下了已发布的前序分卷。" }
+    if ([IO.File]::ReadAllText((Join-Path $temp "collision.zip.part002")) -cne "keep-existing") { throw "分卷脚本覆盖了原有分卷文件。" }
+    if (Test-Path (Join-Path $temp "collision.zip.parts.json")) { throw "分卷失败后仍发布了不完整清单。" }
+    if (@(Get-ChildItem -LiteralPath $temp -Directory -Filter ".offline-parts-*").Count -ne 0) { throw "分卷失败后遗留暂存目录。" }
+
     Write-Host "离线安装套件分卷与合并测试通过。"
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
