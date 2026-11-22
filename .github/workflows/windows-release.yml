@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       build_offline_bundle:
-        description: "仅在需要内部验证完整离线套件时启用（预计约 11 GiB）"
+        description: "仅在需要内部验证完整离线套件时启用（预计约 13 GiB）"
         required: false
         type: boolean
         default: true
@@ -281,8 +281,8 @@ jobs:
           $drive = Get-PSDrive -Name $env:SystemDrive.TrimEnd(':')
           $freeGiB = [math]::Round($drive.Free / 1GB, 2)
           Write-Host "Available build disk space: $freeGiB GiB"
-          if ($drive.Free -lt 18GB) {
-            throw "完整离线套件预计约 11 GiB，打包过程建议至少 18 GiB 可用空间；当前仅 $freeGiB GiB。为避免生成损坏包，已在下载大文件前停止。"
+          if ($drive.Free -lt 24GB) {
+            throw "完整离线套件预计约 13 GiB，包含 ComfyUI 四种运行包、本地 Qwen3 和 Stable Diffusion 图片模型；打包过程建议至少 24 GiB 可用空间；当前仅 $freeGiB GiB。为避免生成损坏包，已在下载大文件前停止。"
           }
 
       - name: Build and verify complete offline bundle
@@ -318,7 +318,7 @@ jobs:
           }
           # The ZIP has already passed full read-back verification and was split
           # with per-volume SHA-256 values. Keep only the verified volumes for
-          # upload to avoid storing both the 11 GiB ZIP and all its copies.
+          # upload to avoid storing both the complete offline ZIP and all its copies.
           $archive = Join-Path $release $base
           if (!(Test-Path -LiteralPath $archive -PathType Leaf)) { throw "完整离线 ZIP 不存在。" }
           Remove-Item -LiteralPath $archive -Force
