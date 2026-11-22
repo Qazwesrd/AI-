@@ -141,7 +141,11 @@ foreach ($storeEntry in $storeEntries) {
             if ([System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\\/])\.\.([\\/]|$)') {
                 throw "Npm license/notice path escaped its package directory."
             }
-            $safePackage = [regex]::Replace($key, '[^A-Za-z0-9._@+-]', '_')
+            $keyBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($key)
+            $keyHasher = [System.Security.Cryptography.SHA256]::Create()
+            try { $keyHash = [BitConverter]::ToString($keyHasher.ComputeHash($keyBytes)).Replace("-", "").ToLowerInvariant().Substring(0, 12) }
+            finally { $keyHasher.Dispose() }
+            $safePackage = ([regex]::Replace($key, '[^A-Za-z0-9._@+-]', '_')) + "-" + $keyHash
             $destinationRelative = Join-Path $safePackage $relative
             $destination = Join-Path $licenseRoot $destinationRelative
             $sourceHash = (Get-FileHash -LiteralPath $licenseFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
