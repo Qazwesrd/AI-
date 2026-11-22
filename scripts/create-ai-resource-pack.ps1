@@ -125,7 +125,7 @@ try {
 
 try {
     $packHash = (Get-FileHash -LiteralPath $tempZip -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText($tempHash, "$packHash  $([IO.Path]::GetFileName($OutputZip))" + [Environment]::NewLine, [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText($tempHash, "$packHash  $([IO.Path]::GetFileName($OutputZip))" + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
     [IO.File]::Move($tempZip, $OutputZip)
     [IO.File]::Move($tempHash, "$OutputZip.sha256")
 } catch {
