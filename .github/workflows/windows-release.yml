@@ -271,7 +271,7 @@ jobs:
 
 
       - name: Preflight disk space for complete offline bundle
-        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -283,7 +283,7 @@ jobs:
           }
 
       - name: Build and verify complete offline bundle
-        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         shell: pwsh
         timeout-minutes: 300
         run: |
@@ -302,7 +302,7 @@ jobs:
           Get-Content -LiteralPath "$outputZip.sha256"
 
       - name: Prepare split bundle artifact groups
-        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -391,7 +391,7 @@ jobs:
           Write-Host "Prepared and verified $($parts.Count) parts plus assembly metadata in three upload groups."
 
       - name: Upload offline bundle volumes 1-4
-        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Offline-Bundle-Volumes-1
@@ -400,7 +400,7 @@ jobs:
           retention-days: 14
 
       - name: Upload offline bundle volumes 5-8
-        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Offline-Bundle-Volumes-2
@@ -409,7 +409,7 @@ jobs:
           retention-days: 14
 
       - name: Upload offline bundle remaining volumes and assembly manifest
-        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Offline-Bundle-Volumes-3
