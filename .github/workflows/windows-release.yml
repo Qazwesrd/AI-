@@ -345,10 +345,10 @@ jobs:
           if (!(Test-Path -LiteralPath $bundle -PathType Leaf)) { throw "完整离线套件不存在，不能拆分 AI 资源包。" }
           & (Join-Path $PWD "scripts/create-ai-resource-pack.ps1") -InputBundle $bundle -OutputZip $resourcePack
           if (!(Test-Path -LiteralPath "$resourcePack.sha256" -PathType Leaf)) { throw "独立 AI 资源包 SHA-256 文件缺失。" }
-          $hashLine = (Get-Content -LiteralPath "$resourcePack.sha256" -Raw).Trim()
+          $hashLine = (Get-Content -LiteralPath "$resourcePack.sha256" -Raw -Encoding ASCII).Trim()
           $actualHash = (Get-FileHash -LiteralPath $resourcePack -Algorithm SHA256).Hash.ToLowerInvariant()
-          if (!$hashLine.StartsWith($actualHash) -or !$hashLine.EndsWith([IO.Path]::GetFileName($resourcePack))) {
-            throw "独立 AI 资源包 SHA-256 校验失败。"
+          if ($hashLine -cne $actualHash) {
+            throw "独立 AI 资源包 SHA-256 校验失败：清单值与实际文件哈希不一致。"
           }
           Write-Host ("Standalone AI resource pack: {0:N2} GiB" -f ((Get-Item $resourcePack).Length / 1GB))
           Write-Host "AI resource pack checksum verified."
