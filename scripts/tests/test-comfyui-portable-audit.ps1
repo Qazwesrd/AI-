@@ -17,6 +17,9 @@ if ($installerSource -match [regex]::Escape('图片生成模型未包含在安�
     $installerSource -notmatch [regex]::Escape('已从完整离线安装套件部署 Stable Diffusion 1.5 FP16 图片模型')) {
     throw "ComfyUI 安装器输出必须准确说明图片模型已随离线套件安装，不能显示过时的未包含提示。"
 }
+if ($installerSource -notmatch [regex]::Escape('[long]$archiveInfo.ExpandedBytes + [long]$imageModel.size_bytes + 1GB')) {
+    throw "ComfyUI 安装器磁盘空间预检必须同时计算运行包展开空间和图片模型复制空间。"
+}
 if ($installerSource -notmatch '(?s)Move-Item\s+-LiteralPath\s+\$portableRoot\s+-Destination\s+\$installFullPath\s*\r?\n\s*\$deploymentOwned\s*=\s*\$true' -or
     $installerSource -notmatch '(?s)catch\s*\{.*?\$deploymentOwned\s*-and\s*\(Test-Path\s+-LiteralPath\s+\$installFullPath\).*?Remove-Item\s+-LiteralPath\s+\$installFullPath\s+-Recurse\s+-Force') {
     throw "ComfyUI 安装器必须在目标目录移动成功后才取得回滚所有权，且只能回滚本次新建目录。"
