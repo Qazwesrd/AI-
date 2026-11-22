@@ -30,11 +30,23 @@ $OutputZip = [System.IO.Path]::GetFullPath($OutputZip)
 $outputDirectory = Split-Path -Parent $OutputZip
 New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
 
-if ((Test-Path -LiteralPath $OutputZip) -or (Test-Path -LiteralPath "$OutputZip.sha256")) {
+$archiveBase = [IO.Path]::GetFileName($OutputZip)
+$partsManifestPath = "$OutputZip.parts.json"
+$joinerTool = Join-Path $outputDirectory "AI漫剧制作大师-离线套件合并工具.ps1"
+$existingPartFiles = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$archiveBase.part*" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match ('^' + [regex]::Escape($archiveBase) + '\.part\d{3}$') })
+$existingArtifacts = @(
+    $OutputZip,
+    "$OutputZip.sha256",
+    $partsManifestPath,
+    $joinerTool
+) | Where-Object { Test-Path -LiteralPath $_ }
+$existingArtifacts = @($existingArtifacts) + @($existingPartFiles | ForEach-Object { $_.FullName })
+if ($existingArtifacts.Count -gt 0) {
     if (-not $Force) {
-        throw "输出 ZIP 或其 SHA-256 校验文件已存在：$OutputZip。为保护已有离线套件，不会自动删除；若确认重新制作，请添加 -Force 参数。"
+        throw "检测到已有完整 ZIP、分卷、清单或合并工具。为保护已有离线套件，不会覆盖；若确认重新制作，请添加 -Force 参数。"
     }
-    Remove-Item -LiteralPath $OutputZip, "$OutputZip.sha256" -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $existingArtifacts -Force -ErrorAction SilentlyContinue
 }
 
 if ([string]::IsNullOrWhiteSpace($SetupExe)) {
@@ -109,7 +121,6 @@ if (!(Test-Path -LiteralPath $splitScript -PathType Leaf)) {
 Write-Host "正在把完整离线 ZIP 拆分为低于 2 GB 的下载分卷，并生成逐卷 SHA-256 清单。"
 & $splitScript -InputZip $OutputZip -PartSizeBytes $PartSizeBytes
 $partsManifest = "$OutputZip.parts.json"
-$joinerTool = Join-Path $outputDirectory "AI漫剧制作大师-离线套件合并工具.ps1"
 if (!(Test-Path -LiteralPath $partsManifest -PathType Leaf) -or !(Test-Path -LiteralPath $joinerTool -PathType Leaf)) {
     throw "分卷清单或自动合并工具缺失，拒绝报告套件准备完成。"
 }
