@@ -27,7 +27,7 @@ on:
 permissions:
   contents: write
 
-# Full offline bundle builds run only on explicit workflow_dispatch opt-in or a push commit marked [build-offline-bundle].
+# Full offline bundle builds run only on explicit workflow_dispatch opt-in or a push commit marked [build-offline-bundle]. Retry after UTF-8 AI resource checksum fix.
 # Serialize master release builds so two commits cannot upload the same
 # versioned assets to one GitHub Release at the same time. PR validation
 # builds remain independent per pull request and never publish releases.
