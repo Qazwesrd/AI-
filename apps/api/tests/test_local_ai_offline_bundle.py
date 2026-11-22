@@ -79,6 +79,29 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         self.assertIn("-ValidateOnly", transaction)
         self.assertIn("Remove-TransactionOwnedInstall", transaction)
 
+    def test_image_checkpoint_and_download_manual_match_the_actual_bundle_contract(self):
+        packer = (ROOT / "scripts" / "prepare-comfyui-offline-bundle.ps1").read_text(encoding="utf-8")
+        installer = (ROOT / "scripts" / "install-comfyui-offline.ps1").read_text(encoding="utf-8")
+        manual = (ROOT / "docs" / "manual" / "COMFYUI-OFFLINE-BUNDLE.md").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github" / "workflows" / "windows-release.yml").read_text(encoding="utf-8")
+
+        self.assertIn("ComfyUI-Payload/models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors", packer)
+        self.assertIn("Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt", packer)
+        self.assertIn("imageModelHash", installer)
+        self.assertIn("本套件构建脚本会把固定版本的 Stable Diffusion 1.5 FP16 检查点", manual)
+        self.assertNotIn("图片生成检查点是独立资源，当前不随安装包自动下载或打包", manual)
+        self.assertIn("必须下载全部三个产物", manual)
+        self.assertIn("分别解压这三个 ZIP", manual)
+        self.assertIn("AI漫剧制作大师-离线套件合并工具.ps1", manual)
+        for artifact in (
+            "AI-Comic-Studio-Offline-Bundle-Volumes-1",
+            "AI-Comic-Studio-Offline-Bundle-Volumes-2",
+            "AI-Comic-Studio-Offline-Bundle-Volumes-3",
+        ):
+            with self.subTest(artifact=artifact):
+                self.assertIn(artifact, workflow)
+                self.assertIn(artifact, manual)
+
     def test_desktop_uses_the_bundled_runtime_without_changing_dev_default(self):
         main = (ROOT / "apps" / "desktop" / "main.cjs").read_text(encoding="utf-8")
         runtime = (ROOT / "apps" / "api" / "app" / "routers" / "local_ai_runtime.py").read_text(encoding="utf-8")
