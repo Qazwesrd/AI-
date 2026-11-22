@@ -490,6 +490,9 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
         throw "ComfyUI Frontend npm 许可证清点报告的来源或审核状态无效。"
     }
     $frontendAuditLicenseFiles = @(Get-ChildItem -LiteralPath (Join-Path $frontendAuditOutput "licenses") -File -Recurse)
+    if ($frontendAuditLicenseFiles.Count -lt 1 -or $frontendAuditLicenseFiles.Count -ne [int]$frontendAuditSummary.license_file_count) {
+        throw "ComfyUI Frontend npm 许可证/NOTICE 文件数量与清点摘要不匹配。"
+    }
     $frontendAuditBundleFiles = @()
     foreach ($auditFile in @(Get-ChildItem -LiteralPath $frontendAuditOutput -File -Recurse)) {
         $relative = $auditFile.FullName.Substring($frontendAuditOutput.Length).TrimStart("\", "/").Replace("\", "/")
