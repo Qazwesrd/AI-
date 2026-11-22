@@ -2,7 +2,7 @@ name: Project quality checks
 
 on:
   push:
-    branches: [master]
+    branches: [master, feat/product-completion-foundation]
   # Run quality checks for stacked feature PRs as well as PRs targeting master.
   pull_request:
   workflow_dispatch:
