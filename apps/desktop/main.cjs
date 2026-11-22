@@ -6,6 +6,15 @@ const http = require("http");
 const net = require("net");
 const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
 
+// In packaged builds, keep user projects, generated media, ComfyUI and Ollama
+// beside the selected application directory. This avoids silently filling C:
+// when the user installs the desktop app on another drive. The sibling data
+// directory is not part of the app file manifest and is preserved on uninstall.
+if (app.isPackaged) {
+  const installRoot = path.dirname(process.resourcesPath);
+  app.setPath("userData", path.join(installRoot, "AIComicStudio-Data"));
+}
+
 const API_PORT = 8000;
 const WEB_PORT = 3000;
 
@@ -351,7 +360,7 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
     fs.mkdirSync(storageDir, { recursive: true });
   }
 
-  const ollamaRoot = path.join(app.getPath("home"), "AIComicStudio", "Ollama");
+  const ollamaRoot = path.join(dataDir, "engines", "Ollama");
   const ollamaRuntime = path.join(ollamaRoot, "runtime");
   const ollamaExe = path.join(ollamaRuntime, "ollama.exe");
   const ollamaModels = path.join(ollamaRoot, "models");
