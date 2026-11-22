@@ -56,3 +56,18 @@ The number of distributions with absent or ambiguous metadata license fields is 
 - GNU GPL v3 text: https://www.gnu.org/licenses/gpl-3.0.html
 - GNU LGPL v3 text: https://www.gnu.org/licenses/lgpl-3.0.html
 - Mozilla Public License 2.0: https://www.mozilla.org/MPL/2.0/
+
+
+## Additional model and runtime evidence (2026-11-22)
+
+- The official Qwen/Qwen3-4B model card identifies the model as Apache-2.0. This confirms the upstream model-family license declaration, but it does **not** by itself prove that the exact Ollama quantized manifest/blob selected by this project is identical to a particular upstream artifact or that all conversion metadata is covered. Pin the exact model tag, manifest digest, layer/blob digests and retain the license/model notice with the payload.
+- Ollama's upstream repository identifies its own project license as MIT. The Windows documentation separately describes GPU runtime libraries and standalone archives; those bundled dependencies must be inventoried independently. Do not treat Ollama's top-level MIT license as a blanket license for every native GPU library shipped beside it.
+- The official ComfyUI Windows portable documentation says the portable packages can also run CPU-only. For AMD and Intel portable packages, its documented CPU launch path uses the embedded Python executable with `--cpu --windows-standalone-build`. The app launcher should detect the actual available backend and use an explicit CPU fallback rather than assume an AMD integrated GPU is supported by the AMD acceleration runtime.
+
+Evidence links:
+- Qwen3-4B model card: https://huggingface.co/Qwen/Qwen3-4B
+- Ollama MIT license: https://github.com/ollama/ollama/blob/main/LICENSE
+- Ollama Windows runtime documentation: https://github.com/ollama/ollama/blob/main/docs/windows.mdx
+- ComfyUI Windows portable CPU instructions: https://github.com/Comfy-Org/ComfyUI/blob/master/docs/installation.md
+
+These findings narrow the remaining review but do not change the overall `pending` / `distribution_approved=false` decision.
