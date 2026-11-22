@@ -124,14 +124,14 @@
     {
       "name": "comfy-aimdo 0.6.0",
       "license": "GPL-3.0 (confirmed by upstream LICENSE; original author reserves the right to offer alternative licenses)",
-      "evidence": "ComfyUI v0.46.0 inventory artifact: dist-info/licenses/LICENSE (36,091 bytes) extracted; upstream https://github.com/Comfy-Org/comfy-aimdo/blob/master/LICENSE; PyPI Windows x64 wheel SHA-256 45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c",
-      "status": "upstream_gpl_3_0_confirmed_bundled_wheel_license_file_present_exact_wheel_hash_match_and_corresponding_source_pending"
+      "evidence": "ComfyUI v0.46.0 inventory artifact: dist-info/licenses/LICENSE (36,091 bytes) extracted; upstream https://github.com/Comfy-Org/comfy-aimdo/blob/master/LICENSE; PyPI Windows x64 wheel SHA-256 45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c; bundle notice: THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt; source archive not yet included",
+      "status": "upstream_gpl_3_0_and_standalone_license_bundled_installed_source_archive_and_exact_wheel_hash_match_pending"
     },
     {
       "name": "comfyui-frontend-package 1.59.6",
       "license": "GPL-3.0-only (confirmed by the exact upstream ComfyUI_frontend v1.59.6 package.json and LICENSE)",
-      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.",
-      "status": "upstream_gpl_3_0_only_confirmed_exact_pypi_wheel_provenance_and_embedded_frontend_dependency_notice_review_pending"
+      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.; bundle notice: THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt; THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md; source archive and npm dependency notice audit pending",
+      "status": "gpl_3_0_only_license_and_upstream_third_party_notice_bundled_installed_source_archive_and_npm_dependency_audit_pending"
     },
     {
       "name": "AMD ROCm Windows SDK 7.2.1 packages",
