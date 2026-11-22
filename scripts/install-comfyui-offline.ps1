@@ -361,6 +361,54 @@ if (!(Test-Path -LiteralPath $frontendSourcePath -PathType Leaf) -or
     (Get-Sha256 $frontendSourcePath) -ne ([string]$manifest.comfyui_frontend.source_archive_sha256).ToLowerInvariant()) {
     throw "ComfyUI Frontend GPL 对应源代码包缺失或 SHA-256 校验失败。"
 }
+$frontendNpmAudit = $manifest.comfyui_frontend.npm_dependency_audit
+if ($null -eq $frontendNpmAudit -or
+    $frontendNpmAudit.status -cne "inventory_generated_manual_license_review_pending" -or
+    $frontendNpmAudit.distribution_approved -ne $false -or
+    [int]$frontendNpmAudit.package_count -lt 1) {
+    throw "ComfyUI Frontend npm 依赖许可证清点状态或清点数量无效。"
+}
+$frontendNpmReportPath = Join-Path $bundleRoot ([string]$frontendNpmAudit.report_file)
+$frontendNpmSummaryPath = Join-Path $bundleRoot ([string]$frontendNpmAudit.summary_file)
+if (!(Test-Path -LiteralPath $frontendNpmReportPath -PathType Leaf) -or
+    (Get-Sha256 $frontendNpmReportPath) -ne ([string]$frontendNpmAudit.report_sha256).ToLowerInvariant()) {
+    throw "ComfyUI Frontend npm 许可证完整清点报告缺失或 SHA-256 校验失败。"
+}
+if (!(Test-Path -LiteralPath $frontendNpmSummaryPath -PathType Leaf) -or
+    (Get-Sha256 $frontendNpmSummaryPath) -ne ([string]$frontendNpmAudit.summary_sha256).ToLowerInvariant()) {
+    throw "ComfyUI Frontend npm 许可证清点摘要缺失或 SHA-256 校验失败。"
+}
+$frontendNpmSummary = Get-Content -LiteralPath $frontendNpmSummaryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($frontendNpmSummary.source_commit -cne [string]$manifest.comfyui_frontend.source_commit -or
+    $frontendNpmSummary.distribution_approved -ne $false -or
+    [int]$frontendNpmSummary.package_count -ne [int]$frontendNpmAudit.package_count -or
+    [int]$frontendNpmSummary.license_file_count -ne [int]$frontendNpmAudit.license_file_count) {
+    throw "ComfyUI Frontend npm 清点摘要与安装包清单不匹配。"
+}
+$frontendNpmFiles = @($frontendNpmAudit.files)
+if ($frontendNpmFiles.Count -lt 2) { throw "ComfyUI Frontend npm 许可证清点文件列表为空或不完整。" }
+$frontendNpmExpectedReport = [string]$frontendNpmAudit.report_file
+$frontendNpmExpectedSummary = [string]$frontendNpmAudit.summary_file
+if (@($frontendNpmFiles | Where-Object { $_.path -ceq $frontendNpmExpectedReport -and $_.sha256 -ceq $frontendNpmAudit.report_sha256 }).Count -ne 1 -or
+    @($frontendNpmFiles | Where-Object { $_.path -ceq $frontendNpmExpectedSummary -and $_.sha256 -ceq $frontendNpmAudit.summary_sha256 }).Count -ne 1) {
+    throw "ComfyUI Frontend npm 清点报告未列入逐文件完整性清单。"
+}
+foreach ($frontendNpmFile in $frontendNpmFiles) {
+    $relativePath = [string]$frontendNpmFile.path
+    $installedRelativePath = [string]$frontendNpmFile.installed_path
+    if (!$relativePath.StartsWith("THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/", [System.StringComparison]::Ordinal) -or
+        $relativePath -match '(^|/)\.\.(/|$)' -or
+        !$installedRelativePath.StartsWith("licenses/ComfyUI-Frontend-NPM/", [System.StringComparison]::Ordinal) -or
+        $installedRelativePath -match '(^|/)\.\.(/|$)') {
+        throw "ComfyUI Frontend npm 许可证文件路径不安全。"
+    }
+    $sourceFile = Join-Path $bundleRoot $relativePath.Replace("/", "\")
+    if (!(Test-Path -LiteralPath $sourceFile -PathType Leaf) -or
+        (Get-Item -LiteralPath $sourceFile).Length -ne [long]$frontendNpmFile.size_bytes -or
+        (Get-Sha256 $sourceFile) -ne ([string]$frontendNpmFile.sha256).ToLowerInvariant()) {
+        throw "ComfyUI Frontend npm 许可证/NOTICE 文件缺失或 SHA-256 校验失败：$relativePath"
+    }
+}
 $cpuArchitecture = @(Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture | Select-Object -Unique)
 if ([Environment]::Is64BitOperatingSystem -ne $true -or $cpuArchitecture.Count -ne 1 -or $cpuArchitecture[0] -ne 9) {
     throw "当前系统不是受支持的 Windows x64 环境。"
@@ -494,6 +542,14 @@ try {
         New-Item -ItemType Directory -Path $installedSourceCodeDir -Force | Out-Null
         Copy-Item -LiteralPath $comfyAimdoSourcePath -Destination (Join-Path $installedSourceCodeDir "comfy-aimdo-v0.6.0-source.zip")
         Copy-Item -LiteralPath $frontendSourcePath -Destination (Join-Path $installedSourceCodeDir "ComfyUI-Frontend-v1.59.6-source.zip")
+        foreach ($frontendNpmFile in $frontendNpmFiles) {
+            $installedRelative = ([string]$frontendNpmFile.installed_path).Substring("licenses/".Length).Replace("/", "\")
+            $installedTarget = Join-Path $installedLicenseDir $installedRelative
+            $installedTargetDirectory = Split-Path -Parent $installedTarget
+            New-Item -ItemType Directory -Path $installedTargetDirectory -Force | Out-Null
+            $bundleSource = Join-Path $bundleRoot ([string]$frontendNpmFile.path).Replace("/", "\")
+            Copy-Item -LiteralPath $bundleSource -Destination $installedTarget
+        }
         if ((Get-Content -LiteralPath $installedImageLicense -Raw -Encoding UTF8) -notmatch "Attachment A") {
             throw "Stable Diffusion 模型许可证未能完整部署。"
         }
@@ -542,6 +598,11 @@ try {
             comfyui_frontend_source_code_status = [string]$manifest.comfyui_frontend.source_code_status
             comfyui_frontend_source_archive = "licenses/source-code/ComfyUI-Frontend-v1.59.6-source.zip"
             comfyui_frontend_source_archive_sha256 = [string]$manifest.comfyui_frontend.source_archive_sha256
+            comfyui_frontend_npm_license_audit_status = [string]$frontendNpmAudit.status
+            comfyui_frontend_npm_package_count = [int]$frontendNpmAudit.package_count
+            comfyui_frontend_npm_license_file_count = [int]$frontendNpmAudit.license_file_count
+            comfyui_frontend_npm_license_report = "licenses/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json"
+            comfyui_frontend_npm_license_summary = "licenses/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json"
             selection_reason = $selection.selection_reason
             installed_utc = [DateTime]::UtcNow.ToString("o")
             distribution_approved = $false
