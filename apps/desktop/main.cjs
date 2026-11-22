@@ -369,21 +369,35 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
     path.join(ollamaModels, "manifests", "registry.ollama.ai", "library", "qwen3", "4b"),
     path.join(ollamaModels, "manifests", "registry.ollama.com", "library", "qwen3", "4b")
   ];
-  let ollamaBaseUrl = process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434";
-  if (fs.existsSync(ollamaExe) && fs.existsSync(ollamaModels) &&
-      modelManifestCandidates.some(file => fs.existsSync(file))) {
-    ollamaBaseUrl = "http://127.0.0.1:11435";
-    await startBundledOllama({
-      ollamaExe,
-      ollamaRuntime,
-      ollamaModels,
-      host: "127.0.0.1:11435",
-      port: 11435,
-      baseUrl: ollamaBaseUrl
-    }, 3);
-    process.env.OLLAMA_MODELS = ollamaModels;
-    process.env.PATH = ollamaRuntime + path.delimiter + process.env.PATH;
+  // Packaged desktop builds must use the Ollama runtime and Qwen3 model
+  // shipped in the selected installation's persistent data directory.
+  // Never silently fall back to a developer/system Ollama endpoint: that
+  // would break the promised offline-first behavior and could use another model.
+  const hasBundledOllamaRuntime = fs.existsSync(ollamaExe);
+  const hasBundledModelStore = fs.existsSync(ollamaModels);
+  const bundledModelManifest = modelManifestCandidates.find(file => fs.existsSync(file));
+  if (!hasBundledOllamaRuntime || !hasBundledModelStore || !bundledModelManifest) {
+    const missing = [
+      !hasBundledOllamaRuntime ? "Ollama 运行程序" : null,
+      !hasBundledModelStore ? "本地模型目录" : null,
+      !bundledModelManifest ? "Qwen3 4B 模型清单" : null
+    ].filter(Boolean).join("、");
+    throw new Error(
+      `本地 AI 离线组件不完整，缺少：${missing}。请运行完整离线安装套件中的修复/重新安装程序；软件不会改用联网服务或其他 Ollama 实例。`
+    );
   }
+
+  const ollamaBaseUrl = "http://127.0.0.1:11435";
+  await startBundledOllama({
+    ollamaExe,
+    ollamaRuntime,
+    ollamaModels,
+    host: "127.0.0.1:11435",
+    port: 11435,
+    baseUrl: ollamaBaseUrl
+  }, 3);
+  process.env.OLLAMA_MODELS = ollamaModels;
+  process.env.PATH = ollamaRuntime + path.delimiter + (process.env.PATH || "");
   process.env.OLLAMA_BASE_URL = ollamaBaseUrl;
 
   if (startApi) {
