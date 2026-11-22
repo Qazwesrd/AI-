@@ -39,6 +39,23 @@ def get_openrail_license_text() -> str:
     return content
 
 
+def license_path() -> Path:
+    configured = os.environ.get("APP_DATA_DIR")
+    root = Path(configured).expanduser() if configured else Path.home() / "AIComicStudio" / "data"
+    return root / "engines" / "ComfyUI" / "licenses" / "Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
+
+
+def get_openrail_license_text() -> str:
+    path = license_path()
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(503, "未找到本机随模型安装的 CreativeML Open RAIL-M 完整许可证文件。请修复本地 ComfyUI 引擎安装。") from exc
+    if "CreativeML Open RAIL-M" not in content or "Attachment A" not in content:
+        raise HTTPException(503, "本机 CreativeML Open RAIL-M 许可证文件不完整，暂不能确认。")
+    return content
+
+
 def get_openrail_acceptance() -> dict:
     path = acceptance_path()
     try:
