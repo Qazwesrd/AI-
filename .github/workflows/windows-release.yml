@@ -9,7 +9,7 @@ on:
         type: boolean
         default: true
   push:
-    branches: [master]
+    branches: [master, feat/product-completion-foundation]
     paths:
       - "apps/**"
       - "packages/**"
