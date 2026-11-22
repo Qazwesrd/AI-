@@ -20,7 +20,8 @@
     "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval.",
     "For comfy-aimdo 0.6.0, the pinned v0.6.0 upstream source archive and GPL-3.0 license are now included and installed; verify the exact installed Windows wheel digest against the source build and confirm source correspondence before approval.",
     "Resolve the AMD ROCm 7.2.1 rocm, rocm-sdk-core and rocm-sdk-libraries-custom packages' exact Windows component licenses and proprietary runtime terms; AMD licenses ROCm components individually.",
-    "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval."
+    "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval.",
+    "For AMD Windows binaries, identify each bundled HIP/ROCm DLL and determine whether it is the HIP runtime or an SDK library. AMD's Windows component matrix identifies HIP runtime as closed-source, and its deployment guidance says applications should not distribute the HIP runtime; do not ship any matching runtime DLL until AMD's exact redistribution terms and packaging guidance are verified."
   ],
   "portable_variants": [
     {
@@ -138,6 +139,12 @@
       "license": "Per-component licensing; exact licenses for rocm, rocm-sdk-core, rocm-sdk-libraries-custom and embedded HIP runtime not yet established",
       "evidence": "ComfyUI AMD portable v0.46.0 artifact inventory; AMD ROCm component license documentation https://rocm.docs.amd.com/en/docs-7.2.3/about/license.html",
       "status": "exact_windows_package_and_embedded_runtime_license_review_pending"
+    },
+    {
+      "name": "AMD Windows HIP runtime / HIP SDK libraries",
+      "license": "Component-specific; Windows HIP runtime is documented as closed-source; redistribution treatment must be checked per exact binary",
+      "evidence": "AMD Windows HIP SDK component support matrix: https://rocm.docs.amd.com/projects/install-on-windows/en/develop/conceptual/component-support.html ; deployment guidelines: https://rocm.docs.amd.com/projects/install-on-windows/en/develop/conceptual/deployment-guidelines.html",
+      "status": "portable_archive_binary_to_component_mapping_and_exact_redistribution_terms_pending"
     }
   ],
   "policy": {
