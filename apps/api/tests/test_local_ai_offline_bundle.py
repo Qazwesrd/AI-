@@ -104,6 +104,9 @@ class LocalAIOfflineBundleContractTests(unittest.TestCase):
         self.assertEqual(workflow.count("- name: Upload offline bundle remaining volumes and assembly manifest"), 1)
         self.assertEqual(workflow.count("  audit-comfyui-portable-dependencies:"), 1)
         self.assertIn("$stagedChecksum -notmatch", workflow)
+        self.assertIn(r"\.part\d{3}$", workflow)
+        wrapper = (ROOT / "scripts" / "create-comfyui-offline-installer.ps1").read_text(encoding="utf-8")
+        self.assertIn(r"\.part\d{3}$", wrapper)
         for artifact in (
             "AI-Comic-Studio-Offline-Bundle-Volumes-1",
             "AI-Comic-Studio-Offline-Bundle-Volumes-2",
