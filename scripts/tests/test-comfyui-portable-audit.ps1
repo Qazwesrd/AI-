@@ -321,10 +321,13 @@ try {
     $installedPython = Join-Path $installRoot "python_embeded\python.exe"
     $cpuLauncher = Join-Path $installRoot "AI漫剧大师-CPU模式启动.bat"
     $runtimeManifestPath = Join-Path $installRoot "runtime-manifest.json"
+    $installedImageModel = Join-Path $installRoot "ComfyUI\models\checkpoints\v1-5-pruned-emaonly-fp16.safetensors"
     if (!(Test-Path -LiteralPath $installedMain -PathType Leaf) -or
         !(Test-Path -LiteralPath $installedPython -PathType Leaf) -or
         !(Test-Path -LiteralPath $cpuLauncher -PathType Leaf) -or
-        !(Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf)) {
+        !(Test-Path -LiteralPath $runtimeManifestPath -PathType Leaf) -or
+        !(Test-Path -LiteralPath $installedImageModel -PathType Leaf) -or
+        (Get-Sha256 $installedImageModel) -ne $imageModelHash) {
         throw "ComfyUI 离线安装测试失败：运行环境、CPU 启动器或运行清单缺失。"
     }
     $runtimeManifest = Get-Content -LiteralPath $runtimeManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
