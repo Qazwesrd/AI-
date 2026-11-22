@@ -33,7 +33,7 @@ $ExpectedAssets = @(
 )
 $MetadataNames = @("METADATA", "PKG-INFO")
 $LicenseNamePattern = '^(LICENSE|LICENCE|COPYING|NOTICE)(\.|$|[-_])'
-$RuntimePattern = '(?i)(^|[/\\])(torch|torchvision|torchaudio|triton|onnxruntime|openvino|tensorrt|llvmlite|numpy\.libs|scipy\.libs)([/\\]|[-_.])|(^|[/\\])(cudart|cublas|cudnn|cusparse|hip|rocblas|rocsolver|mkl|sycl|ze_loader|libiomp|libomp|vcruntime|msvcp|python3?\d*|avcodec|avformat|avutil|swresample|swscale)[^/\\]*\.(dll|pyd)'
+$RuntimePattern = '(?i)\.(dll|pyd|exe|so|dylib|lib|a)$'
 
 function Get-ArchiveEntries {
     param([string]$Tool, [string]$Archive, [int]$EntryLimit)
