@@ -26,6 +26,23 @@ try {
     $failed = $false
     try { & $copyJoiner -ManifestPath $manifest -OutputPath $badOutput } catch { $failed = $true }
     if (!$failed -or (Test-Path $badOutput)) { throw "损坏分卷未被正确拒绝。" }
+    # A malformed manifest must be rejected before any output ZIP is created.
+    $badManifest = Join-Path $temp "bad-order.parts.json"
+    $badData = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
+    $badData.parts[1].name = $badData.parts[0].name
+    $badData | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $badManifest -Encoding UTF8
+    $badManifestOutput = Join-Path $temp "bad-order.zip"
+    $badManifestFailed = $false
+    try { & $copyJoiner -ManifestPath $badManifest -OutputPath $badManifestOutput } catch { $badManifestFailed = $true }
+    if (!$badManifestFailed -or (Test-Path $badManifestOutput)) { throw "重复/错序分卷清单未在创建输出文件前被拒绝。" }
+
+    # Existing output files are never overwritten.
+    $existingOutput = Join-Path $temp "existing.zip"
+    [IO.File]::WriteAllText($existingOutput, "keep")
+    $existingFailed = $false
+    try { & $copyJoiner -ManifestPath $manifest -OutputPath $existingOutput } catch { $existingFailed = $true }
+    if (!$existingFailed -or [IO.File]::ReadAllText($existingOutput) -cne "keep") { throw "合并工具覆盖了已有目标文件。" }
+
     Write-Host "离线安装套件分卷与合并测试通过。"
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
