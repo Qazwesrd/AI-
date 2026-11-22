@@ -55,6 +55,56 @@ try {
     if (Test-Path (Join-Path $temp "collision.zip.parts.json")) { throw "分卷失败后仍发布了不完整清单。" }
     if (@(Get-ChildItem -LiteralPath $temp -Directory -Filter ".offline-parts-*").Count -ne 0) { throw "分卷失败后遗留暂存目录。" }
 
+    # Reproduce the three GitHub artifact downloads: volumes 1-4, 5-8,
+    # then remaining volumes plus the manifest, joiner and archive checksum.
+    $artifactSource = Join-Path $temp "artifact-layout.zip"
+    $artifactBytes = [byte[]]::new(9MB + 321)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($artifactBytes)
+    [IO.File]::WriteAllBytes($artifactSource, $artifactBytes)
+    & $split -InputZip $artifactSource -PartSizeBytes 1MB
+    $artifactManifest = Join-Path $temp "artifact-layout.zip.parts.json"
+    $artifactParts = @(Get-ChildItem -LiteralPath $temp -File -Filter "artifact-layout.zip.part*" | Sort-Object Name)
+    if ($artifactParts.Count -ne 10) { throw "三组下载布局测试未生成预期的 10 个分卷。" }
+
+    $artifactStage = Join-Path $temp "artifact-stage"
+    $downloaded = Join-Path $temp "simulated-downloads"
+    foreach ($group in 1..3) {
+        $groupPath = Join-Path $artifactStage "group$group"
+        New-Item -ItemType Directory -Path $groupPath -Force | Out-Null
+    }
+    for ($i = 0; $i -lt $artifactParts.Count; $i++) {
+        $group = [math]::Floor($i / 4) + 1
+        Copy-Item -LiteralPath $artifactParts[$i].FullName -Destination (Join-Path $artifactStage "group$group")
+    }
+    Copy-Item -LiteralPath $artifactManifest -Destination (Join-Path $artifactStage "group3")
+    Copy-Item -LiteralPath $join -Destination (Join-Path $artifactStage "group3/AI漫剧制作大师-离线套件合并工具.ps1")
+    $artifactHash = (Get-FileHash -LiteralPath $artifactSource -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$artifactHash  artifact-layout.zip" | Set-Content -LiteralPath (Join-Path $artifactStage "group3/artifact-layout.zip.sha256") -Encoding ascii
+
+    $expectedGroupCounts = @(4, 4, 5)
+    for ($group = 1; $group -le 3; $group++) {
+        $actualCount = @(Get-ChildItem -LiteralPath (Join-Path $artifactStage "group$group") -File).Count
+        if ($actualCount -ne $expectedGroupCounts[$group - 1]) { throw "模拟下载分组 $group 文件数量不正确。" }
+        New-Item -ItemType Directory -Path $downloaded -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $artifactStage "group$group/*") -Destination $downloaded
+    }
+    $downloadedManifest = Join-Path $downloaded "artifact-layout.zip.parts.json"
+    $downloadedJoiner = Join-Path $downloaded "AI漫剧制作大师-离线套件合并工具.ps1"
+    $assembled = Join-Path $downloaded "artifact-layout-reassembled.zip"
+    & $downloadedJoiner -ManifestPath $downloadedManifest -OutputPath $assembled
+    if (!(Test-Path -LiteralPath $assembled) -or
+        (Get-FileHash -LiteralPath $artifactSource -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $assembled -Algorithm SHA256).Hash) {
+        throw "三个下载分组无法还原与原始 ZIP 完全一致的文件。"
+    }
+    $downloadedChecksum = (Get-Content -LiteralPath (Join-Path $downloaded "artifact-layout.zip.sha256") -Raw).Trim()
+    if ($downloadedChecksum -notmatch ('^' + [regex]::Escape($artifactHash) + '\\s+artifact-layout\\.zip
+} finally {
+    Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+}
+)) {
+        throw "模拟下载的完整 ZIP SHA-256 文件内容不正确。"
+    }
+
     Write-Host "离线安装套件分卷与合并测试通过。"
 } finally {
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
