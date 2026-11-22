@@ -18,10 +18,9 @@
     "Have all software, model, trademark, export, and redistribution obligations reviewed before any public or customer distribution.",
     "Verify the installed-app CreativeML Open RAIL-M full-text display and persisted click-through acceptance gate, preserve paragraph 5 restrictions for every model user, and complete legal review before any public/customer distribution.",
     "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval.",
-    "For comfy-aimdo 0.6.0, the pinned v0.6.0 upstream source archive and GPL-3.0 license are now included and installed; verify the exact installed Windows wheel digest against the source build and confirm source correspondence before approval.",
     "Resolve the AMD ROCm 7.2.1 rocm, rocm-sdk-core and rocm-sdk-libraries-custom packages' exact Windows component licenses and proprietary runtime terms; AMD licenses ROCm components individually.",
-    "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval.",
-    "For AMD Windows binaries, identify each bundled HIP/ROCm DLL and determine whether it is the HIP runtime or an SDK library. AMD's Windows component matrix identifies HIP runtime as closed-source, and its deployment guidance says applications should not distribute the HIP runtime; do not ship any matching runtime DLL until AMD's exact redistribution terms and packaging guidance are verified."
+    "For AMD Windows binaries, identify each bundled HIP/ROCm DLL and determine whether it is the HIP runtime or an SDK library. AMD's Windows component matrix identifies HIP runtime as closed-source, and its deployment guidance says applications should not distribute the HIP runtime; do not ship any matching runtime DLL until AMD's exact redistribution terms and packaging guidance are verified.",
+    "Run the pinned ComfyUI Frontend npm production dependency inventory in the Windows offline build, review all missing/ambiguous license declarations and copied license/NOTICE texts, and independently verify the PyPI wheel's exact source correspondence; the generated inventory is not legal approval."
   ],
   "portable_variants": [
     {
@@ -131,8 +130,8 @@
     {
       "name": "comfyui-frontend-package 1.59.6",
       "license": "GPL-3.0-only (confirmed by the exact upstream ComfyUI_frontend v1.59.6 package.json and LICENSE)",
-      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.; bundle notice: THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt; THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md; source archive and npm dependency notice audit pending; pinned upstream v1.59.6 source archive is now included in the offline bundle and installed under licenses/source-code; archive SHA-256 is recorded in the generated manifest; exact wheel/source correspondence and transitive npm dependency license audit remain pending.",
-      "status": "gpl_3_0_only_license_and_pinned_source_archive_included_exact_wheel_correspondence_and_npm_dependency_audit_pending"
+      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.; bundle notice: THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt; THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md; source archive and npm dependency notice audit pending; pinned upstream v1.59.6 source archive is now included in the offline bundle and installed under licenses/source-code; archive SHA-256 is recorded in the generated manifest; exact wheel/source correspondence and transitive npm dependency license audit remain pending. A pinned Node.js 26.8.2/pnpm 11.13.1 build-time scanner is now wired into the offline bundle builder; it installs the pinned source workspace's production dependencies, records each package's license expression and package.json hash, and includes detected LICENSE/COPYING/NOTICE texts with per-file SHA-256. First Windows execution must produce and validate the actual report; this inventory is intentionally broader than one workspace package and is not proof of wheel correspondence.",
+      "status": "pinned_source_archive_included_npm_production_inventory_automation_added_first_build_and_manual_review_pending"
     },
     {
       "name": "AMD ROCm Windows SDK 7.2.1 packages",
@@ -263,6 +262,18 @@
         "installed_path": "licenses/source-code/ComfyUI-Frontend-v1.59.6-source.zip"
       },
       "note": "Source archives are pinned to immutable upstream commits and SHA-256 recorded at build time; this does not yet prove that the binaries in the portable wheels were built from these exact source trees."
+    },
+    "frontend_npm_dependency_inventory": {
+      "scanner": "scripts/audit-comfyui-frontend-npm-licenses.ps1",
+      "upstream_commit": "c62d747f378e0fa277cbb5137bffaf282598c64c",
+      "node_version": "26.8.2",
+      "pnpm_version": "11.13.1",
+      "install_mode": "pnpm install --prod --frozen-lockfile --ignore-scripts",
+      "bundle_report": "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-licenses.json",
+      "bundle_summary": "THIRD_PARTY_NOTICES/ComfyUI-Frontend-NPM/frontend-npm-dependency-summary.json",
+      "installed_location": "licenses/ComfyUI-Frontend-NPM/",
+      "inventory_status": "automation_integrated_first_windows_build_pending",
+      "note": "The scanner enumerates all packages present in the pinned pnpm workspace production virtual store, deliberately broader than one workspace package; it records license expressions, package.json hashes, and detected LICENSE/LICENCE/COPYING/NOTICE files. It does not establish which dependencies are embedded in the PyPI wheel or prove wheel/source correspondence. All findings remain subject to human review."
     }
   }
 }
