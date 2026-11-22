@@ -12,7 +12,8 @@ const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.c
 // directory is not part of the app file manifest and is preserved on uninstall.
 if (app.isPackaged) {
   const installRoot = path.dirname(process.resourcesPath);
-  app.setPath("userData", path.join(installRoot, "AIComicStudio-Data"));
+  const persistentDataRoot = path.join(path.dirname(installRoot), path.basename(installRoot) + "-Data");
+  app.setPath("userData", persistentDataRoot);
 }
 
 const API_PORT = 8000;
