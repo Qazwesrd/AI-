@@ -501,7 +501,7 @@ try {
             Write-Host "当前设备将使用 CPU 模式；首次图片生成可能较慢。"
         }
         Write-Host ("CPU 模式启动器：{0}" -f $cpuLauncher)
-        Write-Host "图片生成模型未包含在安装包内，也没有下载任何模型。"
+        Write-Host "已从完整离线安装套件部署 Stable Diffusion 1.5 FP16 图片模型；未进行联网下载。"
     } catch {
         if ($deploymentOwned -and (Test-Path -LiteralPath $installFullPath)) {
             Remove-Item -LiteralPath $installFullPath -Recurse -Force -ErrorAction SilentlyContinue
