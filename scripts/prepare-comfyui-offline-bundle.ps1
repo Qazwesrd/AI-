@@ -345,7 +345,7 @@ Add-FileEntry $archive "ComfyUI-Payload/install-local-engines-transaction.ps1" (
     $bundleAuditRegister.release_blockers[1] = "Review embedded Python package metadata and license evidence for completeness; confirm package licenses and notices manually."
     $bundleAuditRegister.release_blockers[2] = "Review PyTorch, torchvision, torchaudio, CUDA/ROCm/XPU runtime libraries and their separate license and notice obligations for each GPU variant."
     $bundleAuditRegister.release_blockers[8] = "Manually review the recorded Qwen3 4B manifest digest and blob SHA-256 inventory against the exact upstream model revision and license."
-    $bundleAuditRegister.release_blockers[10] = "Run a clean Windows installation and verify the included runtime, model store, third-party notices, and post-install offline operation."
+    $bundleAuditRegister.release_blockers += "Run a clean Windows installation and verify the included runtime, model store, third-party notices, and post-install offline operation."
     $bundleAuditRegister.release_blockers += "Review Stable Diffusion 1.5 checkpoint provenance, CreativeML OpenRAIL-M downstream restriction notice, and model distribution obligations before public release."
     $bundleAuditRegister.known_components[0].status = "license_text_included_inventory_generated_manual_license_review_pending"
     $bundleAuditRegister.local_ai_payload.runtime_version = [string]$localAIManifest.ollama.version
