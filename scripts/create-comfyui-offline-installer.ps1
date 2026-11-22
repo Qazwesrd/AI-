@@ -113,13 +113,63 @@ $joinerTool = Join-Path $outputDirectory "AI漫剧制作大师-离线套件合�
 if (!(Test-Path -LiteralPath $partsManifest -PathType Leaf) -or !(Test-Path -LiteralPath $joinerTool -PathType Leaf)) {
     throw "分卷清单或自动合并工具缺失，拒绝报告套件准备完成。"
 }
-$partFiles = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$([IO.Path]::GetFileName($OutputZip)).part*")
-if ($partFiles.Count -lt 1 -or @($partFiles | Where-Object { $_.Length -gt 1900000000 }).Count -gt 0) {
-    throw "离线套件分卷数量或单卷大小校验失败。"
+
+# Validate the exact manifest-to-file mapping before the workflow uploads any
+# artifact group. This catches missing, extra, reordered, oversized or damaged
+# volumes while the original ZIP is still available for recovery.
+$manifest = Get-Content -LiteralPath $partsManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($manifest.schema_version -ne 1 -or $manifest.archive_name -cne [IO.Path]::GetFileName($OutputZip)) {
+    throw "分卷清单版本或原始 ZIP 文件名不匹配。"
+}
+if ([long]$manifest.archive_size_bytes -ne [long]$zip.Length) {
+    throw "分卷清单声明的 ZIP 大小与实际文件不一致。"
+}
+$archiveHash = (Get-FileHash -LiteralPath $OutputZip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($manifest.archive_sha256 -cne $archiveHash) {
+    throw "分卷清单中的原始 ZIP SHA-256 与实际文件不一致。"
+}
+$checksumLine = (Get-Content -LiteralPath $checksumPath -Raw).Trim()
+if ($checksumLine -notmatch ('^' + [regex]::Escape($archiveHash) + '\s+' + [regex]::Escape([IO.Path]::GetFileName($OutputZip)) + '$')) {
+    throw "原始 ZIP SHA-256 文件内容与实际文件不一致。"
+}
+$manifestParts = @($manifest.parts)
+if ($manifestParts.Count -lt 5 -or $manifestParts.Count -gt 12) {
+    throw "完整离线套件分卷数量必须为 5 至 12 卷，实际为 $($manifestParts.Count) 卷；拒绝生成不完整的上传分组。"
+}
+$seenNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+[long]$partTotal = 0
+$partFiles = @()
+for ($i = 0; $i -lt $manifestParts.Count; $i++) {
+    $entry = $manifestParts[$i]
+    $expectedName = "$([IO.Path]::GetFileName($OutputZip)).part$('{0:D3}' -f ($i + 1))"
+    if ($entry.name -cne $expectedName -or !$seenNames.Add([string]$entry.name)) {
+        throw "分卷清单中的文件名重复、缺失或顺序异常：$($entry.name)"
+    }
+    $partPath = Join-Path $outputDirectory $entry.name
+    if (!(Test-Path -LiteralPath $partPath -PathType Leaf)) {
+        throw "缺少清单声明的分卷：$partPath"
+    }
+    $part = Get-Item -LiteralPath $partPath
+    if ([long]$part.Length -ne [long]$entry.size_bytes -or $part.Length -gt 1900000000) {
+        throw "分卷大小与清单不符或超过上传限制：$($entry.name)"
+    }
+    $partHash = (Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($partHash -cne ([string]$entry.sha256).ToLowerInvariant()) {
+        throw "分卷 SHA-256 校验失败：$($entry.name)"
+    }
+    $partTotal += [long]$part.Length
+    $partFiles += $part
+}
+if ($partTotal -ne [long]$zip.Length) {
+    throw "分卷总大小与原始 ZIP 不一致。"
+}
+$actualParts = @(Get-ChildItem -LiteralPath $outputDirectory -File -Filter "$([IO.Path]::GetFileName($OutputZip)).part*")
+if ($actualParts.Count -ne $manifestParts.Count) {
+    throw "输出目录存在清单之外的额外分卷或缺失分卷。"
 }
 
 Write-Host ""
-Write-Host "完整离线安装套件制作完成："
+Write-Host "完整离线安装套件制作完成并通过分卷清单、逐卷大小和 SHA-256 校验："
 Write-Host $OutputZip
 Write-Host ("文件大小：{0:N2} GiB" -f ($zip.Length / 1GB))
 Write-Host "SHA-256："
