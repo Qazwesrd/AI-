@@ -2,6 +2,12 @@ name: Windows desktop installer
 
 on:
   workflow_dispatch:
+    inputs:
+      build_offline_bundle:
+        description: "仅在需要内部验证完整离线套件时启用（预计约 11 GiB）"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths:
@@ -266,6 +272,91 @@ jobs:
             apps/desktop/release/*.sha256
             apps/desktop/release/*测试包*.zip
             apps/desktop/release/*测试包*.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preflight disk space for complete offline bundle
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $drive = Get-PSDrive -Name (Get-Item $PWD).PSDrive.Name
+          $freeGiB = [math]::Round($drive.Free / 1GB, 2)
+          Write-Host "Available build disk space: $freeGiB GiB"
+          if ($drive.Free -lt 18GB) {
+            throw "完整离线套件预计约 11 GiB，打包过程建议至少 18 GiB 可用空间；当前仅 $freeGiB GiB。为避免生成损坏包，已在下载大文件前停止。"
+          }
+
+      - name: Build and verify complete offline bundle
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        shell: pwsh
+        timeout-minutes: 300
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Join-Path $PWD "apps/desktop/release"
+          $installers = @(Get-ChildItem $release -File -Filter "*Setup*.exe")
+          if ($installers.Count -ne 1) { throw "Expected exactly one freshly built Setup.exe; found $($installers.Count)." }
+          $outputZip = Join-Path $release "AI漫剧制作大师-完整离线安装套件.zip"
+          ./scripts/create-comfyui-offline-installer.ps1 -SkipBuild -SetupExe $installers[0].FullName -OutputZip $outputZip
+          if (!(Test-Path -LiteralPath "$outputZip.parts.json") -or !(Test-Path -LiteralPath (Join-Path $release "AI漫剧制作大师-离线套件合并工具.ps1"))) {
+            throw "完整离线套件分卷清单或合并工具缺失。"
+          }
+          $zip = Get-Item -LiteralPath $outputZip
+          if ($zip.Length -lt 9GB) { throw "完整离线套件小于 9 GiB，拒绝作为完成品上传。" }
+          Write-Host ("Verified offline bundle: {0:N2} GiB" -f ($zip.Length / 1GB))
+          Get-Content -LiteralPath "$outputZip.sha256"
+
+      - name: Prepare split bundle artifact groups
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Join-Path $PWD "apps/desktop/release"
+          $base = "AI漫剧制作大师-完整离线安装套件.zip"
+          $parts = @(Get-ChildItem -LiteralPath $release -File -Filter "$base.part*" | Sort-Object Name)
+          if ($parts.Count -lt 1) { throw "没有找到完整离线套件分卷。" }
+          $stage = Join-Path $env:RUNNER_TEMP "offline-bundle-artifacts"
+          foreach ($group in 1..3) {
+            $folder = Join-Path $stage "group$group"
+            New-Item -ItemType Directory -Path $folder -Force | Out-Null
+          }
+          for ($i = 0; $i -lt $parts.Count; $i++) {
+            $group = [math]::Floor($i / 4) + 1
+            if ($group -gt 3) { throw "分卷超过预设的 12 卷上限，需要扩展分组后再上传。" }
+            Copy-Item -LiteralPath $parts[$i].FullName -Destination (Join-Path $stage "group$group")
+          }
+          Copy-Item -LiteralPath (Join-Path $release "$base.parts.json") -Destination (Join-Path $stage "group3")
+          Copy-Item -LiteralPath (Join-Path $release "AI漫剧制作大师-离线套件合并工具.ps1") -Destination (Join-Path $stage "group3")
+          Copy-Item -LiteralPath (Join-Path $release "$base.sha256") -Destination (Join-Path $stage "group3")
+          "group1=$stage/group1" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "group2=$stage/group2" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "group3=$stage/group3" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Prepared $($parts.Count) verified parts in three upload groups."
+
+      - name: Upload offline bundle volumes 1-4
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-1
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group1/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload offline bundle volumes 5-8
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-2
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group2/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload offline bundle remaining volumes and assembly manifest
+        if: github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Offline-Bundle-Volumes-3
+          path: ${{ runner.temp }}/offline-bundle-artifacts/group3/*
           if-no-files-found: error
           retention-days: 14
 
