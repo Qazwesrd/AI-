@@ -64,6 +64,8 @@ try {
         parsed: Any = json.loads(output)
     except json.JSONDecodeError as exc:
         raise LocalTtsUnavailable("Windows 语音列表返回格式无效。") from exc
+    if parsed is None:
+        return []
     if isinstance(parsed, dict):
         parsed = [parsed]
     if not isinstance(parsed, list):
