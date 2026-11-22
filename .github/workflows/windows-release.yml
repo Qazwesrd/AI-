@@ -272,7 +272,7 @@ jobs:
 
 
       - name: Preflight disk space for complete offline bundle
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -284,13 +284,13 @@ jobs:
           }
 
       - name: Set up pinned Node.js and pnpm for frontend license audit
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         uses: actions/setup-node@v4
         with:
           node-version: "26.8.2"
 
       - name: Install pinned pnpm for frontend license audit
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         shell: pwsh
         run: |
           npm install --global pnpm@11.13.1
@@ -299,7 +299,7 @@ jobs:
           if ((pnpm --version) -ne "11.13.1") { throw "Unexpected pnpm version for ComfyUI Frontend audit." }
 
       - name: Build and verify complete offline bundle
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         shell: pwsh
         timeout-minutes: 300
         run: |
@@ -318,7 +318,7 @@ jobs:
           Get-Content -LiteralPath "$outputZip.sha256"
 
       - name: Prepare split bundle artifact groups
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -407,7 +407,7 @@ jobs:
           Write-Host "Prepared and verified $($parts.Count) parts plus assembly metadata in three upload groups."
 
       - name: Upload offline bundle volumes 1-4
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Offline-Bundle-Volumes-1
@@ -416,7 +416,7 @@ jobs:
           retention-days: 14
 
       - name: Upload offline bundle volumes 5-8
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Offline-Bundle-Volumes-2
@@ -425,7 +425,7 @@ jobs:
           retention-days: 14
 
       - name: Upload offline bundle remaining volumes and assembly manifest
-        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && github.ref == 'refs/heads/feat/product-completion-foundation')
+        if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle)
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Offline-Bundle-Volumes-3
