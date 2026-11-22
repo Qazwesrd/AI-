@@ -74,14 +74,14 @@ if (!(Test-Path -LiteralPath $localAIBuilder -PathType Leaf)) {
 $localAIPayloadRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("aicomics-local-ai-payload-" + [Guid]::NewGuid().ToString("N"))
 try {
     Write-Host "第 2/3 步：下载并验证 Ollama 官方运行环境，准备 Qwen3 4B 本地模型离线载荷。"
-    Write-Host "此步骤会准备约 4 GiB 本地 AI 资源。若临时盘与输出盘是同一磁盘，建议开始前至少预留 18 GiB 可用空间；不会安装到当前电脑。"
+    Write-Host "此步骤会准备约 4 GiB 本地 AI 资源，并额外下载约 2.13 GB 的 Stable Diffusion 1.5 图片模型。若临时盘与输出盘是同一磁盘，建议开始前至少预留 24 GiB 可用空间；不会安装到当前电脑。"
     & $localAIBuilder -OutputDirectory $localAIPayloadRoot
     if (!(Test-Path -LiteralPath (Join-Path $localAIPayloadRoot "manifest.json") -PathType Leaf)) {
         throw "本地 AI 离线载荷构建未生成有效 manifest。"
     }
 
     Write-Host "第 3/3 步：下载并校验 ComfyUI 四种官方运行包、7-Zip 及完整离线安装 ZIP。"
-    Write-Host "完整套件预计约 11 GiB；输出盘还需预留打包和安装临时空间。"
+    Write-Host "完整套件预计约 13 GiB（随 ComfyUI 版本和驱动变动）；输出盘还需预留打包和安装临时空间。"
     Write-Host "本步骤仅制作 ZIP，不会在当前电脑安装 ComfyUI 或 Ollama。"
     & $bundleScript -SetupExe $SetupExe -OutputZip $OutputZip -LocalAIPayloadRoot $localAIPayloadRoot
 } finally {
