@@ -25,14 +25,16 @@ Evidence:
 
 ### comfy-aimdo 0.6.0
 
-- PyPI identifies Comfy-Org as package owner and links the upstream repository `Comfy-Org/comfy-aimdo`.
-- The upstream `pyproject.toml` declares package name, versioning, Python requirement, README, author, and repository URL, but does not declare a project license field.
-- PyPI's release page lists Windows x64 and other platform wheels; the Windows x64 wheel is 284.5 kB and has SHA-256 `45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c`.
-- The wheel was published with PyPI provenance, but provenance is not a license grant and does not substitute for an upstream LICENSE file.
-- Status: `upstream_license_file_and_wheel_notice_review_required`. Do not assign an SPDX license solely from repository ownership or provenance.
+- The upstream repository contains an explicit `LICENSE` file stating GNU GPL version 3.0. It also states that the original author/copyright holder reserves the right to offer the software under alternative licenses.
+- The upstream `pyproject.toml` does not declare a project license field; this explains the missing/ambiguous package METADATA field, but does not override the repository's license file.
+- PyPI lists a Windows x64 wheel of 284.5 kB with SHA-256 `45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c`; PyPI reports provenance for all five 0.6.0 release files.
+- This confirms the upstream license identity, not that the exact archived portable wheel matches that PyPI hash or that the installer currently includes corresponding source and notices.
+- GPL-3.0 object-code redistribution requires providing the corresponding source under GPL terms, preserving notices and license text, and avoiding additional restrictions inconsistent with GPL. Whether/how the bundled wheel is conveyed in the product should be checked against the actual package and distribution architecture.
+- Status: `upstream_gpl_3_0_confirmed_exact_bundled_wheel_hash_and_corresponding_source_and_notice_inclusion_pending`.
 
 Evidence:
 - https://pypi.org/project/comfy-aimdo/0.6.0/
+- https://github.com/Comfy-Org/comfy-aimdo/blob/master/LICENSE
 - https://github.com/Comfy-Org/comfy-aimdo/blob/master/pyproject.toml
 
 ## Required next evidence before any distribution decision
