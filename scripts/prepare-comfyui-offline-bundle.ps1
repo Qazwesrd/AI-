@@ -17,7 +17,7 @@ $AssetNames = @(
     "ComfyUI_windows_portable_amd.7z",
     "ComfyUI_windows_portable_intel.7z"
 )
-$AllowedRedirectHosts = @("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "huggingface.co", "cdn-lfs.huggingface.co", "cas-bridge.xethub.hf.co", "us.aws.cdn.hf.co")
+$AllowedRedirectHosts = @("github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com", "huggingface.co", "cdn-lfs.huggingface.co", "cas-bridge.xethub.hf.co", "cas-server.xethub.hf.co", "us.aws.cdn.hf.co")
 $ReleaseApi = "https://api.github.com/repos/Comfy-Org/ComfyUI/releases/latest"
 $SevenZipApi = "https://api.github.com/repos/ip7z/7zip/releases/latest"
 $MaxAssetBytes = 12GB
@@ -237,7 +237,7 @@ foreach ($toolAsset in @($sevenZipTool, $sevenZipSource)) {
 $totalBytes = ($manifestAssets | Measure-Object -Property size_bytes -Sum).Sum
 $largestAssetBytes = [long](($manifestAssets | Measure-Object -Property size_bytes -Maximum).Maximum)
 # The largest archive is mirrored to temporary storage while its dependency inventory is generated.
-$estimatedBundleBytes = [long]$totalBytes + [long]$localAIPayloadBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + $largestAssetBytes + 1GB
+$estimatedBundleBytes = [long]$totalBytes + [long]$localAIPayloadBytes + [long]$sevenZipTool.size + [long]$sevenZipSource.size + [long]$setupItem.Length + $largestAssetBytes + [long]2132696762 + 1GB
 $target = [System.IO.Path]::GetFullPath($OutputZip)
 $checksumTarget = "$target.sha256"
 $stagingTarget = "$target.$([Guid]::NewGuid().ToString('N')).partial"
