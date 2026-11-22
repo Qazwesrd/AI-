@@ -63,3 +63,10 @@ The offline bundle includes both the Qwen3 4B local text model and the pinned St
 
 The complete offline builder runs `scripts/audit-comfyui-frontend-npm-licenses.ps1` against the source archive pinned to ComfyUI Frontend v1.59.6 commit `c62d747f378e0fa277cbb5137bffaf282598c64c`. The build pins Node.js 26.8.2 and pnpm 11.13.1, performs a frozen production-only workspace install with lifecycle scripts disabled, enumerates packages in the pnpm virtual store, and copies detected LICENSE/LICENCE/COPYING/NOTICE files into the offline bundle with SHA-256 entries. The installer verifies and installs the generated JSON inventory, summary, and all collected license/notice files.
 This is a conservative workspace-wide production inventory, not proof of the exact dependency closure embedded in the PyPI wheel. Missing or ambiguous license declarations and wheel/source correspondence still require manual review. The central audit register remains pending and distribution remains blocked until the generated first-build evidence is reviewed.
+
+
+## Native runtime candidate SHA-256 evidence
+
+The portable archive scanner now records a SHA-256 digest, exact extracted byte size, file extension, and extension-derived candidate kind for every path selected by the native-runtime filename/extension heuristic. It fails the inventory if a selected candidate is absent from the validated extracted archive. Each record also carries explicit pending fields for license-owner and component mapping.
+
+This improves reproducibility and allows exact binary hashes to be compared against vendor package manifests and release artifacts. It does **not** identify a binary's vendor, prove its component identity, determine its license, or establish redistribution permission. In particular, AMD HIP/ROCm DLLs remain blocked until mapped to exact SDK components and their redistribution terms are verified. The extension-based candidate list is still a heuristic, not a complete binary inventory.
