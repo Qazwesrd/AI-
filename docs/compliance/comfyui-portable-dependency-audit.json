@@ -8,7 +8,7 @@
   "reviewer": null,
   "release_blockers": [
     "Review the completed v0.46.0 inventory evidence for all four official Windows portable variants; automated inventory is not legal approval.",
-    "Resolve remaining packages with missing or ambiguous METADATA license fields (initial inventory: 14 in NVIDIA, 14 in NVIDIA CUDA 12.6, 17 in AMD, 14 in Intel); comfy-aimdo 0.6.0 upstream GPL-3.0 is now identified, but exact bundled wheel/source and notice inclusion still require verification.",
+    "For comfy-aimdo 0.6.0, the pinned v0.6.0 upstream source archive and GPL-3.0 license are now included and installed; verify the exact installed Windows wheel digest against the source build and confirm source correspondence before approval.",
     "Review copyleft and notice obligations identified in the inventories, including comfyui-embedded-docs GPL-3.0, pygit2 GPLv2 with linking exception, autocommand LGPLv3, certifi MPL-2.0, and tqdm MPL-2.0 AND MIT.",
     "Review Intel Simplified Software License terms for the Intel oneAPI/MKL/TBB/Tcmlib components in the Intel portable variant.",
     "Review every redistributable native runtime binary and its owner/license; the automated inventory now filters by native-binary extensions and known runtime-library filename markers, but this heuristic is not a complete binary ownership or license determination.",
@@ -17,10 +17,10 @@
     "Complete Ollama Windows amd64 runtime dependency inventory and exact Qwen3 4B manifest/blob digest and license review.",
     "Have all software, model, trademark, export, and redistribution obligations reviewed before any public or customer distribution.",
     "Verify the installed-app CreativeML Open RAIL-M full-text display and persisted click-through acceptance gate, preserve paragraph 5 restrictions for every model user, and complete legal review before any public/customer distribution.",
-    "Review comfyui-frontend-package 1.59.6's exact 30.1 MB wheel frontend assets and embedded third-party licenses; the bundled METADATA has no license declaration, classifier, project URL or license files, and PyPI reports no provenance.",
-    "For comfy-aimdo 0.6.0, verify the exact installed Windows wheel digest and include/provide corresponding GPL-3.0 source; the portable artifacts do contain the 36,091-byte dist-info LICENSE file, but that is not the corresponding source.",
+    "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval.",
+    "For comfy-aimdo 0.6.0, the pinned v0.6.0 upstream source archive and GPL-3.0 license are now included and installed; verify the exact installed Windows wheel digest against the source build and confirm source correspondence before approval.",
     "Resolve the AMD ROCm 7.2.1 rocm, rocm-sdk-core and rocm-sdk-libraries-custom packages' exact Windows component licenses and proprietary runtime terms; AMD licenses ROCm components individually.",
-    "For comfyui-frontend-package 1.59.6, retain the upstream GPL-3.0-only license and corresponding source, then enumerate all frontend npm dependency and asset notices from the exact wheel/build; the PyPI wheel and sdist have no provenance metadata."
+    "For comfyui-frontend-package 1.59.6, the pinned v1.59.6 upstream source archive and GPL-3.0-only license are now included and installed; verify exact wheel/source correspondence and enumerate all npm transitive dependency and asset licenses/notices before approval."
   ],
   "portable_variants": [
     {
@@ -124,14 +124,14 @@
     {
       "name": "comfy-aimdo 0.6.0",
       "license": "GPL-3.0 (confirmed by upstream LICENSE; original author reserves the right to offer alternative licenses)",
-      "evidence": "ComfyUI v0.46.0 inventory artifact: dist-info/licenses/LICENSE (36,091 bytes) extracted; upstream https://github.com/Comfy-Org/comfy-aimdo/blob/master/LICENSE; PyPI Windows x64 wheel SHA-256 45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c; bundle notice: THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt; source archive not yet included",
-      "status": "upstream_gpl_3_0_and_standalone_license_bundled_installed_source_archive_and_exact_wheel_hash_match_pending"
+      "evidence": "ComfyUI v0.46.0 inventory artifact: dist-info/licenses/LICENSE (36,091 bytes) extracted; upstream https://github.com/Comfy-Org/comfy-aimdo/blob/master/LICENSE; PyPI Windows x64 wheel SHA-256 45f821b5828c4b38bcac6553f2250b56e6db87bd65334ed37eb938985d809a3c; bundle notice: THIRD_PARTY_NOTICES/comfy-aimdo-GPL-3.0-LICENSE.txt; source archive not yet included; pinned upstream v0.6.0 source archive is now included in the offline bundle and installed under licenses/source-code; archive SHA-256 is recorded in the generated manifest; exact installed wheel/source correspondence remains pending.",
+      "status": "upstream_gpl_3_0_license_and_pinned_source_archive_included_exact_wheel_hash_match_and_correspondence_review_pending"
     },
     {
       "name": "comfyui-frontend-package 1.59.6",
       "license": "GPL-3.0-only (confirmed by the exact upstream ComfyUI_frontend v1.59.6 package.json and LICENSE)",
-      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.; bundle notice: THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt; THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md; source archive and npm dependency notice audit pending",
-      "status": "gpl_3_0_only_license_and_upstream_third_party_notice_bundled_installed_source_archive_and_npm_dependency_audit_pending"
+      "evidence": "Upstream source tag v1.59.6 commit c62d747f378e0fa277cbb5137bffaf282598c64c; package.json declares GPL-3.0-only; LICENSE is GPL-3.0; PyPI 1.59.6 wheel has no provenance and the exact built wheel/source correspondence is not independently verified.; bundle notice: THIRD_PARTY_NOTICES/ComfyUI-Frontend-GPL-3.0-LICENSE.txt; THIRD_PARTY_NOTICES/ComfyUI-Frontend-THIRD-PARTY-NOTICES.md; source archive and npm dependency notice audit pending; pinned upstream v1.59.6 source archive is now included in the offline bundle and installed under licenses/source-code; archive SHA-256 is recorded in the generated manifest; exact wheel/source correspondence and transitive npm dependency license audit remain pending.",
+      "status": "gpl_3_0_only_license_and_pinned_source_archive_included_exact_wheel_correspondence_and_npm_dependency_audit_pending"
     },
     {
       "name": "AMD ROCm Windows SDK 7.2.1 packages",
@@ -239,6 +239,23 @@
     "note": "These strict counts differ from earlier counts that included classifier-only records. Artifact review is evidence only, not approval.",
     "frontend_upstream_tag": "v1.59.6",
     "frontend_upstream_commit": "c62d747f378e0fa277cbb5137bffaf282598c64c",
-    "frontend_license": "GPL-3.0-only"
+    "frontend_license": "GPL-3.0-only",
+    "pinned_gpl_source_archives": {
+      "comfy_aimdo": {
+        "tag": "v0.6.0",
+        "commit": "68088de9dce9f5e32231fccf230938769c5562da",
+        "archive_path": "THIRD_PARTY_NOTICES/source-code/comfy-aimdo-v0.6.0-68088de9.zip",
+        "sha256": "computed_during_build_recorded_in_manifest",
+        "installed_path": "licenses/source-code/comfy-aimdo-v0.6.0-source.zip"
+      },
+      "comfyui_frontend": {
+        "tag": "v1.59.6",
+        "commit": "c62d747f378e0fa277cbb5137bffaf282598c64c",
+        "archive_path": "THIRD_PARTY_NOTICES/source-code/ComfyUI_frontend-v1.59.6-c62d747f.zip",
+        "sha256": "computed_during_build_recorded_in_manifest",
+        "installed_path": "licenses/source-code/ComfyUI-Frontend-v1.59.6-source.zip"
+      },
+      "note": "Source archives are pinned to immutable upstream commits and SHA-256 recorded at build time; this does not yet prove that the binaries in the portable wheels were built from these exact source trees."
+    }
   }
 }
