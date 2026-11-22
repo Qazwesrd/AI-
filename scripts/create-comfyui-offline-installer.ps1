@@ -143,7 +143,7 @@ if ($manifest.archive_sha256 -cne $archiveHash) {
 # checksum files is informational only: ASCII readers may replace Chinese
 # characters with '?', even when the recorded digest is perfectly valid.
 $checksumLine = [IO.File]::ReadAllText($checksumPath, [Text.Encoding]::UTF8).Trim()
-$checksumMatch = [regex]::Match($checksumLine, '^([0-9a-fA-F]{64})(?:[ \t]+.*)?
+$checksumMatch = [regex]::Match($checksumLine, '^([0-9a-fA-F]{64})')
 
 $manifestParts = @($manifest.parts)
 if ($manifestParts.Count -lt 5 -or $manifestParts.Count -gt 12) {
@@ -154,7 +154,7 @@ $seenNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordina
 $partFiles = @()
 for ($i = 0; $i -lt $manifestParts.Count; $i++) {
     $entry = $manifestParts[$i]
-    $expectedName = "$([IO.Path]::GetFileName($OutputZip)).part$('{0:D3}' -f ($i + 1))"
+    $expectedName = [IO.Path]::GetFileName($OutputZip) + ".part" + ('{0:D3}' -f ($i + 1))
     if ($entry.name -cne $expectedName -or !$seenNames.Add([string]$entry.name)) {
         throw "分卷清单中的文件名重复、缺失或顺序异常：$($entry.name)"
     }
