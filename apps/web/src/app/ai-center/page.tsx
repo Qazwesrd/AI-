@@ -1,240 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
-
-type Provider = {
-  id: number;
-  provider: string;
-  display_name: string;
-  base_url: string;
-  model: string;
-  enabled: boolean;
-  paid: boolean;
-  purpose: string;
-  has_api_key: boolean;
-};
-
-const presets = [
-  { id: "deepseek", name: "DeepSeek", url: "https://api.deepseek.com", model: "deepseek-chat", paid: true, purpose: "text" },
-  { id: "doubao", name: "豆包", url: "https://ark.cn-beijing.volces.com/api/v3", model: "", paid: true, purpose: "image" },
-  { id: "openai", name: "OpenAI", url: "https://api.openai.com/v1", model: "gpt-4.1-mini", paid: true, purpose: "text" },
-  { id: "xai", name: "Grok（xAI）", url: "https://api.x.ai/v1", model: "", paid: true, purpose: "text" },
-  { id: "gemini", name: "Google Gemini", url: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.5-flash", paid: true, purpose: "text" },
-  { id: "cloudflare", name: "Cloudflare Workers AI", url: "", model: "", paid: true, purpose: "text" },
-  { id: "custom_video", name: "自定义视频生成服务商", url: "", model: "", paid: true, purpose: "video" },
-  { id: "tripo3d", name: "Tripo AI 三维模型", url: "https://openapi.tripo3d.ai/v3", model: "v3.1-20260211", paid: true, purpose: "3d" },
-];
-
 export default function AICenterPage() {
-  const [providers, setProviders] = useState<Provider[]>([]);
-  const [network, setNetwork] = useState(false);
-  const [paid, setPaid] = useState(false);
-  const [selected, setSelected] = useState(presets[0]);
-  const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState(presets[0].url);
-  const [model, setModel] = useState(presets[0].model);
-  const [enabled, setEnabled] = useState(false);
-  const [logs, setLogs] = useState<any[]>([]);
-  const [message, setMessage] = useState("");
-
-  async function api(path: string, options?: RequestInit) {
-    const response = await fetch(`${API}${path}`, options);
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail || "请求失败");
-    return data;
-  }
-
-  async function refresh() {
-    try {
-      const [p, r, l] = await Promise.all([
-        api("/api/ai/providers"),
-        api("/api/ai/runtime"),
-        api("/api/ai/usage-logs"),
-      ]);
-      setProviders(p.items || []);
-      setNetwork(r.network_enabled);
-      setPaid(r.paid_api_allowed);
-      setLogs(l.items || []);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "读取失败");
-    }
-  }
-
-  useEffect(() => { refresh(); }, []);
-
-  function choose(item: typeof presets[number]) {
-    setSelected(item);
-    setBaseUrl(item.url);
-    setModel(item.model);
-    setApiKey("");
-    const old = providers.find((x) => x.provider === item.id);
-    setSelected({ ...item, paid: old?.paid ?? item.paid });
-    setEnabled(old?.enabled || false);
-  }
-
-  async function save() {
-    const existing = providers.find((item) => item.provider === selected.id);
-    if (enabled && (!baseUrl.trim() || !model.trim() || (!apiKey.trim() && !existing?.has_api_key))) {
-      setMessage("启用服务商前，请填写 API 地址、模型名称，并配置 API 密钥。");
-      return;
-    }
-    if (baseUrl.trim()) {
-      try { new URL(baseUrl.trim()); } catch {
-        setMessage("API 地址格式不正确，请填写完整的 http:// 或 https:// 地址。");
-        return;
-      }
-    }
-    try {
-      await api("/api/ai/providers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider: selected.id,
-          display_name: selected.name,
-          base_url: baseUrl,
-          model,
-          api_key: apiKey,
-          enabled,
-          paid: selected.paid,
-          purpose: selected.purpose,
-        }),
-      });
-      setApiKey("");
-      await refresh();
-      setMessage(`${selected.name} 配置已保存`);
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "保存失败");
-    }
-  }
-
-  async function saveRuntime(nextNetwork: boolean, nextPaid: boolean) {
-    try {
-      await api("/api/ai/runtime", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          network_enabled: nextNetwork,
-          paid_api_allowed: nextPaid,
-        }),
-      });
-      setNetwork(nextNetwork);
-      setPaid(nextPaid);
-      setMessage("调用权限设置已保存");
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "设置失败");
-    }
-  }
-
-  async function removeProvider() {
-    if (!confirm(`确定删除 ${selected.name} 配置吗？`)) return;
-    try {
-      await api(`/api/ai/providers/${selected.id}`, { method: "DELETE" });
-      await refresh();
-      setMessage("配置已删除");
-    } catch (e) {
-      setMessage(e instanceof Error ? e.message : "删除失败");
-    }
-  }
-
   return (
     <main className="cosmic min-h-screen text-white">
       <div className="nebula nebula-one" />
       <div className="nebula nebula-two" />
-      <div className="relative z-10 min-h-screen p-5 lg:p-8">
-        <header className="mb-7">
+      <div className="relative z-10 mx-auto min-h-screen max-w-5xl p-5 lg:p-8">
+        <header className="mb-8">
           <a href="/" className="text-sm text-purple-300">← 返回首页</a>
-          <h1 className="mt-3 text-3xl font-black">⚙️ AI 模型管理中心</h1>
-          <p className="mt-2 text-sm text-purple-200">配置 AI 服务、控制网络权限、管理调用记录</p>
-          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-5 text-amber-100">费用安全提示：本页面不会读取服务商实时余额、套餐价格或免费额度。所有服务默认按付费服务保护；只有你已向服务商核实当前额度确实免费且不会自动转为付费时，才可自行调整计费标记。</p>
+          <h1 className="mt-3 text-3xl font-black">AI 创作中心</h1>
+          <p className="mt-3 max-w-3xl text-sm leading-7 text-purple-100/80">
+            本软件不内置 DeepSeek、豆包、OpenAI 等第三方云端 AI API，不要求填写 API 地址、API Key 或付费授权，也不会自动向这些服务提交 API 请求。
+          </p>
         </header>
 
-        {message && <div className="mb-5 rounded-xl border border-purple-400/30 bg-purple-950/70 p-3 text-sm">{message}</div>}
+        <section className="grid gap-5 md:grid-cols-2">
+          <a href="/local-models" className="rounded-2xl border border-emerald-300/30 bg-emerald-950/30 p-6 transition hover:border-emerald-200">
+            <div className="text-2xl">🖥️ 本地 AI 模型</div>
+            <p className="mt-3 text-sm leading-7 text-emerald-100/80">
+              连接电脑上已经安装的 Ollama 和本地模型，在本机完成剧本、分镜、提示词等创作。不会调用第三方云端 AI API。
+            </p>
+            <span className="mt-5 inline-block rounded-lg bg-emerald-500/20 px-4 py-2 text-sm font-semibold text-emerald-100">进入本地模型中心 →</span>
+          </a>
 
-        <section className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
-            <h2 className="font-bold">网络调用总开关</h2>
-            <p className="my-2 text-xs text-purple-300">关闭后，所有外部 AI 请求都会被阻止。</p>
-            <button onClick={() => saveRuntime(!network, paid)} className={`rounded-lg px-5 py-2 text-sm font-bold ${network ? "bg-emerald-700" : "bg-gray-700"}`}>
-              {network ? "已开启" : "已关闭"}
-            </button>
-          </div>
-          <div className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
-            <h2 className="font-bold">付费 API 总授权</h2>
-            <p className="my-2 text-xs text-purple-300">开启仅表示允许付费请求，还必须在具体请求时再次确认。</p>
-            <button onClick={() => saveRuntime(network, !paid)} className={`rounded-lg px-5 py-2 text-sm font-bold ${paid ? "bg-amber-700" : "bg-gray-700"}`}>
-              {paid ? "已授权" : "未授权"}
-            </button>
-          </div>
+          <a href="/ai-tools" className="rounded-2xl border border-sky-300/30 bg-sky-950/30 p-6 transition hover:border-sky-200">
+            <div className="text-2xl">🌐 网页版 AI 协作</div>
+            <p className="mt-3 text-sm leading-7 text-sky-100/80">
+              打开 ChatGPT、DeepSeek、豆包等网页版工具，由你自行登录并手动确认提交。软件负责整理章节、任务和提示词，不读取网页账号密码，也不配置 API。
+            </p>
+            <span className="mt-5 inline-block rounded-lg bg-sky-500/20 px-4 py-2 text-sm font-semibold text-sky-100">进入网页协作中心 →</span>
+          </a>
         </section>
 
-        <section className="grid grid-cols-1 gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
-          <aside className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
-            <h2 className="mb-4 text-lg font-bold">AI 服务商</h2>
-            <div className="space-y-2">
-              {presets.map((p) => {
-                const saved = providers.find((x) => x.provider === p.id);
-                return (
-                  <button key={p.id} onClick={() => choose(p)} className={`w-full rounded-xl border p-3 text-left ${selected.id === p.id ? "border-purple-300 bg-purple-700/30" : "border-purple-400/15 bg-black/20"}`}>
-                    <div className="flex justify-between gap-2">
-                      <span className="font-semibold">{p.name}</span>
-                      <span className={`text-xs ${saved?.enabled ? "text-emerald-300" : "text-gray-400"}`}>{saved?.enabled ? "已启用" : "未启用"}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-purple-300">{p.purpose === "image" ? "视觉生成" : p.purpose === "3d" ? "三维模型生成" : p.purpose === "video" ? "视频生成" : p.purpose === "audio" ? "语音生成" : "文本与分析"} · {(providers.find((x) => x.provider === p.id)?.paid ?? p.paid) ? "需付费授权与本次确认" : "按免费服务调用"}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </aside>
-
-          <div className="space-y-5">
-            <section className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
-              <h2 className="mb-5 text-xl font-bold">{selected.name} 配置</h2>
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <label className="text-sm text-purple-200">API 地址
-                  <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="mt-2 w-full rounded-lg border border-purple-400/30 bg-black/30 p-3 text-white" />
-                </label>
-                <label className="text-sm text-purple-200">模型名称
-                  <input value={model} onChange={(e) => setModel(e.target.value)} className="mt-2 w-full rounded-lg border border-purple-400/30 bg-black/30 p-3 text-white" />
-                </label>
-                <label className="text-sm text-purple-200 md:col-span-2">API 密钥（留空则保留已保存的密钥）
-                  <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="输入 API Key" className="mt-2 w-full rounded-lg border border-purple-400/30 bg-black/30 p-3 text-white" />
-                </label>
-              </div>
-              <label className="mt-4 flex items-center gap-3 text-sm">
-                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                启用此服务商
-              </label>
-              <label className="mt-3 flex items-start gap-3 text-sm">
-                <input type="checkbox" checked={selected.paid} onChange={(e) => setSelected({ ...selected, paid: e.target.checked })} />
-                <span>
-                  此服务商/当前模型属于付费服务
-                  <span className="mt-1 block text-xs text-purple-300">默认按付费处理。只有已核实当前套餐或免费额度确实不收费时才取消勾选；免费额度耗尽后可能转为收费，请以服务商账单规则为准。</span>
-                </span>
-              </label>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <button onClick={save} className="rounded-lg bg-purple-600 px-5 py-2 font-semibold">保存配置</button>
-                <button onClick={removeProvider} className="rounded-lg border border-red-400/30 px-5 py-2 text-red-300">删除配置</button>
-              </div>
-              <p className="mt-4 text-xs leading-6 text-purple-300">
-                密钥保存在本机加密文件中，接口不会返回密钥明文。不同服务商的模型名称和 API 地址请以官方文档为准。视频生成服务请在“自定义视频生成服务商”中配置官方 API 地址、模型名称和密钥；视频任务接口格式需在分镜中心按服务商文档填写。
-              </p>
-            </section>
-
-            <section id="usage-logs" className="rounded-2xl border border-purple-400/20 bg-[#160d2acc] p-5">
-              <h2 className="mb-4 text-lg font-bold">最近调用记录</h2>
-              <div className="max-h-72 space-y-2 overflow-y-auto">
-                {logs.map((log) => (
-                  <div key={log.id} className="flex flex-wrap justify-between gap-2 rounded-lg bg-black/20 p-3 text-xs">
-                    <span>{log.provider} · {log.model} · {log.task}</span>
-                    <span className={log.status === "success" ? "text-emerald-300" : log.status === "submission_unknown" ? "text-amber-200" : "text-red-300"}>{log.status === "submission_unknown" ? "提交结果待核实" : log.status === "success" ? "成功" : "失败"}</span>
-                  </div>
-                ))}
-                {logs.length === 0 && <p className="text-sm text-purple-300">暂无调用记录。</p>}
-              </div>
-            </section>
-          </div>
+        <section className="mt-6 rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-6">
+          <h2 className="text-lg font-bold">费用与隐私说明</h2>
+          <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7 text-purple-100/80">
+            <li>不内置第三方云端 AI API，不需要用户提供任何 API Key。</li>
+            <li>本地模型在本机运行；模型下载或安装可能消耗网络流量和磁盘空间。</li>
+            <li>网页版 AI 由用户自行登录和操作；其账号权益、免费额度及收费规则由对应网站决定。</li>
+            <li>软件不会自动购买服务、充值或开启付费订阅。</li>
+          </ul>
         </section>
       </div>
     </main>
