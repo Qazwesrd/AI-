@@ -483,5 +483,21 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
                         module._DOWNLOAD_TASKS.clear()
                         module._persist_download_tasks_locked()
 
+
+    def test_standalone_resource_pack_builder_preserves_verified_offline_payloads(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[3]
+        builder = (root / "scripts" / "create-ai-resource-pack.ps1").read_text(encoding="utf-8")
+        workflow = (root / ".github" / "workflows" / "windows-release.yml").read_text(encoding="utf-8")
+        self.assertIn('bundle_type = "ai-comic-studio-offline-ai-resource-pack"', builder)
+        self.assertIn('ComfyUI-Payload/manifest.json', builder)
+        self.assertIn('LocalAI-Payload/manifest.json', builder)
+        self.assertIn('LocalAI-Payload/ollama-windows-amd64.zip', builder)
+        self.assertIn('Setup.exe', builder)
+        self.assertIn('AI-Resource-Pack.manifest.json', builder)
+        self.assertIn('Get-FileHash -LiteralPath $tempZip -Algorithm SHA256', builder)
+        self.assertIn('AI-Comic-Studio-Offline-AI-Resource-Pack', workflow)
+        self.assertIn('Build standalone offline AI resource pack', workflow)
+
 if __name__ == "__main__":
     unittest.main()
