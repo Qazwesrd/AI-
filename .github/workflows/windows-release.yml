@@ -31,7 +31,9 @@ permissions:
 # versioned assets to one GitHub Release at the same time. PR validation
 # builds remain independent per pull request and never publish releases.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('windows-installer-pr-{0}', github.event.pull_request.number) || 'windows-installer-master-release' }}
+  # Keep manual full offline-bundle builds in a separate lane so a long
+  # model download cannot block fast push validation builds.
+  group: ${{ github.event_name == 'pull_request' && format('windows-installer-pr-{0}', github.event.pull_request.number) || github.event_name == 'workflow_dispatch' && format('windows-installer-offline-{0}', github.ref) || 'windows-installer-master-release' }}
   cancel-in-progress: false
 
 jobs:
