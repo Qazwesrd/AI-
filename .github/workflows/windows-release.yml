@@ -60,6 +60,7 @@ jobs:
             "scripts/audit-comfyui-portable-dependencies.ps1",
             "scripts/audit-comfyui-frontend-npm-licenses.ps1",
             "scripts/prepare-local-ai-offline-payload.ps1",
+            "scripts/create-ai-resource-pack.ps1",
             "scripts/split-offline-bundle.ps1",
             "scripts/join-offline-bundle.ps1",
             "scripts/tests/test-offline-bundle-volumes.ps1",
