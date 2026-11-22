@@ -209,6 +209,15 @@ if ($manifest.target_architecture -ne "windows-x64" -or
 $imageModel = $manifest.image_generation_model
 $imageModelRelative = "models/checkpoints/v1-5-pruned-emaonly-fp16.safetensors"
 $imageModelPath = Join-Path $payload $imageModelRelative
+$imageLicenseRelative = "THIRD_PARTY_NOTICES/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
+$imageLicensePath = Join-Path $bundleRoot $imageLicenseRelative
+if (!(Test-Path -LiteralPath $imageLicensePath -PathType Leaf)) {
+    throw "离线安装套件缺少 Stable Diffusion CreativeML OpenRAIL-M 完整许可证文本。"
+}
+$imageLicenseText = Get-Content -LiteralPath $imageLicensePath -Raw -Encoding UTF8
+if ($imageLicenseText -notmatch "CreativeML Open RAIL-M" -or $imageLicenseText -notmatch "Attachment A") {
+    throw "Stable Diffusion CreativeML OpenRAIL-M 许可证文本不完整。"
+}
 if (!$imageModel -or
     $imageModel.name -cne "Stable Diffusion 1.5 FP16" -or
     $imageModel.file -cne "ComfyUI-Payload/$imageModelRelative" -or
@@ -441,6 +450,13 @@ try {
         New-Item -ItemType Directory -Path $installedCheckpointDir -Force | Out-Null
         $installedCheckpoint = Join-Path $installedCheckpointDir (Split-Path -Leaf $imageModelPath)
         Copy-Item -LiteralPath $imageModelPath -Destination $installedCheckpoint
+        $installedLicenseDir = Join-Path $installFullPath "licenses"
+        New-Item -ItemType Directory -Path $installedLicenseDir -Force | Out-Null
+        $installedImageLicense = Join-Path $installedLicenseDir "Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
+        Copy-Item -LiteralPath $imageLicensePath -Destination $installedImageLicense
+        if ((Get-Content -LiteralPath $installedImageLicense -Raw -Encoding UTF8) -notmatch "Attachment A") {
+            throw "Stable Diffusion 模型许可证未能完整部署。"
+        }
         if ((Get-FileHash -LiteralPath $installedCheckpoint -Algorithm SHA256).Hash.ToLowerInvariant() -cne $imageModelHash) {
             throw "Stable Diffusion 图片模型部署后的 SHA-256 校验失败。"
         }
@@ -472,6 +488,7 @@ try {
             image_generation_model = [string]$imageModel.name
             image_generation_model_sha256 = $imageModelHash
             image_generation_model_license = [string]$imageModel.license
+            image_generation_model_license_file = "licenses/Stable-Diffusion-CreativeML-OpenRAIL-M-LICENSE.txt"
             selection_reason = $selection.selection_reason
             installed_utc = [DateTime]::UtcNow.ToString("o")
             distribution_approved = $false
