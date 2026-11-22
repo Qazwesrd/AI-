@@ -48,7 +48,9 @@ try {
     [IO.File]::WriteAllBytes($collisionSource, [byte[]]::new(5MB + 17))
     [IO.File]::WriteAllText((Join-Path $temp "collision.zip.part002"), "keep-existing")
     $collisionFailed = $false
-    try { & $split -InputZip $collisionSource -PartSizeBytes 2MB } catch { $collisionFailed = $true }
+    $collisionManifest = Join-Path $temp "collision.zip.parts.json"
+    $collisionJoiner = Join-Path $temp "collision-joiner.ps1"
+    try { & $split -InputZip $collisionSource -PartSizeBytes 2MB -ManifestPath $collisionManifest -JoinerPath $collisionJoiner } catch { $collisionFailed = $true }
     if (!$collisionFailed) { throw "遇到后续分卷文件冲突时，分卷脚本未失败。" }
     if (Test-Path (Join-Path $temp "collision.zip.part001")) { throw "分卷失败后留下了已发布的前序分卷。" }
     if ([IO.File]::ReadAllText((Join-Path $temp "collision.zip.part002")) -cne "keep-existing") { throw "分卷脚本覆盖了原有分卷文件。" }
@@ -61,8 +63,9 @@ try {
     $artifactBytes = [byte[]]::new(9MB + 321)
     [Security.Cryptography.RandomNumberGenerator]::Fill($artifactBytes)
     [IO.File]::WriteAllBytes($artifactSource, $artifactBytes)
-    & $split -InputZip $artifactSource -PartSizeBytes 1MB
     $artifactManifest = Join-Path $temp "artifact-layout.zip.parts.json"
+    $artifactJoiner = Join-Path $temp "artifact-joiner.ps1"
+    & $split -InputZip $artifactSource -PartSizeBytes 1MB -ManifestPath $artifactManifest -JoinerPath $artifactJoiner
     $artifactParts = @(Get-ChildItem -LiteralPath $temp -File -Filter "artifact-layout.zip.part*" | Where-Object { $_.Name -match '^artifact-layout\.zip\.part\d{3}$' } | Sort-Object Name)
     if ($artifactParts.Count -ne 10) { throw "三组下载布局测试未生成预期的 10 个分卷。" }
 
@@ -77,7 +80,7 @@ try {
         Copy-Item -LiteralPath $artifactParts[$i].FullName -Destination (Join-Path $artifactStage "group$group")
     }
     Copy-Item -LiteralPath $artifactManifest -Destination (Join-Path $artifactStage "group3")
-    Copy-Item -LiteralPath $join -Destination (Join-Path $artifactStage "group3/AI漫剧制作大师-离线套件合并工具.ps1")
+    Copy-Item -LiteralPath $artifactJoiner -Destination (Join-Path $artifactStage "group3/AI漫剧制作大师-离线套件合并工具.ps1")
     $artifactHash = (Get-FileHash -LiteralPath $artifactSource -Algorithm SHA256).Hash.ToLowerInvariant()
     "$artifactHash  artifact-layout.zip" | Set-Content -LiteralPath (Join-Path $artifactStage "group3/artifact-layout.zip.sha256") -Encoding ascii
 
