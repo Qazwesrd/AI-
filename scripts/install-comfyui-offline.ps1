@@ -222,14 +222,17 @@ $comfyAimdoLicensePath = Join-Path $bundleRoot ([string]$manifest.comfy_aimdo.li
 $frontendLicensePath = Join-Path $bundleRoot ([string]$manifest.comfyui_frontend.license_file)
 $frontendNoticePath = Join-Path $bundleRoot ([string]$manifest.comfyui_frontend.third_party_notice_file)
 if (!(Test-Path -LiteralPath $comfyAimdoLicensePath -PathType Leaf) -or
-    (Get-Content -LiteralPath $comfyAimdoLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE") {
+    (Get-Content -LiteralPath $comfyAimdoLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE" -or
+    (Get-Sha256 $comfyAimdoLicensePath) -ne ([string]$manifest.comfy_aimdo.license_sha256).ToLowerInvariant()) {
     throw "缺少 comfy-aimdo GPL-3.0 许可证文本。"
 }
 if (!(Test-Path -LiteralPath $frontendLicensePath -PathType Leaf) -or
-    (Get-Content -LiteralPath $frontendLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE") {
+    (Get-Content -LiteralPath $frontendLicensePath -Raw -Encoding UTF8) -notmatch "GNU GENERAL PUBLIC LICENSE" -or
+    (Get-Sha256 $frontendLicensePath) -ne ([string]$manifest.comfyui_frontend.license_sha256).ToLowerInvariant()) {
     throw "缺少 ComfyUI Frontend GPL-3.0 许可证文本。"
 }
-if (!(Test-Path -LiteralPath $frontendNoticePath -PathType Leaf)) {
+if (!(Test-Path -LiteralPath $frontendNoticePath -PathType Leaf) -or
+    (Get-Sha256 $frontendNoticePath) -ne ([string]$manifest.comfyui_frontend.third_party_notice_sha256).ToLowerInvariant()) {
     throw "缺少 ComfyUI Frontend 第三方通知文件。"
 }
 if (!$imageModel -or
