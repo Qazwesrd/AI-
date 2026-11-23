@@ -15,31 +15,28 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y transmission-cli
-      - name: Create small disposable test payload and torrent
+      - name: Create test payload as Transmission service user
         shell: bash
         run: |
           set -euo pipefail
-          SEED_DIR="$RUNNER_TEMP/p2p-seed"
-          rm -rf "$SEED_DIR"
-          mkdir -p "$SEED_DIR"
-          chmod 755 "$SEED_DIR"
-          dd if=/dev/urandom of="$SEED_DIR/p2p-probe-8MiB.bin" bs=1M count=8 status=none
-          cd "$SEED_DIR"
-          transmission-create \
+          SEED_DIR=/var/lib/transmission-daemon/downloads/p2p-probe
+          sudo install -d -o debian-transmission -g debian-transmission -m 0755 "$SEED_DIR"
+          sudo -u debian-transmission dd if=/dev/urandom of="$SEED_DIR/p2p-probe-8MiB.bin" bs=1M count=8 status=none
+          sudo -u debian-transmission transmission-create \
             -t udp://tracker.opentrackr.org:1337/announce \
             -t udp://open.stealth.si:80/announce \
             -t udp://tracker.torrent.eu.org:451/announce \
-            -o "$RUNNER_TEMP/p2p-probe.torrent" \
-            p2p-probe-8MiB.bin
-          install -m 0644 "$RUNNER_TEMP/p2p-probe.torrent" "$SEED_DIR/p2p-probe.torrent"
-          chmod 644 "$SEED_DIR/p2p-probe-8MiB.bin" "$SEED_DIR/p2p-probe.torrent"
-          transmission-show -m "$SEED_DIR/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
+            -o "$SEED_DIR/p2p-probe.torrent" \
+            "$SEED_DIR/p2p-probe-8MiB.bin"
+          sudo -u debian-transmission transmission-show -m "$SEED_DIR/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
+          sudo cp "$SEED_DIR/p2p-probe.torrent" "$RUNNER_TEMP/p2p-probe.torrent"
+          sudo chown runner:runner "$RUNNER_TEMP/magnet.txt" "$RUNNER_TEMP/p2p-probe.torrent"
+          sha256sum "$SEED_DIR/p2p-probe-8MiB.bin"
           echo "MAGNET_URI_BEGIN"
           cat "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_END"
-          sha256sum "$SEED_DIR/p2p-probe-8MiB.bin"
-          ls -ld "$SEED_DIR"
-          ls -l "$SEED_DIR"
+          sudo -u debian-transmission test -r "$SEED_DIR/p2p-probe-8MiB.bin"
+          sudo -u debian-transmission test -r "$SEED_DIR/p2p-probe.torrent"
       - name: Publish disposable torrent metadata
         uses: actions/upload-artifact@v4
         with:
@@ -52,11 +49,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SEED_DIR="$RUNNER_TEMP/p2p-seed"
-          chmod 755 "$SEED_DIR"
-          chmod 644 "$SEED_DIR/p2p-probe-8MiB.bin" "$SEED_DIR/p2p-probe.torrent"
-          cd "$SEED_DIR"
-          echo "Starting Transmission seeder with readable payload and metadata."
+          SEED_DIR=/var/lib/transmission-daemon/downloads/p2p-probe
+          echo "Starting Transmission with service-owned payload."
           timeout 12m transmission-cli \
             --download-dir "$SEED_DIR" \
             --port 51413 \
