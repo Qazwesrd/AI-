@@ -1,0 +1,50 @@
+name: P2P connectivity probe
+on:
+  push:
+    branches:
+      - test/p2p-connectivity-probe
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  seed-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - name: Install torrent tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y transmission-cli aria2
+      - name: Create small disposable test payload and torrent
+        id: torrent
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/p2p-seed"
+          dd if=/dev/urandom of="$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin" bs=1M count=8 status=none
+          transmission-create \
+            -t udp://tracker.opentrackr.org:1337/announce \
+            -t udp://open.stealth.si:80/announce \
+            -t udp://tracker.torrent.eu.org:451/announce \
+            -o "$RUNNER_TEMP/p2p-probe.torrent" \
+            "$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin"
+          echo "MAGNET_URI_BEGIN"
+          transmission-show -m "$RUNNER_TEMP/p2p-probe.torrent"
+          echo "MAGNET_URI_END"
+          sha256sum "$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin"
+      - name: Seed for a limited connectivity window
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Temporary seed window: 12 minutes. This is only an 8 MiB random test file."
+          timeout 12m aria2c \
+            --enable-dht=true \
+            --enable-peer-exchange=true \
+            --seed-time=12 \
+            --seed-ratio=0 \
+            --listen-port=51413 \
+            --bt-tracker=udp://tracker.opentrackr.org:1337/announce,udp://open.stealth.si:80/announce,udp://tracker.torrent.eu.org:451/announce \
+            "$RUNNER_TEMP/p2p-probe.torrent" || status=$?
+          if [[ "${status:-0}" -ne 0 && "${status:-0}" -ne 124 ]]; then
+            exit "$status"
+          fi
