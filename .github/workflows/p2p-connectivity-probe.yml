@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           SEED_DIR=/var/lib/transmission-daemon/downloads/p2p-probe
+          sudo systemctl stop transmission-daemon || true
           sudo install -d -o debian-transmission -g debian-transmission -m 0755 "$SEED_DIR"
           sudo -u debian-transmission dd if=/dev/urandom of="$SEED_DIR/p2p-probe-8MiB.bin" bs=1M count=8 status=none
           sudo -u debian-transmission transmission-create \
@@ -51,10 +52,13 @@ jobs:
         run: |
           set -euo pipefail
           SEED_DIR=/var/lib/transmission-daemon/downloads/p2p-probe
-          echo "Starting Transmission with service-owned payload."
-          timeout 12m transmission-cli \
+          sudo systemctl stop transmission-daemon || true
+          sudo -u debian-transmission test -r "$SEED_DIR/p2p-probe.torrent"
+          sudo -u debian-transmission test -r "$SEED_DIR/p2p-probe-8MiB.bin"
+          echo "Starting standalone Transmission seeder as debian-transmission."
+          sudo -u debian-transmission timeout 12m transmission-cli \
             --download-dir "$SEED_DIR" \
-            --port 51413 \
+            --port 51414 \
             "$SEED_DIR/p2p-probe.torrent" || status=$?
           if [[ "${status:-0}" -ne 0 && "${status:-0}" -ne 124 ]]; then
             exit "$status"
