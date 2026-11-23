@@ -1,0 +1,1 @@
+Trigger standalone seeder after stopping transmission daemon.
