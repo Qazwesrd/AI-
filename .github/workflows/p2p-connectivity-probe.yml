@@ -28,10 +28,19 @@ jobs:
             -t udp://tracker.torrent.eu.org:451/announce \
             -o "$RUNNER_TEMP/p2p-probe.torrent" \
             "$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin"
+          transmission-show -m "$RUNNER_TEMP/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_BEGIN"
-          transmission-show -m "$RUNNER_TEMP/p2p-probe.torrent"
+          cat "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_END"
           sha256sum "$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin"
+      - name: Publish disposable torrent metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: p2p-probe-metadata
+          path: |
+            ${{ runner.temp }}/p2p-probe.torrent
+            ${{ runner.temp }}/magnet.txt
+          retention-days: 2
       - name: Seed for a limited connectivity window
         shell: bash
         run: |
