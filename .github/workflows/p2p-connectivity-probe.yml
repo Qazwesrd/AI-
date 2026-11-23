@@ -19,27 +19,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SEED_DIR=/tmp/p2p-seed
-          sudo rm -rf "$SEED_DIR"
-          sudo mkdir -p "$SEED_DIR"
-          sudo chmod 755 /tmp "$SEED_DIR"
+          SEED_DIR="$RUNNER_TEMP/p2p-seed"
+          rm -rf "$SEED_DIR"
+          mkdir -p "$SEED_DIR"
+          chmod 755 "$SEED_DIR"
           dd if=/dev/urandom of="$SEED_DIR/p2p-probe-8MiB.bin" bs=1M count=8 status=none
           cd "$SEED_DIR"
           transmission-create \
             -t udp://tracker.opentrackr.org:1337/announce \
             -t udp://open.stealth.si:80/announce \
             -t udp://tracker.torrent.eu.org:451/announce \
-            -o /tmp/p2p-probe.torrent \
+            -o "$RUNNER_TEMP/p2p-probe.torrent" \
             p2p-probe-8MiB.bin
-          sudo install -m 0644 /tmp/p2p-probe.torrent "$SEED_DIR/p2p-probe.torrent"
-          sudo chmod 644 "$SEED_DIR/p2p-probe-8MiB.bin" "$SEED_DIR/p2p-probe.torrent"
+          install -m 0644 "$RUNNER_TEMP/p2p-probe.torrent" "$SEED_DIR/p2p-probe.torrent"
+          chmod 644 "$SEED_DIR/p2p-probe-8MiB.bin" "$SEED_DIR/p2p-probe.torrent"
           transmission-show -m "$SEED_DIR/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
-          cp /tmp/p2p-probe.torrent "$RUNNER_TEMP/p2p-probe.torrent"
           echo "MAGNET_URI_BEGIN"
           cat "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_END"
           sha256sum "$SEED_DIR/p2p-probe-8MiB.bin"
-          ls -ld /tmp "$SEED_DIR"
+          ls -ld "$SEED_DIR"
           ls -l "$SEED_DIR"
       - name: Publish disposable torrent metadata
         uses: actions/upload-artifact@v4
@@ -53,14 +52,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd /tmp/p2p-seed
-          sudo -u debian-transmission test -r ./p2p-probe.torrent
-          sudo -u debian-transmission test -r ./p2p-probe-8MiB.bin
-          echo "Verified files readable by Transmission service account; starting seed."
+          SEED_DIR="$RUNNER_TEMP/p2p-seed"
+          chmod 755 "$SEED_DIR"
+          chmod 644 "$SEED_DIR/p2p-probe-8MiB.bin" "$SEED_DIR/p2p-probe.torrent"
+          cd "$SEED_DIR"
+          echo "Starting Transmission seeder with readable payload and metadata."
           timeout 12m transmission-cli \
-            --download-dir /tmp/p2p-seed \
+            --download-dir "$SEED_DIR" \
             --port 51413 \
-            /tmp/p2p-seed/p2p-probe.torrent || status=$?
+            "$SEED_DIR/p2p-probe.torrent" || status=$?
           if [[ "${status:-0}" -ne 0 && "${status:-0}" -ne 124 ]]; then
             exit "$status"
           fi
