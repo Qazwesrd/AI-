@@ -22,17 +22,18 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/p2p-seed"
           dd if=/dev/urandom of="$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin" bs=1M count=8 status=none
+          cd "$RUNNER_TEMP/p2p-seed"
           transmission-create \
             -t udp://tracker.opentrackr.org:1337/announce \
             -t udp://open.stealth.si:80/announce \
             -t udp://tracker.torrent.eu.org:451/announce \
             -o "$RUNNER_TEMP/p2p-probe.torrent" \
-            "$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin"
+            p2p-probe-8MiB.bin
           transmission-show -m "$RUNNER_TEMP/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_BEGIN"
           cat "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_END"
-          sha256sum "$RUNNER_TEMP/p2p-seed/p2p-probe-8MiB.bin"
+          sha256sum p2p-probe-8MiB.bin
       - name: Publish disposable torrent metadata
         uses: actions/upload-artifact@v4
         with:
@@ -47,6 +48,7 @@ jobs:
           set -euo pipefail
           echo "Temporary seed window: 12 minutes. This is only an 8 MiB random test file."
           timeout 12m aria2c \
+            --dir="$RUNNER_TEMP/p2p-seed" \
             --enable-dht=true \
             --enable-peer-exchange=true \
             --seed-time=12 \
