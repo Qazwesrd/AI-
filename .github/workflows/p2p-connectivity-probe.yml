@@ -29,11 +29,13 @@ jobs:
             -t udp://tracker.torrent.eu.org:451/announce \
             -o "$RUNNER_TEMP/p2p-probe.torrent" \
             p2p-probe-8MiB.bin
-          transmission-show -m "$RUNNER_TEMP/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
+          install -m 0644 "$RUNNER_TEMP/p2p-probe.torrent" "$RUNNER_TEMP/p2p-seed/p2p-probe.torrent"
+          transmission-show -m "$RUNNER_TEMP/p2p-seed/p2p-probe.torrent" > "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_BEGIN"
           cat "$RUNNER_TEMP/magnet.txt"
           echo "MAGNET_URI_END"
           sha256sum p2p-probe-8MiB.bin
+          ls -l "$RUNNER_TEMP/p2p-seed"
       - name: Publish disposable torrent metadata
         uses: actions/upload-artifact@v4
         with:
@@ -47,11 +49,13 @@ jobs:
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/p2p-seed"
+          test -r ./p2p-probe.torrent
+          test -r ./p2p-probe-8MiB.bin
           echo "Verifying existing payload and seeding for 12 minutes with Transmission."
           timeout 12m transmission-cli \
             --download-dir "$RUNNER_TEMP/p2p-seed" \
             --port 51413 \
-            "$RUNNER_TEMP/p2p-probe.torrent" || status=$?
+            ./p2p-probe.torrent || status=$?
           if [[ "${status:-0}" -ne 0 && "${status:-0}" -ne 124 ]]; then
             exit "$status"
           fi
