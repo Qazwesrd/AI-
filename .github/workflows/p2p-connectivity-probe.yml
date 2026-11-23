@@ -11,10 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
-      - name: Install torrent tools
+      - name: Install torrent tools and service account
         run: |
           sudo apt-get update
-          sudo apt-get install -y transmission-cli
+          sudo apt-get install -y transmission-cli transmission-daemon
+          id debian-transmission
       - name: Create test payload as Transmission service user
         shell: bash
         run: |
