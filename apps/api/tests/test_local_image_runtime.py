@@ -89,12 +89,14 @@ class LocalImageRuntimeTests(unittest.TestCase):
         self.assertEqual(result["gpu_level"], "unknown")
         self.assertTrue(any("不能据此判断没有 GPU" in item for item in result["reasons"]))
 
-    def test_cpu_launch_command_explicitly_disables_gpu(self):
+    def test_cpu_launch_command_uses_rocm_safe_compatibility_launcher(self):
         main_py = Path("ComfyUI") / "main.py"
-        command = _build_runtime_command(Path("python.exe"), main_py, "cpu")
-        self.assertEqual(command, ["python.exe", "-s", str(main_py), "--cpu", "--windows-standalone-build"])
+        launcher = Path("run_comfy_cpu.py")
+        command = _build_runtime_command(Path("python.exe"), main_py, "cpu", launcher)
+        self.assertEqual(command, ["python.exe", "-s", str(launcher)])
+        self.assertNotIn(str(main_py), command)
 
-    def test_gpu_launch_command_does_not_add_cpu_flag(self):
+    def test_gpu_launch_command_keeps_native_gpu_entrypoint(self):
         main_py = Path("ComfyUI") / "main.py"
         command = _build_runtime_command(Path("python.exe"), main_py, "gpu")
         self.assertEqual(command, ["python.exe", "-s", str(main_py), "--windows-standalone-build"])
