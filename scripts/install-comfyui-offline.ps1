@@ -440,7 +440,12 @@ if (!$tool -or $tool.source -ne $expectedToolUrl -or
 if ($PSBoundParameters.ContainsKey("DetectedAdapters")) {
     $adapters = @($DetectedAdapters)
 } else {
-    $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
+    try {
+        $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
+    } catch {
+        Write-Warning ("无法读取 Windows 显卡信息，将使用离线 CPU 模式：{0}" -f $_.Exception.Message)
+        $adapters = @()
+    }
 }
 $selection = Select-ComfyAsset $adapters
 $asset = $manifest.assets | Where-Object { $_.name -eq $selection.name } | Select-Object -First 1
