@@ -7,7 +7,7 @@ on:
         description: "仅在需要内部验证完整离线套件时启用（预计约 13 GiB）"
         required: false
         type: boolean
-        default: true
+        default: false
   push:
     branches: [master, feat/product-completion-foundation]
     paths:
