@@ -33,10 +33,28 @@ function Assert-OfficialUri([string]$Url, [string[]]$Hosts) {
 
 function Add-FileEntry([System.IO.Compression.ZipArchive]$Archive, [string]$EntryName, [string]$SourcePath) {
     $entry = $Archive.CreateEntry($EntryName, [System.IO.Compression.CompressionLevel]::NoCompression)
-    $input = [System.IO.File]::OpenRead($SourcePath)
     $output = $entry.Open()
-    try { $input.CopyTo($output, $ChunkBytes) }
-    finally { $output.Dispose(); $input.Dispose() }
+    try {
+        if ($EntryName.EndsWith(".ps1", [System.StringComparison]::OrdinalIgnoreCase)) {
+            # Windows PowerShell 5.1 must read Chinese PowerShell scripts with an explicit UTF-8 BOM.
+            $bytes = [System.IO.File]::ReadAllBytes($SourcePath)
+            $hasUtf8Bom = $bytes.Length -ge 3 -and
+                $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+            if (!$hasUtf8Bom) {
+                $normalized = [byte[]]::new($bytes.Length + 3)
+                $normalized[0] = 0xEF
+                $normalized[1] = 0xBB
+                $normalized[2] = 0xBF
+                [System.Buffer]::BlockCopy($bytes, 0, $normalized, 3, $bytes.Length)
+                $bytes = $normalized
+            }
+            $output.Write($bytes, 0, $bytes.Length)
+        } else {
+            $input = [System.IO.File]::OpenRead($SourcePath)
+            try { $input.CopyTo($output, $ChunkBytes) }
+            finally { $input.Dispose() }
+        }
+    } finally { $output.Dispose() }
 }
 
 function Add-TextEntry([System.IO.Compression.ZipArchive]$Archive, [string]$EntryName, [string]$Text) {
