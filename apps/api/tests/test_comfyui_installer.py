@@ -11,6 +11,15 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parents[3]
         prepare = (root / "scripts" / "prepare-comfyui-offline-bundle.ps1").read_text(encoding="utf-8")
+        # Every PowerShell script embedded in the offline payload must carry a UTF-8 BOM,
+        # otherwise Windows PowerShell 5.1 can misread Chinese comments/messages.
+        self.assertIn('$EntryName.EndsWith(".ps1"', prepare)
+        self.assertIn('$normalized[0] = 0xEF', prepare)
+        self.assertIn('$normalized[1] = 0xBB', prepare)
+        self.assertIn('$normalized[2] = 0xBF', prepare)
+        workflow = (root / ".github" / "workflows" / "windows-release.yml").read_text(encoding="utf-8")
+        self.assertIn("build_offline_bundle:", workflow)
+        self.assertIn("default: false", workflow)
         install = (root / "scripts" / "install-comfyui-offline.ps1").read_text(encoding="utf-8")
         bundle_type = "complete-offline-comfyui-engine-internal-validation-only"
         distribution_status = "blocked-pending-third-party-dependency-audit"
