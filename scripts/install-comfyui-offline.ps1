@@ -194,6 +194,7 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
 }
 
 $payload = (Resolve-Path -LiteralPath $PayloadRoot).Path
+$bundleRoot = Split-Path -Parent $payload
 $manifestPath = Join-Path $payload "manifest.json"
 $sevenZip = Join-Path $payload "7zr.exe"
 if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf) -or !(Test-Path -LiteralPath $sevenZip -PathType Leaf)) {
@@ -263,7 +264,6 @@ if ($manifestAssetItems.Count -ne 4 -or $manifestAssetNames.Count -ne 4 -or
     throw "离线数据包缺少官方显卡运行包、包含重复项或包含未知文件。"
 }
 
-$bundleRoot = Split-Path -Parent $payload
 $inventoryReportRelative = [string]$manifest.dependency_inventory_report
 if ($inventoryReportRelative -cne "THIRD_PARTY_NOTICES/comfyui-portable-dependency-inventory.json") {
     throw "离线清单缺少四种 Portable 运行包的依赖清点报告路径。"
