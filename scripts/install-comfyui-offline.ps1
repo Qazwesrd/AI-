@@ -25,6 +25,46 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Write-ComfyCpuLaunchers([string]$Root) {
+    $pythonLauncher = Join-Path $Root "run_comfy_cpu.py"
+    $pythonContent = @'
+import os
+import sys
+import runpy
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+main = root / "ComfyUI" / "main.py"
+if not main.is_file():
+    raise SystemExit("ComfyUI main.py is missing.")
+
+os.environ["COMFY_KITCHEN_DISABLE_HIP"] = "1"
+
+import torch
+
+# Avoid the unstable Windows ROCm availability probe in CPU fallback mode.
+torch.cuda.is_available = lambda: False
+
+sys.argv = [str(main), "--cpu", "--windows-standalone-build"]
+runpy.run_path(str(main), run_name="__main__")
+'@
+    Set-Content -LiteralPath $pythonLauncher -Value $pythonContent -Encoding UTF8
+
+    $batchLauncher = Join-Path $Root "AI漫剧大师-CPU模式启动.bat"
+    $batchContent = @(
+        "@echo off",
+        "setlocal",
+        'cd /d "%~dp0"',
+        'if not exist "python_embeded\python.exe" (echo ComfyUI embedded Python is missing.& pause & exit /b 1)',
+        'if not exist "ComfyUI\main.py" (echo ComfyUI main.py is missing.& pause & exit /b 1)',
+        'if not exist "run_comfy_cpu.py" (echo CPU compatibility launcher is missing.& pause & exit /b 1)',
+        '"python_embeded\python.exe" -s "run_comfy_cpu.py"',
+        "if errorlevel 1 (echo ComfyUI CPU mode exited with an error.& pause & exit /b 1)",
+        "endlocal"
+    )
+    Set-Content -LiteralPath $batchLauncher -Value $batchContent -Encoding ASCII
+}
+
 function Get-GpuVendor($Adapter) {
     $pnp = [string]$Adapter.PNPDeviceID
     $name = [string]$Adapter.Name
@@ -483,7 +523,8 @@ if (Test-Path -LiteralPath $installFullPath) {
                 if ($existingState.comfyui_version) { $existingVersion = [string]$existingState.comfyui_version }
             } catch {}
         }
-        Write-Host "检测到已有 ComfyUI $existingVersion。为保护现有模型、插件和配置，本次保留现有引擎，不覆盖或删除任何文件。"
+        Write-ComfyCpuLaunchers $installFullPath
+        Write-Host "检测到已有 ComfyUI $existingVersion。已补齐 CPU 兼容启动器；为保护现有模型、插件和配置，本次保留现有引擎，不覆盖或删除任何文件。"
         if ($transcriptStarted) {
             Stop-Transcript | Out-Null
             $transcriptStarted = $false
@@ -578,46 +619,8 @@ try {
             throw "Stable Diffusion 图片模型部署后的 SHA-256 校验失败。"
         }
 
-        # Windows ROCm on older Radeon APUs can crash inside torch.cuda.is_available().
-        # Centralize the CPU fallback before importing ComfyUI; do not patch every
-        # individual ComfyUI module. This is an offline, reversible launcher shim.
-        $cpuPythonLauncher = Join-Path $installFullPath "run_comfy_cpu.py"
-        $cpuPythonLauncherContent = @'
-import os
-import sys
-import runpy
-from pathlib import Path
-
-root = Path(__file__).resolve().parent
-main = root / "ComfyUI" / "main.py"
-if not main.is_file():
-    raise SystemExit("ComfyUI main.py is missing.")
-
-os.environ["COMFY_KITCHEN_DISABLE_HIP"] = "1"
-
-import torch
-
-# Avoid the unstable Windows ROCm availability probe in CPU fallback mode.
-torch.cuda.is_available = lambda: False
-
-sys.argv = [str(main), "--cpu", "--windows-standalone-build"]
-runpy.run_path(str(main), run_name="__main__")
-'@
-        Set-Content -LiteralPath $cpuPythonLauncher -Value $cpuPythonLauncherContent -Encoding UTF8
-
-        $cpuLauncher = Join-Path $installFullPath "AI漫剧大师-CPU模式启动.bat"
-        $cpuLauncherContent = @(
-            "@echo off",
-            "setlocal",
-            'cd /d "%~dp0"',
-            'if not exist "python_embeded\python.exe" (echo ComfyUI embedded Python is missing.& pause & exit /b 1)',
-            'if not exist "ComfyUI\main.py" (echo ComfyUI main.py is missing.& pause & exit /b 1)',
-            'if not exist "run_comfy_cpu.py" (echo CPU compatibility launcher is missing.& pause & exit /b 1)',
-            '"python_embeded\python.exe" -s "run_comfy_cpu.py"',
-            "if errorlevel 1 (echo ComfyUI CPU mode exited with an error.& pause & exit /b 1)",
-            "endlocal"
-        )
-        Set-Content -LiteralPath $cpuLauncher -Value $cpuLauncherContent -Encoding ASCII
+        # Install or refresh the CPU compatibility entry points without touching models or custom nodes.
+        Write-ComfyCpuLaunchers $installFullPath
 
         $runtimeManifest = @{
             schema_version = 1
