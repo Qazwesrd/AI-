@@ -126,6 +126,27 @@ function Get-TextSha256([string]$Text) {
     finally { $sha.Dispose() }
 }
 
+function Get-ArchiveFileMetadata([string]$Path, [bool]$EnsureUtf8Bom = $false) {
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    $hasUtf8Bom = $bytes.Length -ge 3 -and
+        $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    if ($EnsureUtf8Bom -and !$hasUtf8Bom) {
+        $normalized = [byte[]]::new($bytes.Length + 3)
+        $normalized[0] = 0xEF
+        $normalized[1] = 0xBB
+        $normalized[2] = 0xBF
+        [System.Buffer]::BlockCopy($bytes, 0, $normalized, 3, $bytes.Length)
+        $bytes = $normalized
+    }
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return @{
+            size_bytes = [long]$bytes.Length
+            sha256 = [BitConverter]::ToString($sha.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant()
+        }
+    } finally { $sha.Dispose() }
+}
+
 function Get-ZipEntrySha256([System.IO.Compression.ZipArchiveEntry]$Entry) {
     $input = $Entry.Open()
     $hasher = [System.Security.Cryptography.IncrementalHash]::CreateHash([System.Security.Cryptography.HashAlgorithmName]::SHA256)
@@ -732,7 +753,8 @@ try {
     $expectedEntries += @{ path = $imageModelEntry; size = [long]$imageModelResult.size_bytes; sha256 = [string]$imageModelResult.sha256 }
     $transactionInstaller = Join-Path $PSScriptRoot "install-local-engines-transaction.ps1"
     if (!(Test-Path -LiteralPath $transactionInstaller -PathType Leaf)) { throw "整套本地引擎事务安装脚本不存在：$transactionInstaller" }
-    $expectedEntries += @{ path = "ComfyUI-Payload/install-local-engines-transaction.ps1"; size = (Get-Item -LiteralPath $transactionInstaller).Length; sha256 = (Get-FileHash -LiteralPath $transactionInstaller -Algorithm SHA256).Hash.ToLowerInvariant() }
+    $transactionInstallerArchive = Get-ArchiveFileMetadata $transactionInstaller $true
+    $expectedEntries += @{ path = "ComfyUI-Payload/install-local-engines-transaction.ps1"; size = [long]$transactionInstallerArchive.size_bytes; sha256 = [string]$transactionInstallerArchive.sha256 }
     $expectedEntries += @{ path = "THIRD_PARTY_NOTICES/$($sevenZipSource.name)"; size = [long]$sevenZipSourceResult.size_bytes; sha256 = [string]$sevenZipSourceResult.sha256 }
     $expectedEntries += @{ path = [string]$comfyAimdoSourceResult.path; size = [long]$comfyAimdoSourceResult.size_bytes; sha256 = [string]$comfyAimdoSourceResult.sha256 }
     $expectedEntries += @{ path = [string]$frontendSourceResult.path; size = [long]$frontendSourceResult.size_bytes; sha256 = [string]$frontendSourceResult.sha256 }
@@ -755,10 +777,11 @@ try {
             sha256 = (Get-FileHash -LiteralPath $localAIFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }
     }
+    $localAIInstallScriptArchive = Get-ArchiveFileMetadata $localAIInstallScript $true
     $expectedEntries += @{
         path = "LocalAI-Payload/install-local-ai-offline.ps1"
-        size = (Get-Item -LiteralPath $localAIInstallScript).Length
-        sha256 = (Get-FileHash -LiteralPath $localAIInstallScript -Algorithm SHA256).Hash.ToLowerInvariant()
+        size = [long]$localAIInstallScriptArchive.size_bytes
+        sha256 = [string]$localAIInstallScriptArchive.sha256
     }
 
     foreach ($expected in $expectedEntries) {
