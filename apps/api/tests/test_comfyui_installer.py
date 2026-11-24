@@ -20,6 +20,10 @@ class ComfyUIInstallReadinessTests(unittest.TestCase):
         workflow = (root / ".github" / "workflows" / "windows-release.yml").read_text(encoding="utf-8")
         self.assertIn("build_offline_bundle:", workflow)
         self.assertIn("default: false", workflow)
+        patch_builder = (root / "scripts" / "create-offline-script-repair-patch.ps1").read_text(encoding="utf-8")
+        self.assertIn('patch_type = "offline-installer-scripts-only"', patch_builder)
+        self.assertIn("contains_models = $false", patch_builder)
+        self.assertIn("AIComicStudio-Script-Repair-Patch.zip", workflow)
         install = (root / "scripts" / "install-comfyui-offline.ps1").read_text(encoding="utf-8")
         bundle_type = "complete-offline-comfyui-engine-internal-validation-only"
         distribution_status = "blocked-pending-third-party-dependency-audit"
