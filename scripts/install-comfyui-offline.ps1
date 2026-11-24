@@ -121,11 +121,11 @@ function Select-ComfyAsset($Adapters) {
 }
 
 function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
-    # Bound native listing output before parsing to avoid unbounded memory use
-    # when an archive contains an unexpectedly large directory table.
-    $maximumEntries = 50000
-    $maximumListingLines = ([long]$maximumEntries * 12) + 1000
-    $listing = New-Object System.Collections.Generic.List[string]
+    # Keep hard limits, but allow the actual bundled runtime's file count.
+    # Use generic lists to avoid quadratic array growth while parsing large archives.
+    $maximumEntries = 100000
+    $maximumListingLines = ([long]$maximumEntries * 16) + 2000
+    $listing = New-Object 'System.Collections.Generic.List[string]'
     & $SevenZip l -slt -- $ArchivePath 2>&1 | ForEach-Object {
         if ($listing.Count -ge $maximumListingLines) {
             throw "ComfyUI 运行包目录清单超过安全上限 $maximumListingLines 行。"
@@ -133,12 +133,13 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
         $listing.Add([string]$_)
     }
     if ($LASTEXITCODE -ne 0) { throw "ComfyUI 运行包目录清单读取失败。" }
-    $blocks = @()
+
+    $blocks = New-Object 'System.Collections.Generic.List[object]'
     $current = @{}
     foreach ($line in $listing) {
         $text = [string]$line
         if ($text -match "^Path = (.*)$") {
-            if ($current.Count -gt 0) { $blocks += ,$current }
+            if ($current.Count -gt 0) { $blocks.Add($current) }
             $current = @{ Path = $Matches[1] }
             continue
         }
@@ -146,7 +147,7 @@ function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
             $current[$Matches[1].Trim()] = $Matches[2]
         }
     }
-    if ($current.Count -gt 0) { $blocks += ,$current }
+    if ($current.Count -gt 0) { $blocks.Add($current) }
 
     $entries = @($blocks | Where-Object { $_.Path -and $_.ContainsKey("Size") })
     if ($entries.Count -lt 1 -or $entries.Count -gt $maximumEntries) {
