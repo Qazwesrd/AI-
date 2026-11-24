@@ -123,12 +123,11 @@ def assess_image_hardware(hardware: dict):
     }
 
 
-def _build_runtime_command(python_exe: Path, main_py: Path, mode: str):
-    command = [str(python_exe), "-s", str(main_py)]
+def _build_runtime_command(python_exe: Path, main_py: Path, mode: str, cpu_launcher: Path | None = None):
     if mode == "cpu":
-        command.append("--cpu")
-    command.append("--windows-standalone-build")
-    return command
+        launcher = cpu_launcher or main_py.parent.parent / "run_comfy_cpu.py"
+        return [str(python_exe), "-s", str(launcher)]
+    return [str(python_exe), "-s", str(main_py), "--windows-standalone-build"]
 
 
 def _runtime_mode():
@@ -268,12 +267,15 @@ def start_local_image_runtime():
         root = _install_root()
         python_exe = root / "python_embeded" / "python.exe"
         main_py = root / "ComfyUI" / "main.py"
+        cpu_launcher = root / "run_comfy_cpu.py"
         if not root.is_dir() or not python_exe.is_file() or not main_py.is_file():
             raise HTTPException(status_code=404, detail=f"没有找到完整的 ComfyUI 引擎。预期位置：{root}")
         if python_exe.is_symlink() or main_py.is_symlink():
             raise HTTPException(status_code=400, detail="ComfyUI 启动文件不能是符号链接。")
         mode, adapter_name = _runtime_mode()
-        command = _build_runtime_command(python_exe, main_py, mode)
+        if mode == "cpu" and not cpu_launcher.is_file():
+            raise HTTPException(status_code=409, detail="当前设备需要 CPU 兼容启动器，但安装目录缺少 run_comfy_cpu.py。请运行 AI 漫剧大师离线修复程序。")
+        command = _build_runtime_command(python_exe, main_py, mode, cpu_launcher)
         log_path = _log_path()
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -293,7 +295,7 @@ def start_local_image_runtime():
                 shell=False,
                 close_fds=True,
                 creationflags=creationflags,
-                env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1"},
+                env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", **({"COMFY_KITCHEN_DISABLE_HIP": "1"} if mode == "cpu" else {})},
             )
         except OSError as exc:
             try:
