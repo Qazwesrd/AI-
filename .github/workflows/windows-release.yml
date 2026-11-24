@@ -288,6 +288,20 @@ jobs:
       # the complete offline AI resource pack and its verified distribution.
 
 
+      - name: Build small offline installer script repair patch
+        shell: pwsh
+        run: ./scripts/create-offline-script-repair-patch.ps1
+
+      - name: Upload script-only repair patch for internal acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Script-Repair-Patch
+          path: |
+            apps/desktop/release/AIComicStudio-Script-Repair-Patch.zip
+            apps/desktop/release/AIComicStudio-Script-Repair-Patch.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Preflight disk space for complete offline bundle
         if: (github.event_name == 'workflow_dispatch' && inputs.build_offline_bundle) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[build-offline-bundle]'))
         shell: pwsh
