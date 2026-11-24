@@ -117,7 +117,16 @@ function Select-ComfyAsset($Adapters) {
         }
     }
 
-    throw "没有识别到受支持的 NVIDIA、AMD 或 Intel GPU。安装已停止，不会猜测运行包，也不会联网下载。"
+    # A missing/unknown WMI display adapter must not block an offline install.
+    # The bundled official AMD portable archive also supports the explicit CPU launcher.
+    # This fallback is local-only: it does not download or infer a GPU-specific runtime.
+    return @{
+        name = "ComfyUI_windows_portable_amd.7z"
+        detected_gpu = "未识别到兼容显卡，使用通用 CPU 模式"
+        vendor = "unknown"
+        runtime_mode = "cpu"
+        selection_reason = "Windows 未能识别受支持的 GPU，使用已随离线包提供的 CPU 运行模式"
+    }
 }
 
 function Get-ArchiveEntries([string]$SevenZip, [string]$ArchivePath) {
