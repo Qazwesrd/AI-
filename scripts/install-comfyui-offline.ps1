@@ -578,9 +578,33 @@ try {
             throw "Stable Diffusion 图片模型部署后的 SHA-256 校验失败。"
         }
 
-        # Provide an explicit CPU launcher for integrated/unsupported GPU devices.
-        # This follows the official ComfyUI portable CPU invocation and does not
-        # install extra runtimes or download anything.
+        # Windows ROCm on older Radeon APUs can crash inside torch.cuda.is_available().
+        # Centralize the CPU fallback before importing ComfyUI; do not patch every
+        # individual ComfyUI module. This is an offline, reversible launcher shim.
+        $cpuPythonLauncher = Join-Path $installFullPath "run_comfy_cpu.py"
+        $cpuPythonLauncherContent = @'
+import os
+import sys
+import runpy
+from pathlib import Path
+
+root = Path(__file__).resolve().parent
+main = root / "ComfyUI" / "main.py"
+if not main.is_file():
+    raise SystemExit("ComfyUI main.py is missing.")
+
+os.environ["COMFY_KITCHEN_DISABLE_HIP"] = "1"
+
+import torch
+
+# Avoid the unstable Windows ROCm availability probe in CPU fallback mode.
+torch.cuda.is_available = lambda: False
+
+sys.argv = [str(main), "--cpu", "--windows-standalone-build"]
+runpy.run_path(str(main), run_name="__main__")
+'@
+        Set-Content -LiteralPath $cpuPythonLauncher -Value $cpuPythonLauncherContent -Encoding UTF8
+
         $cpuLauncher = Join-Path $installFullPath "AI漫剧大师-CPU模式启动.bat"
         $cpuLauncherContent = @(
             "@echo off",
@@ -588,7 +612,8 @@ try {
             'cd /d "%~dp0"',
             'if not exist "python_embeded\python.exe" (echo ComfyUI embedded Python is missing.& pause & exit /b 1)',
             'if not exist "ComfyUI\main.py" (echo ComfyUI main.py is missing.& pause & exit /b 1)',
-            '"python_embeded\python.exe" -s "ComfyUI\main.py" --cpu --windows-standalone-build',
+            'if not exist "run_comfy_cpu.py" (echo CPU compatibility launcher is missing.& pause & exit /b 1)',
+            '"python_embeded\python.exe" -s "run_comfy_cpu.py"',
             "if errorlevel 1 (echo ComfyUI CPU mode exited with an error.& pause & exit /b 1)",
             "endlocal"
         )
