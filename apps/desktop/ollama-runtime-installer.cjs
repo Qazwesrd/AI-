@@ -29,7 +29,13 @@ function pathApiFor(value) {
 
 function resolveAppDataDirectory(defaultDirectory, env = process.env) {
   const configured = String(env.AICOMICS_DATA_DIR || env.APP_DATA_DIR || "").trim();
-  const selected = configured || defaultDirectory;
+  // Reuse the user's existing E: drive offline resource store when it is present.
+  // Never create a second empty profile that hides the already-installed models.
+  const knownManagedDirectory = "E:\\\\123\\\\ai-comic-studio-desktop-Data";
+  const knownRuntime = path.win32.join(knownManagedDirectory, "engines", "Ollama", "runtime", "ollama.exe");
+  const selected = configured || (process.platform === "win32" && fs.existsSync(knownRuntime)
+    ? knownManagedDirectory
+    : defaultDirectory);
   return pathApiFor(selected).resolve(selected);
 }
 
