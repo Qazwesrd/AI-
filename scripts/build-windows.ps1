@@ -47,26 +47,15 @@ try {
     Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
 }
 
-$FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
-$FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
+# FFmpeg is a user-provided runtime dependency and is deliberately not bundled.
+# CI may use a system installation for optional media-related manual checks, but
+# installer creation must never fail merely because FFmpeg is not installed.
 $SystemFfmpeg = (Get-Command ffmpeg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
 $SystemFfprobe = (Get-Command ffprobe.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-
-if (!(Test-Path $FfmpegSource) -or (Get-Item $FfmpegSource).Length -lt 1MB) {
-    if ($SystemFfmpeg) {
-        New-Item -ItemType Directory -Path (Split-Path $FfmpegSource) -Force | Out-Null
-        Copy-Item $SystemFfmpeg $FfmpegSource -Force
-    } else {
-        throw "FFmpeg executable is missing or is a Git LFS pointer. Install FFmpeg and add it to PATH."
-    }
-}
-if (!(Test-Path $FfprobeSource) -or (Get-Item $FfprobeSource).Length -lt 1MB) {
-    if ($SystemFfprobe) {
-        New-Item -ItemType Directory -Path (Split-Path $FfprobeSource) -Force | Out-Null
-        Copy-Item $SystemFfprobe $FfprobeSource -Force
-    } else {
-        throw "FFmpeg executable is missing or is a Git LFS pointer. Install FFmpeg and add it to PATH."
-    }
+if ($SystemFfmpeg -and $SystemFfprobe) {
+    Write-Host "Using system FFmpeg for build-time smoke tests: $SystemFfmpeg"
+} else {
+    Write-Host "FFmpeg not installed on build host; continuing because it is not part of the installer."
 }
 
 
@@ -171,8 +160,13 @@ try {
     $env:APP_DATA_DIR = $ManualDataDir
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
-    $env:FFMPEG_PATH = $FfmpegSource
-    $env:FFPROBE_PATH = $FfprobeSource
+    if ($SystemFfmpeg -and $SystemFfprobe) {
+        $env:FFMPEG_PATH = $SystemFfmpeg
+        $env:FFPROBE_PATH = $SystemFfprobe
+    } else {
+        Remove-Item Env:FFMPEG_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:FFPROBE_PATH -ErrorAction SilentlyContinue
+    }
     $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
 
     $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
