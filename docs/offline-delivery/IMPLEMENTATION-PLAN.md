@@ -14,10 +14,11 @@ The resource bundle is versioned independently from the desktop app and has a ma
 
 Required components:
 - Ollama Windows runtime
-- Qwen3:4b model blobs and manifest
-- ComfyUI runtime and pinned Python dependencies
-- selected local image checkpoint(s), with license and checksum evidence
-- FFmpeg and FFprobe (or a separately versioned media-runtime component)
+- Qwen3.5:4b model blobs and manifest as the current recommended text model
+- preserve the user's existing Qwen3:4b model blobs as a compatibility fallback; never delete or overwrite them
+- ComfyUI v0.46.0 runtime and pinned Python dependencies
+- selected local image checkpoint(s), with license and checksum evidence; include a low-memory CPU-compatible baseline and do not label legacy SD 1.5 as a latest-generation model
+- FFmpeg 9.1 and FFprobe (or a separately versioned media-runtime component)
 
 Do not mark a component ready merely because a directory or UI catalog entry exists. A model is ready only after file integrity verification and an actual load/inference smoke test.
 
@@ -59,10 +60,21 @@ Do not mark a component ready merely because a directory or UI catalog entry exi
 
 - Packaged ASAR contains `main.cjs`, `preload.cjs`, and `ollama-runtime-installer.cjs`.
 - Fresh install to `E:\\123` and upgrade over an existing install both pass.
-- Existing userData Ollama runtime at port 11435 is discovered and reused.
-- Qwen3:4b is listed and answers a Chinese prompt with network disabled.
+- Existing userData Ollama runtime at port 11435 is discovered, started before API startup, and reused.
+- Qwen3.5:4b is listed and answers a Chinese prompt with network disabled; the pre-existing Qwen3:4b remains available as a fallback.
 - ComfyUI starts and produces a real low-resolution image using the pinned image model with network disabled.
 - FFmpeg and FFprobe execute from the installed application resources.
 - Install, upgrade, rollback, and uninstall preserve user projects and do not delete separately managed AI resources unless the user explicitly selects their removal.
 - The program ZIP is the only user download for an app-only update when the resource manifest has no changes.
 - All generated manifests and archives pass SHA-256 verification.
+
+
+## Current upstream version targets (2026-11-26)
+
+- Ollama: 0.40.18 (official Windows runtime).
+- ComfyUI: v0.46.0.
+- Text model: Qwen3.5:4b as the new recommended model; keep Qwen3:4b for compatibility.
+- Media runtime: FFmpeg 9.1 / matching FFprobe.
+- Image model selection is hardware-aware. The Ryzen 7 4800U integrated Vega graphics configuration must have a CPU fallback and conservative 512px workflows; a high-VRAM model must not be represented as suitable for this device merely because ComfyUI can list it.
+
+The repository manifest and scripts/package-ai-resource-bundle.ps1 describe/validate the intended resource archive. They do not prove the archive has been assembled: packaging must fail until the Qwen3.5:4b manifest, ComfyUI runtime, at least one checkpoint, FFmpeg and FFprobe are physically present and version-checked.
