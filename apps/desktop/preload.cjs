@@ -47,3 +47,7 @@ contextBridge.exposeInMainWorld("localAIInstallerDesktop", {
     return () => ipcRenderer.removeListener("local-ai:ollama-install-progress", listener);
   }
 });
+
+contextBridge.exposeInMainWorld("patchCenterDesktop", {
+  getInstalledInventory: () => ipcRenderer.invoke("patch-center:installed-inventory")
+});
