@@ -266,6 +266,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
+        OLLAMA_HOST: process.env.OLLAMA_HOST || "http://127.0.0.1:11435",
         ...(ffmpegPair ? { FFMPEG_PATH: ffmpeg, FFPROBE_PATH: ffprobe } : {})
       }
     });
