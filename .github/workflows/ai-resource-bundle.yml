@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ai-offline-resource-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-ai-resource-bundle:
     runs-on: windows-latest
@@ -82,7 +86,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ComfyUI portable archive extraction failed." }
           $portable = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
           if (!$portable) { throw "ComfyUI portable directory not found." }
-          Copy-Item -LiteralPath $portable.FullName -Destination (Join-Path $env:RESOURCE_ROOT "ComfyUI") -Recurse -Force
+          $comfyDestination = Join-Path $env:RESOURCE_ROOT "ComfyUI"
+          New-Item -ItemType Directory -Path $comfyDestination -Force | Out-Null
+          Get-ChildItem -LiteralPath $portable.FullName | Copy-Item -Destination $comfyDestination -Recurse -Force
+          Remove-Item -LiteralPath $archive -Force
+          Remove-Item -LiteralPath $extract -Recurse -Force
           $python = Join-Path $env:RESOURCE_ROOT "ComfyUI\python_embeded\python.exe"
           $main = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\main.py"
           if (!(Test-Path $python) -or !(Test-Path $main)) { throw "ComfyUI portable runtime layout is incomplete." }
