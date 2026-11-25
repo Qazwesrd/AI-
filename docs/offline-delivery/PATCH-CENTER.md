@@ -50,3 +50,15 @@
 - 新增预览解析测试。预览接口明确 `apply_supported=false`，不写入任何程序文件。
 
 下一阶段仍要先解决打包版程序的可更新边界：桌面程序当前包含独立 API 可执行文件和 Next.js standalone 资源，不能将仓库源代码路径直接映射为已安装文件路径。自动更新器必须针对实际发布产物建立受控文件清单和原子替换机制，再实现备份与回滚。
+
+
+
+## 第四阶段：Windows 发布产物更新清单（构建期）
+
+- 新增 `scripts/generate-update-manifest.cjs`，在 Windows 安装包构建期间扫描真实 Next.js 构建产物。
+- 清单仅登记 `web/.next/static/` 与 `web/public/` 下不超过 5 MiB 的 JS/CSS/JSON 文本文件，逐文件记录安装相对路径、大小和 SHA-256。
+- 安装包将清单放入 `resources/update/manifest.json`，路径对应实际 electron-builder `extraResources` 布局。
+- API EXE、Electron app.asar、桌面主进程/preload、Next.js server.js、node_modules、FFmpeg、模型、运行时和用户数据明确排除。
+- CI 增加清单生成器语法检查与白名单/哈希测试。
+
+**重要：** 这是一份构建期文件库存清单，不是签名更新授权，也不具备应用能力。当前不替换文件、不提供自动应用承诺。下一步需在安装版读取此清单，验证安装路径与基线哈希，并设计签名补丁包及应用关闭后的安全更新流程。
