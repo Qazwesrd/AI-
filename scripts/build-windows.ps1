@@ -322,16 +322,16 @@ try {
 }
 
 # Verify every runtime payload and manifest that Electron expects under resources/.
-$PackagedResources = Join-Path $Desktop "release\\win-unpacked\\resources"
+$PackagedResources = Join-Path $Desktop "release\win-unpacked\resources"
 $RequiredResourceFiles = @(
-    "api\\ai-comic-api.exe",
-    "web\\server.js",
-    "web\\.next\\static",
-    "web\\public",
-    "media\\ffmpeg.exe",
-    "media\\ffprobe.exe",
-    "update\\manifest.json",
-    "ai-resources\\resource-manifest.json"
+    "api\ai-comic-api.exe",
+    "web\server.js",
+    "web\.next\static",
+    "web\public",
+    "media\ffmpeg.exe",
+    "media\ffprobe.exe",
+    "update\manifest.json",
+    "ai-resources\resource-manifest.json"
 )
 foreach ($RelativeResource in $RequiredResourceFiles) {
     $PackagedPath = Join-Path $PackagedResources $RelativeResource
@@ -339,12 +339,13 @@ foreach ($RelativeResource in $RequiredResourceFiles) {
         throw "Packaged runtime payload is missing: $RelativeResource"
     }
 }
-$ResourceManifestPath = Join-Path $PackagedResources "ai-resources\\resource-manifest.json"
+$ResourceManifestPath = Join-Path $PackagedResources "ai-resources\resource-manifest.json"
 $ResourceManifest = Get-Content -LiteralPath $ResourceManifestPath -Raw | ConvertFrom-Json
 if ($ResourceManifest.schema_version -ne 1 -or $ResourceManifest.product -ne "AI漫剧制作大师" -or !$ResourceManifest.resource_bundle_version) {
     throw "Packaged AI resource manifest is invalid."
 }
-$UpdateManifestPath = Join-Path $PackagedResources "update\\manifest.json"
+$UpdateManifestPath = Join-Path $PackagedResources "update\manifest.json"
+$DesktopPackage = Get-Content (Join-Path $Desktop "package.json") -Raw | ConvertFrom-Json
 $UpdateManifest = Get-Content -LiteralPath $UpdateManifestPath -Raw | ConvertFrom-Json
 if ($UpdateManifest.schema_version -ne 1 -or $UpdateManifest.product -ne "AI漫剧制作大师" -or $UpdateManifest.product_version -ne $DesktopPackage.version) {
     throw "Packaged update inventory is missing, malformed, or targets a different application version."
