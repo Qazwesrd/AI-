@@ -32,6 +32,7 @@ function Get-FirstLine([string]$Executable, [string[]]$Arguments) {
 $ollamaRoot = Join-Path $ResourceRoot "Ollama"
 $comfyRoot = Join-Path $ResourceRoot "ComfyUI"
 $ffmpegRoot = Join-Path $ResourceRoot "FFmpeg"
+$videoEngineRoot = Join-Path $ResourceRoot "StableDiffusionCpp"
 $ollamaExe = Join-Path $ollamaRoot "runtime\ollama.exe"
 $ollamaModels = Join-Path $ollamaRoot "models"
 $comfyPython = Join-Path $comfyRoot "python_embeded\python.exe"
@@ -40,6 +41,8 @@ $comfyVenvPython = Join-Path $comfyRoot "venv\Scripts\python.exe"
 $comfyVenvMain = Join-Path $comfyRoot "main.py"
 $ffmpegExe = Join-Path $ffmpegRoot "ffmpeg.exe"
 $ffprobeExe = Join-Path $ffmpegRoot "ffprobe.exe"
+$videoCli = Join-Path $videoEngineRoot "sd-cli.exe"
+if (!(Test-Path -LiteralPath $videoCli)) { $videoCli = Get-ChildItem -LiteralPath $videoEngineRoot -Filter "sd-cli.exe" -File -Recurse | Select-Object -First 1 | ForEach-Object FullName }
 
 Require-Path $ollamaExe "Ollama Windows runtime"
 Require-Path (Join-Path $ollamaModels "blobs") "Ollama model blobs"
@@ -50,6 +53,8 @@ $manifestDirectories = @(
 if ($manifestDirectories.Count -eq 0) { throw "Ollama model manifests are missing." }
 Require-Path $ffmpegExe "FFmpeg executable"
 Require-Path $ffprobeExe "FFprobe executable"
+Require-Path $videoEngineRoot "stable-diffusion.cpp video runtime"
+Require-Path $videoCli "stable-diffusion.cpp CLI executable"
 
 $comfyPythonSelected = $null
 $comfyMainSelected = $null
@@ -99,6 +104,7 @@ Require-Path $manifestPath "versioned resource manifest"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $manifest.engines | Where-Object id -eq "ollama" | ForEach-Object { $_.status = "bundled-and-version-verified" }
 $manifest.engines | Where-Object id -eq "comfyui" | ForEach-Object { $_.status = "bundled-and-cpu-inference-verified" }
+$manifest.engines | Where-Object id -eq "stable-diffusion-cpp" | ForEach-Object { $_.status = "bundled-runtime-cli-verified-video-model-not-yet-qualified" }
 $manifest.engines | Where-Object id -eq "ffmpeg" | ForEach-Object {
     $_.version = $ffmpegVersion
     $_.status = "bundled-and-version-verified"
@@ -113,6 +119,7 @@ $manifest | Add-Member -NotePropertyName bundle_verification -NotePropertyValue 
     comfyui_cpu_image_inference_test = $true
     qwen_generation_smoke_test = $true
     sd15_sha256 = (Get-FileHash -LiteralPath $checkpoint -Algorithm SHA256).Hash
+    stable_diffusion_cpp_cli_smoke_test = $true
     video_models_included = $false
     hardware_note = "Ryzen 7 4800U Vega iGPU is not certified for local video diffusion; CPU image generation may be very slow."
 }) -Force
@@ -126,6 +133,7 @@ try {
     Copy-Item -LiteralPath $ollamaRoot -Destination (Join-Path $staging "Ollama") -Recurse
     Copy-Item -LiteralPath $comfyRoot -Destination (Join-Path $staging "ComfyUI") -Recurse
     Copy-Item -LiteralPath $ffmpegRoot -Destination (Join-Path $staging "FFmpeg") -Recurse
+    Copy-Item -LiteralPath $videoEngineRoot -Destination (Join-Path $staging "StableDiffusionCpp") -Recurse
     $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $staging "resource-manifest.json") -Encoding utf8
     $inventory = @()
     Get-ChildItem -LiteralPath $staging -File -Recurse | Sort-Object FullName | ForEach-Object {
