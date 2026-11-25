@@ -53,9 +53,9 @@ class PatchCenterTests(unittest.TestCase):
 
     def test_preview_returns_hunks_without_applying(self):
         diff = (
-            "--- a/apps/web/src/app/page.tsx\\n"
-            "+++ b/apps/web/src/app/page.tsx\\n"
-            "@@ -1 +1 @@\\n-old\\n+new\\n"
+            "--- a/apps/web/src/app/page.tsx\n"
+            "+++ b/apps/web/src/app/page.tsx\n"
+            "@@ -1 +1 @@\n-old\n+new\n"
         )
         preview = _build_patch_preview({
             "id": "a" * 32,
