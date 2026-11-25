@@ -47,16 +47,18 @@ try {
     Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
 }
 
-# FFmpeg is a user-provided runtime dependency and is deliberately not bundled.
-# CI may use a system installation for optional media-related manual checks, but
-# installer creation must never fail merely because FFmpeg is not installed.
-$SystemFfmpeg = (Get-Command ffmpeg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-$SystemFfprobe = (Get-Command ffprobe.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-if ($SystemFfmpeg -and $SystemFfprobe) {
-    Write-Host "Using system FFmpeg for build-time smoke tests: $SystemFfmpeg"
-} else {
-    Write-Host "FFmpeg not installed on build host; continuing because it is not part of the installer."
+# FFmpeg and FFprobe are downloaded by CI and bundled into the offline installer.
+$FfmpegSource = Join-Path $Desktop "build-resources\\ffmpeg\\ffmpeg.exe"
+$FfprobeSource = Join-Path $Desktop "build-resources\\ffmpeg\\ffprobe.exe"
+foreach ($tool in @($FfmpegSource, $FfprobeSource)) {
+    if (!(Test-Path $tool) -or (Get-Item $tool).Length -lt 1MB) {
+        throw "Bundled media runtime is missing or invalid: $tool"
+    }
 }
+$SystemFfmpeg = $FfmpegSource
+$SystemFfprobe = $FfprobeSource
+Write-Host "Bundled FFmpeg: $FfmpegSource"
+Write-Host "Bundled FFprobe: $FfprobeSource"
 
 
 Write-Host "[1/4] Checking PyInstaller..."
@@ -160,13 +162,8 @@ try {
     $env:APP_DATA_DIR = $ManualDataDir
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
-    if ($SystemFfmpeg -and $SystemFfprobe) {
-        $env:FFMPEG_PATH = $SystemFfmpeg
-        $env:FFPROBE_PATH = $SystemFfprobe
-    } else {
-        Remove-Item Env:FFMPEG_PATH -ErrorAction SilentlyContinue
-        Remove-Item Env:FFPROBE_PATH -ErrorAction SilentlyContinue
-    }
+    $env:FFMPEG_PATH = $FfmpegSource
+    $env:FFPROBE_PATH = $FfprobeSource
     $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
 
     $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
