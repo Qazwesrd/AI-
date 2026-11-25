@@ -48,12 +48,14 @@ export default function PatchCenterPage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [inventory, setInventory] = useState<InstalledInventory | null>(null);
   const [inventoryBusy, setInventoryBusy] = useState(false);
+  const [desktopBridgeAvailable, setDesktopBridgeAvailable] = useState(false);
 
   const refreshInstalledInventory = useCallback(async () => {
     if (!window.patchCenterDesktop?.getInstalledInventory) {
       setInventory(null);
       return;
     }
+    setDesktopBridgeAvailable(true);
     setInventoryBusy(true);
     try {
       const result = await window.patchCenterDesktop.getInstalledInventory();
@@ -151,7 +153,7 @@ export default function PatchCenterPage() {
           </div>
           <button onClick={() => void refreshInstalledInventory()} disabled={inventoryBusy} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs disabled:opacity-50">{inventoryBusy ? "正在核验…" : "重新核验"}</button>
         </div>
-        {!window.patchCenterDesktop ? (
+        {!desktopBridgeAvailable ? (
           <p className="mt-3 text-sm text-amber-200">当前运行环境不是桌面安装版，无法读取本机安装清单。</p>
         ) : inventory ? (
           <>
