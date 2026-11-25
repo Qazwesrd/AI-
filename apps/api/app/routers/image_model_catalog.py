@@ -140,7 +140,7 @@ def _head_pinned_file_metadata(url, opener=None):
             raise ValueError("无法取得精确文件大小；范围查询失败，未开始下载") from exc
         with ranged_response:
             range_header = ranged_response.headers.get("Content-Range", "")
-            match = __import__("re").fullmatch(r"bytes\\s+0-0/(\\d+)", range_header.strip(), flags=__import__("re").IGNORECASE)
+            match = __import__("re").fullmatch(r"bytes\s+0-0/(\d+)", range_header.strip(), flags=__import__("re").IGNORECASE)
             if match:
                 size = _parse_positive_int(match.group(1))
             # Consume at most one byte. A server ignoring Range is rejected.
