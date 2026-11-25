@@ -136,7 +136,67 @@ function createRollbackSnapshot({ resourcesPath, backupRoot, verifiedPatch }) {
   }
 }
 
+
+function verifyRollbackSnapshot({ backupRoot, snapshotId }) {
+  try {
+    if (typeof snapshotId !== "string" || !/^[a-f0-9-]{36}$/i.test(snapshotId)) {
+      throw new Error("回滚快照编号无效。");
+    }
+    const root = fs.realpathSync(backupRoot);
+    const snapshotDir = path.resolve(root, snapshotId);
+    if (!isPathInside(root, snapshotDir) || !fs.existsSync(snapshotDir) ||
+        fs.lstatSync(snapshotDir).isSymbolicLink() || !fs.statSync(snapshotDir).isDirectory()) {
+      throw new Error("回滚快照目录不存在或路径不安全。");
+    }
+    const manifestPath = path.join(snapshotDir, "rollback-manifest.json");
+    const manifestStat = fs.lstatSync(manifestPath);
+    if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.size > 2 * 1024 * 1024) {
+      throw new Error("回滚清单文件无效。");
+    }
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    if (manifest.schema_version !== 1 || manifest.snapshot_id !== snapshotId ||
+        manifest.purpose !== "backup-only; no target files changed" ||
+        !Array.isArray(manifest.files) || manifest.files.length > MAX_FILES) {
+      throw new Error("回滚清单结构或标识无效。");
+    }
+    let verifiedCount = 0;
+    for (const entry of manifest.files) {
+      if (!validPath(entry.path)) throw new Error("回滚清单包含不允许的原文件路径。");
+      if (!entry.existed) {
+        if (entry.backup_path !== null || entry.sha256 !== null) throw new Error("新增文件的回滚记录不一致。");
+        verifiedCount++;
+        continue;
+      }
+      const expectedRelative = snapshotId + "/" + entry.path;
+      if (entry.backup_path !== expectedRelative || !/^[a-f0-9]{64}$/i.test(String(entry.sha256 || "")) ||
+          !Number.isInteger(entry.size_bytes) || entry.size_bytes < 1 || entry.size_bytes > MAX_FILE_BYTES) {
+        throw new Error("回滚文件记录无效。");
+      }
+      const backupPath = path.resolve(root, ...expectedRelative.split("/"));
+      if (!isPathInside(root, backupPath)) throw new Error("回滚文件路径越界。");
+      let cursor = root;
+      for (const part of expectedRelative.split("/")) {
+        cursor = path.join(cursor, part);
+        if (fs.lstatSync(cursor).isSymbolicLink()) throw new Error("回滚备份包含符号链接。");
+      }
+      const stat = fs.statSync(backupPath);
+      if (!stat.isFile() || stat.size !== entry.size_bytes || hashFile(backupPath) !== entry.sha256) {
+        throw new Error("回滚备份文件哈希或大小校验失败。");
+      }
+      verifiedCount++;
+    }
+    return { valid: true, snapshot_id: snapshotId, file_count: manifest.files.length, verified_count: verifiedCount };
+  } catch (error) {
+    return { valid: false, error: String(error && error.message || error) };
+  }
+}
+
+function isPathInside(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 module.exports = {
-  canonicalize, validPath, verifySignedPatch, createRollbackSnapshot,
+  canonicalize, validPath, verifySignedPatch, createRollbackSnapshot, verifyRollbackSnapshot,
   MAX_PACKAGE_BYTES, MAX_FILE_BYTES, TRUSTED_PATCH_PUBLIC_KEY_PEM
 };
