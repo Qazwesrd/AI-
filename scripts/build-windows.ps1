@@ -300,9 +300,10 @@ if (!(Test-Path $AsarPath)) {
 }
 Push-Location $Desktop
 try {
-    $AsarEntries = & npx --no-install asar list $AsarPath
+    $AsarEntriesRaw = & npx --no-install asar list $AsarPath
     Check-ExitCode "Unable to inspect packaged app.asar"
-    foreach ($RequiredEntry in @("/main.cjs", "/preload.cjs", "/ollama-runtime-installer.cjs")) {
+    $AsarEntries = @($AsarEntriesRaw | ForEach-Object { ([string]$_).Trim() -replace "\\\\", "/" -replace "^/", "" })
+    foreach ($RequiredEntry in @("main.cjs", "preload.cjs", "ollama-runtime-installer.cjs")) {
         if ($AsarEntries -notcontains $RequiredEntry) {
             throw "Packaged app.asar is missing required entry: $RequiredEntry"
         }
