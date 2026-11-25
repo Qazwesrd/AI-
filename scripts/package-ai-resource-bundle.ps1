@@ -90,19 +90,19 @@ $manifestPath = Join-Path $PSScriptRoot "..\apps\desktop\build-resources\ai-reso
 Require-Path $manifestPath "versioned resource manifest"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $manifest.engines | Where-Object id -eq "ollama" | ForEach-Object { $_.status = "bundled-and-version-verified" }
-$manifest.engines | Where-Object id -eq "comfyui" | ForEach-Object { $_.status = "bundled-and-startup-verified" }
+$manifest.engines | Where-Object id -eq "comfyui" | ForEach-Object { $_.status = "bundled-and-cpu-inference-verified" }
 $manifest.engines | Where-Object id -eq "ffmpeg" | ForEach-Object {
     $_.version = $ffmpegVersion
     $_.status = "bundled-and-version-verified"
 }
 $manifest.text_models | Where-Object id -eq "qwen3.5:4b" | ForEach-Object { $_.status = "bundled-and-generation-verified" }
-$manifest.image_models | Where-Object id -eq "sd15-fp16-baseline" | ForEach-Object { $_.status = "bundled-and-sha256-verified-not-inference-certified" }
+$manifest.image_models | Where-Object id -eq "sd15-fp16-baseline" | ForEach-Object { $_.status = "bundled-and-cpu-inference-verified" }
 $manifest | Add-Member -NotePropertyName bundle_verification -NotePropertyValue ([pscustomobject]@{
     ollama_version = $ollamaVersion
     ffmpeg_version = $ffmpegVersion
     ffprobe_version = $ffprobeVersion
     comfyui_runtime_present = $true
-    comfyui_cpu_startup_smoke_test = $true
+    comfyui_cpu_image_inference_test = $true
     qwen_generation_smoke_test = $true
     sd15_sha256 = (Get-FileHash -LiteralPath $checkpoint -Algorithm SHA256).Hash
     video_models_included = $false
