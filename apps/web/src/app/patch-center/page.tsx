@@ -117,7 +117,7 @@ export default function PatchCenterPage() {
       const result = await window.patchCenterDesktop.importSignedPackage();
       if (result.canceled) return;
       if (!result.valid) throw new Error(result.message || "签名补丁导入失败");
-      setImportResult(result.message || "签名补丁已暂存。");
+      setImportResult(`${result.message || "签名补丁已暂存。"}${result.snapshot_id ? ` 回滚备份编号：${result.snapshot_id}；文件数：${result.file_count ?? 0}。` : ""}`);
       await refreshInstalledInventory();
     } catch (e) {
       setError(e instanceof Error ? e.message : "签名补丁导入失败");
