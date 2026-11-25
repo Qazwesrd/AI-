@@ -18,6 +18,7 @@ Required components:
 - preserve the user's existing Qwen3:4b model blobs as a compatibility fallback; never delete or overwrite them
 - ComfyUI v0.46.0 runtime and pinned Python dependencies
 - selected local image checkpoint(s), with license and checksum evidence; include a low-memory CPU-compatible baseline and do not label legacy SD 1.5 as a latest-generation model
+- local AI video generation model resources and workflows, separate from FFmpeg video editing; include Wan 2.2 TI2V-5B as the primary supported-GPU candidate, retain LTX-Video 2B distilled as an experimental lightweight candidate, and keep Wan 2.2 14B as an optional high-end tier
 - FFmpeg 9.1 and FFprobe (or a separately versioned media-runtime component)
 
 Do not mark a component ready merely because a directory or UI catalog entry exists. A model is ready only after file integrity verification and an actual load/inference smoke test.
@@ -78,3 +79,14 @@ Do not mark a component ready merely because a directory or UI catalog entry exi
 - Image model selection is hardware-aware. The Ryzen 7 4800U integrated Vega graphics configuration must have a CPU fallback and conservative 512px workflows; a high-VRAM model must not be represented as suitable for this device merely because ComfyUI can list it.
 
 The repository manifest and scripts/package-ai-resource-bundle.ps1 describe/validate the intended resource archive. They do not prove the archive has been assembled: packaging must fail until the Qwen3.5:4b manifest, ComfyUI runtime, at least one checkpoint, FFmpeg and FFprobe are physically present and version-checked.
+
+
+## Local AI video generation requirements
+
+- Treat AI video generation as a separate capability from FFmpeg editing/transcoding. The UI must show separate status and clearly distinguish text-to-video, image-to-video, video extension/video-to-video, and ordinary editing tools.
+- Include pinned ComfyUI workflows plus all required video model weights, text encoders, VAE files, and custom-node dependencies in the separately versioned offline resource bundle. The bundle script must fail if any required file is missing; do not label a workflow ready because its name appears in a catalog.
+- Primary supported-GPU candidate: Wan 2.2 TI2V-5B for text-to-video and image-to-video. Its ComfyUI workflow guidance indicates an 8 GiB VRAM class requirement; this is not a promise that shared Vega graphics memory is equivalent to dedicated VRAM.
+- Experimental lighter candidate: LTX-Video 2B distilled. Its weights have separate license terms; review the exact model card/license before redistribution and perform real Windows hardware inference tests before enabling the ready state.
+- Optional future-upgrade tier: Wan 2.2 14B workflows. Do not bundle it into the default low-resource set or claim compatibility with integrated graphics.
+- For the user's Ryzen 7 4800U with integrated Vega graphics and 16 GiB system RAM, do not promise practical local video generation on this machine. The app must detect hardware, explain incompatibility/experimental status, and never silently fall back to cloud APIs or paid services. Keep the video-generation module visible in the front end, but show “未安装/硬件不支持/待实测” from actual detection rather than a fake ready state.
+- Acceptance requires a real short text-to-video and image-to-video smoke test on a supported GPU with networking disabled, plus a separate hardware-compatibility check on the user's integrated-GPU machine. Video model weights, workflows, licenses, checksums, and exact file sizes must be included in the manifest.
