@@ -40,6 +40,15 @@
         "ffprobe.exe"
       ],
       "status": "use-existing-user-copy-or-verified-bundle"
+    },
+    {
+      "id": "stable-diffusion-cpp",
+      "version": "pinned-after-qualification",
+      "platform": "windows-x64",
+      "official_source": "https://github.com/leejet/stable-diffusion.cpp",
+      "install_path": "engines/StableDiffusionCpp",
+      "status": "video-engine-candidate-not-yet-bundled-or-target-tested",
+      "notes": "Separate C/C++ inference engine for Wan video generation; CPU AVX2 and Windows are listed upstream, but the target Ryzen 7 4800U must pass a real short-video generation and memory test before this engine is shipped."
     }
   ],
   "text_models": [
@@ -82,6 +91,42 @@
     }
   ],
   "video_models": [
+    {
+      "id": "wan2.1-t2v-1.3b-q4-gguf",
+      "engine": "stable-diffusion-cpp",
+      "repository": "off-grid-ai/Wan2.1-T2V-1.3B-GGUF",
+      "file": "Wan2.1-T2V-1.3B-Q4_K_S.gguf",
+      "file_size_mb": 816,
+      "companion_repository": "off-grid-ai/Video-Companions-GGUF",
+      "companion_files": [
+        {
+          "file": "umt5-xxl-encoder-Q4_K_M.gguf",
+          "size_mb": 3655,
+          "purpose": "required text encoder"
+        },
+        {
+          "file": "wan_2.1_vae.safetensors",
+          "size_mb": 254,
+          "purpose": "required video VAE"
+        }
+      ],
+      "full_resource_size_gb": 4.725,
+      "workflow": "stable-diffusion.cpp Wan 2.1 T2V 1.3B CPU/AVX2 qualification workflow",
+      "license": "Apache-2.0",
+      "recommended": false,
+      "status": "candidate-not-bundled-awaiting-real-CPU-generation-and-memory-qualification",
+      "hardware": {
+        "windows_x64": "upstream-supported-platform",
+        "cpu_backend": "upstream-lists-AVX2; target-device inference not yet verified",
+        "ryzen_7_4800u": "experimental-candidate-only; no successful target-device video generation claim",
+        "ram_16_gib": "unverified; model file size does not represent peak inference RAM",
+        "vega_integrated_gpu": "do-not-assume-ROCm-or-GPU-acceleration"
+      },
+      "purpose": [
+        "text-to-video"
+      ],
+      "notes": "The 816 MB generator is not a complete model. The full pack is approximately 4.725 GB including the 3.655 GB UMT5-XXL Q4 encoder and 254 MB Wan VAE. Published timing data is from an NVIDIA RTX PRO 6000 Blackwell, not CPU or Ryzen 7 4800U. Only bundle after a real CPU-mode short-video test records successful MP4 output, peak RAM, elapsed time, and hashes."
+    },
     {
       "id": "wan2.2-ti2v-5b",
       "engine": "comfyui",
