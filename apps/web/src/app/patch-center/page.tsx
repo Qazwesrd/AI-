@@ -13,6 +13,7 @@ type PatchPackage = {
   created_at: string;
   sha256: string;
   size_bytes: number;
+  changed_files?: string[];
   status: string;
 };
 
@@ -21,6 +22,7 @@ export default function PatchCenterPage() {
   const [description, setDescription] = useState("");
   const [targetVersion, setTargetVersion] = useState("current");
   const [format, setFormat] = useState("unified-diff");
+  const [targetPath, setTargetPath] = useState("");
   const [code, setCode] = useState("");
   const [packages, setPackages] = useState<PatchPackage[]>([]);
   const [busy, setBusy] = useState(false);
@@ -53,13 +55,13 @@ export default function PatchCenterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title, description, target_version: targetVersion,
-          patch_format: format, code,
+          patch_format: format, target_path: targetPath, code,
         }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "补丁包生成失败");
       setMessage(`补丁包已生成：${data.id}；大小 ${data.size_bytes} 字节；SHA256：${data.sha256}`);
-      setTitle(""); setDescription(""); setCode("");
+      setTitle(""); setDescription(""); setTargetPath(""); setCode("");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "补丁包生成失败");
@@ -122,7 +124,7 @@ export default function PatchCenterPage() {
         {packages.length === 0 ? <p className="text-sm text-purple-300">暂无补丁包。</p> : <div className="space-y-3">{packages.map(item => <article key={item.id} className="rounded-xl bg-black/25 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2"><b>{item.title}</b><span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-200">已暂存</span></div>
           <p className="mt-1 text-xs text-purple-300">{item.description || "无补丁说明"} · {item.patch_format} · {item.size_bytes} bytes</p>
-          <p className="mt-2 break-all font-mono text-[11px] text-purple-400">ID: {item.id} · SHA256: {item.sha256}</p>
+          <p className="mt-2 text-xs text-purple-300">涉及文件：{item.changed_files?.join("、") || "未提供"}</p><p className="mt-2 break-all font-mono text-[11px] text-purple-400">ID: {item.id} · SHA256: {item.sha256}</p>
         </article>)}</div>}
       </section>
       <p className="mt-5 text-xs leading-6 text-purple-300">安全说明：当前版本只负责生成、校验和本机暂存补丁，不会执行粘贴的代码，也不会覆盖程序文件。自动应用、备份和一键回滚需要下一阶段接入受限更新器并通过桌面端测试后才会开放。</p>
