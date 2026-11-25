@@ -245,6 +245,40 @@ function findFfmpegPair() {
   return null;
 }
 
+function findComfyUiRuntime() {
+  const root = path.join(app.getPath("userData"), "engines", "ComfyUI");
+  const layouts = [
+    { python: path.join(root, "python_embeded", "python.exe"), main: path.join(root, "ComfyUI", "main.py") },
+    { python: path.join(root, "venv", "Scripts", "python.exe"), main: path.join(root, "main.py") },
+    { python: path.join(root, "python", "python.exe"), main: path.join(root, "main.py") },
+  ];
+  return layouts.find(item => fs.existsSync(item.python) && fs.existsSync(item.main)) || null;
+}
+
+function startComfyUiRuntime() {
+  const baseUrl = "http://127.0.0.1:8188";
+  const runtime = findComfyUiRuntime();
+  if (!runtime) {
+    console.warn("[ComfyUI] Offline engine bundle not found; image generation remains unavailable until the resource bundle is installed.");
+    return null;
+  }
+  const child = spawn(runtime.python, [
+    "-s", runtime.main,
+    "--listen", "127.0.0.1",
+    "--port", "8188",
+    ...(fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "nvidia-smi.exe")) ? [] : ["--cpu"]),
+  ], {
+    cwd: path.dirname(runtime.main),
+    windowsHide: true,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+  });
+  child.unref();
+  console.log("[ComfyUI] Starting managed local image engine at", baseUrl);
+  return child;
+}
+
 function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
@@ -344,6 +378,11 @@ async function createWindow() {
         "本地端口 3000 已被其他程序占用，而且不是 AI 漫剧制作大师网页服务。请关闭占用程序后重新启动。软件不会强行结束其他程序。"
       );
     }
+
+    // Start the managed ComfyUI engine when its offline resource bundle exists.
+    // Unsupported GPU environments fall back to CPU; no cloud service is used.
+    const comfyUiAlreadyListening = !(await checkPort(8188));
+    if (!comfyUiAlreadyListening) startComfyUiRuntime();
 
     // Start the app-managed E: drive Ollama runtime before the API boots so
     // /api/local-ai/runtime can discover existing offline models on first launch.
