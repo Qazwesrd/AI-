@@ -81,7 +81,7 @@ class ImageModelCatalogTests(unittest.TestCase):
         self.assertEqual(opener.timeouts[0], 12)
 
     def test_metadata_head_fails_closed_without_exact_size(self):
-        opener = FakeOpener(FakeResponse({"ETag": "opaque"}), FakeResponse({"Content-Range": "bytes 0-0/2280000000"}, status=206, body=b"x"))
+        opener = FakeOpener(FakeResponse({"ETag": "opaque"}), FakeResponse({"Content-Range": "bytes 0-0/*"}, status=206, body=b"x"))
         url = "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors"
         with self.assertRaisesRegex(ValueError, "精确文件大小"):
             _head_pinned_file_metadata(url, opener=opener)
