@@ -89,7 +89,7 @@ def list_patch_packages():
             item = json.loads(file.read_text(encoding="utf-8"))
             result.append({key: item.get(key) for key in (
                 "id", "title", "description", "target_version", "patch_format",
-                "created_at", "sha256", "size_bytes", "status"
+                "created_at", "sha256", "size_bytes", "changed_files", "status"
             )})
         except (OSError, json.JSONDecodeError):
             continue
