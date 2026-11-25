@@ -788,6 +788,15 @@ ipcMain.handle("patch-center:import-signed-package", async (event) => {
     return { valid: false, trusted: true, message: "补丁目标版本与当前程序版本不一致，已拒绝导入。" };
   }
 
+  const inventory = inspectUpdateInventory({ resourcesPath: process.resourcesPath, appVersion: app.getVersion() });
+  if (!inventory.valid || inventory.missing_file_count || inventory.changed_file_count || inventory.invalid_file_count) {
+    return { valid: false, trusted: true, message: "本机安装文件未通过完整基线核验，已拒绝导入补丁。" };
+  }
+  const verifiedPaths = new Set(inventory.files.filter(item => item.status === "verified").map(item => item.path));
+  if (verified.files.some(item => !verifiedPaths.has(item.path))) {
+    return { valid: false, trusted: true, message: "补丁目标不在本机已核验文件清单中；当前版本只允许替换已有静态资源文件。" };
+  }
+
   const patchRoot = path.join(app.getPath("userData"), "patch-center");
   const backupRoot = path.join(patchRoot, "backups");
   let snapshot;
