@@ -18,8 +18,8 @@ test("inventory includes only bounded JS/CSS/JSON under static/public roots", ()
   fs.writeFileSync(path.join(web, ".next", "static", "chunks", "font.woff2"), "font");
   fs.writeFileSync(path.join(web, "node_modules", "package.js"), "not allowed");
 
-  const files = walkFiles(path.join(web, ".next", "static"), "web")
-    .concat(walkFiles(path.join(web, "public"), "web"));
+  const files = walkFiles(path.join(web, ".next", "static"), "web", [], web)
+    .concat(walkFiles(path.join(web, "public"), "web", [], web));
   assert.deepEqual(files.map(file => file.install_path).sort(), [
     "web/.next/static/chunks/app.js",
     "web/public/settings.json",
