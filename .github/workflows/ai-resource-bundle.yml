@@ -1,0 +1,152 @@
+name: Build full offline AI resource bundle
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/package-ai-resource-bundle.ps1"
+      - "apps/desktop/build-resources/ai-resources/resource-manifest.json"
+      - ".github/workflows/ai-resource-bundle.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-ai-resource-bundle:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare resource directories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $PWD "resource-stage"
+          foreach ($name in @("Ollama\runtime", "Ollama\models", "ComfyUI", "FFmpeg")) {
+            New-Item -ItemType Directory -Path (Join-Path $root $name) -Force | Out-Null
+          }
+          "RESOURCE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Download and verify Ollama 0.40.18 runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "ollama-windows-amd64.zip"
+          Invoke-WebRequest -Uri "https://github.com/ollama/ollama/releases/download/v0.40.18/ollama-windows-amd64.zip" -OutFile $archive
+          $expected = "ca97292ac1e9acc77fcf473bb2741fa6acd12e3798f261b419680068b7cc4c16"
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Ollama archive SHA-256 mismatch: $actual" }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $env:RESOURCE_ROOT "Ollama\runtime") -Force
+          if (!(Test-Path (Join-Path $env:RESOURCE_ROOT "Ollama\runtime\ollama.exe"))) { throw "ollama.exe missing after extraction." }
+
+      - name: Pull Qwen3.5 4B into the offline model store
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:OLLAMA_MODELS = Join-Path $env:RESOURCE_ROOT "Ollama\models"
+          $env:OLLAMA_HOST = "127.0.0.1:11435"
+          $ollama = Join-Path $env:RESOURCE_ROOT "Ollama\runtime\ollama.exe"
+          $server = Start-Process -FilePath $ollama -ArgumentList "serve" -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 90; $i++) {
+              try { Invoke-RestMethod -Uri "http://127.0.0.1:11435/api/version" -TimeoutSec 2 | Out-Null; $ready = $true; break } catch { Start-Sleep -Seconds 2 }
+            }
+            if (!$ready) { throw "Ollama server did not start." }
+            & $ollama pull qwen3.5:4b
+            if ($LASTEXITCODE -ne 0) { throw "Ollama failed to pull qwen3.5:4b." }
+            $body = @{ model = "qwen3.5:4b"; prompt = "Reply with exactly: OFFLINE_MODEL_OK"; stream = $false } | ConvertTo-Json
+            $result = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11435/api/generate" -ContentType "application/json" -Body $body -TimeoutSec 600
+            if (!$result.response -or $result.response -notmatch "OFFLINE_MODEL_OK") { throw "Qwen3.5:4b generation smoke test failed." }
+          } finally {
+            if ($server -and !$server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Download and verify ComfyUI Windows portable runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "ComfyUI_windows_portable_nvidia.7z"
+          Invoke-WebRequest -Uri "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.46.0/ComfyUI_windows_portable_nvidia.7z" -OutFile $archive
+          $expected = "6a5255c7ec01fdc54bdbd8e4507073cf6acda2fbeea74ae1829a50681af5fac6"
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "ComfyUI portable archive SHA-256 mismatch: $actual" }
+          $sevenZip = Join-Path $env:RUNNER_TEMP "7zr.exe"
+          Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile $sevenZip
+          $extract = Join-Path $env:RUNNER_TEMP "comfy-extract"
+          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+          & $sevenZip x $archive "-o$extract" -y
+          if ($LASTEXITCODE -ne 0) { throw "ComfyUI portable archive extraction failed." }
+          $portable = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+          if (!$portable) { throw "ComfyUI portable directory not found." }
+          Copy-Item -LiteralPath $portable.FullName -Destination (Join-Path $env:RESOURCE_ROOT "ComfyUI") -Recurse -Force
+          $python = Join-Path $env:RESOURCE_ROOT "ComfyUI\python_embeded\python.exe"
+          $main = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\main.py"
+          if (!(Test-Path $python) -or !(Test-Path $main)) { throw "ComfyUI portable runtime layout is incomplete." }
+          & $python -c "import torch; print('torch', torch.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw "ComfyUI bundled Python/PyTorch smoke test failed." }
+
+      - name: Download and verify Stable Diffusion 1.5 FP16 weights
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\models\checkpoints\v1-5-pruned-emaonly-fp16.safetensors"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+          Invoke-WebRequest -Uri "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors" -OutFile $target
+          $expected = "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916"
+          $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Stable Diffusion 1.5 checkpoint SHA-256 mismatch: $actual" }
+
+      - name: Smoke-test ComfyUI CPU startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = Join-Path $env:RESOURCE_ROOT "ComfyUI\python_embeded\python.exe"
+          $main = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\main.py"
+          $process = Start-Process -FilePath $python -ArgumentList @($main, "--cpu", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch") -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 90; $i++) {
+              try { Invoke-WebRequest -Uri "http://127.0.0.1:8188/system_stats" -TimeoutSec 3 | Out-Null; $ready = $true; break } catch { Start-Sleep -Seconds 2 }
+            }
+            if (!$ready) { throw "ComfyUI CPU-mode startup smoke test failed." }
+          } finally {
+            if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Download FFmpeg 9.1 runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = Invoke-RestMethod -Headers @{ "User-Agent" = "AI-Comic-Studio-CI" } -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+          $asset = $release.assets | Where-Object { $_.name -match "win64-gpl.*\.zip$" -and $_.name -notmatch "shared" } | Select-Object -First 1
+          if (!$asset) { throw "Static Windows FFmpeg archive not found." }
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
+          $extract = Join-Path $env:RUNNER_TEMP "ffmpeg-extract"
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $ffmpeg = Get-ChildItem $extract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          $ffprobe = Get-ChildItem $extract -Filter ffprobe.exe -File -Recurse | Select-Object -First 1
+          if (!$ffmpeg -or !$ffprobe) { throw "FFmpeg archive is incomplete." }
+          Copy-Item $ffmpeg.FullName (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe") -Force
+          Copy-Item $ffprobe.FullName (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffprobe.exe") -Force
+          $version = (& (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe") -version | Select-Object -First 1)
+          if ($version -notmatch "ffmpeg version 9\.1") { throw "Expected FFmpeg 9.1, found: $version" }
+
+      - name: Package resource bundle and SHA-256 inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          ./scripts/package-ai-resource-bundle.ps1 -ResourceRoot $env:RESOURCE_ROOT -OutputDirectory (Join-Path $PWD "dist\ai-resources")
+
+      - name: Upload complete offline resource bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-AI-Offline-Resources-2026.11
+          path: |
+            dist/ai-resources/AI漫剧大师-AI离线资源包-2026.11.zip
+            dist/ai-resources/AI漫剧大师-AI离线资源包-2026.11.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
