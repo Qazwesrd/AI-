@@ -33,7 +33,11 @@ $ffprobeExe = Join-Path $ffmpegRoot "ffprobe.exe"
 
 Require-Path $ollamaExe "Ollama Windows runtime"
 Require-Path (Join-Path $ollamaModels "blobs") "Ollama model blobs"
-Require-Path (Join-Path $ollamaModels "manifests-v2") "Ollama model manifests"
+$manifestDirectories = @(
+    (Join-Path $ollamaModels "manifests"),
+    (Join-Path $ollamaModels "manifests-v2")
+) | Where-Object { Test-Path -LiteralPath $_ }
+if ($manifestDirectories.Count -eq 0) { throw "Ollama model manifests are missing." }
 Require-Path $ffmpegExe "FFmpeg executable"
 Require-Path $ffprobeExe "FFprobe executable"
 
@@ -61,7 +65,7 @@ if ($checkpoints.Count -lt 1) {
     throw "No local image checkpoint found. The image workbench cannot generate images without model weights."
 }
 
-$qwenManifest = Get-ChildItem -LiteralPath (Join-Path $ollamaModels "manifests-v2") -File -Recurse |
+$qwenManifest = Get-ChildItem -LiteralPath $manifestDirectories -File -Recurse |
     Where-Object { $_.FullName -match "qwen3\.5[\\/]4b$" } |
     Select-Object -First 1
 if (!$qwenManifest) {
@@ -79,6 +83,22 @@ if ($ffmpegVersion -notmatch "ffmpeg version 9\.1") {
 
 $manifestPath = Join-Path $PSScriptRoot "..\apps\desktop\build-resources\ai-resources\resource-manifest.json"
 Require-Path $manifestPath "versioned resource manifest"
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$manifest.engines | Where-Object id -eq "ollama" | ForEach-Object { $_.status = "bundled-and-version-verified" }
+$manifest.engines | Where-Object id -eq "comfyui" | ForEach-Object { $_.status = "bundled-and-startup-verified" }
+$manifest.engines | Where-Object id -eq "ffmpeg" | ForEach-Object { $_.status = "bundled-and-version-verified" }
+$manifest.text_models | Where-Object id -eq "qwen3.5:4b" | ForEach-Object { $_.status = "bundled-and-generation-verified" }
+$manifest.image_models | Where-Object id -eq "sd15-fp16-baseline" | ForEach-Object { $_.status = "bundled-and-sha256-verified-not-inference-certified" }
+$manifest | Add-Member -NotePropertyName bundle_verification -NotePropertyValue ([pscustomobject]@{
+    ollama_version = $ollamaVersion
+    ffmpeg_version = $ffmpegVersion
+    comfyui_runtime_present = $true
+    comfyui_cpu_startup_smoke_test = $true
+    qwen_generation_smoke_test = $true
+    sd15_sha256 = (Get-FileHash -LiteralPath $checkpoint -Algorithm SHA256).Hash
+    video_models_included = $false
+    hardware_note = "Ryzen 7 4800U Vega iGPU is not certified for local video diffusion; CPU image generation may be very slow."
+}) -Force
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $staging = Join-Path $env:TEMP ("ai-comic-resource-bundle-" + [guid]::NewGuid().ToString("N"))
@@ -89,7 +109,16 @@ try {
     Copy-Item -LiteralPath $ollamaRoot -Destination (Join-Path $staging "Ollama") -Recurse
     Copy-Item -LiteralPath $comfyRoot -Destination (Join-Path $staging "ComfyUI") -Recurse
     Copy-Item -LiteralPath $ffmpegRoot -Destination (Join-Path $staging "FFmpeg") -Recurse
-    Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $staging "resource-manifest.json")
+    $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $staging "resource-manifest.json") -Encoding utf8
+    $inventory = @()
+    Get-ChildItem -LiteralPath $staging -File -Recurse | Sort-Object FullName | ForEach-Object {
+        $inventory += [pscustomobject]@{
+            path = $_.FullName.Substring($staging.Length).TrimStart([char]92)
+            size = $_.Length
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        }
+    }
+    $inventory | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $staging "file-inventory.json") -Encoding utf8
 
     if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
