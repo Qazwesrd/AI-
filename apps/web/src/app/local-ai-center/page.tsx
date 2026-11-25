@@ -129,6 +129,24 @@ export default function LocalAICenterPage() {
           <a href="/local-image-studio" className="mt-4 inline-block rounded-lg border border-purple-300/30 px-3 py-2 text-sm">进入本地图片生成工作台 →</a>
         </Panel>
 
+        <Panel title="🎬 本地 AI 视频生成模型">
+          <div className="space-y-3 text-sm">
+            <div className="rounded-xl bg-black/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2"><b>Wan 2.2 TI2V-5B</b><State value="not_installed" /></div>
+              <p className="mt-2 text-xs leading-6 text-purple-300">支持文生视频、图生视频；ComfyUI 官方工作流面向约 8GB 独立显存级显卡。当前模型权重尚未纳入离线资源包。</p>
+            </div>
+            <div className="rounded-xl bg-black/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2"><b>LTX-Video 2B Distilled</b><State value="not_tested" /></div>
+              <p className="mt-2 text-xs leading-6 text-purple-300">轻量候选，计划用于图生视频和视频续写；需完成模型许可核对、Windows 依赖封装及真实推理测试。</p>
+            </div>
+            <div className="rounded-xl bg-black/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2"><b>Wan 2.2 14B</b><State value="not_installed" /></div>
+              <p className="mt-2 text-xs leading-6 text-purple-300">高性能显卡可选档，不作为默认安装资源，不适用于当前 Vega 核显。</p>
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-6 text-amber-200">注意：当前 Ryzen 7 4800U + Vega 核显 + 16GB 内存不具备已验证的本地视频生成能力。此处不会把 FFmpeg 剪辑功能冒充 AI 视频生成，也不会自动调用收费云端服务。</p>
+        </Panel>
+
         <Panel title="🎞️ 本地视频处理 · FFmpeg">
           <div className="space-y-3 text-sm">
             <div className="flex items-center justify-between gap-3"><span>FFmpeg</span><State value={ffmpeg?.status} /></div>
