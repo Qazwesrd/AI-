@@ -312,7 +312,7 @@ try {
     $AsarEntriesRaw = & npx --no-install asar list $AsarPath
     Check-ExitCode "Unable to inspect packaged app.asar"
     $AsarEntries = @($AsarEntriesRaw | ForEach-Object { ([string]$_).Trim() -replace "\\\\", "/" -replace "^/", "" })
-    foreach ($RequiredEntry in @("main.cjs", "preload.cjs", "ollama-runtime-installer.cjs")) {
+    foreach ($RequiredEntry in @("main.cjs", "preload.cjs", "ollama-runtime-installer.cjs", "update-inventory.cjs", "patch-package-verifier.cjs", "package.json")) {
         if ($AsarEntries -notcontains $RequiredEntry) {
             throw "Packaged app.asar is missing required entry: $RequiredEntry"
         }
@@ -320,6 +320,39 @@ try {
 } finally {
     Pop-Location
 }
+
+# Verify every runtime payload and manifest that Electron expects under resources/.
+$PackagedResources = Join-Path $Desktop "release\\win-unpacked\\resources"
+$RequiredResourceFiles = @(
+    "api\\ai-comic-api.exe",
+    "web\\server.js",
+    "web\\.next\\static",
+    "web\\public",
+    "media\\ffmpeg.exe",
+    "media\\ffprobe.exe",
+    "update\\manifest.json",
+    "ai-resources\\resource-manifest.json"
+)
+foreach ($RelativeResource in $RequiredResourceFiles) {
+    $PackagedPath = Join-Path $PackagedResources $RelativeResource
+    if (!(Test-Path -LiteralPath $PackagedPath)) {
+        throw "Packaged runtime payload is missing: $RelativeResource"
+    }
+}
+$ResourceManifestPath = Join-Path $PackagedResources "ai-resources\\resource-manifest.json"
+$ResourceManifest = Get-Content -LiteralPath $ResourceManifestPath -Raw | ConvertFrom-Json
+if ($ResourceManifest.schema_version -ne 1 -or $ResourceManifest.product -ne "AI漫剧制作大师" -or !$ResourceManifest.resource_bundle_version) {
+    throw "Packaged AI resource manifest is invalid."
+}
+$UpdateManifestPath = Join-Path $PackagedResources "update\\manifest.json"
+$UpdateManifest = Get-Content -LiteralPath $UpdateManifestPath -Raw | ConvertFrom-Json
+if ($UpdateManifest.schema_version -ne 1 -or $UpdateManifest.product -ne "AI漫剧制作大师" -or $UpdateManifest.product_version -ne $DesktopPackage.version) {
+    throw "Packaged update inventory is missing, malformed, or targets a different application version."
+}
+if (@($UpdateManifest.files).Count -lt 1) {
+    throw "Packaged update inventory is empty."
+}
+Write-Host "Verified ASAR main-process modules and all required runtime/resource manifests."
 
 $Release = Join-Path $Desktop "release"
 
