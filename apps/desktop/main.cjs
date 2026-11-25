@@ -2,7 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electro
 const { spawn, execFile } = require("child_process");
 const path = require("path");
 const { inspectUpdateInventory } = require("./update-inventory.cjs");
-const { verifySignedPatch, createRollbackSnapshot, TRUSTED_PATCH_PUBLIC_KEY_PEM, MAX_PACKAGE_BYTES } = require("./patch-package-verifier.cjs");
+const { verifySignedPatch, createRollbackSnapshot, verifyRollbackSnapshot, TRUSTED_PATCH_PUBLIC_KEY_PEM, MAX_PACKAGE_BYTES } = require("./patch-package-verifier.cjs");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
@@ -806,6 +806,10 @@ ipcMain.handle("patch-center:import-signed-package", async (event) => {
       backupRoot,
       verifiedPatch: verified
     });
+    const rollbackCheck = verifyRollbackSnapshot({ backupRoot, snapshotId: snapshot.snapshot_id });
+    if (!rollbackCheck.valid) {
+      throw new Error("回滚备份完整性复核失败：" + rollbackCheck.error);
+    }
     const packageRoot = path.join(patchRoot, "verified");
     fs.mkdirSync(packageRoot, { recursive: true });
     const packagePath = path.join(packageRoot, verified.package_id + ".json");
