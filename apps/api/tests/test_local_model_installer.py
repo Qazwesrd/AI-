@@ -17,7 +17,7 @@ class LocalModelInstallerTests(unittest.TestCase):
             return_value=type("Usage", (), {"free": 10 * 1024 ** 3})(),
         ):
             result = model_install_info()
-        self.assertEqual(result["model"], "qwen3:4b")
+        self.assertEqual(result["model"], "qwen3.5:4b")
         self.assertTrue(result["enough_space"])
         self.assertFalse(result["automatic_download"])
         self.assertFalse(result["cloud_fallback"])
@@ -30,12 +30,22 @@ class LocalModelInstallerTests(unittest.TestCase):
     def test_existing_model_is_not_downloaded_again(self):
         with patch(
             "app.routers.local_model_installer._ollama_models",
-            return_value=[{"name": "qwen3:4b"}],
+            return_value=[{"name": "qwen3.5:4b"}],
         ):
             result = start_model_install(StartModelInstallInput(confirm_download=True))
         self.assertEqual(result["status"], "already_installed")
         self.assertFalse(result["network_used"])
         self.assertFalse(result["cloud_fallback"])
+
+    def test_legacy_qwen3_model_remains_supported_without_overwrite(self):
+        with patch(
+            "app.routers.local_model_installer._ollama_models",
+            return_value=[{"name": "qwen3:4b"}],
+        ):
+            result = start_model_install(StartModelInstallInput(model="qwen3:4b", confirm_download=True))
+        self.assertEqual(result["status"], "already_installed")
+        self.assertEqual(result["model"], "qwen3:4b")
+        self.assertFalse(result["network_used"])
 
 
 if __name__ == "__main__":
