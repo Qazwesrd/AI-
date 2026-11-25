@@ -7,6 +7,7 @@ const {
   REQUIRED_FREE_BYTES,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
+  getBundledRuntimePath,
 } = require("./ollama-runtime-installer.cjs");
 
 test("installer source is the fixed official HTTPS URL", () => {
@@ -28,6 +29,13 @@ test("signature requires both a valid Authenticode status and Ollama Inc organiz
   assert.equal(isTrustedOllamaSignature({ status: "Valid", subject: "CN=Ollama Inc., O=Not Ollama Inc." }), false);
   assert.equal(isTrustedOllamaSignature({ status: "HashMismatch", subject: "CN=Ollama Inc., O=Ollama Inc." }), false);
   assert.equal(isTrustedOllamaSignature(null), false);
+});
+
+test("app-managed runtime path follows the Electron userData directory", () => {
+  assert.equal(
+    getBundledRuntimePath("E:\\123\\ai-comic-studio-desktop-Data"),
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\runtime\\ollama.exe"
+  );
 });
 
 test("runtime install disk reserve is at least five GiB", () => {
