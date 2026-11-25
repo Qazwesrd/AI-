@@ -17,7 +17,39 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "release-assets.githubusercontent.com",
 ]);
 const REQUIRED_FREE_BYTES = 5 * 1024 ** 3;
-const API_URL = "http://127.0.0.1:11434/api/tags";
+const API_PORTS = [11435, 11434];
+const API_PATH = "/api/tags";
+
+function getBundledRuntimePath(userDataDirectory) {
+  return path.join(userDataDirectory, "engines", "Ollama", "runtime", "ollama.exe");
+}
+
+async function findOllamaEndpoint() {
+  const configured = String(process.env.OLLAMA_HOST || "").trim();
+  const candidates = [];
+  if (configured) {
+    const normalized = configured.startsWith("http") ? configured : "http://" + configured;
+    candidates.push(normalized.replace(/\\/$/, "") + API_PATH);
+  }
+  for (const port of API_PORTS) candidates.push(`http://127.0.0.1:${port}${API_PATH}`);
+  for (const url of [...new Set(candidates)]) {
+    const data = await requestJson(url);
+    if (data && Array.isArray(data.models)) return { url, baseUrl: url.slice(0, -API_PATH.length), data };
+  }
+  return null;
+}
+
+function startBundledRuntime(runtimePath) {
+  if (!fs.existsSync(runtimePath)) return null;
+  const child = spawn(runtimePath, ["serve"], {
+    windowsHide: true,
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, OLLAMA_HOST: "127.0.0.1:11435" },
+  });
+  child.unref();
+  return child;
+}
 
 function isAllowedDownloadUrl(value) {
   try {
@@ -121,11 +153,11 @@ function runInstaller(filePath) {
 async function waitForOllama(timeoutMs = 90000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const data = await requestJson(API_URL);
-    if (data && Array.isArray(data.models)) return true;
+    const endpoint = await findOllamaEndpoint();
+    if (endpoint) return endpoint;
     await new Promise(resolve => setTimeout(resolve, 1500));
   }
-  return false;
+  return null;
 }
 
 function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
@@ -144,10 +176,13 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const home = app.getPath("home");
     let freeBytes = null;
     try { freeBytes = getFreeBytes(home); } catch {}
-    const api = await requestJson(API_URL);
+    const runtimePath = getBundledRuntimePath(app.getPath("userData"));
+    const endpoint = await findOllamaEndpoint();
     return {
-      installed: Boolean(api),
-      status: api ? "ready" : "not_installed",
+      installed: Boolean(endpoint) || fs.existsSync(runtimePath),
+      status: endpoint ? "ready" : fs.existsSync(runtimePath) ? "runtime_stopped" : "not_installed",
+      endpoint: endpoint?.baseUrl || null,
+      runtimePath: fs.existsSync(runtimePath) ? runtimePath : null,
       freeBytes,
       requiredFreeBytes: REQUIRED_FREE_BYTES,
       enoughSpace: freeBytes !== null && freeBytes >= REQUIRED_FREE_BYTES,
@@ -162,7 +197,19 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const home = app.getPath("home");
     const freeBytes = getFreeBytes(home);
     if (freeBytes < REQUIRED_FREE_BYTES) throw new Error("系统盘可用空间不足。Ollama 官方 Windows 安装至少需要约 4 GB，请预留 5 GiB 后重试。");
-    if (await requestJson(API_URL)) return { status: "already_installed" };
+    const runtimePath = getBundledRuntimePath(app.getPath("userData"));
+    const existingEndpoint = await findOllamaEndpoint();
+    if (existingEndpoint) return { status: "already_installed", endpoint: existingEndpoint.baseUrl };
+    if (fs.existsSync(runtimePath)) {
+      setJob({ status: "checking", stage: "正在启动已有本地 Ollama", percent: 10, message: "复用已安装的离线运行环境" });
+      startBundledRuntime(runtimePath);
+      const ready = await waitForOllama(30000);
+      if (ready) {
+        setJob({ status: "success", stage: "启动完成", percent: 100, message: "已启动并复用现有本地 Ollama 运行环境。" });
+        return { status: "already_installed", endpoint: ready.baseUrl };
+      }
+      throw new Error("检测到本地 Ollama 程序，但启动后 API 未就绪。已保留现有模型文件，请检查运行日志后重试。");
+    }
 
     cancelRequested = false;
     const installerPath = path.join(app.getPath("temp"), "AI-Comic-Studio-OllamaSetup.exe");
@@ -187,7 +234,7 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
       const ready = await waitForOllama();
       if (!ready) throw new Error("安装程序已结束，但本地 Ollama 服务尚未就绪。请重启软件或在系统托盘启动 Ollama 后重试检测。");
       setJob({ status: "success", stage: "安装完成", percent: 100, message: "Ollama 本地运行环境已就绪。下一步可确认下载 Qwen3 4B 模型。" });
-      return { status: "success" };
+      return { status: "success", endpoint: ready.baseUrl };
     } catch (error) {
       const cancelled = cancelRequested;
       setJob({ status: cancelled ? "cancelled" : "failed", stage: cancelled ? "已取消" : "安装失败", message: error instanceof Error ? error.message : "Ollama 安装失败" });
@@ -213,5 +260,7 @@ module.exports = {
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
   getFreeBytes,
+  getBundledRuntimePath,
+  findOllamaEndpoint,
   registerOllamaRuntimeInstaller,
 };
