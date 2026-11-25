@@ -60,6 +60,8 @@ if (!(Test-Path $checkpointDirectory)) {
     $checkpointDirectory = Join-Path $comfyRoot "models\checkpoints"
 }
 Require-Path $checkpointDirectory "ComfyUI checkpoint directory"
+$checkpoint = Join-Path $checkpointDirectory "v1-5-pruned-emaonly-fp16.safetensors"
+Require-Path $checkpoint "Stable Diffusion 1.5 FP16 checkpoint"
 $checkpoints = @(Get-ChildItem -LiteralPath $checkpointDirectory -File | Where-Object {
     $_.Extension -in @(".safetensors", ".ckpt")
 })
