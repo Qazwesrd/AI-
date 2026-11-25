@@ -266,7 +266,7 @@ function startComfyUiRuntime() {
     "-s", runtime.main,
     "--listen", "127.0.0.1",
     "--port", "8188",
-    ...(fs.existsSync(path.join(process.env.SystemRoot || "C:\\Windows", "System32", "nvidia-smi.exe")) ? [] : ["--cpu"]),
+    ...(String(process.env.PATH || "").split(path.delimiter).some(dir => fs.existsSync(path.join(dir, "nvidia-smi.exe"))) ? [] : ["--cpu"]),
   ], {
     cwd: path.dirname(runtime.main),
     windowsHide: true,
