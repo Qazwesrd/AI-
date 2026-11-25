@@ -49,7 +49,7 @@ async function findOllamaEndpoint() {
   const candidates = [];
   if (configured) {
     const normalized = configured.startsWith("http") ? configured : "http://" + configured;
-    candidates.push(normalized.replace(/\\/$/, "") + API_PATH);
+    candidates.push((normalized.endsWith("/") ? normalized.slice(0, -1) : normalized) + API_PATH);
   }
   for (const port of API_PORTS) candidates.push(`http://127.0.0.1:${port}${API_PATH}`);
   for (const url of [...new Set(candidates)]) {
