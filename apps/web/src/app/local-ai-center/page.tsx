@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
@@ -30,7 +31,7 @@ function State({ value }: { value?: string }) {
   const ready = value === "ready" || value === "ok";
   return <span className={`rounded-full px-3 py-1 text-xs ${ready ? "bg-emerald-500/15 text-emerald-300" : "bg-amber-500/15 text-amber-200"}`}>{ready ? "已连接" : value === "not_running" ? "未启动" : value === "error" ? "异常" : "未检测"}</span>;
 }
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, children }: { title: string; children: ReactNode }) {
   return <section className="rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-5"><h2 className="mb-4 text-lg font-bold">{title}</h2>{children}</section>;
 }
 
