@@ -24,6 +24,21 @@ function getBundledRuntimePath(userDataDirectory) {
   return path.join(userDataDirectory, "engines", "Ollama", "runtime", "ollama.exe");
 }
 
+function getBundledModelsPath(runtimePath) {
+  return path.resolve(path.dirname(runtimePath), "..", "models");
+}
+
+function getBundledRuntimeEnvironment(runtimePath, baseEnv = process.env) {
+  return {
+    ...baseEnv,
+    OLLAMA_HOST: "127.0.0.1:11435",
+    OLLAMA_MODELS: getBundledModelsPath(runtimePath),
+    OLLAMA_NO_CLOUD: "1",
+    OLLAMA_NUM_PARALLEL: "1",
+    OLLAMA_MAX_LOADED_MODELS: "1",
+  };
+}
+
 async function findOllamaEndpoint() {
   const configured = String(process.env.OLLAMA_HOST || "").trim();
   const candidates = [];
@@ -45,10 +60,32 @@ function startBundledRuntime(runtimePath) {
     windowsHide: true,
     detached: true,
     stdio: "ignore",
-    env: { ...process.env, OLLAMA_HOST: "127.0.0.1:11435" },
+    env: getBundledRuntimeEnvironment(runtimePath),
   });
   child.unref();
   return child;
+}
+
+async function waitForBundledEndpoint(timeoutMs = 30000) {
+  const baseUrl = "http://127.0.0.1:11435";
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const data = await requestJson(baseUrl + API_PATH);
+    if (data && Array.isArray(data.models)) return { url: baseUrl + API_PATH, baseUrl, data };
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return null;
+}
+
+async function ensureBundledRuntime(runtimePath) {
+  const baseUrl = "http://127.0.0.1:11435";
+  const existing = await requestJson(baseUrl + API_PATH);
+  if (existing && Array.isArray(existing.models)) {
+    return { url: baseUrl + API_PATH, baseUrl, data: existing };
+  }
+  if (!fs.existsSync(runtimePath)) return null;
+  startBundledRuntime(runtimePath);
+  return waitForBundledEndpoint();
 }
 
 function isAllowedDownloadUrl(value) {
@@ -177,7 +214,9 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     let freeBytes = null;
     try { freeBytes = getFreeBytes(home); } catch {}
     const runtimePath = getBundledRuntimePath(app.getPath("userData"));
-    const endpoint = await findOllamaEndpoint();
+    const endpoint = fs.existsSync(runtimePath)
+      ? await ensureBundledRuntime(runtimePath)
+      : await findOllamaEndpoint();
     return {
       installed: Boolean(endpoint) || fs.existsSync(runtimePath),
       status: endpoint ? "ready" : fs.existsSync(runtimePath) ? "runtime_stopped" : "not_installed",
@@ -198,18 +237,17 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const freeBytes = getFreeBytes(home);
     if (freeBytes < REQUIRED_FREE_BYTES) throw new Error("系统盘可用空间不足。Ollama 官方 Windows 安装至少需要约 4 GB，请预留 5 GiB 后重试。");
     const runtimePath = getBundledRuntimePath(app.getPath("userData"));
-    const existingEndpoint = await findOllamaEndpoint();
-    if (existingEndpoint) return { status: "already_installed", endpoint: existingEndpoint.baseUrl };
     if (fs.existsSync(runtimePath)) {
-      setJob({ status: "checking", stage: "正在启动已有本地 Ollama", percent: 10, message: "复用已安装的离线运行环境" });
-      startBundledRuntime(runtimePath);
-      const ready = await waitForOllama(30000);
+      setJob({ status: "checking", stage: "正在启动 E 盘已有本地 Ollama", percent: 10, message: "复用 E 盘运行程序和现有模型，不重新下载" });
+      const ready = await ensureBundledRuntime(runtimePath);
       if (ready) {
-        setJob({ status: "success", stage: "启动完成", percent: 100, message: "已启动并复用现有本地 Ollama 运行环境。" });
+        setJob({ status: "success", stage: "启动完成", percent: 100, message: "已启动并复用 E 盘 Ollama 运行环境及模型。" });
         return { status: "already_installed", endpoint: ready.baseUrl };
       }
-      throw new Error("检测到本地 Ollama 程序，但启动后 API 未就绪。已保留现有模型文件，请检查运行日志后重试。");
+      throw new Error("检测到 E 盘 Ollama 程序，但 11435 服务未就绪。已保留现有模型文件，不会重新下载或覆盖。");
     }
+    const existingEndpoint = await findOllamaEndpoint();
+    if (existingEndpoint) return { status: "already_installed", endpoint: existingEndpoint.baseUrl };
 
     cancelRequested = false;
     const installerPath = path.join(app.getPath("temp"), "AI-Comic-Studio-OllamaSetup.exe");
@@ -261,6 +299,9 @@ module.exports = {
   isTrustedOllamaSignature,
   getFreeBytes,
   getBundledRuntimePath,
+  getBundledModelsPath,
+  getBundledRuntimeEnvironment,
   findOllamaEndpoint,
+  ensureBundledRuntime,
   registerOllamaRuntimeInstaller,
 };
