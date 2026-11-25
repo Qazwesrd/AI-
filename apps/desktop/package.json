@@ -63,6 +63,10 @@
             {
                 "to": "update/manifest.json",
                 "from": "build-resources/update-manifest.json"
+            },
+            {
+                "to": "ai-resources/resource-manifest.json",
+                "from": "build-resources/ai-resources/resource-manifest.json"
             }
         ],
         "win": {
