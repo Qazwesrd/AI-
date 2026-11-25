@@ -29,7 +29,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $root = Join-Path $PWD "resource-stage"
-          foreach ($name in @("Ollama\runtime", "Ollama\models", "ComfyUI", "FFmpeg")) {
+          foreach ($name in @("Ollama\runtime", "Ollama\models", "ComfyUI", "FFmpeg", "StableDiffusionCpp")) {
             New-Item -ItemType Directory -Path (Join-Path $root $name) -Force | Out-Null
           }
           "RESOURCE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -68,6 +68,29 @@ jobs:
           } finally {
             if ($server -and !$server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
           }
+
+      - name: Download and verify stable-diffusion.cpp Windows CPU video runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sd-master-52491bd-bin-win-cpu-x64.zip"
+          $url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1133-52491bd/sd-master-52491bd-bin-win-cpu-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $expected = "7d1c819708f7b922bebda2e1454b6224fa524480cb98bb7b0aea111f3c15678b"
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "stable-diffusion.cpp archive SHA-256 mismatch: $actual" }
+          $target = Join-Path $env:RESOURCE_ROOT "StableDiffusionCpp"
+          Expand-Archive -LiteralPath $archive -DestinationPath $target -Force
+          $cli = Get-ChildItem -LiteralPath $target -Filter "sd-cli.exe" -File -Recurse | Select-Object -First 1
+          if (!$cli) { throw "stable-diffusion.cpp sd-cli.exe missing after extraction." }
+          $help = (& $cli.FullName --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "stable-diffusion.cpp CLI help smoke test failed." }
+          foreach ($required in @("vid_gen", "--diffusion-model", "--t5xxl")) {
+            if ($help -notmatch [regex]::Escape($required)) { throw "Video CLI capability missing: $required" }
+          }
+          "SD_CPP_CLI=$($cli.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Verified stable-diffusion.cpp CPU runtime and Wan video CLI options."
+          Remove-Item -LiteralPath $archive -Force
 
       - name: Download and verify ComfyUI Windows portable runtime
         shell: pwsh
