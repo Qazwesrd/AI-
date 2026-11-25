@@ -1,6 +1,6 @@
 {
     "name": "ai-comic-studio-desktop",
-    "version": "1.0.19",
+    "version": "1.0.20",
     "private": true,
     "description": "AI漫剧制作大师 Windows 桌面应用",
     "main": "main.cjs",
@@ -26,6 +26,7 @@
         "files": [
             "main.cjs",
             "preload.cjs",
+            "ollama-runtime-installer.cjs",
             "package.json"
         ],
         "extraResources": [
