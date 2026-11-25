@@ -73,9 +73,9 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $archive = Join-Path $env:RUNNER_TEMP "ComfyUI_windows_portable_nvidia.7z"
-          Invoke-WebRequest -Uri "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.46.0/ComfyUI_windows_portable_nvidia.7z" -OutFile $archive
-          $expected = "6a5255c7ec01fdc54bdbd8e4507073cf6acda2fbeea74ae1829a50681af5fac6"
+          $archive = Join-Path $env:RUNNER_TEMP "ComfyUI_windows_portable_amd.7z"
+          Invoke-WebRequest -Uri "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.46.0/ComfyUI_windows_portable_amd.7z" -OutFile $archive
+          $expected = "00f42ed58381e194892b74e9085d4d5666fac1aab8f021094c3a745e9b52ad97"
           $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "ComfyUI portable archive SHA-256 mismatch: $actual" }
           $sevenZip = Join-Path $env:RUNNER_TEMP "7zr.exe"
@@ -108,8 +108,9 @@ jobs:
           $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "Stable Diffusion 1.5 checkpoint SHA-256 mismatch: $actual" }
 
-      - name: Smoke-test ComfyUI CPU startup
+      - name: CPU image generation inference test
         shell: pwsh
+        timeout-minutes: 35
         run: |
           $ErrorActionPreference = "Stop"
           $python = Join-Path $env:RESOURCE_ROOT "ComfyUI\python_embeded\python.exe"
@@ -121,6 +122,37 @@ jobs:
               try { Invoke-WebRequest -Uri "http://127.0.0.1:8188/system_stats" -TimeoutSec 3 | Out-Null; $ready = $true; break } catch { Start-Sleep -Seconds 2 }
             }
             if (!$ready) { throw "ComfyUI CPU-mode startup smoke test failed." }
+
+            $workflow = @{
+              "1" = @{ class_type = "CheckpointLoaderSimple"; inputs = @{ ckpt_name = "v1-5-pruned-emaonly-fp16.safetensors" } }
+              "2" = @{ class_type = "CLIPTextEncode"; inputs = @{ text = "a detailed anime character portrait, clean line art"; clip = @("1", 1) } }
+              "3" = @{ class_type = "CLIPTextEncode"; inputs = @{ text = "blurry, low quality, distorted"; clip = @("1", 1) } }
+              "4" = @{ class_type = "EmptyLatentImage"; inputs = @{ width = 512; height = 512; batch_size = 1 } }
+              "5" = @{ class_type = "KSampler"; inputs = @{ seed = 42; steps = 8; cfg = 7; sampler_name = "euler"; scheduler = "normal"; denoise = 1; model = @("1", 0); positive = @("2", 0); negative = @("3", 0); latent_image = @("4", 0) } }
+              "6" = @{ class_type = "VAEDecode"; inputs = @{ samples = @("5", 0); vae = @("1", 2) } }
+              "7" = @{ class_type = "SaveImage"; inputs = @{ filename_prefix = "AIComic-Offline-Smoke"; images = @("6", 0) } }
+            }
+            $body = @{ prompt = $workflow; client_id = "ai-comic-offline-ci" } | ConvertTo-Json -Depth 20
+            $queued = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8188/prompt" -ContentType "application/json" -Body $body -TimeoutSec 30
+            if (!$queued.prompt_id) { throw "ComfyUI did not accept the image generation workflow." }
+            $completed = $false
+            for ($i = 0; $i -lt 1800; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $history = Invoke-RestMethod -Uri ("http://127.0.0.1:8188/history/" + $queued.prompt_id) -TimeoutSec 5
+                $entry = $history.($queued.prompt_id)
+                if ($entry.status.completed -eq $true) {
+                  if (!$entry.outputs."7".images -or $entry.outputs."7".images.Count -lt 1) { throw "Image inference finished without an output image." }
+                  $completed = $true
+                  break
+                }
+                if ($entry.status.status_str -eq "error") { throw "ComfyUI image inference returned an error." }
+              } catch {
+                if ($_.Exception.Message -match "image inference") { throw }
+              }
+            }
+            if (!$completed) { throw "CPU image inference timed out after 30 minutes." }
+            Write-Host "ComfyUI CPU image inference succeeded."
           } finally {
             if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
           }
