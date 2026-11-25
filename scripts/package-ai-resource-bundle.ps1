@@ -14,11 +14,19 @@ function Require-Path([string]$Path, [string]$Description) {
 }
 
 function Get-FirstLine([string]$Executable, [string[]]$Arguments) {
-    $output = & $Executable @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to inspect runtime: $Executable"
+    # Ollama may emit a harmless "could not connect" warning on stderr when
+    # inspecting its version without a running server. Ignore stderr and select
+    # the actual version line from stdout instead of treating the warning as it.
+    $output = @(& $Executable @Arguments 2>$null)
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Failed to inspect runtime: $Executable (exit code $exitCode)"
     }
-    return (($output | Select-Object -First 1) -join "").Trim()
+    $line = $output | Where-Object { "$_" -match "(?i)version" } | Select-Object -First 1
+    if (!$line) {
+        throw "Runtime version string was not returned by: $Executable"
+    }
+    return "$line".Trim()
 }
 
 $ollamaRoot = Join-Path $ResourceRoot "Ollama"
