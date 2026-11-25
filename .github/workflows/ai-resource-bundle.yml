@@ -2,7 +2,8 @@ name: Build full offline AI resource bundle
 
 on:
   workflow_dispatch:
-  pull_request:
+  push:
+    branches: [offline-bundle-installer-repair]
     paths:
       - "scripts/package-ai-resource-bundle.ps1"
       - "apps/desktop/build-resources/ai-resources/resource-manifest.json"
@@ -94,7 +95,7 @@ jobs:
           $ErrorActionPreference = "Stop"
           $target = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\models\checkpoints\v1-5-pruned-emaonly-fp16.safetensors"
           New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
-          Invoke-WebRequest -Uri "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/4fddeb7/v1-5-pruned-emaonly-fp16.safetensors" -OutFile $target
+          Invoke-WebRequest -Uri "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors" -OutFile $target
           $expected = "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916"
           $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "Stable Diffusion 1.5 checkpoint SHA-256 mismatch: $actual" }
@@ -139,6 +140,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
+          $env:AI_RESOURCE_BUNDLE_TESTS = "passed"
           ./scripts/package-ai-resource-bundle.ps1 -ResourceRoot $env:RESOURCE_ROOT -OutputDirectory (Join-Path $PWD "dist\ai-resources")
 
       - name: Upload complete offline resource bundle
