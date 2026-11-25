@@ -13,6 +13,7 @@ declare global {
   interface Window {
     patchCenterDesktop?: {
       getInstalledInventory: () => Promise<InstalledInventory>;
+      importSignedPackage: () => Promise<{ canceled?: boolean; valid?: boolean; trusted?: boolean; package_id?: string; file_count?: number; total_bytes?: number; snapshot_id?: string; message?: string }>;
     };
   }
 }
@@ -49,6 +50,8 @@ export default function PatchCenterPage() {
   const [inventory, setInventory] = useState<InstalledInventory | null>(null);
   const [inventoryBusy, setInventoryBusy] = useState(false);
   const [desktopBridgeAvailable, setDesktopBridgeAvailable] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importResult, setImportResult] = useState("");
 
   const refreshInstalledInventory = useCallback(async () => {
     if (!window.patchCenterDesktop?.getInstalledInventory) {
@@ -101,6 +104,25 @@ export default function PatchCenterPage() {
       setError(e instanceof Error ? e.message : "补丁预览失败");
     } finally {
       setPreviewBusy(false);
+    }
+  }
+
+  async function importSignedPackage() {
+    if (!window.patchCenterDesktop?.importSignedPackage) {
+      setError("签名补丁导入仅支持 Windows 桌面安装版。");
+      return;
+    }
+    setImportBusy(true); setError(""); setImportResult("");
+    try {
+      const result = await window.patchCenterDesktop.importSignedPackage();
+      if (result.canceled) return;
+      if (!result.valid) throw new Error(result.message || "签名补丁导入失败");
+      setImportResult(result.message || "签名补丁已暂存。");
+      await refreshInstalledInventory();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "签名补丁导入失败");
+    } finally {
+      setImportBusy(false);
     }
   }
 
@@ -200,6 +222,18 @@ export default function PatchCenterPage() {
           <p className="text-xs text-purple-300">单个补丁上限 512 KiB。模型权重、视频模型、运行时和大型素材仍走独立资源包。</p>
           <button onClick={() => void generatePatch()} disabled={busy || !title.trim() || !code.trim() || (format !== "unified-diff" && !targetPath.trim())} className="rounded-xl bg-fuchsia-700 px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40">{busy ? "正在生成…" : "生成并保存补丁包"}</button>
         </div>
+      </section>
+
+      <section className="mb-5 rounded-2xl border border-amber-300/20 bg-[#21190dcc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold">导入签名补丁</h2>
+            <p className="mt-1 text-xs text-amber-100/80">仅接受 Ed25519 签名的静态网页资源补丁；导入时先验证签名和文件哈希，再生成原文件备份。</p>
+          </div>
+          <button onClick={() => void importSignedPackage()} disabled={importBusy || !desktopBridgeAvailable} className="rounded-lg border border-amber-300/40 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40">{importBusy ? "正在验证…" : "选择 .aicpatch 文件"}</button>
+        </div>
+        {importResult && <p className="mt-3 text-sm text-emerald-200">{importResult}</p>}
+        <p className="mt-3 text-xs text-amber-200">安全状态：正式发行公钥尚未配置前，导入会被拒绝。当前仅建立签名验证与备份机制，不会应用补丁或修改安装文件。</p>
       </section>
 
       <section className="mt-6 rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-5">
