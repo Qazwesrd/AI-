@@ -92,40 +92,40 @@
   ],
   "video_models": [
     {
-      "id": "wan2.1-t2v-1.3b-q4-gguf",
+      "id": "wan2.1-t2v-1.3b-bf16-safetensors",
       "engine": "stable-diffusion-cpp",
-      "repository": "off-grid-ai/Wan2.1-T2V-1.3B-GGUF",
-      "file": "Wan2.1-T2V-1.3B-Q4_K_S.gguf",
-      "file_size_mb": 816,
-      "companion_repository": "off-grid-ai/Video-Companions-GGUF",
+      "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "file": "split_files/diffusion_models/wan2.1_t2v_1.3B_bf16.safetensors",
+      "file_size_gb": 2.84,
+      "file_sha256": "6f999b0d6cb9a72b3d98ac386ed96f57f8cecae13994a69232514ea4974ad5fd",
+      "official_model_card": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "companion_repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
       "companion_files": [
         {
-          "file": "umt5-xxl-encoder-Q4_K_M.gguf",
-          "size_mb": 3655,
-          "purpose": "required text encoder"
+          "file": "split_files/text_encoders/umt5_xxl_fp16.safetensors",
+          "purpose": "required UMT5-XXL text encoder; evaluate a compatible quantized GGUF build to reduce RAM"
         },
         {
-          "file": "wan_2.1_vae.safetensors",
+          "file": "split_files/vae/wan_2.1_vae.safetensors",
           "size_mb": 254,
-          "purpose": "required video VAE"
+          "purpose": "required Wan 2.1 VAE"
         }
       ],
-      "full_resource_size_gb": 4.725,
-      "workflow": "stable-diffusion.cpp Wan 2.1 T2V 1.3B CPU/AVX2 qualification workflow",
+      "workflow": "stable-diffusion.cpp Wan 2.1 T2V 1.3B official safetensors workflow; -M vid_gen",
       "license": "Apache-2.0",
       "recommended": false,
       "status": "candidate-not-bundled-awaiting-real-CPU-generation-and-memory-qualification",
       "hardware": {
-        "windows_x64": "upstream-supported-platform",
-        "cpu_backend": "upstream-lists-AVX2; target-device inference not yet verified",
-        "ryzen_7_4800u": "experimental-candidate-only; no successful target-device video generation claim",
-        "ram_16_gib": "unverified; model file size does not represent peak inference RAM",
+        "windows_x64": "upstream-platform-support; packaged binary still to be built and tested",
+        "cpu_backend": "candidate for CPU fallback; real target-device video inference not yet verified",
+        "ryzen_7_4800u": "experimental-only; no successful target-device video generation claim",
+        "ram_16_gib": "unverified; diffusion weights alone are 2.84 GB and peak RAM will be substantially higher",
         "vega_integrated_gpu": "do-not-assume-ROCm-or-GPU-acceleration"
       },
       "purpose": [
         "text-to-video"
       ],
-      "notes": "The 816 MB generator is not a complete model. The full pack is approximately 4.725 GB including the 3.655 GB UMT5-XXL Q4 encoder and 254 MB Wan VAE. Published timing data is from an NVIDIA RTX PRO 6000 Blackwell, not CPU or Ryzen 7 4800U. Only bundle after a real CPU-mode short-video test records successful MP4 output, peak RAM, elapsed time, and hashes."
+      "notes": "Corrected from the earlier GGUF assumption: upstream stable-diffusion.cpp documentation lists Wan 2.1 T2V 1.3B as safetensors, while its listed Wan GGUF examples concern 14B variants. Do not use an unverified third-party 1.3B GGUF file. The model card reports Apache-2.0. Qualify a real CPU-mode MP4 generation with the required UMT5 encoder and Wan VAE, recording peak RAM, elapsed time, output validity and hashes before bundling."
     },
     {
       "id": "wan2.2-ti2v-5b",
