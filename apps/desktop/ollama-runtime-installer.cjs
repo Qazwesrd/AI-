@@ -20,6 +20,11 @@ const REQUIRED_FREE_BYTES = 5 * 1024 ** 3;
 const API_PORTS = [11435, 11434];
 const API_PATH = "/api/tags";
 
+function resolveAppDataDirectory(defaultDirectory, env = process.env) {
+  const configured = String(env.AICOMICS_DATA_DIR || env.APP_DATA_DIR || "").trim();
+  return path.resolve(configured || defaultDirectory);
+}
+
 function getBundledRuntimePath(userDataDirectory) {
   return path.join(userDataDirectory, "engines", "Ollama", "runtime", "ollama.exe");
 }
@@ -302,6 +307,7 @@ module.exports = {
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
   getFreeBytes,
+  resolveAppDataDirectory,
   getBundledRuntimePath,
   getBundledModelsPath,
   getBundledRuntimeEnvironment,
