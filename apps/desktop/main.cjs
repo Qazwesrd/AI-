@@ -7,6 +7,8 @@ const net = require("net");
 const {
   registerOllamaRuntimeInstaller,
   resolveAppDataDirectory,
+  getBundledRuntimePath,
+  ensureBundledRuntime,
 } = require("./ollama-runtime-installer.cjs");
 
 // Allow the user-selected data directory (including an E: drive) to be reused
@@ -341,6 +343,18 @@ async function createWindow() {
       throw new Error(
         "本地端口 3000 已被其他程序占用，而且不是 AI 漫剧制作大师网页服务。请关闭占用程序后重新启动。软件不会强行结束其他程序。"
       );
+    }
+
+    // Start the app-managed E: drive Ollama runtime before the API boots so
+    // /api/local-ai/runtime can discover existing offline models on first launch.
+    const managedOllamaPath = getBundledRuntimePath(app.getPath("userData"));
+    if (fs.existsSync(managedOllamaPath)) {
+      const ollama = await ensureBundledRuntime(managedOllamaPath);
+      if (!ollama) {
+        console.warn("[Ollama] Bundled runtime exists but its local endpoint did not become ready; preserving model files.");
+      } else {
+        console.log("[Ollama] Managed local runtime ready:", ollama.baseUrl, "models:", ollama.data.models?.length || 0);
+      }
     }
 
     startProductionServices({
