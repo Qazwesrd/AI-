@@ -70,7 +70,10 @@ class LocalAIRuntimeTests(unittest.TestCase):
         payload = request.call_args.args[1]
         self.assertEqual(payload["model"], "qwen2.5:3b")
         self.assertFalse(payload["stream"])
-        self.assertEqual(payload["options"]["num_predict"], 48)
+        self.assertEqual(payload["prompt"], "只输出四个汉字：测试成功")
+        self.assertFalse(payload["think"])
+        self.assertEqual(payload["options"]["num_predict"], 32)
+        self.assertEqual(payload["options"]["temperature"], 0)
 
     def test_rejects_invalid_model_name(self):
         with self.assertRaises(HTTPException) as caught:
