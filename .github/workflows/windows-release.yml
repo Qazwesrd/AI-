@@ -59,6 +59,35 @@ jobs:
           npm ci --prefix apps/web --include=dev
           npm ci --prefix apps/desktop --include=dev
 
+      - name: Download FFmpeg runtime for offline installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $PWD "apps/desktop/build-resources/ffmpeg"
+          $temp = Join-Path $env:RUNNER_TEMP "ffmpeg-runtime"
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          New-Item -ItemType Directory -Path $temp -Force | Out-Null
+          $release = Invoke-RestMethod -Headers @{ "User-Agent" = "AI-Comic-Studio-CI" } -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+          $asset = $release.assets |
+            Where-Object { $_.name -match "win64-gpl.*\.zip$" -and $_.name -notmatch "shared" } |
+            Select-Object -First 1
+          if (!$asset) { throw "No static Windows FFmpeg GPL build found in the latest release." }
+          $archive = Join-Path $temp "ffmpeg.zip"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive -TimeoutSec 240
+          if ((Get-Item $archive).Length -lt 10MB) { throw "FFmpeg archive download is incomplete." }
+          $extract = Join-Path $temp "extract"
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $ffmpeg = Get-ChildItem $extract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          $ffprobe = Get-ChildItem $extract -Filter ffprobe.exe -File -Recurse | Select-Object -First 1
+          if (!$ffmpeg -or !$ffprobe) { throw "Downloaded FFmpeg archive lacks ffmpeg.exe or ffprobe.exe." }
+          Copy-Item $ffmpeg.FullName (Join-Path $target "ffmpeg.exe") -Force
+          Copy-Item $ffprobe.FullName (Join-Path $target "ffprobe.exe") -Force
+          foreach ($name in @("ffmpeg.exe", "ffprobe.exe")) {
+            $file = Get-Item (Join-Path $target $name)
+            if ($file.Length -lt 1MB) { throw "$name is unexpectedly small." }
+            Write-Host "$name : $($file.Length) bytes"
+          }
+
       - name: Build Windows installer
         shell: pwsh
         run: |
@@ -114,7 +143,7 @@ jobs:
           Windows 桌面安装包。
 
           - 包含桌面启动器、本地 API 和 Web 前端。
-          - 自动检测并调用用户本机 FFmpeg / FFprobe，不在安装包内重复打包。
+          - 安装包内置 FFmpeg / FFprobe，无需用户另行下载。
           - 同时提供包含安装程序、中文 PDF 使用说明书和实际界面截图的本地测试 ZIP。
           - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
           '@
