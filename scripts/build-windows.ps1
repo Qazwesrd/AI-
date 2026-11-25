@@ -293,6 +293,24 @@ Get-ChildItem $Release -File -Filter "*Setup*.exe" -ErrorAction SilentlyContinue
 npm run build:desktop
 Check-ExitCode "Electron installer build failed"
 
+# Fail the build if a relative main-process dependency is missing from the packaged ASAR.
+$AsarPath = Join-Path $Desktop "release\\win-unpacked\\resources\\app.asar"
+if (!(Test-Path $AsarPath)) {
+    throw "Packaged app.asar is missing; refusing to publish an installer that may fail at startup."
+}
+Push-Location $Desktop
+try {
+    $AsarEntries = & npx --no-install asar list $AsarPath
+    Check-ExitCode "Unable to inspect packaged app.asar"
+    foreach ($RequiredEntry in @("/main.cjs", "/preload.cjs", "/ollama-runtime-installer.cjs")) {
+        if ($AsarEntries -notcontains $RequiredEntry) {
+            throw "Packaged app.asar is missing required entry: $RequiredEntry"
+        }
+    }
+} finally {
+    Pop-Location
+}
+
 $Release = Join-Path $Desktop "release"
 
 if (!(Test-Path $Release)) {
@@ -305,47 +323,31 @@ if ($Installers.Count -eq 0) {
     throw "No installer EXE was generated."
 }
 
-# Assemble the single-click local testing ZIP with installer, checksums and illustrated manual.
+# Build the user-facing application update ZIP only. AI resource bundles are versioned and stored separately.
 $DesktopPackage = Get-Content (Join-Path $Desktop "package.json") -Raw | ConvertFrom-Json
-$BundleName = "AI漫剧制作大师-本地测试包-$($DesktopPackage.version)"
+$BundleName = "AI漫剧制作大师-Windows-程序安装包-$($DesktopPackage.version)"
 $BundleZip = Join-Path $Release "$BundleName.zip"
-$BundleStage = Join-Path $Release ("bundle-stage-" + [guid]::NewGuid().ToString("N"))
-$InstallFolder = Join-Path $BundleStage "安装程序"
-$GuideFolder = Join-Path $BundleStage "使用说明书"
-New-Item -ItemType Directory -Path $InstallFolder -Force | Out-Null
-New-Item -ItemType Directory -Path $GuideFolder -Force | Out-Null
+$BundleStage = Join-Path $Release ("program-zip-stage-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $BundleStage -Force | Out-Null
 $InstallerForBundle = $Installers | Where-Object { $_.Name -match "Setup" } | Select-Object -First 1
 if (!$InstallerForBundle) { throw "The Windows Setup installer is missing from the release folder." }
-Copy-Item $InstallerForBundle.FullName $InstallFolder -Force
+Copy-Item $InstallerForBundle.FullName $BundleStage -Force
 $InstallerHashFile = Join-Path $Release ($InstallerForBundle.Name + ".sha256")
 $InstallerHash = (Get-FileHash -LiteralPath $InstallerForBundle.FullName -Algorithm SHA256).Hash
 "$InstallerHash  $($InstallerForBundle.Name)" | Set-Content -LiteralPath $InstallerHashFile -Encoding ascii
-Copy-Item $InstallerHashFile $InstallFolder -Force
-Copy-Item $ManualPdf $GuideFolder -Force
-Copy-Item (Join-Path $ManualDir "manual.html") $GuideFolder -Force
-Copy-Item $ManualImageDir (Join-Path $GuideFolder "images") -Recurse -Force
+Copy-Item $InstallerHashFile $BundleStage -Force
 $BundleReadme = @"
-AI漫剧制作大师 Windows 本地测试包 $($DesktopPackage.version)
+AI漫剧制作大师 Windows 程序更新包 $($DesktopPackage.version)
 
-1. 先打开“使用说明书\AI漫剧制作大师-使用说明书.pdf”阅读安装与首次启动说明。
-2. 运行“安装程序\$($InstallerForBundle.Name)”并按向导安装。
-3. 安装完成后从桌面快捷方式打开软件。
-4. 首次使用请配置 AI 服务商；第三方 AI 费用、账号权限和额度由用户自行确认。
-5. 建议先用少量测试小说和素材验证流程，再导入重要项目。
-6. “使用说明书\images”包含本次构建时从实际软件页面采集的界面截图。
-7. 安装程序 SHA-256：$InstallerHash
-
-重要提醒：
-- 此 ZIP 是 Windows 安装程序和使用说明书的组合包，不是源码包。
-- 正式使用前请在“项目数据备份与恢复中心”创建完整工作空间备份。
-- 网页版第三方 AI 需要用户手动提交任务并导回结果；不会自动控制第三方网页。
-- 若付费任务状态不确定，先在服务商后台核实，避免重复扣费。
+本 ZIP 仅包含最新 Windows 程序安装程序及其 SHA-256 校验文件。
+独立 AI 离线资源包采用独立版本和清单管理；程序更新时不重复打包或要求重新下载未变化的模型资源。
+安装前请核对 SHA-256。安装程序会保留现有项目数据和独立 AI 资源目录。
 "@
-Set-Content -LiteralPath (Join-Path $BundleStage "测试前必读.txt") -Value $BundleReadme -Encoding utf8
+Set-Content -LiteralPath (Join-Path $BundleStage "安装说明.txt") -Value $BundleReadme -Encoding utf8
 if (Test-Path $BundleZip) { Remove-Item $BundleZip -Force }
 Compress-Archive -Path (Join-Path $BundleStage "*") -DestinationPath $BundleZip -CompressionLevel Optimal -Force
 Remove-Item $BundleStage -Recurse -Force
-if (!(Test-Path $BundleZip) -or (Get-Item $BundleZip).Length -lt 1MB) { throw "The combined installer and manual ZIP was not created correctly." }
+if (!(Test-Path $BundleZip) -or (Get-Item $BundleZip).Length -lt 1MB) { throw "The program installer ZIP was not created correctly." }
 $BundleHash = (Get-FileHash -LiteralPath $BundleZip -Algorithm SHA256).Hash
 "$BundleHash  $([System.IO.Path]::GetFileName($BundleZip))" | Set-Content -LiteralPath "$BundleZip.sha256" -Encoding ascii
 Write-Host "Testing bundle: $BundleZip"
