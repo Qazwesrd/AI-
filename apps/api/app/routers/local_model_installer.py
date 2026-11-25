@@ -18,11 +18,27 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/local-ai/model-installer", tags=["本地模型安装"])
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11435").rstrip("/")
-MODEL_NAME = "qwen3:4b"
-MODEL_SIZE_BYTES = 2_500_000_000
+MODEL_CATALOG = {
+    "qwen3.5:4b": {
+        "size_bytes": 4_000_000_000,
+        "page": "https://ollama.com/library/qwen3.5:4b",
+        "license": "Apache-2.0",
+        "recommended": True,
+        "purpose": "新一代本地文字与视觉理解模型；适用于小说分析、剧本、对白与剧情审核。",
+    },
+    "qwen3:4b": {
+        "size_bytes": 3_500_000_000,
+        "page": "https://ollama.com/library/qwen3:4b",
+        "license": "Apache-2.0",
+        "recommended": False,
+        "purpose": "兼容旧项目的现有模型；保留，不自动删除。",
+    },
+}
+MODEL_NAME = "qwen3.5:4b"
+MODEL_SIZE_BYTES = MODEL_CATALOG[MODEL_NAME]["size_bytes"]
 REQUIRED_FREE_BYTES = 6 * 1024 ** 3
-MODEL_PAGE = "https://ollama.com/library/qwen3:4b"
-LICENSE_URL = "https://ollama.com/library/qwen3:4b"
+MODEL_PAGE = MODEL_CATALOG[MODEL_NAME]["page"]
+LICENSE_URL = MODEL_PAGE
 _OPENER = build_opener(ProxyHandler({}))
 _LOCK = threading.RLock()
 _CANCEL = threading.Event()
@@ -35,7 +51,7 @@ _RESPONSE = None
 
 
 class StartModelInstallInput(BaseModel):
-    model: Literal["qwen3:4b"] = MODEL_NAME
+    model: Literal["qwen3.5:4b", "qwen3:4b"] = MODEL_NAME
     confirm_download: bool = False
 
 
@@ -61,13 +77,13 @@ def _model_directory():
     return Path.home() / ".ollama" / "models"
 
 
-def _model_installed():
+def _model_installed(model_name: str):
     models = _ollama_models()
     if models is None:
         return None
     return any(
         isinstance(item, dict)
-        and (item.get("name") == MODEL_NAME or item.get("model") == MODEL_NAME)
+        and (item.get("name") == model_name or item.get("model") == model_name)
         for item in models
     )
 
@@ -83,15 +99,20 @@ def model_install_info():
         free_bytes = shutil.disk_usage(disk_root).free
     except OSError:
         free_bytes = None
-    installed = None if models is None else any(
-        isinstance(item, dict) and (item.get("name") == MODEL_NAME or item.get("model") == MODEL_NAME)
-        for item in models
-    )
+    installed_names = {
+        item.get("name") or item.get("model")
+        for item in (models or []) if isinstance(item, dict)
+    }
+    installed = None if models is None else MODEL_NAME in installed_names
     with _LOCK:
         job = dict(_JOB)
     return {
         "engine_status": "ready" if models is not None else "not_running",
         "model": MODEL_NAME,
+        "catalog": [
+            {**item, "name": name, "installed": name in installed_names if models is not None else None}
+            for name, item in MODEL_CATALOG.items()
+        ],
         "model_size_bytes": MODEL_SIZE_BYTES,
         "required_free_bytes": REQUIRED_FREE_BYTES,
         "free_bytes": free_bytes,
@@ -107,11 +128,11 @@ def model_install_info():
     }
 
 
-def _pull_worker():
+def _pull_worker(model_name: str):
     global _RESPONSE
     request = Request(
         OLLAMA_URL + "/api/pull",
-        data=json.dumps({"model": MODEL_NAME, "stream": True}).encode("utf-8"),
+        data=json.dumps({"model": model_name, "stream": True}).encode("utf-8"),
         headers={"Content-Type": "application/json", "Accept": "application/x-ndjson"},
         method="POST",
     )
@@ -147,14 +168,14 @@ def _pull_worker():
                 if update.get("status") == "success":
                     _JOB.update(status="verifying", stage="模型下载完成，正在核验本机模型清单")
         response.close()
-        installed = _model_installed()
+        installed = _model_installed(model_name)
         with _LOCK:
             if _CANCEL.is_set():
                 _JOB.update(status="cancelled", stage="已取消；可再次开始并续传")
             elif installed:
                 _JOB.update(status="success", stage="模型已安装并通过本机清单核验", percent=100, error=None)
             else:
-                _JOB.update(status="failed", stage="下载结束但未在本机模型清单中找到目标模型", error="请检查 Ollama 状态后重试")
+                _JOB.update(status="failed", stage="下载结束但未在本机模型清单中找到目标模型", error=f"未在本机模型清单中找到 {model_name}")
     except Exception as exc:
         with _LOCK:
             if _CANCEL.is_set():
@@ -174,8 +195,9 @@ def start_model_install(payload: StartModelInstallInput):
     models = _ollama_models()
     if models is None:
         raise HTTPException(503, "本机尚未运行 Ollama。请先安装并启动官方 Ollama，再回来安装模型。")
-    if any(isinstance(item, dict) and (item.get("name") == MODEL_NAME or item.get("model") == MODEL_NAME) for item in models):
-        return {"status": "already_installed", "model": MODEL_NAME, "network_used": False, "cloud_fallback": False}
+    model_name = payload.model
+    if any(isinstance(item, dict) and (item.get("name") == model_name or item.get("model") == model_name) for item in models):
+        return {"status": "already_installed", "model": model_name, "network_used": False, "cloud_fallback": False}
     info = model_install_info()
     if not info["enough_space"]:
         raise HTTPException(507, "模型安装需要至少 6 GiB 可用磁盘空间；请清理磁盘或更改 Ollama 模型存储位置。")
@@ -184,14 +206,14 @@ def start_model_install(payload: StartModelInstallInput):
             raise HTTPException(409, "已有模型下载任务正在运行。")
         _CANCEL.clear()
         _JOB.update(
-            status="downloading", model=MODEL_NAME, stage="正在连接 Ollama 官方模型库",
-            completed_bytes=0, total_bytes=MODEL_SIZE_BYTES, percent=0, error=None,
+            status="downloading", model=model_name, stage="正在连接 Ollama 官方模型库",
+            completed_bytes=0, total_bytes=MODEL_CATALOG[model_name]["size_bytes"], percent=0, error=None,
             updated=True,
         )
-        worker = threading.Thread(target=_pull_worker, name="local-qwen-model-pull", daemon=True)
+        worker = threading.Thread(target=_pull_worker, args=(model_name,), name="local-qwen-model-pull", daemon=True)
         worker.start()
     return {
-        "status": "downloading", "model": MODEL_NAME,
+        "status": "downloading", "model": model_name,
         "network_used": True, "cloud_fallback": False,
         "message": "已按你的确认开始下载；下载可续传，不会调用云端 AI API。",
     }
