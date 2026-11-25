@@ -14,6 +14,10 @@ const ALLOWED_EXTENSIONS = new Set([".js", ".css", ".json"]);
 // An empty key deliberately fails closed; test keys are injected only by tests.
 const TRUSTED_PATCH_PUBLIC_KEY_PEM = "";
 
+function hashFile(filePath) {
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
+}
+
 function canonicalize(value) {
   if (Array.isArray(value)) return "[" + value.map(canonicalize).join(",") + "]";
   if (value && typeof value === "object") {
