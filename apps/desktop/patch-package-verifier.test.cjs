@@ -88,7 +88,7 @@ test("creates verified rollback snapshot without changing installed files", (t) 
   const snapshot = createRollbackSnapshot({ resourcesPath: root, backupRoot, verifiedPatch: verified });
   assert.equal(fs.readFileSync(target, "utf8"), "old bundle");
   assert.equal(snapshot.file_count, 1);
-  const saved = path.join(backupRoot, snapshot.snapshot_id, ...snapshot.files[0].backup_path.split("/"));
+  const saved = path.join(backupRoot, ...snapshot.files[0].backup_path.split("/"));
   assert.equal(fs.readFileSync(saved, "utf8"), "old bundle");
   assert.equal(fs.existsSync(path.join(backupRoot, snapshot.snapshot_id, "rollback-manifest.json")), true);
   const checked = verifyRollbackSnapshot({ backupRoot, snapshotId: snapshot.snapshot_id });
