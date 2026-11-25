@@ -96,6 +96,7 @@ const navigation = [
       ["🔧", "网络与付费权限", "/ai-center"],
       ["💾", "项目数据备份与恢复", "/backup-center"],
       ["🩺", "系统运行诊断", "/system-diagnostics"],
+      ["🩹", "补丁中心", "/patch-center"],
       ["📘", "使用说明书", "/help"]
     ]
   }
