@@ -31,8 +31,8 @@ export default function PatchCenterPage() {
   const refresh = useCallback(async () => {
     try {
       const [s, p] = await Promise.all([
-        fetch(`${API}/api/patch-center/status", { cache: "no-store" }),
-        fetch(`${API}/api/patch-center/packages", { cache: "no-store" }),
+        fetch(`${API}/api/patch-center/status`, { cache: "no-store" }),
+        fetch(`${API}/api/patch-center/packages`, { cache: "no-store" }),
       ]);
       if (!s.ok || !p.ok) throw new Error("补丁中心服务暂不可用");
       const [sd, pd] = await Promise.all([s.json(), p.json()]);
@@ -48,7 +48,7 @@ export default function PatchCenterPage() {
   async function generatePatch() {
     setBusy(true); setError(""); setMessage("");
     try {
-      const response = await fetch(`${API}/api/patch-center/packages", {
+      const response = await fetch(`${API}/api/patch-center/packages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
