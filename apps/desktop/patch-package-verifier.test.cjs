@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const {
-  canonicalize, verifySignedPatch, createRollbackSnapshot
+  canonicalize, verifySignedPatch, createRollbackSnapshot, verifyRollbackSnapshot
 } = require("./patch-package-verifier.cjs");
 
 function signedEnvelope(pair, { content = "new bundle", targetVersion = "1.0.20" } = {}) {
@@ -91,4 +91,10 @@ test("creates verified rollback snapshot without changing installed files", (t) 
   const saved = path.join(backupRoot, snapshot.snapshot_id, ...snapshot.files[0].backup_path.split("/"));
   assert.equal(fs.readFileSync(saved, "utf8"), "old bundle");
   assert.equal(fs.existsSync(path.join(backupRoot, snapshot.snapshot_id, "rollback-manifest.json")), true);
+  const checked = verifyRollbackSnapshot({ backupRoot, snapshotId: snapshot.snapshot_id });
+  assert.equal(checked.valid, true);
+  fs.writeFileSync(saved, "corrupt");
+  const corrupted = verifyRollbackSnapshot({ backupRoot, snapshotId: snapshot.snapshot_id });
+  assert.equal(corrupted.valid, false);
+
 });
