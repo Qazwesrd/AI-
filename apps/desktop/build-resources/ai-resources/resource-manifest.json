@@ -43,12 +43,16 @@
     },
     {
       "id": "stable-diffusion-cpp",
-      "version": "pinned-after-qualification",
+      "version": "master-1133-52491bd",
       "platform": "windows-x64",
       "official_source": "https://github.com/leejet/stable-diffusion.cpp",
       "install_path": "engines/StableDiffusionCpp",
-      "status": "video-engine-candidate-not-yet-bundled-or-target-tested",
-      "notes": "Separate C/C++ inference engine for Wan video generation; CPU AVX2 and Windows are listed upstream, but the target Ryzen 7 4800U must pass a real short-video generation and memory test before this engine is shipped."
+      "status": "bundled-runtime-candidate-pending-video-model-and-inference-qualification",
+      "notes": "Pinned official Windows CPU runtime. CLI capability smoke test can verify Wan video mode/options, but does not certify the target PC can complete video inference.",
+      "license": "MIT",
+      "release_asset": "sd-master-52491bd-bin-win-cpu-x64.zip",
+      "release_url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1133-52491bd/sd-master-52491bd-bin-win-cpu-x64.zip",
+      "sha256": "7d1c819708f7b922bebda2e1454b6224fa524480cb98bb7b0aea111f3c15678b"
     }
   ],
   "text_models": [
