@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electron");
 const { spawn, execFile } = require("child_process");
 const path = require("path");
+const { inspectUpdateInventory } = require("./update-inventory.cjs");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
@@ -741,6 +742,17 @@ ipcMain.handle("ai-browser:open", async (_event, payload = {}) => {
   return { opened: true, taskId };
 });
 
+
+// Read-only inventory check for the installed static web files. No file is modified.
+ipcMain.handle("patch-center:installed-inventory", async (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    throw new Error("不允许的补丁中心调用来源");
+  }
+  return inspectUpdateInventory({
+    resourcesPath: process.resourcesPath,
+    appVersion: app.getVersion()
+  });
+});
 
 // Install Ollama only after explicit user confirmation from the local model page.
 registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow });
