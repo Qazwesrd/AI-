@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "product": "AI漫剧制作大师",
+  "resource_bundle_version": "2026.11",
+  "policy": {
+    "offline_first": true,
+    "no_cloud_fallback": true,
+    "no_automatic_model_download": true,
+    "preserve_existing_models": true,
+    "program_updates_reuse_resource_bundle": true
+  },
+  "engines": [
+    {
+      "id": "ollama",
+      "version": "0.40.18",
+      "platform": "windows-x64",
+      "official_source": "https://github.com/ollama/ollama/releases",
+      "install_path": "engines/Ollama/runtime",
+      "models_path": "engines/Ollama/models",
+      "port": 11435,
+      "status": "existing-user-resource-and-runtime-target"
+    },
+    {
+      "id": "comfyui",
+      "version": "0.46.0",
+      "platform": "windows",
+      "official_source": "https://github.com/Comfy-Org/ComfyUI/releases",
+      "install_path": "engines/ComfyUI",
+      "port": 8188,
+      "status": "required-resource-not-yet-bundled",
+      "notes": "Use a pinned Python environment and hardware-aware PyTorch build. CPU fallback is required for unsupported integrated GPUs."
+    },
+    {
+      "id": "ffmpeg",
+      "version": "9.1",
+      "official_source": "https://ffmpeg.org/download.html",
+      "install_path": "engines/FFmpeg",
+      "executables": [
+        "ffmpeg.exe",
+        "ffprobe.exe"
+      ],
+      "status": "use-existing-user-copy-or-verified-bundle"
+    }
+  ],
+  "text_models": [
+    {
+      "id": "qwen3.5:4b",
+      "version": "latest",
+      "engine": "ollama",
+      "official_source": "https://ollama.com/library/qwen3.5:4b",
+      "license": "Apache-2.0",
+      "recommended": true,
+      "status": "target-model-not-yet-verified-in-local-resource-bundle",
+      "purpose": [
+        "novel-analysis",
+        "screenplay",
+        "dialogue",
+        "plot-review",
+        "storyboard-prompts"
+      ]
+    },
+    {
+      "id": "qwen3:4b",
+      "version": "existing",
+      "engine": "ollama",
+      "official_source": "https://ollama.com/library/qwen3:4b",
+      "license": "Apache-2.0",
+      "recommended": false,
+      "status": "preserve-existing-user-model"
+    }
+  ],
+  "image_models": [
+    {
+      "id": "sd15-fp16-baseline",
+      "engine": "comfyui",
+      "repository": "Comfy-Org/stable-diffusion-1.5",
+      "file": "v1-5-pruned-emaonly-fp16.safetensors",
+      "license": "CreativeML OpenRAIL-M",
+      "status": "compatibility-baseline-not-latest-generation",
+      "recommended_for": "low-memory-cpu-fallback-and-legacy-workflows",
+      "notes": "Not a claim that SD 1.5 is the newest image model. A newer high-parameter model is not suitable as the default for Ryzen 7 4800U integrated graphics and 16 GiB RAM."
+    }
+  ]
+}
