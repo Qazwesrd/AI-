@@ -28,7 +28,38 @@ class PatchPackageInput(BaseModel):
     description: str = Field(default="", max_length=1000)
     target_version: str = Field(default="current", max_length=40)
     patch_format: Literal["unified-diff", "source-code", "json-patch"] = "unified-diff"
+    target_path: str = Field(default="", max_length=240)
     code: str = Field(min_length=1, max_length=MAX_PATCH_BYTES)
+
+
+ALLOWED_PATCH_ROOTS = ("apps/web/src/", "apps/api/app/", "apps/desktop/")
+
+
+def _validate_target_path(value: str) -> str:
+    normalized = value.replace("\\", "/").strip()
+    if not normalized or normalized.startswith("/") or re.match(r"^[a-zA-Z]:", normalized):
+        raise HTTPException(status_code=422, detail="补丁目标必须是项目内的相对文件路径。")
+    parts = normalized.split("/")
+    if any(part in ("", ".", "..") for part in parts) or not normalized.endswith((".py", ".ts", ".tsx", ".js", ".cjs", ".json", ".css", ".md")):
+        raise HTTPException(status_code=422, detail="补丁目标路径包含不允许的目录或文件类型。")
+    if not normalized.startswith(ALLOWED_PATCH_ROOTS):
+        raise HTTPException(status_code=422, detail="补丁只能修改应用源码白名单目录。")
+    return normalized
+
+
+def _diff_paths(diff_text: str) -> list[str]:
+    paths = []
+    for line in diff_text.splitlines():
+        if line.startswith(("--- ", "+++ ")):
+            raw = line[4:].split("\\t", 1)[0].strip()
+            if raw == "/dev/null":
+                continue
+            if raw.startswith(("a/", "b/")):
+                raw = raw[2:]
+            paths.append(_validate_target_path(raw))
+    if not paths or len(paths) % 2:
+        raise HTTPException(status_code=422, detail="统一差异补丁文件头不完整。")
+    return sorted(set(paths))
 
 
 def _safe_package_id(value: str) -> bool:
@@ -71,13 +102,18 @@ def create_patch_package(payload: PatchPackageInput):
     if len(code_bytes) > MAX_PATCH_BYTES:
         raise HTTPException(status_code=413, detail="单个补丁最大支持 512 KiB；大型模型和媒体资源不能放入代码补丁。")
 
+    changed_files = []
     if payload.patch_format == "unified-diff":
         if not payload.code.startswith("--- ") or "\n+++ " not in payload.code:
             raise HTTPException(status_code=422, detail="统一差异补丁格式不正确：需要包含 --- 与 +++ 文件头。")
         forbidden = ("\nGIT binary patch", "\nBinary files ", "\nrename from ", "\nrename to ")
         if any(token in payload.code for token in forbidden):
             raise HTTPException(status_code=422, detail="不接受二进制或重命名补丁；请仅提交文本代码差异。")
+        changed_files = _diff_paths(payload.code)
+    elif payload.patch_format == "source-code":
+        changed_files = [_validate_target_path(payload.target_path)]
     elif payload.patch_format == "json-patch":
+        changed_files = [_validate_target_path(payload.target_path)]
         try:
             parsed = json.loads(payload.code)
         except json.JSONDecodeError as exc:
@@ -93,9 +129,12 @@ def create_patch_package(payload: PatchPackageInput):
         "description": payload.description.strip(),
         "target_version": payload.target_version.strip(),
         "patch_format": payload.patch_format,
+        "target_path": payload.target_path,
+        "changed_files": changed_files,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sha256": sha256,
         "size_bytes": len(code_bytes),
+        "changed_files": changed_files,
         "status": "staged",
         "code": payload.code,
         "apply_supported": False,
