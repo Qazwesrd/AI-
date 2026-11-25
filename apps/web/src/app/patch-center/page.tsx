@@ -29,6 +29,8 @@ export default function PatchCenterPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState<{ package_count?: number; apply_supported?: boolean; message?: string } | null>(null);
+  const [preview, setPreview] = useState<any>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -46,6 +48,20 @@ export default function PatchCenterPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  async function showPreview(id: string) {
+    setPreviewBusy(true); setError(""); setPreview(null);
+    try {
+      const response = await fetch(`${API}/api/patch-center/packages/${id}/preview`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "补丁预览失败");
+      setPreview(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "补丁预览失败");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
 
   async function generatePatch() {
     setBusy(true); setError(""); setMessage("");
@@ -124,9 +140,22 @@ export default function PatchCenterPage() {
         {packages.length === 0 ? <p className="text-sm text-purple-300">暂无补丁包。</p> : <div className="space-y-3">{packages.map(item => <article key={item.id} className="rounded-xl bg-black/25 p-4">
           <div className="flex flex-wrap items-center justify-between gap-2"><b>{item.title}</b><span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-200">已暂存</span></div>
           <p className="mt-1 text-xs text-purple-300">{item.description || "无补丁说明"} · {item.patch_format} · {item.size_bytes} bytes</p>
-          <p className="mt-2 text-xs text-purple-300">涉及文件：{item.changed_files?.join("、") || "未提供"}</p><p className="mt-2 break-all font-mono text-[11px] text-purple-400">ID: {item.id} · SHA256: {item.sha256}</p>
+          <p className="mt-2 text-xs text-purple-300">涉及文件：{item.changed_files?.join("、") || "未提供"}</p><p className="mt-2 break-all font-mono text-[11px] text-purple-400">ID: {item.id} · SHA256: {item.sha256}</p><button onClick={() => void showPreview(item.id)} disabled={previewBusy} className="mt-3 rounded-lg border border-purple-300/30 px-3 py-2 text-xs disabled:opacity-50">只读预览差异</button>
         </article>)}</div>}
       </section>
+      {preview && <section className="mt-6 rounded-2xl border border-cyan-300/20 bg-[#101b2acc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">补丁差异预览：{preview.title}</h2><button onClick={() => setPreview(null)} className="rounded-lg border border-white/20 px-3 py-2 text-xs">关闭预览</button></div>
+        <p className="mt-2 break-all text-xs text-cyan-200">SHA256：{preview.sha256}</p>
+        <p className="mt-1 text-xs text-amber-200">{preview.message}</p>
+        {preview.files?.map((file: any, index: number) => <article key={index} className="mt-4 overflow-hidden rounded-xl border border-white/10">
+          <div className="bg-black/30 px-3 py-2 font-mono text-xs text-cyan-100">{file.path || file.new_path || file.old_path}</div>
+          {file.hunks ? file.hunks.map((hunk: any, hindex: number) => <div key={hindex} className="border-t border-white/10">
+            <div className="bg-cyan-950/30 px-3 py-2 font-mono text-xs text-cyan-200">{hunk.header}</div>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all p-3 text-xs leading-5">{hunk.changes.join("\\n")}</pre>
+          </div>) : <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all p-3 text-xs leading-5">{file.preview}</pre>}
+        </article>)}
+        <p className="mt-4 text-xs text-amber-200">当前仅展示差异，不会写入文件；应用和回滚功能仍未开放。</p>
+      </section>}
       <p className="mt-5 text-xs leading-6 text-purple-300">安全说明：当前版本只负责生成、校验和本机暂存补丁，不会执行粘贴的代码，也不会覆盖程序文件。自动应用、备份和一键回滚需要下一阶段接入受限更新器并通过桌面端测试后才会开放。</p>
     </div>
   </main>;
