@@ -1,4 +1,4 @@
-"""Read-only hardware readiness assessment for the bundled Qwen3 4B workflow."""
+"""Read-only hardware readiness assessment for the recommended Qwen3.5 4B workflow."""
 import os
 import platform
 import re
@@ -8,11 +8,11 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from app.routers.system import _get_hardware_profile
-from app.routers.local_model_installer import MODEL_NAME, REQUIRED_FREE_BYTES, _model_directory, _ollama_models
+from app.routers.local_model_installer import MODEL_NAME, MODEL_CATALOG, REQUIRED_FREE_BYTES, _model_directory, _ollama_models
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地 AI 硬件适配"])
 
-MODEL_BYTES_ESTIMATE = 2_500_000_000
+MODEL_BYTES_ESTIMATE = MODEL_CATALOG[MODEL_NAME]["size_bytes"]
 GIB = 1024 ** 3
 
 
@@ -36,7 +36,7 @@ def _windows_compatibility(system_name: str, version: str):
     }
 
 
-def assess_qwen3_4b(hardware: dict, free_disk_bytes: int | None, system_name: str, version: str):
+def assess_qwen35_4b(hardware: dict, free_disk_bytes: int | None, system_name: str, version: str):
     memory = hardware.get("memory", {})
     gpu = hardware.get("gpu", {})
     ram = memory.get("total_bytes")
@@ -60,7 +60,7 @@ def assess_qwen3_4b(hardware: dict, free_disk_bytes: int | None, system_name: st
     if ram is None:
         reasons.append("无法读取物理内存，不能可靠判断模型是否适合。")
     elif ram < 8 * GIB:
-        blockers.append("系统内存低于 8 GiB，不建议安装并运行 Qwen3 4B。")
+        blockers.append("系统内存低于 8 GiB，不建议安装并运行 Qwen3.5 4B。")
     elif ram < 16 * GIB:
         reasons.append("系统内存达到基础建议值，但多任务或较长上下文可能吃紧。")
     else:
@@ -125,7 +125,7 @@ def local_model_hardware_readiness():
 
     system_name = platform.system()
     version = platform.version()
-    assessment = assess_qwen3_4b(hardware, free_disk, system_name, version)
+    assessment = assess_qwen35_4b(hardware, free_disk, system_name, version)
     models = _ollama_models()
     assessment.update({
         "hardware": hardware,
@@ -140,3 +140,7 @@ def local_model_hardware_readiness():
         "cloud_fallback": False,
     })
     return assessment
+
+
+# Backward-compatible import for existing tests/integrations.
+assess_qwen3_4b = assess_qwen35_4b
