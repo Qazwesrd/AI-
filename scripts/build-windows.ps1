@@ -48,8 +48,8 @@ try {
 }
 
 # FFmpeg and FFprobe are downloaded by CI and bundled into the offline installer.
-$FfmpegSource = Join-Path $Desktop "build-resources\\ffmpeg\\ffmpeg.exe"
-$FfprobeSource = Join-Path $Desktop "build-resources\\ffmpeg\\ffprobe.exe"
+$FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
+$FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
 foreach ($tool in @($FfmpegSource, $FfprobeSource)) {
     if (!(Test-Path $tool) -or (Get-Item $tool).Length -lt 1MB) {
         throw "Bundled media runtime is missing or invalid: $tool"
