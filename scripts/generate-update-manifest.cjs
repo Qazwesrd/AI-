@@ -13,19 +13,19 @@ function sha256(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
 }
 
-function walkFiles(directory, prefix, results = []) {
+function walkFiles(directory, prefix, results = [], baseRoot = webRoot) {
   if (!fs.existsSync(directory)) return results;
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const absolute = path.join(directory, entry.name);
     if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      walkFiles(absolute, prefix, results);
+      walkFiles(absolute, prefix, results, baseRoot);
       continue;
     }
     if (!entry.isFile() || !ALLOWED_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
     const stat = fs.statSync(absolute);
     if (stat.size < 1 || stat.size > MAX_FILE_BYTES) continue;
-    const relative = path.relative(webRoot, absolute).split(path.sep).join("/");
+    const relative = path.relative(baseRoot, absolute).split(path.sep).join("/");
     if (!(relative.startsWith(".next/static/") || relative.startsWith("public/"))) continue;
     const content = fs.readFileSync(absolute);
     results.push({
