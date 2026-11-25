@@ -53,6 +53,11 @@ def _model_directory():
     configured = os.environ.get("OLLAMA_MODELS")
     if configured:
         return Path(configured).expanduser()
+    app_data_dir = os.environ.get("APP_DATA_DIR")
+    if app_data_dir:
+        managed_models = Path(app_data_dir) / "engines" / "Ollama" / "models"
+        if managed_models.exists():
+            return managed_models
     return Path.home() / ".ollama" / "models"
 
 
