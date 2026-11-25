@@ -5,6 +5,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($env:AI_RESOURCE_BUNDLE_TESTS -ne "passed") { throw "Run the resource download, checksum, Qwen generation, and ComfyUI startup checks before packaging." }
+
 function Require-Path([string]$Path, [string]$Description) {
     if (!(Test-Path -LiteralPath $Path)) {
         throw "AI resource bundle missing $Description : $Path"
