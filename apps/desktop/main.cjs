@@ -4,7 +4,17 @@ const path = require("path");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
-const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
+const {
+  registerOllamaRuntimeInstaller,
+  resolveAppDataDirectory,
+} = require("./ollama-runtime-installer.cjs");
+
+// Allow the user-selected data directory (including an E: drive) to be reused
+// consistently by Electron, the local API, and the bundled Ollama runtime.
+const appDataDirectory = resolveAppDataDirectory(app.getPath("userData"));
+if (appDataDirectory !== app.getPath("userData")) {
+  app.setPath("userData", appDataDirectory);
+}
 
 const API_PORT = 8000;
 const WEB_PORT = 3000;
