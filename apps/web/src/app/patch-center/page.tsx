@@ -2,6 +2,21 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+type InstalledInventory = {
+  available: boolean; valid: boolean; app_version: string; manifest_version: string | null;
+  generated_at: string | null; declared_file_count: number; verified_file_count: number;
+  updateable_file_count: number; missing_file_count: number; changed_file_count: number;
+  invalid_file_count: number; message: string;
+};
+
+declare global {
+  interface Window {
+    patchCenterDesktop?: {
+      getInstalledInventory: () => Promise<InstalledInventory>;
+    };
+  }
+}
+
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type PatchPackage = {
@@ -31,6 +46,29 @@ export default function PatchCenterPage() {
   const [status, setStatus] = useState<{ package_count?: number; apply_supported?: boolean; message?: string } | null>(null);
   const [preview, setPreview] = useState<any>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
+  const [inventory, setInventory] = useState<InstalledInventory | null>(null);
+  const [inventoryBusy, setInventoryBusy] = useState(false);
+
+  const refreshInstalledInventory = useCallback(async () => {
+    if (!window.patchCenterDesktop?.getInstalledInventory) {
+      setInventory(null);
+      return;
+    }
+    setInventoryBusy(true);
+    try {
+      const result = await window.patchCenterDesktop.getInstalledInventory();
+      setInventory(result);
+    } catch {
+      setInventory({
+        available: false, valid: false, app_version: "", manifest_version: null,
+        generated_at: null, declared_file_count: 0, verified_file_count: 0,
+        updateable_file_count: 0, missing_file_count: 0, changed_file_count: 0,
+        invalid_file_count: 0, message: "读取桌面安装清单失败，请重启软件后重试。"
+      });
+    } finally {
+      setInventoryBusy(false);
+    }
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -48,6 +86,7 @@ export default function PatchCenterPage() {
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refreshInstalledInventory(); }, [refreshInstalledInventory]);
 
   async function showPreview(id: string) {
     setPreviewBusy(true); setError(""); setPreview(null);
@@ -101,6 +140,32 @@ export default function PatchCenterPage() {
           <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200">本地补丁仓库</span>
         </div>
         <p className="mt-3 text-sm text-amber-200">{status?.message || "补丁包生成和暂存已启用；自动应用器尚未启用。"}</p>
+      </section>
+
+      
+      <section className="mb-5 rounded-2xl border border-cyan-300/20 bg-[#101b2acc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold">本机安装清单核验</h2>
+            <p className="mt-1 text-xs text-cyan-200">只读取安装目录中的静态网页文件，不修改任何文件。</p>
+          </div>
+          <button onClick={() => void refreshInstalledInventory()} disabled={inventoryBusy} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs disabled:opacity-50">{inventoryBusy ? "正在核验…" : "重新核验"}</button>
+        </div>
+        {!window.patchCenterDesktop ? (
+          <p className="mt-3 text-sm text-amber-200">当前运行环境不是桌面安装版，无法读取本机安装清单。</p>
+        ) : inventory ? (
+          <>
+            <p className="mt-3 text-sm text-amber-100">{inventory.message}</p>
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">当前程序版本</p><p className="mt-1 font-mono text-sm">{inventory.app_version || "未知"}</p></div>
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">清单版本</p><p className="mt-1 font-mono text-sm">{inventory.manifest_version || "未读取"}</p></div>
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">清单文件数</p><p className="mt-1 text-lg font-bold">{inventory.declared_file_count}</p></div>
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">校验一致 / 可更新候选</p><p className="mt-1 text-lg font-bold">{inventory.verified_file_count} / {inventory.updateable_file_count}</p></div>
+            </div>
+            <p className="mt-3 text-xs text-purple-300">缺失 {inventory.missing_file_count} · 已变化 {inventory.changed_file_count} · 不合规 {inventory.invalid_file_count}</p>
+            <p className="mt-2 text-xs text-amber-200">说明：这里的“可更新候选”仅表示文件与清单基线一致，不代表已有可安装补丁。签名验证、备份、替换和回滚尚未启用。</p>
+          </>
+        ) : <p className="mt-3 text-sm text-purple-300">{inventoryBusy ? "正在读取本机清单…" : "尚未获取到本机安装清单状态。"}</p>}
       </section>
 
       {error && <div className="mb-4 rounded-xl border border-rose-400/30 bg-rose-950/30 p-4 text-sm text-rose-200">{error}</div>}
