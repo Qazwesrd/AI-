@@ -133,6 +133,15 @@ if (!(Test-Path "$Web\.next\static")) {
     throw "Next.js static directory not found."
 }
 
+Write-Host "Generating a hash-verified inventory of eligible installed web assets..."
+Push-Location $Root
+try {
+    & node "$Root\scripts\generate-update-manifest.cjs"
+    Check-ExitCode "Generating the installed update inventory failed"
+} finally {
+    Pop-Location
+}
+
 Write-Host "Frontend standalone build created."
 
 # Start the freshly built local services and capture real UI screenshots for the Chinese manual.
