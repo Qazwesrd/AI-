@@ -7,6 +7,7 @@ const {
   REQUIRED_FREE_BYTES,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
+  resolveAppDataDirectory,
   getBundledRuntimePath,
   getBundledModelsPath,
   getBundledRuntimeEnvironment,
@@ -31,6 +32,15 @@ test("signature requires both a valid Authenticode status and Ollama Inc organiz
   assert.equal(isTrustedOllamaSignature({ status: "Valid", subject: "CN=Ollama Inc., O=Not Ollama Inc." }), false);
   assert.equal(isTrustedOllamaSignature({ status: "HashMismatch", subject: "CN=Ollama Inc., O=Ollama Inc." }), false);
   assert.equal(isTrustedOllamaSignature(null), false);
+});
+
+test("configured app data directory overrides Electron default and supports E drive", () => {
+  assert.equal(
+    resolveAppDataDirectory("C:\\Users\\Administrator\\AppData\\Roaming\\ai-comic-studio-desktop", {
+      AICOMICS_DATA_DIR: "E:\\123\\ai-comic-studio-desktop-Data",
+    }),
+    "E:\\123\\ai-comic-studio-desktop-Data"
+  );
 });
 
 test("app-managed runtime path follows the Electron userData directory", () => {
