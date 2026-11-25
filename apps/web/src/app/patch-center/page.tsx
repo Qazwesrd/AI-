@@ -115,7 +115,7 @@ export default function PatchCenterPage() {
         </label>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-purple-300">单个补丁上限 512 KiB。模型权重、视频模型、运行时和大型素材仍走独立资源包。</p>
-          <button onClick={() => void generatePatch()} disabled={busy || !title.trim() || !code.trim()} className="rounded-xl bg-fuchsia-700 px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40">{busy ? "正在生成…" : "生成并保存补丁包"}</button>
+          <button onClick={() => void generatePatch()} disabled={busy || !title.trim() || !code.trim() || (format !== "unified-diff" && !targetPath.trim())} className="rounded-xl bg-fuchsia-700 px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40">{busy ? "正在生成…" : "生成并保存补丁包"}</button>
         </div>
       </section>
 
