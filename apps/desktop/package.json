@@ -57,6 +57,10 @@
             {
                 "to": "media/ffprobe.exe",
                 "from": "build-resources/ffmpeg/ffprobe.exe"
+            },
+            {
+                "to": "update/manifest.json",
+                "from": "build-resources/update-manifest.json"
             }
         ],
         "win": {
