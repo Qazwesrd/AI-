@@ -211,21 +211,25 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
 
   ipcMain.handle("local-ai:ollama-status", async () => {
     const home = app.getPath("home");
-    let freeBytes = null;
-    try { freeBytes = getFreeBytes(home); } catch {}
     const runtimePath = getBundledRuntimePath(app.getPath("userData"));
-    const endpoint = fs.existsSync(runtimePath)
+    const hasBundledRuntime = fs.existsSync(runtimePath);
+    let freeBytes = null;
+    try { freeBytes = getFreeBytes(hasBundledRuntime ? path.dirname(runtimePath) : home); } catch {}
+    const endpoint = hasBundledRuntime
       ? await ensureBundledRuntime(runtimePath)
       : await findOllamaEndpoint();
     return {
-      installed: Boolean(endpoint) || fs.existsSync(runtimePath),
-      status: endpoint ? "ready" : fs.existsSync(runtimePath) ? "runtime_stopped" : "not_installed",
+      installed: Boolean(endpoint) || hasBundledRuntime,
+      status: endpoint ? "ready" : hasBundledRuntime ? "runtime_stopped" : "not_installed",
       endpoint: endpoint?.baseUrl || null,
-      runtimePath: fs.existsSync(runtimePath) ? runtimePath : null,
+      runtimePath: hasBundledRuntime ? runtimePath : null,
+      modelsPath: hasBundledRuntime ? getBundledModelsPath(runtimePath) : null,
       freeBytes,
       requiredFreeBytes: REQUIRED_FREE_BYTES,
       enoughSpace: freeBytes !== null && freeBytes >= REQUIRED_FREE_BYTES,
-      installDirectory: path.join(home, "AppData", "Local", "Programs", "Ollama"),
+      installDirectory: hasBundledRuntime
+        ? path.resolve(path.dirname(runtimePath), "..")
+        : path.join(home, "AppData", "Local", "Programs", "Ollama"),
     };
   });
 
@@ -233,9 +237,6 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     if (process.platform !== "win32") throw new Error("Ollama 自动安装目前仅支持 Windows 桌面版。");
     if (payload.confirm !== true) throw new Error("必须先由用户明确确认，才会下载或安装 Ollama。");
     if (["downloading", "verifying", "installing", "checking"].includes(job.status)) throw new Error("Ollama 安装任务正在进行。");
-    const home = app.getPath("home");
-    const freeBytes = getFreeBytes(home);
-    if (freeBytes < REQUIRED_FREE_BYTES) throw new Error("系统盘可用空间不足。Ollama 官方 Windows 安装至少需要约 4 GB，请预留 5 GiB 后重试。");
     const runtimePath = getBundledRuntimePath(app.getPath("userData"));
     if (fs.existsSync(runtimePath)) {
       setJob({ status: "checking", stage: "正在启动 E 盘已有本地 Ollama", percent: 10, message: "复用 E 盘运行程序和现有模型，不重新下载" });
@@ -248,6 +249,9 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     }
     const existingEndpoint = await findOllamaEndpoint();
     if (existingEndpoint) return { status: "already_installed", endpoint: existingEndpoint.baseUrl };
+    const home = app.getPath("home");
+    const freeBytes = getFreeBytes(home);
+    if (freeBytes < REQUIRED_FREE_BYTES) throw new Error("可用磁盘空间不足。安装新的 Ollama 运行环境至少需要预留 5 GiB；已有 E 盘运行环境会直接复用，不需要此步骤。");
 
     cancelRequested = false;
     const installerPath = path.join(app.getPath("temp"), "AI-Comic-Studio-OllamaSetup.exe");
