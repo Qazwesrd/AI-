@@ -134,7 +134,6 @@ def create_patch_package(payload: PatchPackageInput):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "sha256": sha256,
         "size_bytes": len(code_bytes),
-        "changed_files": changed_files,
         "status": "staged",
         "code": payload.code,
         "apply_supported": False,
@@ -152,6 +151,70 @@ def create_patch_package(payload: PatchPackageInput):
         "status": "staged",
         "message": "补丁包已生成并暂存；当前版本不会自动执行或覆盖程序文件。",
     }
+
+
+def _build_patch_preview(record: dict) -> dict:
+    code = record.get("code", "")
+    patch_format = record.get("patch_format")
+    files = []
+    if patch_format == "unified-diff":
+        current = None
+        hunks = []
+        for line in code.splitlines():
+            if line.startswith("--- "):
+                if current:
+                    current["hunks"] = hunks
+                    files.append(current)
+                old_path = line[4:].split("\\t", 1)[0].strip()
+                current = {"old_path": old_path, "new_path": "", "hunks": []}
+                hunks = []
+            elif line.startswith("+++ ") and current:
+                current["new_path"] = line[4:].split("\\t", 1)[0].strip()
+            elif line.startswith("@@ ") and current:
+                hunks.append({"header": line, "changes": []})
+            elif current and hunks and (line.startswith((" ", "+", "-", "\\\\"))):
+                hunks[-1]["changes"].append(line)
+        if current:
+            current["hunks"] = hunks
+            files.append(current)
+        if not files or any(not item["new_path"] for item in files):
+            raise HTTPException(status_code=422, detail="补丁预览失败：差异文件头不完整。")
+    else:
+        files = [{
+            "path": record.get("target_path", ""),
+            "format": patch_format,
+            "preview": code[:12000],
+            "truncated": len(code) > 12000,
+        }]
+    return {
+        "id": record.get("id"),
+        "title": record.get("title"),
+        "target_version": record.get("target_version"),
+        "sha256": record.get("sha256"),
+        "size_bytes": record.get("size_bytes"),
+        "changed_files": record.get("changed_files", []),
+        "format": patch_format,
+        "files": files,
+        "apply_supported": False,
+        "message": "这是只读差异预览；尚未修改任何程序文件。",
+    }
+
+
+@router.get("/packages/{package_id}/preview")
+def preview_patch_package(package_id: str):
+    if not _safe_package_id(package_id):
+        raise HTTPException(status_code=400, detail="补丁编号无效。")
+    path = _patch_root() / f"{package_id}.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="未找到该补丁包。")
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="补丁包读取失败。") from exc
+    actual_hash = hashlib.sha256(record.get("code", "").encode("utf-8")).hexdigest()
+    if actual_hash != record.get("sha256"):
+        raise HTTPException(status_code=409, detail="补丁包 SHA256 校验失败，拒绝预览。")
+    return _build_patch_preview(record)
 
 
 @router.get("/packages/{package_id}")
