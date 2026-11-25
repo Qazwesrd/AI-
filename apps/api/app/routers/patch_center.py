@@ -51,13 +51,13 @@ def _diff_paths(diff_text: str) -> list[str]:
     paths = []
     for line in diff_text.splitlines():
         if line.startswith(("--- ", "+++ ")):
-            raw = line[4:].split("\\t", 1)[0].strip()
+            raw = line[4:].split("\t", 1)[0].strip()
             if raw == "/dev/null":
                 continue
             if raw.startswith(("a/", "b/")):
                 raw = raw[2:]
             paths.append(_validate_target_path(raw))
-    if not paths or len(paths) % 2:
+    if not paths:
         raise HTTPException(status_code=422, detail="统一差异补丁文件头不完整。")
     return sorted(set(paths))
 
