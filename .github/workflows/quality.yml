@@ -63,4 +63,5 @@ jobs:
           node --check apps/desktop/main.cjs
           node --check apps/desktop/preload.cjs
           node --check apps/desktop/capture-manual-screenshots.cjs
-          node --test apps/desktop/ollama-runtime-installer.test.cjs
+          node --check scripts/generate-update-manifest.cjs
+          node --test apps/desktop/ollama-runtime-installer.test.cjs scripts/generate-update-manifest.test.cjs
