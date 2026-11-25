@@ -49,5 +49,6 @@ contextBridge.exposeInMainWorld("localAIInstallerDesktop", {
 });
 
 contextBridge.exposeInMainWorld("patchCenterDesktop", {
-  getInstalledInventory: () => ipcRenderer.invoke("patch-center:installed-inventory")
+  getInstalledInventory: () => ipcRenderer.invoke("patch-center:installed-inventory"),
+  importSignedPackage: () => ipcRenderer.invoke("patch-center:import-signed-package")
 });
