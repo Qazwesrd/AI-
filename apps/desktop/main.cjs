@@ -189,11 +189,11 @@ function stopServices() {
 
 function findFfmpegPair() {
   const roots = [
+    path.join(process.resourcesPath, "media"),
     process.env.AICOMICS_FFMPEG_DIR,
     process.env.FFMPEG_PATH && path.dirname(process.env.FFMPEG_PATH),
-    "D:\\下载",
     path.join(app.getPath("userData"), "ffmpeg"),
-    path.join(process.resourcesPath, "media")
+    "D:\\下载"
   ].filter(Boolean);
   const visited = new Set();
   for (const root of roots) {
