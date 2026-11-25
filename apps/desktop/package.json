@@ -27,7 +27,9 @@
             "main.cjs",
             "preload.cjs",
             "ollama-runtime-installer.cjs",
-            "package.json"
+            "package.json",
+            "update-inventory.cjs",
+            "patch-package-verifier.cjs"
         ],
         "extraResources": [
             {
