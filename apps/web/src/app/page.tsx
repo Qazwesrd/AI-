@@ -75,7 +75,8 @@ const navigation = [
       ["🧭", "统一任务中心", "/tasks"],
       ["🌐", "AI网页工具协同中心", "/ai-tools"],
       ["🤝", "网页版 AI 协作执行中心", "/ai-collaboration"],
-      ["🧠", "小说深度分析与剧情审核", "/ai-analysis"]
+      ["🧠", "小说深度分析与剧情审核", "/ai-analysis"],
+      ["🧰", "本地 AI 引擎与模型中心", "/local-ai-center"]
     ]
   },
   {
@@ -89,6 +90,7 @@ const navigation = [
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
+      ["🧰", "本地引擎与模型状态", "/local-ai-center"],
       ["📊", "AI调用记录", "/ai-center#usage-logs"],
       ["🗄️", "素材库", "/assets"],
       ["🔧", "网络与付费权限", "/ai-center"],
@@ -283,7 +285,8 @@ export default function Home() {
                   ["🎞️", "智能分镜", "/storyboard"],
                   ["🎥", "视频生成", "/media-studio"],
                   ["🧭", "统一任务", "/tasks"],
-                  ["📘", "使用说明", "/help"]
+                  ["📘", "使用说明", "/help"],
+                  ["🧰", "本地 AI 引擎", "/local-ai-center"]
                 ].map(([icon, name, href]) => (
                   <a
                     href={href}
