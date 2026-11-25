@@ -2,6 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electro
 const { spawn, execFile } = require("child_process");
 const path = require("path");
 const { inspectUpdateInventory } = require("./update-inventory.cjs");
+const { verifySignedPatch, createRollbackSnapshot, TRUSTED_PATCH_PUBLIC_KEY_PEM, MAX_PACKAGE_BYTES } = require("./patch-package-verifier.cjs");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
@@ -752,6 +753,65 @@ ipcMain.handle("patch-center:installed-inventory", async (event) => {
     resourcesPath: process.resourcesPath,
     appVersion: app.getVersion()
   });
+});
+
+// Import only signed, data-only static-web patches. No code execution or file replacement.
+ipcMain.handle("patch-center:import-signed-package", async (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    throw new Error("不允许的补丁中心调用来源");
+  }
+  if (!TRUSTED_PATCH_PUBLIC_KEY_PEM.trim()) {
+    return { valid: false, trusted: false, message: "正式发行签名公钥尚未配置；为安全起见，暂不接受签名补丁导入。" };
+  }
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: "导入签名补丁包",
+    properties: ["openFile"],
+    filters: [{ name: "AI 漫剧签名补丁", extensions: ["aicpatch", "json"] }]
+  });
+  if (selected.canceled || !selected.filePaths.length) return { canceled: true };
+  const filePath = selected.filePaths[0];
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size < 2 || stat.size > MAX_PACKAGE_BYTES) {
+    return { valid: false, trusted: false, message: "补丁包文件大小不符合要求（最大 20 MiB）。" };
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return { valid: false, trusted: false, message: "补丁包不是有效的 JSON 格式。" };
+  }
+  const verified = verifySignedPatch(envelope);
+  if (!verified.valid || !verified.trusted) {
+    return { valid: false, trusted: false, message: verified.error || "签名验证失败。" };
+  }
+  if (verified.target_version !== app.getVersion()) {
+    return { valid: false, trusted: true, message: "补丁目标版本与当前程序版本不一致，已拒绝导入。" };
+  }
+
+  const patchRoot = path.join(app.getPath("userData"), "patch-center");
+  const backupRoot = path.join(patchRoot, "backups");
+  let snapshot;
+  try {
+    snapshot = createRollbackSnapshot({
+      resourcesPath: process.resourcesPath,
+      backupRoot,
+      verifiedPatch: verified
+    });
+    const packageRoot = path.join(patchRoot, "verified");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    const packagePath = path.join(packageRoot, verified.package_id + ".json");
+    const tempPath = packagePath + ".tmp";
+    fs.writeFileSync(tempPath, JSON.stringify(envelope), { flag: "wx" });
+    fs.renameSync(tempPath, packagePath);
+  } catch (error) {
+    return { valid: false, trusted: true, message: "补丁验证通过，但备份/暂存失败：" + String(error && error.message || error) };
+  }
+  return {
+    valid: true, trusted: true, package_id: verified.package_id,
+    target_version: verified.target_version, file_count: verified.files.length,
+    total_bytes: verified.total_bytes, snapshot_id: snapshot.snapshot_id,
+    message: "签名验证通过，补丁已安全暂存，并已生成原文件回滚备份；尚未修改安装目录。"
+  };
 });
 
 // Install Ollama only after explicit user confirmation from the local model page.
