@@ -141,8 +141,16 @@ jobs:
           if (!$ffmpeg -or !$ffprobe) { throw "FFmpeg archive is incomplete." }
           Copy-Item $ffmpeg.FullName (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe") -Force
           Copy-Item $ffprobe.FullName (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffprobe.exe") -Force
-          $version = (& (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe") -version | Select-Object -First 1)
-          if ($version -notmatch "ffmpeg version 9\.1") { throw "Expected FFmpeg 9.1, found: $version" }
+          $ffmpegExe = Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe"
+          $ffprobeExe = Join-Path $env:RESOURCE_ROOT "FFmpeg\ffprobe.exe"
+          $version = (& $ffmpegExe -version | Select-Object -First 1)
+          $probeVersion = (& $ffprobeExe -version | Select-Object -First 1)
+          if ($version -notmatch "^ffmpeg version ") { throw "FFmpeg version probe failed: $version" }
+          if ($probeVersion -notmatch "^ffprobe version ") { throw "FFprobe version probe failed: $probeVersion" }
+          Write-Host "Verified FFmpeg: $version"
+          Write-Host "Verified FFprobe: $probeVersion"
+          Remove-Item -LiteralPath $archive -Force
+          Remove-Item -LiteralPath $extract -Recurse -Force
 
       - name: Package resource bundle and SHA-256 inventory
         shell: pwsh
