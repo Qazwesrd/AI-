@@ -20,17 +20,26 @@ const REQUIRED_FREE_BYTES = 5 * 1024 ** 3;
 const API_PORTS = [11435, 11434];
 const API_PATH = "/api/tags";
 
+function pathApiFor(value) {
+  const candidate = String(value || "");
+  return /^[A-Za-z]:[\\\\/]/.test(candidate) || candidate.startsWith("\\\\\\\\")
+    ? path.win32
+    : path;
+}
+
 function resolveAppDataDirectory(defaultDirectory, env = process.env) {
   const configured = String(env.AICOMICS_DATA_DIR || env.APP_DATA_DIR || "").trim();
-  return path.resolve(configured || defaultDirectory);
+  const selected = configured || defaultDirectory;
+  return pathApiFor(selected).resolve(selected);
 }
 
 function getBundledRuntimePath(userDataDirectory) {
-  return path.join(userDataDirectory, "engines", "Ollama", "runtime", "ollama.exe");
+  return pathApiFor(userDataDirectory).join(userDataDirectory, "engines", "Ollama", "runtime", "ollama.exe");
 }
 
 function getBundledModelsPath(runtimePath) {
-  return path.resolve(path.dirname(runtimePath), "..", "models");
+  const pathApi = pathApiFor(runtimePath);
+  return pathApi.resolve(pathApi.dirname(runtimePath), "..", "models");
 }
 
 function getBundledRuntimeEnvironment(runtimePath, baseEnv = process.env) {
