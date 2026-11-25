@@ -10,9 +10,15 @@ from app.routers.image_model_catalog import (
 
 
 class FakeResponse:
-    def __init__(self, headers, status=200):
+    def __init__(self, headers, status=200, body=b""):
         self.headers = headers
         self.status = status
+        self.code = status
+        self.body = body
+
+    def read(self, amount=-1):
+        data, self.body = self.body[:amount], self.body[amount:]
+        return data
 
     def __enter__(self):
         return self
@@ -22,15 +28,17 @@ class FakeResponse:
 
 
 class FakeOpener:
-    def __init__(self, response):
-        self.response = response
-        self.request = None
-        self.timeout = None
+    def __init__(self, *responses):
+        self.responses = list(responses)
+        self.requests = []
+        self.timeouts = []
 
     def open(self, request, timeout):
-        self.request = request
-        self.timeout = timeout
-        return self.response
+        self.requests.append(request)
+        self.timeouts.append(timeout)
+        if not self.responses:
+            raise AssertionError("Unexpected HTTP request")
+        return self.responses.pop(0)
 
 
 class ImageModelCatalogTests(unittest.TestCase):
