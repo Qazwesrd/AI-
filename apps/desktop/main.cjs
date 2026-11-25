@@ -186,16 +186,64 @@ function stopServices() {
   apiProcess = null;
 }
 
+
+function findFfmpegPair() {
+  const roots = [
+    process.env.AICOMICS_FFMPEG_DIR,
+    process.env.FFMPEG_PATH && path.dirname(process.env.FFMPEG_PATH),
+    "D:\\下载",
+    path.join(app.getPath("userData"), "ffmpeg"),
+    path.join(process.resourcesPath, "media")
+  ].filter(Boolean);
+  const visited = new Set();
+  for (const root of roots) {
+    if (!fs.existsSync(root)) continue;
+    const stat = fs.statSync(root);
+    if (stat.isFile()) {
+      const dir = path.dirname(root);
+      const ffmpeg = path.basename(root).toLowerCase() === "ffmpeg.exe" ? root : path.join(dir, "ffmpeg.exe");
+      const ffprobe = process.env.FFPROBE_PATH || path.join(dir, "ffprobe.exe");
+      if (fs.existsSync(ffmpeg) && fs.existsSync(ffprobe)) return { ffmpeg, ffprobe };
+      continue;
+    }
+    const queue = [{ dir: root, depth: 0 }];
+    while (queue.length && visited.size < 12000) {
+      const current = queue.shift();
+      const normalized = path.resolve(current.dir).toLowerCase();
+      if (visited.has(normalized)) continue;
+      visited.add(normalized);
+      let entries;
+      try { entries = fs.readdirSync(current.dir, { withFileTypes: true }); } catch { continue; }
+      const names = new Map(entries.filter(entry => entry.isFile()).map(entry => [entry.name.toLowerCase(), entry.name]));
+      if (names.has("ffmpeg.exe") && names.has("ffprobe.exe")) {
+        return {
+          ffmpeg: path.join(current.dir, names.get("ffmpeg.exe")),
+          ffprobe: path.join(current.dir, names.get("ffprobe.exe"))
+        };
+      }
+      if (current.depth < 6) {
+        for (const entry of entries) {
+          if (entry.isDirectory() && !["node_modules", ".git", "cache", "temp"].includes(entry.name.toLowerCase())) {
+            queue.push({ dir: path.join(current.dir, entry.name), depth: current.depth + 1 });
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
   const webServer = path.join(resources, "web", "server.js");
   const webNodeModules = path.join(resources, "web", "node_modules", "next");
-  const ffmpeg = path.join(resources, "media", "ffmpeg.exe");
-  const ffprobe = path.join(resources, "media", "ffprobe.exe");
+  const ffmpegPair = findFfmpegPair();
+  const ffmpeg = ffmpegPair?.ffmpeg;
+  const ffprobe = ffmpegPair?.ffprobe;
   const dataDir = app.getPath("userData");
 
-  for (const file of [apiExe, webServer, webNodeModules, ffmpeg, ffprobe]) {
+  for (const file of [apiExe, webServer, webNodeModules]) {
     if (!fs.existsSync(file)) {
       throw new Error(`安装包缺少必要文件：${file}`);
     }
@@ -218,8 +266,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
-        FFMPEG_PATH: ffmpeg,
-        FFPROBE_PATH: ffprobe
+        ...(ffmpegPair ? { FFMPEG_PATH: ffmpeg, FFPROBE_PATH: ffprobe } : {})
       }
     });
     logChild("API", apiProcess);
