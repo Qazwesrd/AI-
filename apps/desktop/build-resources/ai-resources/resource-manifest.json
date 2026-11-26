@@ -154,7 +154,6 @@
           "size_mb": 254,
           "purpose": "Wan VAE companion; confirm compatibility against the pinned stable-diffusion.cpp build",
           "sha256": "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd",
-          "file_size_bytes": 254000000,
           "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f",
           "file_url": "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/7dfc285018411b85ce414d0db85d7c7b4d8bb97f/pig_wan_vae_fp32-f16.gguf"
         }
@@ -178,8 +177,7 @@
       "notes": "Third-party GGUF quantization, not an official Wan-AI release asset. The pinned Q4_0 diffusion file, UMT5 Q4_K_M encoder and PIG Wan VAE companion have individually published SHA-256 values and are recorded with revision-pinned URLs. Upstream stable-diffusion.cpp documents VACE 1.3B T2V and R2V recipes, but does not itself certify this exact Q4_0 + Q4_K_M + PIG-VAE combination; load all three with the pinned Windows binary and produce valid MP4 outputs before enabling. Do not enable by default until real CPU inference, output validation, peak RAM, elapsed time and base-model redistribution terms are verified. The quantized repository states VACE reference conditioning without CLIP vision.",
       "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f",
       "file_url": "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/7dfc285018411b85ce414d0db85d7c7b4d8bb97f/wan2.1-vace-1.3b-q4_0.gguf",
-      "file_sha256": "985b0adb23a32dd7c0ed008d22754a38cb7b3f076fb1014586f30d74134e8556",
-      "file_size_bytes": 1450000000
+      "file_sha256": "985b0adb23a32dd7c0ed008d22754a38cb7b3f076fb1014586f30d74134e8556"
     },
     {
       "id": "wan2.2-ti2v-5b",
