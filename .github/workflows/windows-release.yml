@@ -17,6 +17,8 @@ on:
       - "scripts/build-windows.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
+      - "scripts/install-offline-bundle.ps1"
+      - ".github/workflows/assemble-offline-installer.yml"
 
 permissions:
   contents: write
@@ -92,6 +94,20 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-windows.ps1
+
+      - name: Validate offline installer PowerShell syntax and contract
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD "scripts/install-offline-bundle.ps1"), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; throw "Offline installer PowerShell syntax validation failed." }
+          $source = Get-Content "scripts/install-offline-bundle.ps1" -Raw
+          foreach ($required in @("AICOMICS_DATA_DIR", "file-inventory.json", "SHA-256", "Ollama", "ComfyUI", "StableDiffusionCpp", "robocopy")) {
+            if ($source -notmatch [regex]::Escape($required)) { throw "Offline installer contract is missing: $required" }
+          }
+          Write-Host "Offline installer syntax and required resource-import contract validated."
 
       - name: Verify installer and write SHA-256 checksum
         shell: pwsh
