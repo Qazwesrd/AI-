@@ -127,6 +127,8 @@ try {
     Write-Host "[5/5] 事务式全量替换托管引擎（不清理用户项目、作品、素材和存档）。"
     $backup = Join-Path $DataDirectory (".ai-resource-backup-" + [guid]::NewGuid().ToString("N"))
     $deployed = New-Object System.Collections.Generic.List[object]
+    $manifestWasUpdated = $false
+    $hadManifest = $false
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
     New-Item -ItemType Directory -Path $engines -Force | Out-Null
     try {
@@ -161,6 +163,7 @@ try {
         $hadManifest = Test-Path -LiteralPath $manifestDestination
         if ($hadManifest) { Copy-Item -LiteralPath $manifestDestination -Destination $manifestBackup -Force }
         Copy-Item -LiteralPath $manifestPath -Destination $manifestDestination -Force
+        $manifestWasUpdated = $true
         Write-Host "[6/6] 启动桌面程序安装器。请确认程序安装目录：$InstallDirectory"
         $installerArgument = '/D="' + $InstallDirectory + '"'
         $installer = Start-Process -FilePath $InstallerPath -ArgumentList $installerArgument -Wait -PassThru
@@ -176,8 +179,8 @@ try {
         }
         $manifestDestination = Join-Path $DataDirectory "resource-manifest.json"
         $manifestBackup = Join-Path $backup "resource-manifest.json"
-        if (Test-Path -LiteralPath $manifestBackup) { Copy-Item -LiteralPath $manifestBackup -Destination $manifestDestination -Force }
-        elseif (Test-Path -LiteralPath $manifestDestination) { Remove-Item -LiteralPath $manifestDestination -Force }
+        if ($manifestWasUpdated -and (Test-Path -LiteralPath $manifestBackup)) { Copy-Item -LiteralPath $manifestBackup -Destination $manifestDestination -Force }
+        elseif ($manifestWasUpdated -and !$hadManifest -and (Test-Path -LiteralPath $manifestDestination)) { Remove-Item -LiteralPath $manifestDestination -Force }
         [Environment]::SetEnvironmentVariable("AICOMICS_DATA_DIR", $oldUserData, "User")
         $env:AICOMICS_DATA_DIR = $oldProcessData
         throw
