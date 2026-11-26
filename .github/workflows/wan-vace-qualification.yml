@@ -45,15 +45,16 @@ jobs:
           $ErrorActionPreference = "Stop"
           $models = Join-Path $env:VACE_ROOT "models"
           New-Item -ItemType Directory -Path $models -Force | Out-Null
-          $revision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+          $companionRevision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+          $vaceRevision = "5c6903353adb75f32eed988471bd3c73f30db7f5"
           $items = @(
-            @{ name = "wan2.1-vace-1.3b-q4_0.gguf"; sha = "985b0adb23a32dd7c0ed008d22754a38cb7b3f076fb1014586f30d74134e8556" },
-            @{ name = "umt5-xxl-encoder-q4_k_m.gguf"; sha = "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40" },
-            @{ name = "pig_wan_vae_fp32-f16.gguf"; sha = "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd" }
+            @{ name = "wan2.1-v3-vace-1.3b-q4_0.gguf"; sha = "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74"; revision = $vaceRevision },
+            @{ name = "umt5-xxl-encoder-q4_k_m.gguf"; sha = "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40"; revision = $companionRevision },
+            @{ name = "pig_wan_vae_fp32-f16.gguf"; sha = "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd"; revision = $companionRevision }
           )
           foreach ($item in $items) {
             $dest = Join-Path $models $item.name
-            $url = "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/$revision/$($item.name)"
+            $url = "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/$($item.revision)/$($item.name)"
             Invoke-WebRequest -Uri $url -OutFile $dest
             $actual = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($actual -ne $item.sha) { throw "SHA-256 mismatch for $($item.name): $actual" }
