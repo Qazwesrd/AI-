@@ -1,0 +1,105 @@
+name: Assemble complete offline Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows_setup_run_id:
+        description: Successful Windows installer workflow run ID
+        required: true
+        type: string
+        default: "45734211229"
+      ai_resource_run_id:
+        description: Successful AI offline resource workflow run ID
+        required: true
+        type: string
+        default: "45734211765"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  assemble-offline-installer:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: offline-bundle-installer-repair
+
+      - name: Download Windows setup artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AI-Comic-Studio-Windows-Setup
+          run-id: ${{ inputs.windows_setup_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/setup-artifact
+
+      - name: Download full AI resource artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AI-Comic-Studio-AI-Offline-Resources-2026.11
+          run-id: ${{ inputs.ai_resource_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/resource-artifact
+
+      - name: Assemble and verify single offline distribution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $setupRoot = Join-Path $env:RUNNER_TEMP "setup-artifact"
+          $resourceRoot = Join-Path $env:RUNNER_TEMP "resource-artifact"
+          $stage = Join-Path $env:RUNNER_TEMP "AI-Comic-Studio-Full-Offline-Installer"
+          $output = Join-Path $PWD "offline-distribution"
+          New-Item -ItemType Directory -Path $stage,$output -Force | Out-Null
+          $setup = Get-ChildItem $setupRoot -File -Filter "*Setup*.exe" | Select-Object -First 1
+          $setupHashFile = if ($setup) { Get-Item ($setup.FullName + ".sha256") -ErrorAction SilentlyContinue }
+          if (!$setup -or !$setupHashFile) { throw "Windows Setup executable or its SHA-256 file is missing." }
+          $setupExpected = ((Get-Content $setupHashFile.FullName -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+          $setupActual = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($setupExpected -ne $setupActual) { throw "Windows Setup SHA-256 verification failed." }
+          $resource = Get-ChildItem $resourceRoot -File -Filter "*AI离线资源包*.zip" | Select-Object -First 1
+          $resourceHashFile = if ($resource) { Get-Item ($resource.FullName + ".sha256") -ErrorAction SilentlyContinue }
+          if (!$resource -or !$resourceHashFile) { throw "Full AI resource ZIP or its SHA-256 file is missing." }
+          $resourceExpected = ((Get-Content $resourceHashFile.FullName -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
+          $resourceActual = (Get-FileHash $resource.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($resourceExpected -ne $resourceActual) { throw "AI resource bundle SHA-256 verification failed." }
+          Copy-Item $setup.FullName (Join-Path $stage "AI漫剧制作大师-Setup.exe")
+          Copy-Item $resource.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip")
+          Copy-Item $resourceHashFile.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip.sha256")
+          Copy-Item "scripts/install-offline-bundle.ps1" (Join-Path $stage "一键离线安装.ps1")
+          $readme = @'
+AI漫剧制作大师完整离线安装包
+
+1. 将整个 ZIP 解压到本地磁盘。
+2. 在解压目录打开 PowerShell，执行：
+   powershell -ExecutionPolicy Bypass -File .\一键离线安装.ps1
+3. 按提示选择程序安装目录和 AI 模型数据目录。
+4. 安装程序会校验资源包 SHA-256、解压资源、逐文件校验 SHA-256，并导入本地引擎。
+5. 完成后重新启动 Windows 或重新登录，使 AICOMICS_DATA_DIR 环境变量生效。
+
+本交付物包含程序安装器和完整 AI 资源包，不需要安装时联网下载模型。
+首次安装建议数据盘至少预留约 32 GiB 可用空间。
+Ryzen 7 4800U / Vega 集显未获得本机性能认证；不承诺 GPU 加速。
+'@
+          Set-Content -LiteralPath (Join-Path $stage "安装说明.txt") -Value $readme -Encoding utf8
+          $zip = Join-Path $output "AI漫剧制作大师-完整离线安装包.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::NoCompression, $false)
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          "$hash  $(Split-Path -Leaf $zip)" | Set-Content "$zip.sha256" -Encoding ascii
+          Write-Host "Complete offline installer: $zip"
+          Write-Host ("Size: {0:N2} GiB" -f ((Get-Item $zip).Length / 1GB))
+          Write-Host "SHA256: $hash"
+
+      - name: Upload complete offline installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-Full-Offline-Installer
+          path: |
+            offline-distribution/AI漫剧制作大师-完整离线安装包.zip
+            offline-distribution/AI漫剧制作大师-完整离线安装包.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
