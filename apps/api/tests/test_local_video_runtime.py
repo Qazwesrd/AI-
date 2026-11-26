@@ -8,6 +8,8 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         result = assess_wan_vace_nodes(None)
         self.assertEqual(result["status"], "unavailable")
         self.assertFalse(result["generation_ready"])
+        self.assertFalse(result["workflow_node_set_complete"])
+        self.assertGreater(len(result["missing_required_nodes"]), 0)
 
     def test_empty_nodes_report_missing_without_cloud_fallback(self):
         result = assess_wan_vace_nodes({})
@@ -28,6 +30,18 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["vace_node_found"])
         self.assertTrue(result["wan_video_nodes_found"])
         self.assertIn("wan2.1_i2v.safetensors", result["models"])
+        self.assertFalse(result["generation_ready"])
+        self.assertFalse(result["workflow_execution_verified"])
+        self.assertFalse(result["workflow_node_set_complete"])
+
+
+    def test_full_required_node_set_is_reported_without_claiming_runtime_ready(self):
+        from app.routers.local_video_runtime import REQUIRED_VACE_WORKFLOW_NODES
+        info = {node_name: {} for node_name in REQUIRED_VACE_WORKFLOW_NODES.values()}
+        result = assess_wan_vace_nodes(info)
+        self.assertTrue(result["workflow_node_set_complete"])
+        self.assertEqual(result["missing_required_nodes"], [])
+        self.assertTrue(all(result["required_nodes"].values()))
         self.assertFalse(result["generation_ready"])
         self.assertFalse(result["workflow_execution_verified"])
 
