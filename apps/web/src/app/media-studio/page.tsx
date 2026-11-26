@@ -16,7 +16,7 @@ type MediaTask = {
 };
 
 export default function MediaStudioPage() {
-  const [provider, setProvider] = useState("openai");
+  const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [videoPromptMode, setVideoPromptMode] = useState("cinematic");
@@ -41,6 +41,10 @@ export default function MediaStudioPage() {
   async function createVideo() {
     if (!prompt.trim()) {
       setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
+      return;
+    }
+    if (!provider.trim() || !model.trim()) {
+      setMessage("尚未配置外部视频服务商和模型。当前本地 Wan 2.1 VACE 视频工作流仍在接入中；不会自动选择付费服务。");
       return;
     }
     const styleInstruction = videoPromptMode === "animation"
@@ -107,6 +111,7 @@ export default function MediaStudioPage() {
         <header>
           <h1 className="text-3xl font-bold">AI 视频与音频生产中心</h1>
           <p className="mt-2 text-white/60">视频生成、AI 配音、任务查询与媒体合成</p>
+          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100/80">本地免费模式优先：Wan 2.1 VACE 尚未完成接入。外部视频 API 只有在你手动填写服务商、模型并勾选费用确认后才会提交；默认不选择任何服务商。</p>
           <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
             查看统一任务中心（含配音任务）
           </a>
@@ -125,7 +130,7 @@ export default function MediaStudioPage() {
               className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
             <label className="mb-2 block text-sm">视频模型名称</label>
             <input value={model} onChange={e => setModel(e.target.value)}
-              placeholder="填写服务商提供的视频模型 ID"
+              placeholder="仅在你明确选择外部服务时填写模型 ID"
               className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
             <label className="mb-2 block text-sm">视频内容描述</label>
             <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
