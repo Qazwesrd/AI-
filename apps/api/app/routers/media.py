@@ -779,9 +779,14 @@ def render_episode_from_shots(
     episode_id: int, output_name: str = "episode.mp4",
     music_path: Optional[str] = None,
     music_volume: float = 0.18,
+    width: int = 1920, height: int = 1080, fps: Literal[24, 30] = 24,
     db: Session = Depends(get_db)
 ):
-    """将本集已下载的镜头统一规格后合成为初版成片，并生成对白字幕文件。"""
+    """将本集镜头统一规格后合成 H.264 MP4；默认 1080p/24fps。"""
+    if width not in (1280, 1920) or height not in (720, 1080) or width % 2 or height % 2:
+        raise HTTPException(422, "输出分辨率仅支持 1280x720 或 1920x1080")
+    if (width, height) not in ((1280, 720), (1920, 1080)):
+        raise HTTPException(422, "输出宽高组合无效")
     episode = db.query(EpisodePlan).filter(EpisodePlan.id == episode_id).first()
     if not episode:
         raise HTTPException(404, "分集不存在")
@@ -858,8 +863,8 @@ def render_episode_from_shots(
             actual_durations.append(duration)
             ffmpeg_args += ["-i", str(clip)]
             filters.append(
-                f"[{input_index}:v:0]scale=1920:1080:force_original_aspect_ratio=decrease,"
-                f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=30,setsar=1,format=yuv420p,"
+                f"[{input_index}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p,"
                 f"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]"
             )
             has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
@@ -939,8 +944,9 @@ def render_episode_from_shots(
         run_ffmpeg(ffmpeg_args + [
             "-filter_complex", ";".join(filters),
             "-map", f"[{final_video_label}]", "-map", "[aout]",
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-c:a", "aac", "-ar", "48000", "-movflags", "+faststart",
+            "-r", str(fps), "-fps_mode", "cfr",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
             str(output),
         ])
         # Mix generated dialogue and optional background music with original shot sound.
