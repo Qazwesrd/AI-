@@ -207,6 +207,47 @@ jobs:
           Remove-Item -LiteralPath $archive -Force
           Remove-Item -LiteralPath $extract -Recurse -Force
 
+
+      - name: Download, verify and CPU-test Wan 2.1 VACE 1.3B
+        shell: pwsh
+        timeout-minutes: 55
+        run: |
+          $ErrorActionPreference = "Stop"
+          $models = Join-Path $env:RESOURCE_ROOT "VACE\\models"
+          New-Item -ItemType Directory -Path $models -Force | Out-Null
+          $items = @(
+            @{ name = "wan2.1-v3-vace-1.3b-q4_0.gguf"; sha = "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74"; revision = "5c6903353adb75f32eed988471bd3c73f30db7f5" },
+            @{ name = "umt5-xxl-encoder-q4_k_m.gguf"; sha = "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40"; revision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f" },
+            @{ name = "pig_wan_vae_fp32-f16.gguf"; sha = "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd"; revision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f" }
+          )
+          foreach ($item in $items) {
+            $dest = Join-Path $models $item.name
+            $url = "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/$($item.revision)/$($item.name)"
+            Invoke-WebRequest -Uri $url -OutFile $dest
+            $actual = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $item.sha) { throw "VACE SHA-256 mismatch for $($item.name): $actual" }
+            Write-Host "Verified $($item.name) ($((Get-Item $dest).Length) bytes)"
+          }
+          $licenseUrl = "https://huggingface.co/Wan-AI/Wan2.1-VACE-1.3B/resolve/c43fab4b82d10af8195d0d7d1d115c99aed745cb/LICENSE.txt"
+          Invoke-WebRequest -Uri $licenseUrl -OutFile (Join-Path $env:RESOURCE_ROOT "VACE\\LICENSE-Wan2.1.txt")
+          @"
+          Wan2.1 VACE 1.3B quantized model package
+          Upstream model: Wan-AI/Wan2.1-VACE-1.3B
+          Quantized files: calcuis/wan-1.3b-gguf (pinned revisions and SHA-256 values are recorded in resource-manifest.json)
+          Upstream implementation/model information: https://github.com/Wan-Video/Wan2.1
+          VACE project: https://github.com/TMCADV/vace
+          Model license: Apache-2.0; retain LICENSE-Wan2.1.txt and this notice with the model files.
+          This package contains a third-party GGUF quantization. The CI smoke test is not a performance certification for Ryzen 7 4800U/Vega integrated graphics.
+          "@ | Set-Content -LiteralPath (Join-Path $env:RESOURCE_ROOT "VACE\\THIRD-PARTY-NOTICES.txt") -Encoding utf8
+
+          $out = Join-Path $env:RESOURCE_ROOT "VACE\\vace-t2v.avi"
+          $args = @("-M","vid_gen","--diffusion-model",(Join-Path $models "wan2.1-v3-vace-1.3b-q4_0.gguf"),"--vae",(Join-Path $models "pig_wan_vae_fp32-f16.gguf"),"--t5xxl",(Join-Path $models "umt5-xxl-encoder-q4_k_m.gguf"),"-p","A small golden-orange bird flying slowly above a calm lake at sunrise, cinematic anime style","-n","blurry, low quality, watermark, text","--cfg-scale","4.0","--sampling-method","euler","--steps","4","-W","256","-H","256","--video-frames","5","--offload-to-cpu","-o",$out)
+          & $env:SD_CPP_CLI @args 2>&1 | Tee-Object -FilePath (Join-Path $env:RESOURCE_ROOT "VACE\\t2v.log")
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $out) -or (Get-Item $out).Length -lt 4096) { throw "VACE T2V CPU inference smoke test failed." }
+          & (Join-Path $env:RESOURCE_ROOT "FFmpeg\\ffprobe.exe") -v error -show_entries stream=codec_type,width,height,nb_frames -of json $out
+          if ($LASTEXITCODE -ne 0) { throw "VACE output ffprobe validation failed." }
+          Write-Host "VACE T2V CPU inference and output validation succeeded."
+
       - name: Package resource bundle and SHA-256 inventory
         shell: pwsh
         run: |
