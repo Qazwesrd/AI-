@@ -61,6 +61,33 @@ def _node_choices(node_info):
     return sorted(set(choices))
 
 
+def _node_input_schema(node_info):
+    """Expose bounded ComfyUI input names and dropdown choices for workflow preflight."""
+    inputs = node_info.get("input") if isinstance(node_info, dict) else None
+    if not isinstance(inputs, dict):
+        return {"required": {}, "optional": {}}
+    result = {"required": {}, "optional": {}}
+    for section in ("required", "optional"):
+        fields = inputs.get(section)
+        if not isinstance(fields, dict):
+            continue
+        for name, spec in list(fields.items())[:120]:
+            entry = {}
+            if isinstance(spec, list) and spec:
+                if isinstance(spec[0], list):
+                    entry["type"] = "COMBO"
+                    entry["choices"] = [str(value)[:240] for value in spec[0][:300] if isinstance(value, (str, int, float))]
+                elif isinstance(spec[0], str):
+                    entry["type"] = spec[0][:80]
+                if len(spec) > 1 and isinstance(spec[1], dict):
+                    options = spec[1]
+                    entry["default"] = options.get("default")
+                    entry["min"] = options.get("min")
+                    entry["max"] = options.get("max")
+            result[section][str(name)[:120]] = entry
+    return result
+
+
 def assess_wan_vace_nodes(object_info):
     if not isinstance(object_info, dict) or object_info.get("_error"):
         return {
@@ -86,7 +113,11 @@ def assess_wan_vace_nodes(object_info):
         info = object_info.get(name)
         choices = _node_choices(info)
         models.update(choices)
-        details.append({"node_type": name, "model_choices": choices})
+        details.append({
+            "node_type": name,
+            "model_choices": choices,
+            "input_schema": _node_input_schema(info),
+        })
     vace_found = any("vace" in name.lower() for name in names)
     wan_found = any("wanvideo" in name.lower() or "wan_video" in name.lower() for name in names)
     present = {
