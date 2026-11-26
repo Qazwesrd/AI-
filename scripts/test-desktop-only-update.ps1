@@ -3,6 +3,21 @@ $root = Split-Path -Parent $PSScriptRoot
 $updater = Join-Path $PSScriptRoot "update-desktop-only.ps1"
 $source = Get-Content -LiteralPath $updater -Raw
 
+# Parse all installer scripts with the PowerShell parser before checking behavior.
+$parseTargets = @(
+    $updater,
+    (Join-Path $PSScriptRoot "install-offline-bundle.ps1")
+)
+foreach ($target in $parseTargets) {
+    $tokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($target, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if ($parseErrors.Count -gt 0) {
+        $details = ($parseErrors | ForEach-Object { $_.Message }) -join "; "
+        throw "PowerShell syntax validation failed for $target : $details"
+    }
+}
+
 # Guard the updater contract against accidental resource deployment logic.
 $forbidden = @(
     'Expand-Archive',
