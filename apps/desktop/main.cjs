@@ -48,11 +48,17 @@ function resolveAiResourcePaths(dataDir) {
   const ollamaModels = modelsCandidates.find((candidate) =>
     fs.existsSync(path.join(candidate, "blobs")) || fs.existsSync(path.join(candidate, "manifests"))
   ) || "";
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
   const ollamaRoots = uniquePaths([
     process.env.AICOMICS_OLLAMA_DIR,
     process.env.OLLAMA_DIR,
     path.join(dataDir, "engines", "Ollama"),
     path.join(dataDir, "Ollama"),
+    path.join(localAppData, "Programs", "Ollama"),
+    path.join(programFiles, "Ollama"),
+    path.join(programFilesX86, "Ollama"),
     path.join(userProfile, ".ollama")
   ]);
   let ollamaExe = "";
