@@ -6,6 +6,45 @@ const http = require("http");
 const net = require("net");
 const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
 
+ 
+// Resolve the existing user-managed data folder before any service starts.
+// When the app is installed to E:\\AI\\程序, the paired data folder is
+// E:\\AI\\数据. Prefer a configured directory only when it actually contains
+// the managed AI engines; this prevents an empty Electron profile from hiding
+// the user's existing Ollama models and ComfyUI runtime.
+function hasManagedAiResources(directory) {
+  if (!directory) return false;
+  const engines = path.join(directory, "engines");
+  const ollama = path.join(engines, "Ollama", "runtime", "ollama.exe");
+  const comfy = path.join(engines, "ComfyUI");
+  const comfyLayouts = [
+    [path.join(comfy, "python_embeded", "python.exe"), path.join(comfy, "ComfyUI", "main.py")],
+    [path.join(comfy, "venv", "Scripts", "python.exe"), path.join(comfy, "main.py")],
+  ];
+  return fs.existsSync(ollama) || comfyLayouts.some(([python, main]) =>
+    fs.existsSync(python) && fs.existsSync(main)
+  );
+}
+
+function resolveManagedDataDirectory() {
+  const configured = String(process.env.AICOMICS_DATA_DIR || process.env.APP_DATA_DIR || "").trim();
+  const adjacentData = process.platform === "win32" && app.isPackaged
+    ? path.resolve(path.dirname(app.getPath("exe")), "..", "数据")
+    : "";
+  const defaultData = app.getPath("userData");
+  const candidates = [configured, adjacentData, defaultData].filter(Boolean);
+  const existing = candidates.find(hasManagedAiResources);
+  const selected = existing || configured || adjacentData || defaultData;
+  fs.mkdirSync(selected, { recursive: true });
+  process.env.AICOMICS_DATA_DIR = selected;
+  process.env.APP_DATA_DIR = selected;
+  app.setPath("userData", selected);
+  console.log("[DATA] Managed AI data directory:", selected);
+  return selected;
+}
+
+resolveManagedDataDirectory();
+
 const API_PORT = 8000;
 const WEB_PORT = 3000;
 
@@ -292,7 +331,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const ffmpegPair = findFfmpegPair();
   const ffmpeg = ffmpegPair?.ffmpeg;
   const ffprobe = ffmpegPair?.ffprobe;
-  const dataDir = process.env.AICOMICS_DATA_DIR || app.getPath("userData");
+  const dataDir = app.getPath("userData");
 
   for (const file of [apiExe, webServer, webNodeModules]) {
     if (!fs.existsSync(file)) {
