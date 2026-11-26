@@ -96,6 +96,45 @@
   ],
   "video_models": [
     {
+      "id": "wan2.1-vace-1.3b-q4_0",
+      "engine": "stable-diffusion-cpp",
+      "repository": "Wan-AI/Wan2.1-VACE-1.3B",
+      "quantized_repository": "calcuis/wan-1.3b-gguf",
+      "license": "Apache-2.0 (upstream Wan2.1 VACE model; include upstream LICENSE and attribution notice)",
+      "status": "bundled-and-cpu-smoke-tested-on-github-windows-runner; target-device-not-certified",
+      "files": [
+        {
+          "file": "VACE/models/wan2.1-v3-vace-1.3b-q4_0.gguf",
+          "size_bytes": null,
+          "sha256": "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74",
+          "revision": "5c6903353adb75f32eed988471bd3c73f30db7f5"
+        },
+        {
+          "file": "VACE/models/umt5-xxl-encoder-q4_k_m.gguf",
+          "size_bytes": null,
+          "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+          "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+        },
+        {
+          "file": "VACE/models/pig_wan_vae_fp32-f16.gguf",
+          "size_bytes": null,
+          "sha256": "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd",
+          "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+        }
+      ],
+      "workflow": "stable-diffusion.cpp -M vid_gen; VACE diffusion GGUF + UMT5-XXL Q4_K_M + Wan VAE GGUF",
+      "purpose": [
+        "text-to-video",
+        "reference-image-to-video"
+      ],
+      "hardware": {
+        "github_windows_cpu": "T2V and R2V smoke tests passed at 256x256, 5 frames, 4 steps",
+        "ryzen_7_4800u": "not certified; CPU fallback may be extremely slow",
+        "vega_integrated_gpu": "no ROCm/GPU acceleration claim"
+      },
+      "notes": "Third-party quantized GGUF files pinned by revision and SHA-256. Package includes upstream Apache-2.0 license and attribution notice. CI smoke tests prove inference can run on hosted Windows CPU only; they do not certify target PC speed, RAM use or production-quality output."
+    },
+    {
       "id": "wan2.1-t2v-1.3b-bf16-safetensors",
       "engine": "stable-diffusion-cpp",
       "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
@@ -187,5 +226,9 @@
       ],
       "notes": "Optional high-end tier for future GPU upgrades; not included in the default low-resource bundle."
     }
-  ]
+  ],
+  "bundle_policy": {
+    "video_bundle_includes_vace": true,
+    "video_bundle_scope": "VACE 1.3B quantized CPU smoke-tested model plus UMT5/VAE/runtime; no claim of target-device acceleration"
+  }
 }
