@@ -7,40 +7,109 @@ const net = require("net");
 const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
 
  
-// Resolve the existing user-managed data folder before any service starts.
-// When the app is installed to E:\\AI\\程序, the paired data folder is
-// E:\\AI\\数据. Prefer a configured directory only when it actually contains
-// the managed AI engines; this prevents an empty Electron profile from hiding
-// the user's existing Ollama models and ComfyUI runtime.
+// Discover existing user data and AI runtimes without moving, copying,
+// overwriting, or deleting any model files. This runs before services start.
+function uniquePaths(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    if (!value) return false;
+    const resolved = path.resolve(String(value).trim());
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((value) => path.resolve(String(value).trim()));
+}
+
+function firstExisting(paths) {
+  return uniquePaths(paths).find((candidate) => {
+    try { return fs.existsSync(candidate); } catch { return false; }
+  }) || "";
+}
+
+function comfyLayouts(root) {
+  if (!root) return [];
+  return [
+    { root, python: path.join(root, "python_embeded", "python.exe"), main: path.join(root, "ComfyUI", "main.py"), cwd: root },
+    { root, python: path.join(root, "python_embeded", "python.exe"), main: path.join(root, "main.py"), cwd: root },
+    { root, python: path.join(root, "venv", "Scripts", "python.exe"), main: path.join(root, "main.py"), cwd: root },
+    { root, python: path.join(root, ".venv", "Scripts", "python.exe"), main: path.join(root, "main.py"), cwd: root }
+  ];
+}
+
+function resolveAiResourcePaths(dataDir) {
+  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
+  const modelsCandidates = uniquePaths([
+    process.env.OLLAMA_MODELS,
+    path.join(dataDir, "engines", "Ollama", "models"),
+    path.join(dataDir, "Ollama", "models"),
+    path.join(userProfile, ".ollama", "models")
+  ]);
+  const ollamaModels = modelsCandidates.find((candidate) =>
+    fs.existsSync(path.join(candidate, "blobs")) || fs.existsSync(path.join(candidate, "manifests"))
+  ) || "";
+  const ollamaRoots = uniquePaths([
+    process.env.AICOMICS_OLLAMA_DIR,
+    process.env.OLLAMA_DIR,
+    path.join(dataDir, "engines", "Ollama"),
+    path.join(dataDir, "Ollama"),
+    path.join(userProfile, ".ollama")
+  ]);
+  let ollamaExe = "";
+  let ollamaRoot = "";
+  for (const root of ollamaRoots) {
+    const candidate = firstExisting([path.join(root, "runtime", "ollama.exe"), path.join(root, "ollama.exe")]);
+    if (candidate) { ollamaExe = candidate; ollamaRoot = root; break; }
+  }
+
+  const comfyRoots = uniquePaths([
+    process.env.AICOMICS_COMFYUI_DIR,
+    process.env.COMFYUI_PATH,
+    path.join(dataDir, "engines", "ComfyUI"),
+    path.join(dataDir, "ComfyUI"),
+    path.join(path.dirname(dataDir), "ComfyUI"),
+    path.join(userProfile, "ComfyUI")
+  ]);
+  let comfy = null;
+  for (const root of comfyRoots) {
+    comfy = comfyLayouts(root).find((layout) =>
+      fs.existsSync(layout.python) && fs.existsSync(layout.main)
+    ) || null;
+    if (comfy) break;
+  }
+  return { ollamaExe, ollamaRoot, ollamaModels, comfy };
+}
+
 function hasManagedAiResources(directory) {
   if (!directory) return false;
-  const engines = path.join(directory, "engines");
-  const ollama = path.join(engines, "Ollama", "runtime", "ollama.exe");
-  const comfy = path.join(engines, "ComfyUI");
-  const comfyLayouts = [
-    [path.join(comfy, "python_embeded", "python.exe"), path.join(comfy, "ComfyUI", "main.py")],
-    [path.join(comfy, "python_embeded", "python.exe"), path.join(comfy, "main.py")],
-    [path.join(comfy, "venv", "Scripts", "python.exe"), path.join(comfy, "main.py")],
-  ];
-  return (fs.existsSync(ollama) && fs.existsSync(path.join(engines, "Ollama", "models", "blobs"))) || comfyLayouts.some(([python, main]) =>
-    fs.existsSync(python) && fs.existsSync(main)
-  );
+  const resources = resolveAiResourcePaths(directory);
+  return Boolean((resources.ollamaExe && resources.ollamaModels) || resources.comfy);
 }
 
 function resolveManagedDataDirectory() {
   const configured = String(process.env.AICOMICS_DATA_DIR || process.env.APP_DATA_DIR || "").trim();
-  const adjacentData = process.platform === "win32" && app.isPackaged
-    ? path.resolve(path.dirname(app.getPath("exe")), "..", "数据")
-    : "";
-  const defaultData = app.getPath("userData");
-  const candidates = [configured, adjacentData, defaultData].filter(Boolean);
+  const executableDir = process.platform === "win32" && app.isPackaged
+    ? path.dirname(app.getPath("exe")) : "";
+  const adjacentData = executableDir ? path.resolve(executableDir, "..", "数据") : "";
+  const legacyUserData = app.getPath("userData");
+  const appData = app.getPath("appData");
+  const candidates = uniquePaths([
+    configured,
+    adjacentData,
+    legacyUserData,
+    path.join(appData, "AI漫剧制作大师"),
+    path.join(appData, "ai-comic-studio-desktop")
+  ]);
   const existing = candidates.find(hasManagedAiResources);
-  const selected = existing || configured || adjacentData || defaultData;
+  const selected = existing || firstExisting([configured]) || adjacentData || legacyUserData;
   fs.mkdirSync(selected, { recursive: true });
   process.env.AICOMICS_DATA_DIR = selected;
   process.env.APP_DATA_DIR = selected;
   app.setPath("userData", selected);
-  console.log("[DATA] Managed AI data directory:", selected);
+  const resources = resolveAiResourcePaths(selected);
+  console.log("[DATA] Persistent user data directory:", selected);
+  console.log("[DATA] Existing Ollama models:", resources.ollamaModels || "not detected");
+  console.log("[DATA] Existing ComfyUI:", resources.comfy?.root || "not detected");
   return selected;
 }
 
@@ -282,46 +351,39 @@ function findFfmpegPair() {
 
 function startManagedAiEngines(dataDir) {
   if (process.platform !== "win32") return;
+  const resources = resolveAiResourcePaths(dataDir);
 
-  const engineRoot = path.join(dataDir, "engines");
-  const ollamaRoot = path.join(engineRoot, "Ollama");
-  const ollamaExe = path.join(ollamaRoot, "runtime", "ollama.exe");
-  const ollamaModels = path.join(ollamaRoot, "models");
-  if (fs.existsSync(ollamaExe) && fs.existsSync(path.join(ollamaModels, "blobs"))) {
+  if (resources.ollamaExe && resources.ollamaModels) {
     const ollamaEnv = {
       ...process.env,
       OLLAMA_HOST: "127.0.0.1:11435",
-      OLLAMA_MODELS: ollamaModels,
+      OLLAMA_MODELS: resources.ollamaModels,
       OLLAMA_NO_CLOUD: "1"
     };
-    ollamaProcess = spawn(ollamaExe, ["serve"], {
-      cwd: ollamaRoot,
+    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
+      cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
       windowsHide: true,
       env: ollamaEnv,
       stdio: ["ignore", "pipe", "pipe"]
     });
     logChild("OLLAMA", ollamaProcess);
   } else {
-    console.warn("[OLLAMA] Bundled runtime or model directory was not found:", ollamaRoot);
+    console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download or replacement will be attempted.");
   }
 
-  const comfyRoot = path.join(engineRoot, "ComfyUI");
-  const layouts = [
-    { python: path.join(comfyRoot, "python_embeded", "python.exe"), main: path.join(comfyRoot, "ComfyUI", "main.py"), cwd: comfyRoot },
-    { python: path.join(comfyRoot, "python_embeded", "python.exe"), main: path.join(comfyRoot, "main.py"), cwd: comfyRoot },
-    { python: path.join(comfyRoot, "venv", "Scripts", "python.exe"), main: path.join(comfyRoot, "main.py"), cwd: comfyRoot }
-  ];
-  const layout = layouts.find(item => fs.existsSync(item.python) && fs.existsSync(item.main));
-  if (layout) {
-    comfyProcess = spawn(layout.python, [layout.main, "--listen", "127.0.0.1", "--port", "8188", "--cpu", "--disable-auto-launch"], {
-      cwd: layout.cwd,
+  if (resources.comfy) {
+    // Preserve the installed Python/GPU backend; do not force CPU-only startup.
+    comfyProcess = spawn(resources.comfy.python, [
+      resources.comfy.main, "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"
+    ], {
+      cwd: resources.comfy.cwd,
       windowsHide: true,
-      env: { ...process.env, PYTHONUNBUFFERED: "1", CUDA_VISIBLE_DEVICES: "" },
+      env: { ...process.env, PYTHONUNBUFFERED: "1" },
       stdio: ["ignore", "pipe", "pipe"]
     });
     logChild("COMFYUI", comfyProcess);
   } else {
-    console.warn("[COMFYUI] Bundled Python runtime or main.py was not found:", comfyRoot);
+    console.warn("[COMFYUI] Existing runtime was not detected; no runtime download or replacement will be attempted.");
   }
 }
 
@@ -358,7 +420,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         APP_DATA_DIR: dataDir,
         AICOMICS_DATA_DIR: dataDir,
         OLLAMA_HOST: "http://127.0.0.1:11435",
-        OLLAMA_MODELS: path.join(dataDir, "engines", "Ollama", "models"),
+        OLLAMA_MODELS: resolveAiResourcePaths(dataDir).ollamaModels || process.env.OLLAMA_MODELS || path.join(dataDir, "engines", "Ollama", "models"),
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
