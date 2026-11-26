@@ -19,9 +19,10 @@ function hasManagedAiResources(directory) {
   const comfy = path.join(engines, "ComfyUI");
   const comfyLayouts = [
     [path.join(comfy, "python_embeded", "python.exe"), path.join(comfy, "ComfyUI", "main.py")],
+    [path.join(comfy, "python_embeded", "python.exe"), path.join(comfy, "main.py")],
     [path.join(comfy, "venv", "Scripts", "python.exe"), path.join(comfy, "main.py")],
   ];
-  return fs.existsSync(ollama) || comfyLayouts.some(([python, main]) =>
+  return (fs.existsSync(ollama) && fs.existsSync(path.join(engines, "Ollama", "models", "blobs"))) || comfyLayouts.some(([python, main]) =>
     fs.existsSync(python) && fs.existsSync(main)
   );
 }
@@ -307,6 +308,7 @@ function startManagedAiEngines(dataDir) {
   const comfyRoot = path.join(engineRoot, "ComfyUI");
   const layouts = [
     { python: path.join(comfyRoot, "python_embeded", "python.exe"), main: path.join(comfyRoot, "ComfyUI", "main.py"), cwd: comfyRoot },
+    { python: path.join(comfyRoot, "python_embeded", "python.exe"), main: path.join(comfyRoot, "main.py"), cwd: comfyRoot },
     { python: path.join(comfyRoot, "venv", "Scripts", "python.exe"), main: path.join(comfyRoot, "main.py"), cwd: comfyRoot }
   ];
   const layout = layouts.find(item => fs.existsSync(item.python) && fs.existsSync(item.main));
