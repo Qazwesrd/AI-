@@ -23,6 +23,7 @@ type TaskItem = {
   failure_diagnostic?: {category:string|null;guidance:string;confidence:string};
   result_available: boolean;
   progress?: number;
+  stage?: string;
   completed_chunks?: number;
   total_chunks?: number;
   created_at: string | null;
@@ -44,8 +45,9 @@ type TaskResponse = {
 };
 
 const statusNames: Record<string, string> = {
-  pending: "等待中", queued: "排队中", submitting: "正在提交",
-  submitted: "已提交", processing: "处理中", running: "运行中",
+  pending: "等待中", queued: "排队中", starting: "准备本地引擎",
+  submitting: "正在提交", submitted: "已提交", processing: "处理中",
+  running: "运行中", validating: "校验生成文件", cancel_requested: "正在停止", interrupted: "已中断",
   completed: "已完成", failed: "失败", cancelled: "已取消",
   canceled: "已取消", paused: "已暂停", partial: "部分完成",
   submission_unknown: "提交结果待核实", awaiting_video_url: "等待视频地址",
@@ -64,7 +66,7 @@ const groupStyles: Record<string, string> = {
 function taskHref(task: TaskItem) {
   const path = task.source === "analysis" ? "/novels"
     : task.source === "image" ? "/visual-studio"
-    : task.type === "speech" || task.type === "episode_speech" ? "/media-studio"
+    : task.source === "media" ? "/media-studio"
     : task.type === "video" ? "/video-editor" : "/storyboard";
   const params = new URLSearchParams();
   if (task.project_id) params.set("projectId", String(task.project_id));
@@ -363,6 +365,14 @@ export default function TasksPage() {
                   </div>
                   <p className="mt-1 text-xs text-purple-200">{task.context || task.type} · {task.provider || "本地任务"}{task.model ? ` / ${task.model}` : ""}{task.project_id ? ` · 项目 #${task.project_id}` : ""}</p>
                   {task.summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-300">{task.summary}</p>}
+                  {task.source === "media" && task.type === "local_vace_video" && task.stage && (
+                    <p className="mt-2 text-xs text-cyan-200">本地执行阶段：{({
+                      queued: "等待本机任务队列", preparing_runtime: "检查本地模型和运行引擎",
+                      generating: "正在本机推理生成", validating_output: "正在用 FFprobe 校验视频",
+                      completed: "生成完成并已归档", failed: "生成失败", cancelled: "已取消",
+                      interrupted: "应用退出导致中断",
+                    } as Record<string,string>)[task.stage] || task.stage}</p>
+                  )}
                   {task.source === "analysis" && (
                     <div className="mt-3 max-w-xl">
                       <div className="mb-1 flex justify-between text-xs text-slate-400">
@@ -404,6 +414,12 @@ export default function TasksPage() {
                   {task.source === "image" && ["pending", "paused", "failed"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "cancel")}
                       className="rounded-lg border border-red-300/25 px-3 py-2 text-xs text-red-200 disabled:opacity-40">取消</button>
+                  )}
+                  {task.source === "media" && task.type === "local_vace_video" && ["queued", "starting", "running", "validating", "cancel_requested"].includes(task.status) && (
+                    <button disabled={busyTask === task.id || task.status === "cancel_requested"} onClick={() => void runAction(task, "cancel")}
+                      className="rounded-lg border border-red-300/25 px-3 py-2 text-xs text-red-200 disabled:opacity-40">
+                      {task.status === "cancel_requested" ? "正在停止…" : "取消本地生成"}
+                    </button>
                   )}
                   {task.source === "media" && ["video", "storyboard_video"].includes(task.type) && !["completed", "failed", "cancelled", "submission_unknown"].includes(task.status) && (
                     <button disabled={busyTask === task.id} onClick={() => void runAction(task, "refresh")}

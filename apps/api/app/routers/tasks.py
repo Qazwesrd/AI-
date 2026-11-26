@@ -22,6 +22,7 @@ from app.routers.visual import (
     cancel_image_task,
 )
 from app.routers.media import refresh_video_task
+from app.services.local_vace import request_cancel_local_vace
 
 router = APIRouter(prefix="/api/tasks", tags=["统一任务中心"])
 
@@ -61,9 +62,9 @@ def _status_group(status: str) -> str:
         return "cancelled"
     if value in {"paused"}:
         return "paused"
-    if value in {"submission_unknown", "awaiting_video_url", "submitting", "interrupted_unknown"}:
+    if value in {"submission_unknown", "awaiting_video_url", "submitting", "interrupted_unknown", "interrupted"}:
         return "attention"
-    if value in {"pending", "queued", "submitted", "processing", "running"}:
+    if value in {"pending", "queued", "submitted", "processing", "running", "starting", "validating", "cancel_requested"}:
         return "active"
     if value == "partial":
         return "partial"
@@ -318,6 +319,7 @@ def list_unified_tasks(
             "video": "独立视频生成",
             "speech": "独立配音",
             "episode_speech": "分镜对白配音",
+            "local_vace_video": "本地离线视频生成（Wan 2.1 VACE）",
         }
         items.append({
             "id": f"media:{task.id}", "source": "media", "source_id": task.id,
@@ -326,9 +328,13 @@ def list_unified_tasks(
             "status": task.status or "unknown", "status_group": _status_group(task.status),
             "provider": task.provider or "", "model": task.model or "",
             "summary": (task.prompt or "")[:180],
-            "context": f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
-                f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
+            "context": "本机 CPU 推理" if kind == "local_vace_video" else (
+                f"第 {meta.get('shot_number')} 镜" if meta.get("shot_number") else (
+                    f"分集 #{meta.get('episode_id')}" if meta.get("episode_id") else ""
+                )
             ),
+            "progress": meta.get("progress"),
+            "stage": meta.get("stage", ""),
             "error": (task.error or "")[:1200], "failure_diagnostic": classify_task_error(task.error), "result_available": bool(task.result_path),
             "created_at": _iso(task.created_at), "updated_at": _iso(task.updated_at),
             "can_open": True,
@@ -529,6 +535,11 @@ def control_unified_task(
         return handler(task_id, db)
 
     if source == "media":
+        if action == "cancel":
+            task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+            if not task or task.task_type != "local_vace_video":
+                raise HTTPException(409, "只有本地 VACE 视频任务支持本地进程取消；远程视频任务请刷新服务商状态")
+            return request_cancel_local_vace(db, task)
         if action == "retry":
             task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
             if not task or task.task_type not in ("speech", "episode_speech"):
@@ -560,7 +571,7 @@ def control_unified_task(
         if action != "refresh":
             raise HTTPException(
                 409,
-                "媒体任务暂不支持本地强制暂停或取消；视频请刷新远程状态，配音任务请走人工核实流程",
+                "仅本地 VACE 视频任务支持停止本机生成进程；远程视频请刷新服务商状态，配音任务请走人工核实流程",
             )
         result = refresh_video_task(task_id, db)
         return {

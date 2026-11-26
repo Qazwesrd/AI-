@@ -16,7 +16,7 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertFalse(is_known_remote_3d_task(task))
 
     def test_active_provider_statuses_are_normalized(self):
-        for value in ("pending", "queued", "submitted", "processing", "running"):
+        for value in ("pending", "queued", "submitted", "processing", "running", "starting", "validating", "cancel_requested"):
             with self.subTest(status=value):
                 self.assertEqual(_status_group(value), "active")
 
@@ -86,10 +86,23 @@ class UnifiedTaskStatusTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
         db.commit.assert_not_called()
 
-    def test_unified_media_does_not_allow_local_force_cancel(self):
+    def test_unified_remote_media_cancel_remains_blocked(self):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = Mock(task_type="video")
         with self.assertRaises(HTTPException) as raised:
-            control_unified_task("media", 4, "cancel", db=object())
+            control_unified_task("media", 4, "cancel", db=db)
         self.assertEqual(raised.exception.status_code, 409)
+
+    def test_unified_local_vace_cancel_delegates_to_owned_process_controller(self):
+        task = Mock(task_type="local_vace_video")
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        with patch("app.routers.tasks.request_cancel_local_vace", return_value={
+            "task_id": 5, "status": "cancel_requested"
+        }) as cancel:
+            result = control_unified_task("media", 5, "cancel", db=db)
+        self.assertEqual(result["status"], "cancel_requested")
+        cancel.assert_called_once_with(db, task)
 
     def test_analysis_retry_requires_explicit_provider_reconciliation(self):
         job = Mock(
