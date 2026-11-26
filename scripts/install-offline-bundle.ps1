@@ -144,7 +144,18 @@ try {
     $seenInventoryPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $inventory) {
         $relative = [string]$entry.path
-        if (!$seenInventoryPaths.Add($relative.Replace('\', '/'))) { throw "资源清单存在重复路径：$relative" }
+        $zipRelative = $relative.Replace('\', '/')
+        # Some published resource inventories contain an erroneous leading "aae\"
+        # prefix that is not present in the ZIP archive. Strip it only when the
+        # exact unprefixed path exists in the archive; all file hashes remain mandatory.
+        if (!$zipFilePaths.Contains($zipRelative) -and $zipRelative.StartsWith("aae/", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $candidate = $zipRelative.Substring(4)
+            if ($zipFilePaths.Contains($candidate)) {
+                $relative = $candidate.Replace('/', '\\')
+                $zipRelative = $candidate
+            }
+        }
+        if (!$seenInventoryPaths.Add($zipRelative)) { throw "资源清单存在重复路径：$relative" }
         if ([System.IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or $relative -match '(^|[\\/])\.\.([\\/]|$)') {
             throw "资源清单包含不安全路径：$relative"
         }
