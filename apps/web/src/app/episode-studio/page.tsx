@@ -85,6 +85,7 @@ export default function EpisodeReadinessPage() {
   } | null>(null);
   const [report, setReport] = useState<Readiness | null>(null);
   const [busy, setBusy] = useState(false);
+  const [renderFps, setRenderFps] = useState<24 | 30>(24);
   const [message, setMessage] = useState("");
   const [replacement, setReplacement] = useState<Record<number, File | null>>({});
   const [renderResult, setRenderResult] = useState<{ output?: string; subtitle_path?: string; duration_target?: number; quality_report?: { duration_seconds?: number; width?: number; height?: number } } | null>(null);
@@ -398,7 +399,8 @@ export default function EpisodeReadinessPage() {
     setBusy(true);
     setMessage("正在合成分集视频，请保持软件运行……");
     try {
-      const response = await fetch(`${API}/api/media/video/episodes/${report.episode_id}/render`, { method: "POST" });
+      const renderQuery = new URLSearchParams({ width: "1920", height: "1080", fps: String(renderFps) });
+      const response = await fetch(`${API}/api/media/video/episodes/${report.episode_id}/render?${renderQuery.toString()}`, { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "合成失败");
       setRenderResult(data);
@@ -524,7 +526,17 @@ export default function EpisodeReadinessPage() {
                   <h2 className="text-xl font-semibold">{report.episode_title || `分集 #${report.episode_id}`}</h2>
                   <p className="mt-1 text-sm text-white/55">共 {report.total_shots} 个镜头 · 逐个验证视频文件与可解码视频流</p>
                 </div>
-                <button disabled={busy || !report.ready} onClick={() => void renderEpisode()} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">合成分集 MP4</button>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="text-sm text-white/65">成片规格：1080P · H.264</label>
+                  <label className="flex items-center gap-2 text-sm text-white/70">帧率
+                    <select value={renderFps} onChange={event => setRenderFps(Number(event.target.value) as 24 | 30)}
+                      className="rounded-lg border border-white/15 bg-slate-900 px-3 py-2">
+                      <option value={24}>24 FPS</option>
+                      <option value={30}>30 FPS</option>
+                    </select>
+                  </label>
+                  <button disabled={busy || !report.ready} onClick={() => void renderEpisode()} className="rounded-xl bg-emerald-600 px-5 py-3 font-semibold disabled:cursor-not-allowed disabled:opacity-40">合成分集 MP4</button>
+                </div>
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3 md:grid-cols-4">
                 {counts.map(([label, value, color]) => <div key={label} className="rounded-xl bg-black/25 p-4"><div className={`text-2xl font-bold ${color}`}>{value}</div><div className="mt-1 text-sm text-white/55">{label}</div></div>)}
