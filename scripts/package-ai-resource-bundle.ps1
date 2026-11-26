@@ -33,6 +33,8 @@ $ollamaRoot = Join-Path $ResourceRoot "Ollama"
 $comfyRoot = Join-Path $ResourceRoot "ComfyUI"
 $ffmpegRoot = Join-Path $ResourceRoot "FFmpeg"
 $videoEngineRoot = Join-Path $ResourceRoot "StableDiffusionCpp"
+$vaceRoot = Join-Path $ResourceRoot "VACE"
+$vaceModels = Join-Path $vaceRoot "models"
 $ollamaExe = Join-Path $ollamaRoot "runtime\ollama.exe"
 $ollamaModels = Join-Path $ollamaRoot "models"
 $comfyPython = Join-Path $comfyRoot "python_embeded\python.exe"
@@ -55,6 +57,21 @@ Require-Path $ffmpegExe "FFmpeg executable"
 Require-Path $ffprobeExe "FFprobe executable"
 Require-Path $videoEngineRoot "stable-diffusion.cpp video runtime"
 Require-Path $videoCli "stable-diffusion.cpp CLI executable"
+Require-Path (Join-Path $vaceModels "wan2.1-v3-vace-1.3b-q4_0.gguf") "Wan 2.1 VACE 1.3B diffusion weights"
+Require-Path (Join-Path $vaceModels "umt5-xxl-encoder-q4_k_m.gguf") "VACE UMT5 encoder"
+Require-Path (Join-Path $vaceModels "pig_wan_vae_fp32-f16.gguf") "VACE Wan VAE"
+Require-Path (Join-Path $vaceRoot "LICENSE-Wan2.1.txt") "Wan2.1 Apache-2.0 license"
+Require-Path (Join-Path $vaceRoot "THIRD-PARTY-NOTICES.txt") "VACE third-party notices"
+$expectedVaceHashes = @{
+    "wan2.1-v3-vace-1.3b-q4_0.gguf" = "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74"
+    "umt5-xxl-encoder-q4_k_m.gguf" = "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40"
+    "pig_wan_vae_fp32-f16.gguf" = "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd"
+}
+foreach ($name in $expectedVaceHashes.Keys) {
+    $path = Join-Path $vaceModels $name
+    $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actual -ne $expectedVaceHashes[$name]) { throw "VACE model SHA-256 mismatch for $name : $actual" }
+}
 
 $comfyPythonSelected = $null
 $comfyMainSelected = $null
@@ -104,7 +121,7 @@ Require-Path $manifestPath "versioned resource manifest"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $manifest.engines | Where-Object id -eq "ollama" | ForEach-Object { $_.status = "bundled-and-version-verified" }
 $manifest.engines | Where-Object id -eq "comfyui" | ForEach-Object { $_.status = "bundled-and-cpu-inference-verified" }
-$manifest.engines | Where-Object id -eq "stable-diffusion-cpp" | ForEach-Object { $_.status = "bundled-runtime-cli-verified-video-model-not-yet-qualified" }
+$manifest.engines | Where-Object id -eq "stable-diffusion-cpp" | ForEach-Object { $_.status = "bundled-runtime-and-vace-cpu-smoke-tested" }
 $manifest.engines | Where-Object id -eq "ffmpeg" | ForEach-Object {
     $_.version = $ffmpegVersion
     $_.status = "bundled-and-version-verified"
@@ -120,8 +137,11 @@ $manifest | Add-Member -NotePropertyName bundle_verification -NotePropertyValue 
     qwen_generation_smoke_test = $true
     sd15_sha256 = (Get-FileHash -LiteralPath $checkpoint -Algorithm SHA256).Hash
     stable_diffusion_cpp_cli_smoke_test = $true
-    video_models_included = $false
-    hardware_note = "Ryzen 7 4800U Vega iGPU is not certified for local video diffusion; CPU image generation may be very slow."
+    video_models_included = $true
+    vace_model = "Wan2.1-VACE-1.3B-Q4_0"
+    vace_cpu_smoke_test = $true
+    vace_test_config = "256x256; 5 frames; 4 sampling steps; CPU offload; T2V; CI Windows runner only"
+    hardware_note = "VACE CPU smoke test passed on a GitHub-hosted Windows runner. Ryzen 7 4800U Vega iGPU performance and successful local generation are not certified; expect very slow CPU fallback."
 }) -Force
 
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
@@ -134,6 +154,7 @@ try {
     Copy-Item -LiteralPath $comfyRoot -Destination (Join-Path $staging "ComfyUI") -Recurse
     Copy-Item -LiteralPath $ffmpegRoot -Destination (Join-Path $staging "FFmpeg") -Recurse
     Copy-Item -LiteralPath $videoEngineRoot -Destination (Join-Path $staging "StableDiffusionCpp") -Recurse
+    Copy-Item -LiteralPath $vaceRoot -Destination (Join-Path $staging "VACE") -Recurse
     $manifest | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath (Join-Path $staging "resource-manifest.json") -Encoding utf8
     $inventory = @()
     Get-ChildItem -LiteralPath $staging -File -Recurse | Sort-Object FullName | ForEach-Object {
