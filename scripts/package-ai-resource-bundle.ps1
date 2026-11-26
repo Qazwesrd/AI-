@@ -150,7 +150,7 @@ try {
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $staging,
         $zipPath,
-        [System.IO.Compression.CompressionLevel]::Optimal,
+        [System.IO.Compression.CompressionLevel]::NoCompression,
         $false
     )
 
