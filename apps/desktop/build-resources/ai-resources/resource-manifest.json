@@ -32,14 +32,14 @@
     },
     {
       "id": "ffmpeg",
-      "version": "9.1",
+      "version": "N-129288-gc81e35cf2b",
       "official_source": "https://ffmpeg.org/download.html",
       "install_path": "engines/FFmpeg",
       "executables": [
         "ffmpeg.exe",
         "ffprobe.exe"
       ],
-      "status": "use-existing-user-copy-or-verified-bundle"
+      "status": "pinned-build-sha256-verified"
     },
     {
       "id": "stable-diffusion-cpp",

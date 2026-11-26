@@ -112,8 +112,8 @@ if ($ollamaVersion -notmatch "0\.40\.18") {
 }
 $ffmpegVersion = Get-FirstLine $ffmpegExe @("-version")
 $ffprobeVersion = Get-FirstLine $ffprobeExe @("-version")
-if ($ffmpegVersion -notmatch "^ffmpeg version " -or $ffprobeVersion -notmatch "^ffprobe version ") {
-    throw "FFmpeg/FFprobe runtime verification failed."
+if ($ffmpegVersion -notmatch "N-129288-gc81e35cf2b" -or $ffprobeVersion -notmatch "N-129288-gc81e35cf2b") {
+    throw "FFmpeg/FFprobe pinned build verification failed: $ffmpegVersion / $ffprobeVersion"
 }
 
 $manifestPath = Join-Path $PSScriptRoot "..\apps\desktop\build-resources\ai-resources\resource-manifest.json"

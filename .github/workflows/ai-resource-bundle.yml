@@ -180,15 +180,16 @@ jobs:
             if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
           }
 
-      - name: Download FFmpeg 9.1 runtime
+      - name: Download and verify pinned FFmpeg Windows runtime
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          $release = Invoke-RestMethod -Headers @{ "User-Agent" = "AI-Comic-Studio-CI" } -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
-          $asset = $release.assets | Where-Object { $_.name -match "win64-gpl.*\.zip$" -and $_.name -notmatch "shared" } | Select-Object -First 1
-          if (!$asset) { throw "Static Windows FFmpeg archive not found." }
-          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg-N-129288-gc81e35cf2b-win64-gpl.zip"
+          $url = "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-25-12-41/ffmpeg-N-129288-gc81e35cf2b-win64-gpl.zip"
+          $expected = "ee17bc29170b6f1d6685985260900c57c92967aaaabaf6f2bc8c65b67d76b8c5"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Pinned FFmpeg archive SHA-256 mismatch: $actual" }
           $extract = Join-Path $env:RUNNER_TEMP "ffmpeg-extract"
           Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
           $ffmpeg = Get-ChildItem $extract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
@@ -200,10 +201,10 @@ jobs:
           $ffprobeExe = Join-Path $env:RESOURCE_ROOT "FFmpeg\ffprobe.exe"
           $version = (& $ffmpegExe -version | Select-Object -First 1)
           $probeVersion = (& $ffprobeExe -version | Select-Object -First 1)
-          if ($version -notmatch "^ffmpeg version ") { throw "FFmpeg version probe failed: $version" }
-          if ($probeVersion -notmatch "^ffprobe version ") { throw "FFprobe version probe failed: $probeVersion" }
-          Write-Host "Verified FFmpeg: $version"
-          Write-Host "Verified FFprobe: $probeVersion"
+          if ($version -notmatch "N-129288-gc81e35cf2b") { throw "Unexpected FFmpeg build: $version" }
+          if ($probeVersion -notmatch "N-129288-gc81e35cf2b") { throw "Unexpected FFprobe build: $probeVersion" }
+          Write-Host "Verified pinned FFmpeg: $version"
+          Write-Host "Verified pinned FFprobe: $probeVersion"
           Remove-Item -LiteralPath $archive -Force
           Remove-Item -LiteralPath $extract -Recurse -Force
 
