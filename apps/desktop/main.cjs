@@ -43,9 +43,9 @@ function resolveAiResourcePaths(dataDir) {
     process.env.OLLAMA_MODELS,
     path.join(dataDir, "engines", "Ollama", "models"),
     path.join(dataDir, "Ollama", "models"),
-    "E:\\\\AI\\\\数据\\\\engines\\\\Ollama\\\\models",
-    "E:\\\\AI\\\\数据\\\\Ollama\\\\models",
-    "E:\\\\123\\\\ai-comic-studio-desktop-Data\\\\engines\\\\Ollama\\\\models",
+    "E:\\AI\\数据\\engines\\Ollama\\models",
+    "E:\\AI\\数据\\Ollama\\models",
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\models",
     path.join(userProfile, ".ollama", "models")
   ]);
   const ollamaModels = modelsCandidates.find((candidate) =>
@@ -76,9 +76,9 @@ function resolveAiResourcePaths(dataDir) {
     process.env.COMFYUI_PATH,
     path.join(dataDir, "engines", "ComfyUI"),
     path.join(dataDir, "ComfyUI"),
-    "E:\\\\AI\\\\数据\\\\engines\\\\ComfyUI",
-    "E:\\\\AI\\\\数据\\\\ComfyUI",
-    "E:\\\\123\\\\ai-comic-studio-desktop-Data\\\\engines\\\\ComfyUI",
+    "E:\\AI\\数据\\engines\\ComfyUI",
+    "E:\\AI\\数据\\ComfyUI",
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\ComfyUI",
     path.join(path.dirname(dataDir), "ComfyUI"),
     path.join(userProfile, "ComfyUI")
   ]);
@@ -122,8 +122,8 @@ function resolveManagedDataDirectory() {
   const candidates = uniquePaths([
     configured,
     // Known legacy data locations are searched before creating a new empty profile.
-    "E:\\\\AI\\\\数据",
-    "E:\\\\123\\\\ai-comic-studio-desktop-Data",
+    "E:\\AI\\数据",
+    "E:\\123\\ai-comic-studio-desktop-Data",
     adjacentData,
     legacyUserData,
     path.join(appData, "AI漫剧制作大师"),
@@ -394,34 +394,42 @@ async function startManagedAiEngines(dataDir) {
   const resources = resolveAiResourcePaths(dataDir);
 
   if (resources.ollamaExe && resources.ollamaModels) {
-    const ollamaEnv = {
-      ...process.env,
-      OLLAMA_HOST: "127.0.0.1:11435",
-      OLLAMA_MODELS: resources.ollamaModels,
-      OLLAMA_NO_CLOUD: "1"
-    };
-    if (await localServiceResponds(11435, "/api/tags")) {\n      console.log("[OLLAMA] Reusing the already-running local Ollama service and its existing models.");\n    } else {\n    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
-      cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
-      windowsHide: true,
-      env: ollamaEnv,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    logChild("OLLAMA", ollamaProcess);
+    if (await localServiceResponds(11435, "/api/tags")) {
+      console.log("[OLLAMA] Reusing the already-running local Ollama service and its existing models.");
+    } else {
+      const ollamaEnv = {
+        ...process.env,
+        OLLAMA_HOST: "127.0.0.1:11435",
+        OLLAMA_MODELS: resources.ollamaModels,
+        OLLAMA_NO_CLOUD: "1"
+      };
+      ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
+        cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
+        windowsHide: true,
+        env: ollamaEnv,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      logChild("OLLAMA", ollamaProcess);
+    }
   } else {
     console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download or replacement will be attempted.");
   }
 
   if (resources.comfy) {
-    // Preserve the installed Python/GPU backend; do not force CPU-only startup.
-    comfyProcess = spawn(resources.comfy.python, [
-      resources.comfy.main, "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"
-    ], {
-      cwd: resources.comfy.cwd,
-      windowsHide: true,
-      env: { ...process.env, PYTHONUNBUFFERED: "1" },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    logChild("COMFYUI", comfyProcess);
+    if (await localServiceResponds(8188, "/system_stats")) {
+      console.log("[COMFYUI] Reusing the already-running local ComfyUI service and installed models.");
+    } else {
+      // Preserve the installed Python/GPU backend; do not force CPU-only startup.
+      comfyProcess = spawn(resources.comfy.python, [
+        resources.comfy.main, "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"
+      ], {
+        cwd: resources.comfy.cwd,
+        windowsHide: true,
+        env: { ...process.env, PYTHONUNBUFFERED: "1" },
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+      logChild("COMFYUI", comfyProcess);
+    }
   } else {
     console.warn("[COMFYUI] Existing runtime was not detected; no runtime download or replacement will be attempted.");
   }
