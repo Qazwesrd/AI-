@@ -43,9 +43,14 @@ class LocalVaceRuntimeTests(unittest.TestCase):
                 with self.assertRaises(FileNotFoundError):
                     _runtime()
 
+    def _db_for_task(self, task):
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = task
+        return db
+
     def test_cancel_queued_task_marks_it_cancelled_without_spawning(self):
         task = Mock(task_type="local_vace_video", status="queued", request_data={"stage": "queued"})
-        db = Mock()
+        db = self._db_for_task(task)
         with patch("app.services.local_vace.remove_queued_task") as remove:
             result = request_cancel_local_vace(db, task)
         self.assertEqual(result["status"], "cancelled")
@@ -56,7 +61,7 @@ class LocalVaceRuntimeTests(unittest.TestCase):
 
     def test_cancel_running_task_sets_cancel_request_for_worker(self):
         task = Mock(task_type="local_vace_video", status="running", request_data={"stage": "generating"})
-        db = Mock()
+        db = self._db_for_task(task)
         result = request_cancel_local_vace(db, task)
         self.assertEqual(result["status"], "cancel_requested")
         self.assertEqual(task.status, "cancel_requested")
@@ -64,7 +69,7 @@ class LocalVaceRuntimeTests(unittest.TestCase):
 
     def test_cancel_completed_task_is_idempotent(self):
         task = Mock(task_type="local_vace_video", status="completed", request_data={})
-        db = Mock()
+        db = self._db_for_task(task)
         result = request_cancel_local_vace(db, task)
         self.assertEqual(result["status"], "completed")
         db.commit.assert_not_called()
