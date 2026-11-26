@@ -1,0 +1,21 @@
+name: Offline installer workflow trigger probe
+
+"on":
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/offline-installer-trigger-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-latest
+    steps:
+      - name: Confirm workflow parser and runner
+        shell: pwsh
+        run: |
+          Write-Host "Workflow parsed and runner started."
+          Write-Host "Commit: $env:GITHUB_SHA"
