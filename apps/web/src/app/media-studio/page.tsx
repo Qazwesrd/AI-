@@ -174,7 +174,20 @@ export default function MediaStudioPage() {
                 )}
                 <p className="text-white/50">工作流实际生成验收：{localVideoRuntime.workflow_execution_verified ? "已通过" : "尚未通过"}。检测不会下载模型、安装节点或提交生成任务。</p>
                 {localVideoRuntime.nodes.length > 0 && (
-                  <p className="break-words text-white/60">节点：{localVideoRuntime.nodes.map(node => node.node_type).join("、")}</p>
+                  <div className="space-y-2">
+                    <p className="break-words text-white/60">已发现节点：{localVideoRuntime.nodes.map(node => node.node_type).join("、")}</p>
+                    {localVideoRuntime.nodes.some(node => node.model_choices.length > 0) && (
+                      <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <p className="mb-2 text-white/70">ComfyUI 节点实际提供的模型选项（仅为下拉清单，不代表模型已完整加载或可成功推理）：</p>
+                        {localVideoRuntime.nodes.filter(node => node.model_choices.length > 0).map(node => (
+                          <div key={node.node_type} className="mb-2 last:mb-0">
+                            <p className="text-cyan-100">{node.node_type}</p>
+                            <p className="break-all text-xs text-white/55">{node.model_choices.join("、")}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}
