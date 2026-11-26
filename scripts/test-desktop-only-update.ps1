@@ -20,6 +20,19 @@ foreach ($pattern in $forbidden) {
     }
 }
 
+# The full offline provisioner may add missing engine folders, but must not
+# move or replace an already present engine/model directory.
+$offlineInstaller = Get-Content -LiteralPath (Join-Path $PSScriptRoot "install-offline-bundle.ps1") -Raw
+if ($offlineInstaller -notmatch 'if \(Test-Path -LiteralPath \$destination -PathType Container\)\s*\{[\s\S]*?continue') {
+    throw "Full offline installer does not skip existing engine directories."
+}
+if ($offlineInstaller -match 'Move-Item -LiteralPath \$destination -Destination \$backupPath') {
+    throw "Full offline installer still moves an existing engine directory into backup."
+}
+if ($offlineInstaller -notmatch 'if \(!\$hadManifest\)') {
+    throw "Full offline installer does not preserve an existing resource manifest."
+}
+
 $temp = Join-Path ([IO.Path]::GetTempPath()) ("ai-comic-update-test-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $temp -Force | Out-Null
 try {
