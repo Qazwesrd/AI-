@@ -147,10 +147,13 @@ try {
 
     if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    # Model weights and runtime archives are already compressed. Re-compressing
+    # multi-GB model files at Optimal wastes minutes or hours for negligible gain.
+    # Store entries without recompression; integrity is provided by the SHA-256 inventory.
     [System.IO.Compression.ZipFile]::CreateFromDirectory(
         $staging,
         $zipPath,
-        [System.IO.Compression.CompressionLevel]::Optimal,
+        [System.IO.Compression.CompressionLevel]::NoCompression,
         $false
     )
 
