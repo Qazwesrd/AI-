@@ -381,8 +381,19 @@ function findFfmpegPair() {
 function localServiceResponds(port, route) {
   return new Promise((resolve) => {
     const req = http.get(`http://127.0.0.1:${port}${route}`, { timeout: 1800 }, (res) => {
-      res.resume();
-      resolve(res.statusCode >= 200 && res.statusCode < 500);
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => { body += chunk; if (body.length > 1024 * 1024) req.destroy(); });
+      res.on("end", () => {
+        if (res.statusCode !== 200) return resolve(false);
+        try {
+          const payload = JSON.parse(body);
+          if (route === "/api/tags") return resolve(Array.isArray(payload.models));
+          return resolve(Boolean(payload && typeof payload === "object"));
+        } catch {
+          resolve(false);
+        }
+      });
     });
     req.on("error", () => resolve(false));
     req.on("timeout", () => { req.destroy(); resolve(false); });
@@ -393,45 +404,49 @@ async function startManagedAiEngines(dataDir) {
   if (process.platform !== "win32") return;
   const resources = resolveAiResourcePaths(dataDir);
 
-  if (resources.ollamaExe && resources.ollamaModels) {
-    if (await localServiceResponds(11435, "/api/tags")) {
-      console.log("[OLLAMA] Reusing the already-running local Ollama service and its existing models.");
-    } else {
-      const ollamaEnv = {
-        ...process.env,
-        OLLAMA_HOST: "127.0.0.1:11435",
-        OLLAMA_MODELS: resources.ollamaModels,
-        OLLAMA_NO_CLOUD: "1"
-      };
-      ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
-        cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
-        windowsHide: true,
-        env: ollamaEnv,
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      logChild("OLLAMA", ollamaProcess);
-    }
+  // Prefer an already-running Ollama service on either supported local port.
+  // Reusing it preserves its existing model store and avoids downloading or copying models.
+  let ollamaPort = 0;
+  if (await localServiceResponds(11435, "/api/tags")) ollamaPort = 11435;
+  else if (await localServiceResponds(11434, "/api/tags")) ollamaPort = 11434;
+
+  if (ollamaPort) {
+    process.env.OLLAMA_HOST = `http://127.0.0.1:${ollamaPort}`;
+    console.log(`[OLLAMA] Reusing the existing local service on port ${ollamaPort}; model files will not be changed.`);
+  } else if (resources.ollamaExe && resources.ollamaModels) {
+    process.env.OLLAMA_HOST = "http://127.0.0.1:11435";
+    const ollamaEnv = {
+      ...process.env,
+      OLLAMA_HOST: "127.0.0.1:11435",
+      OLLAMA_MODELS: resources.ollamaModels,
+      OLLAMA_NO_CLOUD: "1"
+    };
+    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
+      cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
+      windowsHide: true,
+      env: ollamaEnv,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    logChild("OLLAMA", ollamaProcess);
   } else {
-    console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download or replacement will be attempted.");
+    console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download, replacement, or migration will be attempted.");
   }
 
-  if (resources.comfy) {
-    if (await localServiceResponds(8188, "/system_stats")) {
-      console.log("[COMFYUI] Reusing the already-running local ComfyUI service and installed models.");
-    } else {
-      // Preserve the installed Python/GPU backend; do not force CPU-only startup.
-      comfyProcess = spawn(resources.comfy.python, [
-        resources.comfy.main, "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"
-      ], {
-        cwd: resources.comfy.cwd,
-        windowsHide: true,
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        stdio: ["ignore", "pipe", "pipe"]
-      });
-      logChild("COMFYUI", comfyProcess);
-    }
+  if (await localServiceResponds(8188, "/system_stats")) {
+    console.log("[COMFYUI] Reusing the already-running local ComfyUI service and installed models.");
+  } else if (resources.comfy) {
+    // Preserve the installed Python/GPU backend; do not force CPU-only startup.
+    comfyProcess = spawn(resources.comfy.python, [
+      resources.comfy.main, "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"
+    ], {
+      cwd: resources.comfy.cwd,
+      windowsHide: true,
+      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    logChild("COMFYUI", comfyProcess);
   } else {
-    console.warn("[COMFYUI] Existing runtime was not detected; no runtime download or replacement will be attempted.");
+    console.warn("[COMFYUI] Existing runtime was not detected; no runtime download, replacement, or migration will be attempted.");
   }
 }
 
@@ -538,7 +553,7 @@ async function createWindow() {
       );
     }
 
-    startProductionServices({
+    await startProductionServices({
       startApi: apiPortFree,
       startWeb: webPortFree
     });
