@@ -11,7 +11,9 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models.media import MediaFile, MediaTask
 from app.services.media_service import VIDEO_DIR, probe_media
-from app.services.task_runtime import acquire_task_lease, heartbeat_task_lease, release_task_lease
+from app.services.task_runtime import (
+    acquire_task_lease, heartbeat_task_lease, release_task_lease, remove_queued_task,
+)
 
 logger = logging.getLogger("ai_comic_studio.local_vace")
 _STOP = threading.Event()
@@ -373,6 +375,7 @@ def request_cancel_local_vace(db, task):
         task.request_data = request
         task.updated_at = datetime.utcnow()
         db.commit()
+        remove_queued_task(db, "media", task.id)
         return {"task_id": task.id, "status": task.status, "message": "已取消排队中的本地 VACE 任务。"}
     task.status = "cancel_requested"
     task.updated_at = datetime.utcnow()

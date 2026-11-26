@@ -118,7 +118,10 @@ jobs:
             "deployed",
             "rollback",
             "AvailableFreeSpace",
-            "ExtractToDirectory"
+            "ExtractToDirectory",
+            "Assert-ManagedEnginesStopped",
+            "Get-CimInstance",
+            "不会强制结束任何进程"
           )
           foreach ($token in $required) {
             if ($source -notmatch [regex]::Escape($token)) {

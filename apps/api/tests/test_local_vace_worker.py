@@ -46,11 +46,13 @@ class LocalVaceRuntimeTests(unittest.TestCase):
     def test_cancel_queued_task_marks_it_cancelled_without_spawning(self):
         task = Mock(task_type="local_vace_video", status="queued", request_data={"stage": "queued"})
         db = Mock()
-        result = request_cancel_local_vace(db, task)
+        with patch("app.services.local_vace.remove_queued_task") as remove:
+            result = request_cancel_local_vace(db, task)
         self.assertEqual(result["status"], "cancelled")
         self.assertEqual(task.status, "cancelled")
         self.assertEqual(task.request_data["stage"], "cancelled")
         db.commit.assert_called_once()
+        remove.assert_called_once_with(db, "media", task.id)
 
     def test_cancel_running_task_sets_cancel_request_for_worker(self):
         task = Mock(task_type="local_vace_video", status="running", request_data={"stage": "generating"})

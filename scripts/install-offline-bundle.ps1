@@ -49,6 +49,33 @@ if ($InstallDirectory.Equals($DataDirectory, [System.StringComparison]::OrdinalI
     throw "程序安装目录与 AI 数据目录不能相同或互相包含，请选择两个独立目录。"
 }
 
+function Assert-ManagedEnginesStopped {
+    $engineRoot = Normalize-DirectoryPath (Join-Path $DataDirectory "engines")
+    $enginePrefix = $engineRoot.TrimEnd([char[]]@('\\','/')) + [System.IO.Path]::DirectorySeparatorChar
+    try {
+        $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+    } catch {
+        throw "无法安全检查 AI 漫剧大师和本地引擎是否仍在运行；为避免替换被占用的文件，已停止安装。错误：$($_.Exception.Message)"
+    }
+    $running = @($processes | Where-Object {
+        $name = [string]$_.Name
+        $exe = [string]$_.ExecutablePath
+        $commandLine = [string]$_.CommandLine
+        $knownApp = $name -ieq "AI漫剧制作大师.exe" -or $name -ieq "ai-comic-api.exe"
+        $exeMatches = $exe -and $exe.StartsWith($enginePrefix, [System.StringComparison]::OrdinalIgnoreCase)
+        $commandMatches = $commandLine -and $commandLine.IndexOf($enginePrefix, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+        return ($knownApp -or $exeMatches -or $commandMatches)
+    })
+    if ($running.Count -gt 0) {
+        $details = ($running | ForEach-Object { "$($_.Name) (PID $($_.ProcessId))" }) -join ", "
+        throw "检测到 AI 漫剧大师或受管本地引擎仍在运行：$details。请先正常退出软件后重试；安装器不会强制结束任何进程。"
+    }
+}
+
+# Check before extracting the large resource archive; check again immediately before
+# replacing managed engine directories to avoid overwriting files held by live processes.
+Assert-ManagedEnginesStopped
+
 $driveRoot = [System.IO.Path]::GetPathRoot($DataDirectory)
 $drive = [System.IO.DriveInfo]::new($driveRoot)
 $zip = [System.IO.Compression.ZipFile]::OpenRead($ResourceBundlePath)
@@ -133,6 +160,7 @@ try {
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
     New-Item -ItemType Directory -Path $engines -Force | Out-Null
     try {
+        Assert-ManagedEnginesStopped
         foreach ($name in @("Ollama", "ComfyUI", "FFmpeg", "StableDiffusionCpp", "VACE")) {
             $source = Join-Path $staging $name
             if (!(Test-Path -LiteralPath $source -PathType Container)) { throw "资源包缺少引擎目录：$name" }
