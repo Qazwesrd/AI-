@@ -45,6 +45,21 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertFalse(result["generation_ready"])
         self.assertFalse(result["workflow_execution_verified"])
 
+    def test_reports_actual_required_node_input_schema_and_dropdown_choices(self):
+        from app.routers.local_video_runtime import REQUIRED_VACE_WORKFLOW_NODES
+        info = {
+            node_name: {"input": {"required": {"model_name": [["wan-vae.safetensors", "other.safetensors"]]}}}
+            for node_name in REQUIRED_VACE_WORKFLOW_NODES.values()
+        }
+        result = assess_wan_vace_nodes(info)
+        loader = next(node for node in result["nodes"] if node["node_type"] == "WanVideoModelLoader")
+        self.assertEqual(
+            loader["input_schema"]["required"]["model_name"]["choices"],
+            ["wan-vae.safetensors", "other.safetensors"],
+        )
+        self.assertEqual(loader["input_schema"]["required"]["model_name"]["type"], "COMBO")
+        self.assertFalse(result["generation_ready"])
+
     def test_unrelated_nodes_are_not_misclassified(self):
         result = assess_wan_vace_nodes({"KSampler": {}, "SaveImage": {}})
         self.assertEqual(result["node_count"], 0)
