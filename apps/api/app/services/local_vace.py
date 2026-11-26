@@ -258,8 +258,24 @@ def _run_task(task_id):
         current = db.query(MediaTask).filter(MediaTask.id == task_id).first()
         if current is None:
             raise RuntimeError("视频任务记录不存在。")
+        if current.status in ("cancel_requested", "cancelled"):
+            if current.status == "cancel_requested":
+                _write_state(db, current, status="cancelled", stage="cancelled")
+            if output:
+                output.unlink(missing_ok=True)
+            return
         _write_state(db, current, status="validating", stage="validating_output", progress=92)
         info = probe_media(output)
+        db.expire_all()
+        current = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+        if current is None:
+            raise RuntimeError("视频任务记录不存在。")
+        if current.status in ("cancel_requested", "cancelled"):
+            if current.status == "cancel_requested":
+                _write_state(db, current, status="cancelled", stage="cancelled")
+            if output:
+                output.unlink(missing_ok=True)
+            return
         streams = info.get("streams") or []
         video = next((item for item in streams if item.get("codec_type") == "video"), None)
         if not video:
