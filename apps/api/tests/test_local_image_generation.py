@@ -8,11 +8,32 @@ from app.routers.local_image_generation import (
     LocalImageGenerateInput, _checkpoint_names, build_txt2img_workflow,
     generate_local_image, get_local_image_task, LocalImageArchiveInput,
     _safe_output_image, _download_comfyui_output, archive_local_image_task_output,
+    inspect_local_upscale_capabilities,
     _attach_media_to_shot, _remove_media_link_from_shot, _replace_shot_media,
 )
 
 
 class LocalImageGenerationTests(unittest.TestCase):
+    def test_upscale_capabilities_detect_installed_nodes_and_models(self):
+        with patch("app.routers.local_image_generation._local_request", side_effect=[
+            {"UpscaleModelLoader": {"input": {"required": {"model_name": [["4x-UltraSharp.pth"]]}}}},
+            {"ImageUpscaleWithModel": {"input": {"required": {"upscale_model": ["UPSCALE_MODEL"], "image": ["IMAGE"]}}}},
+        ]):
+            result = inspect_local_upscale_capabilities()
+        self.assertTrue(result["upscale_ready"])
+        self.assertEqual(result["models"], ["4x-UltraSharp.pth"])
+        self.assertFalse(result["generation_started"])
+        self.assertFalse(result["network_used"])
+
+    def test_upscale_capabilities_do_not_claim_ready_without_model(self):
+        with patch("app.routers.local_image_generation._local_request", side_effect=[
+            {"UpscaleModelLoader": {"input": {"required": {"model_name": [[]]}}}},
+            {"ImageUpscaleWithModel": {"input": {"required": {"upscale_model": ["UPSCALE_MODEL"]}}}},
+        ]):
+            result = inspect_local_upscale_capabilities()
+        self.assertFalse(result["upscale_ready"])
+        self.assertEqual(result["models_found"], 0)
+
     def test_checkpoint_allowlist_parses_installed_models(self):
         data = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["model.safetensors", "../bad", "中文模型"]]}}}}
         self.assertEqual(_checkpoint_names(data), ["model.safetensors"])
