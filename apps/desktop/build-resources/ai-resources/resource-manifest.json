@@ -6,8 +6,10 @@
     "offline_first": true,
     "no_cloud_fallback": true,
     "no_automatic_model_download": true,
-    "preserve_existing_models": true,
-    "program_updates_reuse_resource_bundle": true
+    "preserve_existing_models": false,
+    "program_updates_reuse_resource_bundle": true,
+    "replace_managed_engine_directories": true,
+    "preserve_user_projects_and_media": true
   },
   "engines": [
     {
@@ -27,7 +29,7 @@
       "official_source": "https://github.com/Comfy-Org/ComfyUI/releases",
       "install_path": "engines/ComfyUI",
       "port": 8188,
-      "status": "required-resource-not-yet-bundled",
+      "status": "bundled-runtime-and-cpu-inference-verified",
       "notes": "Use a pinned Python environment and hardware-aware PyTorch build. CPU fallback is required for unsupported integrated GPUs."
     },
     {
@@ -47,7 +49,7 @@
       "platform": "windows-x64",
       "official_source": "https://github.com/leejet/stable-diffusion.cpp",
       "install_path": "engines/StableDiffusionCpp",
-      "status": "bundled-runtime-candidate-pending-video-model-and-inference-qualification",
+      "status": "bundled-runtime-and-vace-cpu-smoke-tested",
       "notes": "Pinned official Windows CPU runtime. CLI capability smoke test can verify Wan video mode/options, but does not certify the target PC can complete video inference.",
       "license": "MIT",
       "release_asset": "sd-master-52491bd-bin-win-cpu-x64.zip",
