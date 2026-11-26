@@ -109,9 +109,9 @@ class LocalImageGenerateInput(BaseModel):
     prompt: str = Field(min_length=3, max_length=6000)
     negative_prompt: str = Field(default="low quality, blurry, distorted anatomy, extra fingers, text, watermark", max_length=3000)
     style: Literal["国漫", "仿真人", "3D漫", "2D漫"] = "国漫"
-    width: int = Field(default=768, ge=512, le=1536)
+    width: int = Field(default=512, ge=512, le=1536)
     height: int = Field(default=768, ge=512, le=1536)
-    steps: int = Field(default=24, ge=1, le=40)
+    steps: int = Field(default=8, ge=1, le=40)
     cfg: float = Field(default=7.0, ge=1.0, le=12.0)
     seed: int | None = Field(default=None, ge=0, le=4294967295)
     confirm_local_generation: bool = False
