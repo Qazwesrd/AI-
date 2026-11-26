@@ -1,6 +1,10 @@
 name: Build complete offline Windows installer
 
-on:
+"on":
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/build-full-offline-installer.yml'
   workflow_dispatch:
     inputs:
       windows_setup_run_id:
@@ -33,7 +37,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: AI-Comic-Studio-Windows-Setup
-          run-id: ${{ inputs.windows_setup_run_id }}
+          run-id: ${{ inputs.windows_setup_run_id || '45768803050' }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/setup-artifact
 
@@ -41,7 +45,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: AI-Comic-Studio-AI-Offline-Resources-2026.11
-          run-id: ${{ inputs.ai_resource_run_id }}
+          run-id: ${{ inputs.ai_resource_run_id || '45748921430' }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/resource-artifact
 
