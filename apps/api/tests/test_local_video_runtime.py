@@ -66,5 +66,44 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertFalse(result["generation_ready"])
 
 
+    def test_vace_input_preflight_checks_live_inputs_and_model_choices(self):
+        from app.routers.local_video_runtime import validate_vace_node_input_requirements
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {
+                    "model": [["wan2.1-vace.safetensors", "other.safetensors"]],
+                    "precision": ["STRING", {"default": "fp16"}],
+                }}
+            }
+        }
+        result = validate_vace_node_input_requirements(info, {
+            "WanVideoModelLoader": {
+                "model": {"choice": "wan2.1-vace.safetensors"},
+                "precision": {},
+                "missing_field": {},
+            },
+            "MissingNode": {"model": {}},
+        })
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["missing_nodes"], ["MissingNode"])
+        self.assertEqual(result["missing_inputs"], [
+            {"node": "WanVideoModelLoader", "input": "missing_field"}
+        ])
+        self.assertEqual(result["unavailable_choices"], [])
+
+    def test_vace_input_preflight_rejects_uninstalled_model_choice(self):
+        from app.routers.local_video_runtime import validate_vace_node_input_requirements
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["installed.safetensors"]]}}
+            }
+        }
+        result = validate_vace_node_input_requirements(info, {
+            "WanVideoModelLoader": {"model": {"choice": "not-installed.safetensors"}}
+        })
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["unavailable_choices"][0]["choice"], "not-installed.safetensors")
+
+
 if __name__ == "__main__":
     unittest.main()
