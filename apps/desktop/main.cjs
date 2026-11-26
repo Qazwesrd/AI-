@@ -88,8 +88,22 @@ function resolveAiResourcePaths(dataDir) {
 
 function hasManagedAiResources(directory) {
   if (!directory) return false;
-  const resources = resolveAiResourcePaths(directory);
-  return Boolean((resources.ollamaExe && resources.ollamaModels) || resources.comfy);
+  // Only count assets physically inside this candidate directory. Global
+  // USERPROFILE/.ollama or Program Files runtimes must never make an empty
+  // candidate look like the user's data folder.
+  const localModels = [
+    path.join(directory, "engines", "Ollama", "models"),
+    path.join(directory, "Ollama", "models")
+  ].some((models) =>
+    fs.existsSync(path.join(models, "blobs")) || fs.existsSync(path.join(models, "manifests"))
+  );
+  const localComfy = [
+    path.join(directory, "engines", "ComfyUI"),
+    path.join(directory, "ComfyUI")
+  ].some((root) => comfyLayouts(root).some((layout) =>
+    fs.existsSync(layout.python) && fs.existsSync(layout.main)
+  ));
+  return localModels || localComfy;
 }
 
 function resolveManagedDataDirectory() {
