@@ -389,7 +389,7 @@ function localServiceResponds(port, route) {
   });
 }
 
-function startManagedAiEngines(dataDir) {
+async function startManagedAiEngines(dataDir) {
   if (process.platform !== "win32") return;
   const resources = resolveAiResourcePaths(dataDir);
 
@@ -400,7 +400,7 @@ function startManagedAiEngines(dataDir) {
       OLLAMA_MODELS: resources.ollamaModels,
       OLLAMA_NO_CLOUD: "1"
     };
-    if (localServiceResponds(11435, "/api/tags")) {\n      console.log("[OLLAMA] Reusing the already-running local Ollama service and its existing models.");\n    } else {\n    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
+    if (await localServiceResponds(11435, "/api/tags")) {\n      console.log("[OLLAMA] Reusing the already-running local Ollama service and its existing models.");\n    } else {\n    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
       cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
       windowsHide: true,
       env: ollamaEnv,
@@ -427,7 +427,7 @@ function startManagedAiEngines(dataDir) {
   }
 }
 
-function startProductionServices({ startApi = true, startWeb = true } = {}) {
+async function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
   const webServer = path.join(resources, "web", "server.js");
@@ -444,7 +444,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
   }
 
   fs.mkdirSync(dataDir, { recursive: true });
-  startManagedAiEngines(dataDir);
+  await startManagedAiEngines(dataDir);
 
   if (fs.existsSync(dataDir)) {
     const storageDir = path.join(dataDir, "storage");
