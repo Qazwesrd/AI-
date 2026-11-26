@@ -88,6 +88,48 @@ def _node_input_schema(node_info):
     return result
 
 
+def validate_vace_node_input_requirements(object_info, requirements):
+    """Check workflow input names and requested dropdown values against live ComfyUI metadata.
+
+    requirements maps node class names to input names; a string value means the
+    input must exist, while a mapping may include an expected dropdown choice.
+    """
+    missing_nodes = []
+    missing_inputs = []
+    unavailable_choices = []
+    for node_name, fields in requirements.items():
+        node_info = object_info.get(node_name) if isinstance(object_info, dict) else None
+        if not isinstance(node_info, dict):
+            missing_nodes.append(node_name)
+            continue
+        schema = _node_input_schema(node_info)
+        available = {
+            name: details
+            for section in ("required", "optional")
+            for name, details in schema[section].items()
+        }
+        for input_name, expectation in fields.items():
+            if input_name not in available:
+                missing_inputs.append({"node": node_name, "input": input_name})
+                continue
+            expected_choice = expectation.get("choice") if isinstance(expectation, dict) else None
+            if expected_choice is not None:
+                choices = available[input_name].get("choices", [])
+                if expected_choice not in choices:
+                    unavailable_choices.append({
+                        "node": node_name,
+                        "input": input_name,
+                        "choice": expected_choice,
+                        "available_choices": choices,
+                    })
+    return {
+        "valid": not (missing_nodes or missing_inputs or unavailable_choices),
+        "missing_nodes": missing_nodes,
+        "missing_inputs": missing_inputs,
+        "unavailable_choices": unavailable_choices,
+    }
+
+
 def assess_wan_vace_nodes(object_info):
     if not isinstance(object_info, dict) or object_info.get("_error"):
         return {
