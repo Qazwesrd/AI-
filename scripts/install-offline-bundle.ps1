@@ -151,7 +151,7 @@ try {
         if (!$zipFilePaths.Contains($zipRelative) -and $zipRelative.StartsWith("aae/", [System.StringComparison]::OrdinalIgnoreCase)) {
             $candidate = $zipRelative.Substring(4)
             if ($zipFilePaths.Contains($candidate)) {
-                $relative = $candidate.Replace('/', '\\')
+                $relative = $candidate.Replace('/', '\')
                 $zipRelative = $candidate
             }
         }
