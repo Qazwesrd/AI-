@@ -85,7 +85,7 @@ jobs:
           $out = Join-Path $env:VACE_ROOT "vace-t2v.avi"
           $args = @(
             "-M","vid_gen",
-            "--diffusion-model",(Join-Path $models "wan2.1-vace-1.3b-q4_0.gguf"),
+            "--diffusion-model",(Join-Path $models "wan2.1-v3-vace-1.3b-q4_0.gguf"),
             "--vae",(Join-Path $models "pig_wan_vae_fp32-f16.gguf"),
             "--t5xxl",(Join-Path $models "umt5-xxl-encoder-q4_k_m.gguf"),
             "-p","A small golden-orange bird flying slowly above a calm lake at sunrise, cinematic anime style",
@@ -119,7 +119,7 @@ jobs:
           $out = Join-Path $env:VACE_ROOT "vace-r2v.avi"
           $args = @(
             "-M","vid_gen",
-            "--diffusion-model",(Join-Path $models "wan2.1-vace-1.3b-q4_0.gguf"),
+            "--diffusion-model",(Join-Path $models "wan2.1-v3-vace-1.3b-q4_0.gguf"),
             "--vae",(Join-Path $models "pig_wan_vae_fp32-f16.gguf"),
             "--t5xxl",(Join-Path $models "umt5-xxl-encoder-q4_k_m.gguf"),
             "-p","The subject from the reference image gently moves and turns toward the camera, cinematic anime style",
