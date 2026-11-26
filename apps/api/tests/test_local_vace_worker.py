@@ -45,7 +45,17 @@ class LocalVaceRuntimeTests(unittest.TestCase):
 
     def _db_for_task(self, task):
         db = Mock()
-        db.query.return_value.filter.return_value.first.return_value = task
+        filtered = db.query.return_value.filter.return_value
+        filtered.first.return_value = task
+
+        def apply_update(values, synchronize_session=False):
+            for column, value in values.items():
+                field = getattr(column, "key", None) or getattr(column, "name", None)
+                if field:
+                    setattr(task, field, value)
+            return 1
+
+        filtered.update.side_effect = apply_update
         return db
 
     def test_cancel_queued_task_marks_it_cancelled_without_spawning(self):
