@@ -58,7 +58,7 @@ try {
     foreach ($entry in $zip.Entries) {
         if ([string]::IsNullOrEmpty($entry.Name)) { continue }
         if ([System.IO.Path]::IsPathRooted($entry.FullName) -or $entry.FullName.Contains(':') -or
-            $entry.FullName -match '(^|[\/])\.\.([\/]|$)') { throw "资源 ZIP 包含不安全路径：$($entry.FullName)" }
+            $entry.FullName -match '(^|[\\/])\.\.([\\/]|$)') { throw "资源 ZIP 包含不安全路径：$($entry.FullName)" }
         if (!$zipFilePaths.Add($entry.FullName.Replace('\','/'))) { throw "资源 ZIP 包含重复文件路径：$($entry.FullName)" }
         $uncompressedBytes += [long]$entry.Length
     }
@@ -70,7 +70,7 @@ if ($drive.AvailableFreeSpace -lt $requiredFree) {
 New-Item -ItemType Directory -Path $DataDirectory -Force | Out-Null
 $oldUserData = [Environment]::GetEnvironmentVariable("AICOMICS_DATA_DIR", "User")
 $oldProcessData = $env:AICOMICS_DATA_DIR
-Write-Host "[1/5] 资源包 SHA-256、ZIP 路径和空间预检通过，尚未启动安装器。
+Write-Host "[1/5] 资源包 SHA-256、ZIP 路径和空间预检通过，尚未启动安装器。"
 
 $staging = Join-Path $DataDirectory (".ai-resource-staging-" + [guid]::NewGuid().ToString("N"))
 $engines = Join-Path $DataDirectory "engines"
@@ -112,7 +112,7 @@ try {
             throw "资源清单包含不安全路径：$relative"
         }
         $file = [System.IO.Path]::GetFullPath((Join-Path $staging $relative))
-        $prefix = [System.IO.Path]::GetFullPath($staging).TrimEnd([char[]]@('\\','/')) + [System.IO.Path]::DirectorySeparatorChar
+        $prefix = [System.IO.Path]::GetFullPath($staging).TrimEnd([char[]]@('\','/')) + [System.IO.Path]::DirectorySeparatorChar
         if (!$file.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { throw "资源路径越界：$relative" }
         if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "资源文件缺失：$relative" }
         $item = Get-Item -LiteralPath $file -Force
@@ -129,6 +129,7 @@ try {
     $deployed = New-Object System.Collections.Generic.List[object]
     $manifestWasUpdated = $false
     $hadManifest = $false
+    $deploymentSucceeded = $false
     New-Item -ItemType Directory -Path $backup -Force | Out-Null
     New-Item -ItemType Directory -Path $engines -Force | Out-Null
     try {
@@ -170,6 +171,7 @@ try {
         if ($installer.ExitCode -ne 0) { throw "桌面程序安装失败，退出代码：$($installer.ExitCode)" }
         [Environment]::SetEnvironmentVariable("AICOMICS_DATA_DIR", $DataDirectory, "User")
         $env:AICOMICS_DATA_DIR = $DataDirectory
+        $deploymentSucceeded = $true
     } catch {
         Write-Host "安装失败，正在回滚本次替换的托管引擎……" -ForegroundColor Yellow
         for ($i = $deployed.Count - 1; $i -ge 0; $i--) {
@@ -183,9 +185,11 @@ try {
         elseif ($manifestWasUpdated -and !$hadManifest -and (Test-Path -LiteralPath $manifestDestination)) { Remove-Item -LiteralPath $manifestDestination -Force }
         [Environment]::SetEnvironmentVariable("AICOMICS_DATA_DIR", $oldUserData, "User")
         $env:AICOMICS_DATA_DIR = $oldProcessData
+        # Rollback completed: safe to discard the backup copy.
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
         throw
     } finally {
-        if ($? -and (Test-Path -LiteralPath $backup)) { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($deploymentSucceeded -and (Test-Path -LiteralPath $backup)) { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue }
     }
 } finally {
     if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
