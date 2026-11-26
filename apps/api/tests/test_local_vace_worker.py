@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from app.services.local_vace import _runtime, request_cancel_local_vace
 
@@ -67,7 +67,8 @@ class LocalVaceRuntimeTests(unittest.TestCase):
         self.assertEqual(task.status, "cancelled")
         self.assertEqual(task.request_data["stage"], "cancelled")
         db.commit.assert_called_once()
-        remove.assert_called_once_with(db, "media", task.id)
+        self.assertEqual(remove.call_count, 2)
+        remove.assert_has_calls([call(db, "media", task.id), call(db, "media", task.id)])
 
     def test_cancel_running_task_sets_cancel_request_for_worker(self):
         task = Mock(task_type="local_vace_video", status="running", request_data={"stage": "generating"})
