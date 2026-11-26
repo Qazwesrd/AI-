@@ -126,8 +126,15 @@ def _run_task(task_id):
 
         db.expire_all()
         task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-        if task is None or task.status != "queued":
-            release_task_lease(db, "media", task_id, False, "任务在启动前已取消或状态已变化")
+        if task is None:
+            release_task_lease(db, "media", task_id, False, "任务记录在启动前已不存在")
+            lease = False
+            return
+        if task.status == "cancel_requested":
+            _write_state(db, task, status="cancelled", stage="cancelled")
+            return
+        if task.status != "queued":
+            release_task_lease(db, "media", task_id, False, "任务在启动前状态已变化")
             lease = False
             return
         _write_state(db, task, status="starting", stage="preparing_runtime", progress=3)
