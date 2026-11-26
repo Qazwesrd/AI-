@@ -17,6 +17,8 @@ on:
       - "apps/**"
       - "packages/**"
       - "scripts/build-windows.ps1"
+      - "scripts/update-desktop-only.ps1"
+      - "scripts/test-desktop-only-update.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
 
@@ -183,6 +185,7 @@ jobs:
           if (!$release.id) { throw "Release 信息缺少 ID，无法安全上传资产。" }
 
           $releaseDir = Join-Path $PWD "apps/desktop/release"
+          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $releaseDir "update-desktop-only.ps1") -Force
           $files = @(Get-ChildItem $releaseDir -File | Where-Object {
             $_.Name -like "*Setup*.exe" -or
             $_.Name -like "*Setup*.exe.sha256" -or
