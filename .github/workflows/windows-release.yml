@@ -88,6 +88,11 @@ jobs:
             Write-Host "$name : $($file.Length) bytes"
           }
 
+      - name: Verify desktop-only update safety
+        shell: pwsh
+        run: |
+          ./scripts/test-desktop-only-update.ps1
+
       - name: Build Windows installer
         shell: pwsh
         run: |
