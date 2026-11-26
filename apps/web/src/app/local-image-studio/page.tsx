@@ -304,6 +304,53 @@ function ReferenceCapabilityPanel() {
 
 
 
+type UpscaleCapabilityResult = {
+  upscale_ready: boolean;
+  nodes_ready: boolean;
+  models_found: number;
+  models: string[];
+  nodes: Record<string, { available: boolean; reason?: string }>;
+  message: string;
+};
+
+function UpscaleCapabilityPanel() {
+  const [result, setResult] = useState<UpscaleCapabilityResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+
+  async function inspect() {
+    setChecking(true); setError("");
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/upscale-capabilities`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "高清放大环境检测失败");
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "高清放大环境检测失败");
+    } finally { setChecking(false); }
+  }
+
+  return <section className="space-y-3 rounded-2xl border border-violet-300/20 bg-violet-950/10 p-5">
+    <div>
+      <h2 className="text-lg font-semibold">本机 AI 高清放大环境</h2>
+      <p className="mt-1 text-sm text-white/55">检查 ComfyUI 是否已安装 AI 放大节点和放大模型。只检测本机环境，不下载、不安装、不提交生成任务。</p>
+    </div>
+    <button type="button" onClick={() => void inspect()} disabled={checking} className="rounded-lg border border-violet-300/30 px-4 py-2 text-sm text-violet-100 disabled:opacity-40">{checking ? "正在检测放大组件…" : "检测 AI 高清放大环境"}</button>
+    {error && <p role="alert" className="text-sm text-rose-200">{error}</p>}
+    {result && <div className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+      <p className="text-sm">{result.message}</p>
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">所需节点</p><p className="mt-1 text-sm">{result.nodes_ready ? "已具备" : "不完整"}</p></div>
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">已安装放大模型</p><p className="mt-1 text-sm">{result.models_found} 个</p></div>
+        <div className="rounded-lg bg-white/5 p-3"><p className="text-xs text-white/50">工作流条件</p><p className="mt-1 text-sm">{result.upscale_ready ? "可以进入工作流验收" : "尚未满足"}</p></div>
+      </div>
+      {result.models.length > 0 && <p className="break-words text-xs text-white/60">检测到模型：{result.models.join("、")}</p>}
+      {!result.upscale_ready && <p className="text-xs text-amber-200">当前不能承诺 AI 细节增强效果；本程序不会擅自下载缺失模型。</p>}
+      {result.upscale_ready && <p className="text-xs text-emerald-200">检测只代表节点和模型存在，尚未代表实际放大工作流通过验收。</p>}
+    </div>}
+  </section>;
+}
+
 type BatchPreflight = {
   requested_count: number; ready_count: number; missing_count: number;
   ready_shots: Array<{ shot_id: number; shot_number: number; scene_name: string; prompt: string }>;
@@ -769,7 +816,8 @@ export default function LocalImageStudioPage() {
       </section>
 
 
-      <ReferenceCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}
+      <ReferenceCapabilityPanel />
+      <UpscaleCapabilityPanel />\n      {targetProjectId && <StoryboardConsistencyPanel projectId={targetProjectId} />}
       <StoryboardBatchImagePanel projects={targets} checkpoint={checkpoint} style={style} width={width} height={height} steps={steps} />\n\n      {targetShotId && <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">当前分镜已关联图片</h2>
