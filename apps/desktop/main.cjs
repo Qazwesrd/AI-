@@ -199,6 +199,7 @@ function findFfmpegPair() {
     process.env.AICOMICS_FFMPEG_DIR,
     process.env.FFMPEG_PATH && path.dirname(process.env.FFMPEG_PATH),
     path.join(app.getPath("userData"), "ffmpeg"),
+    process.env.AICOMICS_DATA_DIR && path.join(process.env.AICOMICS_DATA_DIR, "engines", "FFmpeg"),
     "D:\\下载"
   ].filter(Boolean);
   const visited = new Set();
