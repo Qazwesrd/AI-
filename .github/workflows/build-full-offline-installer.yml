@@ -10,7 +10,7 @@ name: Build complete offline Windows installer
       setup_run_id:
         description: "Successful Windows installer workflow run ID"
         required: true
-        default: "45852372327"
+        default: "45865621505"
       resource_run_id:
         description: "Verified full AI offline resource workflow run ID"
         required: true
