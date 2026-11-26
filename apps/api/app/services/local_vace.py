@@ -11,7 +11,9 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models.media import MediaFile, MediaTask
 from app.services.media_service import VIDEO_DIR, probe_media
-from app.services.task_runtime import acquire_task_lease, heartbeat_task_lease, release_task_lease
+from app.services.task_runtime import (
+    acquire_task_lease, heartbeat_task_lease, release_task_lease, remove_queued_task,
+)
 
 logger = logging.getLogger("ai_comic_studio.local_vace")
 _STOP = threading.Event()
@@ -224,6 +226,10 @@ def _run_task(task_id):
             if output:
                 output.unlink(missing_ok=True)
             return
+        # Shutdown may kill the child between loop iterations; preserve the
+        # interrupted state rather than misreporting an ordinary inference failure.
+        if _STOP.is_set() and process is not None and process.returncode is not None and not failure:
+            failure = "应用关闭时本地 VACE 任务被中断；下次启动不会自动重跑。"
         if failure:
             if current:
                 _write_state(
@@ -352,6 +358,9 @@ def start_local_vace_worker():
             task.status = "interrupted"
             task.error = "上次应用关闭时任务中断；本次启动不会自动重新生成。"
             task.updated_at = datetime.utcnow()
+            # Release only this worker's stale media lease so it cannot
+            # permanently consume a global concurrency slot after a crash.
+            release_task_lease(db, "media", task.id, False, task.error)
         if stale:
             db.commit()
     finally:
@@ -378,6 +387,7 @@ def request_cancel_local_vace(db, task):
         return {"task_id": task.id, "status": task.status, "message": "任务已结束，无需取消。"}
     request = dict(task.request_data or {})
     if task.status == "queued":
+        remove_queued_task(db, "media", task.id)
         task.status = "cancelled"
         request["stage"] = "cancelled"
         task.request_data = request
