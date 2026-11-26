@@ -70,20 +70,20 @@ jobs:
           Copy-Item $resourceHashFile.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip.sha256")
           Copy-Item "scripts/install-offline-bundle.ps1" (Join-Path $stage "一键离线安装.ps1")
 
-          $readme = @'
-AI漫剧制作大师完整离线安装包
-
-1. 将整个 ZIP 解压到本地磁盘。
-2. 在解压目录打开 PowerShell，执行：
-   powershell -ExecutionPolicy Bypass -File .\一键离线安装.ps1
-3. 按提示选择程序安装目录和 AI 模型数据目录。
-4. 安装程序会校验资源包 SHA-256、解压资源并逐文件校验。
-5. 完成后重新启动 Windows 或重新登录，使环境变量生效。
-
-本交付物包含 Windows 程序安装器和完整 AI 离线资源包，不需要安装时联网下载模型。
-首次安装建议数据盘至少预留约 32 GiB 可用空间。
-Ryzen 7 4800U / Vega 集显尚未获得本机性能认证；不承诺 GPU 加速。
-'@
+          $readme = @(
+            "AI漫剧制作大师完整离线安装包",
+            "",
+            "1. 将整个 ZIP 解压到本地磁盘。",
+            "2. 在解压目录打开 PowerShell，执行：",
+            "   powershell -ExecutionPolicy Bypass -File .\一键离线安装.ps1",
+            "3. 按提示选择程序安装目录和 AI 模型数据目录。",
+            "4. 安装程序会校验资源包 SHA-256、解压资源并逐文件校验。",
+            "5. 完成后重新启动 Windows 或重新登录，使环境变量生效。",
+            "",
+            "本交付物包含 Windows 程序安装器和完整 AI 离线资源包，不需要安装时联网下载模型。",
+            "首次安装建议数据盘至少预留约 32 GiB 可用空间。",
+            "Ryzen 7 4800U / Vega 集显尚未获得本机性能认证；不承诺 GPU 加速。"
+          ) -join [Environment]::NewLine
           Set-Content -LiteralPath (Join-Path $stage "安装说明.txt") -Value $readme -Encoding utf8
 
           $zip = Join-Path $output "AI漫剧制作大师-完整离线安装包.zip"
