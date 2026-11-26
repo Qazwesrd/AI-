@@ -12,6 +12,8 @@ const WEB_PORT = 3000;
 let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
+let ollamaProcess = null;
+let comfyProcess = null;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -182,8 +184,12 @@ function stopChild(child) {
 function stopServices() {
   stopChild(webProcess);
   stopChild(apiProcess);
+  stopChild(comfyProcess);
+  stopChild(ollamaProcess);
   webProcess = null;
   apiProcess = null;
+  comfyProcess = null;
+  ollamaProcess = null;
 }
 
 
@@ -233,6 +239,50 @@ function findFfmpegPair() {
   return null;
 }
 
+function startManagedAiEngines(dataDir) {
+  if (process.platform !== "win32") return;
+
+  const engineRoot = path.join(dataDir, "engines");
+  const ollamaRoot = path.join(engineRoot, "Ollama");
+  const ollamaExe = path.join(ollamaRoot, "runtime", "ollama.exe");
+  const ollamaModels = path.join(ollamaRoot, "models");
+  if (fs.existsSync(ollamaExe) && fs.existsSync(path.join(ollamaModels, "blobs"))) {
+    const ollamaEnv = {
+      ...process.env,
+      OLLAMA_HOST: "127.0.0.1:11435",
+      OLLAMA_MODELS: ollamaModels,
+      OLLAMA_NO_CLOUD: "1"
+    };
+    ollamaProcess = spawn(ollamaExe, ["serve"], {
+      cwd: ollamaRoot,
+      windowsHide: true,
+      env: ollamaEnv,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    logChild("OLLAMA", ollamaProcess);
+  } else {
+    console.warn("[OLLAMA] Bundled runtime or model directory was not found:", ollamaRoot);
+  }
+
+  const comfyRoot = path.join(engineRoot, "ComfyUI");
+  const layouts = [
+    { python: path.join(comfyRoot, "python_embeded", "python.exe"), main: path.join(comfyRoot, "ComfyUI", "main.py"), cwd: comfyRoot },
+    { python: path.join(comfyRoot, "venv", "Scripts", "python.exe"), main: path.join(comfyRoot, "main.py"), cwd: comfyRoot }
+  ];
+  const layout = layouts.find(item => fs.existsSync(item.python) && fs.existsSync(item.main));
+  if (layout) {
+    comfyProcess = spawn(layout.python, [layout.main, "--listen", "127.0.0.1", "--port", "8188", "--cpu", "--disable-auto-launch"], {
+      cwd: layout.cwd,
+      windowsHide: true,
+      env: { ...process.env, PYTHONUNBUFFERED: "1", CUDA_VISIBLE_DEVICES: "" },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    logChild("COMFYUI", comfyProcess);
+  } else {
+    console.warn("[COMFYUI] Bundled Python runtime or main.py was not found:", comfyRoot);
+  }
+}
+
 function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
@@ -241,7 +291,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const ffmpegPair = findFfmpegPair();
   const ffmpeg = ffmpegPair?.ffmpeg;
   const ffprobe = ffmpegPair?.ffprobe;
-  const dataDir = app.getPath("userData");
+  const dataDir = process.env.AICOMICS_DATA_DIR || app.getPath("userData");
 
   for (const file of [apiExe, webServer, webNodeModules]) {
     if (!fs.existsSync(file)) {
@@ -250,6 +300,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
   }
 
   fs.mkdirSync(dataDir, { recursive: true });
+  startManagedAiEngines(dataDir);
 
   if (fs.existsSync(dataDir)) {
     const storageDir = path.join(dataDir, "storage");
@@ -263,6 +314,9 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
       env: {
         ...process.env,
         APP_DATA_DIR: dataDir,
+        AICOMICS_DATA_DIR: dataDir,
+        OLLAMA_HOST: "http://127.0.0.1:11435",
+        OLLAMA_MODELS: path.join(dataDir, "engines", "Ollama", "models"),
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
