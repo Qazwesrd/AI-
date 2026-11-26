@@ -7,12 +7,12 @@ on:
         description: Successful Windows installer workflow run ID
         required: true
         type: string
-        default: "45734211229"
+        default: "45763846989"
       ai_resource_run_id:
         description: Successful AI offline resource workflow run ID
         required: true
         type: string
-        default: "45734211765"
+        default: "45748921430"
 
 permissions:
   actions: read
