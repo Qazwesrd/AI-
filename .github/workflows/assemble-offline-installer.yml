@@ -1,6 +1,6 @@
 name: Assemble complete offline Windows installer
 
-on:
+"on":
   workflow_dispatch:
 
 permissions:
