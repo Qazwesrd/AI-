@@ -26,6 +26,7 @@ const WEB_PORT = 3000;
 let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
+let comfyUiProcess = null;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -194,8 +195,10 @@ function stopChild(child) {
 }
 
 function stopServices() {
+  stopChild(comfyUiProcess);
   stopChild(webProcess);
   stopChild(apiProcess);
+  comfyUiProcess = null;
   webProcess = null;
   apiProcess = null;
 }
@@ -265,7 +268,7 @@ function startComfyUiRuntime() {
     console.warn("[ComfyUI] Offline engine bundle not found; image generation remains unavailable until the resource bundle is installed.");
     return null;
   }
-  const child = spawn(runtime.python, [
+  comfyUiProcess = spawn(runtime.python, [
     "-s", runtime.main,
     "--listen", "127.0.0.1",
     "--port", "8188",
@@ -273,13 +276,18 @@ function startComfyUiRuntime() {
   ], {
     cwd: path.dirname(runtime.main),
     windowsHide: true,
-    detached: true,
     stdio: "ignore",
     env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
   });
-  child.unref();
+  const managedChild = comfyUiProcess;
+  managedChild.once("exit", () => {
+    if (comfyUiProcess === managedChild) comfyUiProcess = null;
+  });
+  managedChild.once("error", error => {
+    console.error("[ComfyUI] Failed to start managed local image engine:", error);
+  });
   console.log("[ComfyUI] Starting managed local image engine at", baseUrl);
-  return child;
+  return managedChild;
 }
 
 function startProductionServices({ startApi = true, startWeb = true } = {}) {

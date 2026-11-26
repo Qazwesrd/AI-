@@ -38,7 +38,8 @@ function Normalize-DirectoryPath([string]$Path) {
     return $full
 }
 function Is-ChildPath([string]$Parent, [string]$Candidate) {
-    $parentFull = (Normalize-DirectoryPath $Parent) + [System.IO.Path]::DirectorySeparatorChar
+    $parentFull = Normalize-DirectoryPath $Parent
+    if (!$parentFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) { $parentFull += [System.IO.Path]::DirectorySeparatorChar }
     return (Normalize-DirectoryPath $Candidate).StartsWith($parentFull, [System.StringComparison]::OrdinalIgnoreCase)
 }
 $InstallDirectory = Normalize-DirectoryPath $InstallDirectory
@@ -53,10 +54,12 @@ $drive = [System.IO.DriveInfo]::new($driveRoot)
 $zip = [System.IO.Compression.ZipFile]::OpenRead($ResourceBundlePath)
 try {
     [long]$uncompressedBytes = 0
+    $zipFilePaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $zip.Entries) {
         if ([string]::IsNullOrEmpty($entry.Name)) { continue }
         if ([System.IO.Path]::IsPathRooted($entry.FullName) -or $entry.FullName.Contains(':') -or
             $entry.FullName -match '(^|[\/])\.\.([\/]|$)') { throw "资源 ZIP 包含不安全路径：$($entry.FullName)" }
+        if (!$zipFilePaths.Add($entry.FullName.Replace('\','/'))) { throw "资源 ZIP 包含重复文件路径：$($entry.FullName)" }
         $uncompressedBytes += [long]$entry.Length
     }
 } finally { $zip.Dispose() }
@@ -117,7 +120,9 @@ try {
         if ($null -eq $entry.size -or $item.Length -ne [long]$entry.size) { throw "资源文件大小不匹配：$relative" }
         $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "资源文件 SHA-256 不匹配：$relative" }
+        if (!$zipFilePaths.Contains($relative.Replace('\','/'))) { throw "资源清单文件不在 ZIP 中：$relative" }
     }
+    if ($zipFilePaths.Count -ne $seenInventoryPaths.Count) { throw "ZIP 文件集合与 file-inventory.json 不一致。" }
 
     Write-Host "[5/5] 事务式全量替换托管引擎（不清理用户项目、作品、素材和存档）。"
     $backup = Join-Path $DataDirectory (".ai-resource-backup-" + [guid]::NewGuid().ToString("N"))
