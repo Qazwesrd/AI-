@@ -24,7 +24,7 @@ if (!(Test-Path -LiteralPath $checksumPath -PathType Leaf)) {
     throw "Installer SHA-256 file is missing: $checksumPath"
 }
 
-$expected = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() -split '\\s+')[0].ToLowerInvariant()
+$expected = ((Get-Content -LiteralPath $checksumPath -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
 if ($expected -notmatch '^[a-f0-9]{64}$') {
     throw "Installer SHA-256 file has an invalid format."
 }
