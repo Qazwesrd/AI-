@@ -20,8 +20,8 @@ router = APIRouter(prefix="/api/video-editor", tags=["AI 视频剪辑"])
 
 class CreateEditInput(BaseModel):
     title: str = "视频剪辑任务"
-    provider: str
-    model: str
+    provider: str = "ollama-local"
+    model: str = "auto"
     instruction: str = Field(min_length=2, max_length=12000)
     source_paths: list[str] = Field(min_length=1, max_length=30)
     confirm_paid: bool = False
@@ -212,8 +212,8 @@ def create_edit_job(data: CreateEditInput, db: Session = Depends(get_db)):
 
         job = VideoEditJob(
             title=data.title,
-            provider=data.provider,
-            model=data.model,
+            provider="ollama-local",
+            model="auto",
             instruction=data.instruction,
             status="analyzing",
             source_files=sources
@@ -222,12 +222,14 @@ def create_edit_job(data: CreateEditInput, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(job)
 
-        plan, raw_response = call_ai_for_edit_plan(
+        plan, local_runtime = call_ai_for_edit_plan(
             db, data.provider, data.model,
-            data.instruction, sources, data.confirm_paid
+            data.instruction, sources, confirm_paid=False
         )
         validated = validate_plan(plan, sources)
 
+        job.provider = local_runtime["provider"]
+        job.model = local_runtime["model"]
         job.edit_plan = validated
         job.title = validated["title"] or data.title
         job.status = "planned"

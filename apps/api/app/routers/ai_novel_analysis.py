@@ -2,18 +2,15 @@ import json
 import re
 import hashlib
 from datetime import datetime, timedelta
-import urllib.request
-import urllib.error
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.cost_safety import require_cloud_ai_api_disabled
 from app.models.novel import Novel, AnalysisItem, NovelAnalysisJob
-from app.models.studio import AIProviderConfig, AIUsageLog
-from app.routers.studio import runtime, decrypt_key
+from app.models.studio import AIUsageLog
+from app.models.task_runtime import TaskExecutionLease
 from app.services.task_runtime import acquire_task_lease, release_task_lease, heartbeat_task_lease
 
 router = APIRouter(prefix="/api", tags=["AI小说深度分析"])
@@ -280,7 +277,7 @@ def unknown_chunk_keys(chunk_states):
     ]
 
 
-def make_chunks(chapters, limit=14000):
+def make_chunks(chapters, limit=4000):
     chunks = []
     current = ""
 
@@ -341,174 +338,82 @@ def extract_json(content):
         raise ValueError("AI返回内容不是有效JSON")
 
 
-def choose_provider(db):
-    items = db.query(AIProviderConfig).filter(
-        AIProviderConfig.enabled == True,
-        AIProviderConfig.purpose == "text",
-    ).all()
+def _analysis_local_model():
+    from app.routers.local_ai_runtime import _installed_models
 
-    priority = {
-        "deepseek": 0,
-        "openai": 1,
-        "xai": 2,
-        "gemini": 3,
-        "cloudflare": 4,
-    }
-
-    items = [
-        x for x in items
-        if x.provider.lower() != "doubao"
-        and x.base_url and x.model and x.encrypted_api_key
-    ]
-
-    items.sort(key=lambda x: priority.get(x.provider.lower(), 99))
-
-    return items[0] if items else None
+    installed = _installed_models()
+    names = [item["name"] for item in installed if isinstance(item, dict) and item.get("name")]
+    for preferred in ("qwen3.5:4b", "qwen3:4b"):
+        if preferred in names:
+            return preferred
+    raise HTTPException(503, "没有已安装的 Qwen 本地文本模型；小说深度分析不会联网下载。")
 
 
-def analyze_chunk(config, api_key, content, chapter_label):
-    prompt = """
+def analyze_chunk(model, content, chapter_label):
+    from app.routers.local_ai_runtime import _ollama_request
+
+    system_prompt = """
 你是一名专业的长篇小说人物档案分析师、影视改编分析师和漫剧资产策划师。
+从小说正文中提取可靠、可用于后续影视制作的结构化资料。
 
-你的任务是从小说正文中提取可靠、可用于后续影视制作的结构化资料。
+人物识别：
+1. 识别所有有明确剧情作用的人物，区分主要、次要、配角和临时人物。
+2. 优先使用正文正式全名；只有正文明确证明同一人物时才记录别名。
+3. 不得因姓氏、名字、身份或称呼相似而合并人物。
+4. 不得把“师父”“长老”“公子”“小姐”等普通称呼自动认定为人物别名。
+5. 不确定是否同一人物时，不要合并，在 uncertain 中说明。
+6. 尽可能记录身份、外貌、发型、体型、服装、性格、能力、所属势力和人物变化。
+7. 不能把其他人物的身份或外貌移植过来。
 
-【一、人物识别必须严格执行】
+其他信息：
+识别人物关系、场景、道具、武器、服装、建筑、特殊物品、事件、世界观和时间线。
+武器必须记录类别、结构、材质、颜色、使用者和原文依据，并与普通道具区分。
+只提取正文有依据的信息，不得编造；尽量记录章节编号和原文证据。
+同一人物跨章节的外貌、服装和身份变化应说明变化，不得覆盖成矛盾设定。
 
-1. 识别所有有明确剧情作用的人物，不要只识别主角。
-2. 区分主要人物、次要人物、配角、临时出场人物。
-3. 每个人物尽可能使用正文中出现的正式全名作为 name。
-4. 同一个人物可能出现全名、姓名简称、昵称、乳名、化名、代号、尊称。
-5. 只有正文明确表明这些称呼指向同一人物时，才写入 aliases。
-6. 不得仅因为姓氏相同、名字相似、身份相似或称呼相似，就判断为同一人物。
-7. 不得把“师父”“长老”“公子”“小姐”等普通称呼自动认定为人物别名。
-8. 不同人物即使同名，也必须结合身份、关系、所在地点、事件和章节证据区分。
-9. 如果暂时无法确定两种称呼是否属于同一人，不要强行归并，在 uncertain 中说明。
-10. 人物必须尽可能记录身份、年龄线索、性格、外貌、发型、体型、服装、能力、所属势力和人物变化。
-11. 人物身份信息不能从其他人物身上移植过来。
-12. 主要人物需要尽可能完整，不能只返回少量主角而遗漏重要配角。
+人物 data 尽可能包含 aliases、role_level、identity、appearance、clothing、
+personality、abilities、faction、relationships、participants、location、evidence、uncertain。
 
-【二、其他结构化信息】
-
-必须识别：
-- 人物关系：双方人物、关系类型、变化和证据。
-- 场景：名称、地点、环境、时间和氛围。
-- 道具：名称、外观、材质、颜色、用途和所属人物。\n- 武器与刀具：名称、类别、刀身/刃口/握柄/护手/鞘的结构、材质、颜色、尺寸、使用者、剧情状态和原文依据；必须与普通道具区分。
-- 服装：穿着人物、款式、颜色、材质和使用场合。
-- 建筑：名称、结构、外观、建筑风格、材质、规模和所在地点。\n- 特殊物品：法器、神器、信物、关键线索物和具有剧情作用的独特物品。
-- 事件：事件名称、参与人物、地点、起因和结果。
-- 世界观：时代、地理、势力、规则和能力体系。
-- 时间线：事件顺序、时间线索和涉及章节。
-
-【三、证据和真实性】
-
-1. 只提取正文有依据的信息，不得凭空编造。
-2. 尽量保留章节编号、章节标题和原文证据。
-3. 不确定的内容写入 data.uncertain。
-4. 不要把普通形容词当成人物、场景或道具。
-5. 人物关系必须尽可能明确双方名称。
-6. 每个人物都要尽可能提供可用于保持视觉一致性的描述。
-7. 对同一人物不同章节出现的外貌、服装或身份变化，应说明变化，不要覆盖成互相矛盾的固定设定。
-
-【四、人物数据字段】
-
-人物 data 应尽可能包含：
-- aliases：正文明确证实的其他称呼
-- role_level：main、secondary、supporting 或 temporary
-- identity：身份和社会角色
-- appearance：外貌
-- clothing：服装
-- personality：性格
-- abilities：能力
-- faction：所属势力
-- relationships：人物关系线索
-- evidence：原文依据和章节
-- uncertain：待确认信息
-
-【五、输出要求】
-
-只输出 JSON，不要输出 Markdown 或解释。
-
-严格使用以下结构：
-{
-  "items": [
-    {
-      "category": "character",
-      "name": "人物正式名称",
-      "description": "人物完整描述",
-      "data": {
-        "aliases": [],
-        "role_level": "main",
-        "identity": "",
-        "appearance": "",
-        "clothing": "",
-        "personality": "",
-        "abilities": "",
-        "faction": "",
-        "relationships": [],
-        "participants": [],
-        "location": "",
-        "evidence": "",
-        "uncertain": []
-      }
-    }
-  ]
-}
-
-category 只能使用：
-character, relationship, scene, prop, weapon, costume,
-architecture, special_item, event, world, timeline。
-
+只输出 JSON，不要 Markdown，结构：
+{"items":[{"category":"character","name":"人物正式名称","description":"完整描述","data":{"aliases":[],"role_level":"main","identity":"","appearance":"","clothing":"","personality":"","abilities":"","faction":"","relationships":[],"participants":[],"location":"","evidence":"","uncertain":[]}}]}
+category 只能是 character, relationship, scene, prop, weapon, costume, architecture, special_item, event, world, timeline。
 没有可靠信息时返回空 items。
 """
-
-    body = {
-        "model": config.model,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": prompt},
-            {
-                "role": "user",
-                "content": (
-                    f"小说片段：{chapter_label}\n\n"
-                    f"请分析以下正文：\n{content}"
-                ),
-            },
-        ],
-    }
-
-    url = config.base_url.rstrip("/") + "/chat/completions"
-
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
-        method="POST",
+    prompt = (
+        f"小说片段：{chapter_label}\n\n"
+        "请分析以下正文，提取所有有可靠依据的实体和关系：\n" + content
     )
-
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            result = json.loads(response.read().decode("utf-8"))
-
-        answer = result["choices"][0]["message"]["content"]
-        parsed = extract_json(answer)
-
-        if not isinstance(parsed, dict):
-            raise ValueError("AI返回的数据结构不正确")
-
-        items = parsed.get("items", [])
-        if not isinstance(items, list):
-            raise ValueError("AI返回的items不是列表")
-
-        return items
-
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:2000]
-        raise RuntimeError(f"模型接口返回HTTP {exc.code}: {detail}") from exc
+        result = _ollama_request(
+            "/api/generate",
+            {
+                "model": model,
+                "system": system_prompt,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "think": False,
+                "options": {
+                    "temperature": 0.2,
+                    "num_ctx": 12288,
+                    "num_predict": 4096,
+                },
+            },
+            timeout=900.0,
+        )
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise RuntimeError(f"AI分析请求失败：{exc}") from exc
+        raise RuntimeError("本地小说分析模型调用失败：" + str(exc)[:1200]) from exc
+
+    answer = result.get("response") if isinstance(result, dict) else None
+    parsed = extract_json(answer)
+    if not isinstance(parsed, dict):
+        raise ValueError("本地模型返回的数据结构不正确")
+    items = parsed.get("items", [])
+    if not isinstance(items, list):
+        raise ValueError("本地模型返回的 items 不是列表")
+    return items
 
 
 def deduplicate_character_items(items):
@@ -689,59 +594,44 @@ def get_novel_analysis_progress(novel_id: int, db: Session = Depends(get_db)):
     }
 
 
+def _release_stale_analysis_lease(db, job_id):
+    lease = db.query(TaskExecutionLease).filter(
+        TaskExecutionLease.source == "analysis",
+        TaskExecutionLease.task_id == job_id,
+        TaskExecutionLease.status == "active",
+    ).first()
+    if lease is None:
+        return False
+    last_heartbeat = lease.heartbeat_at or lease.started_at or datetime.utcnow()
+    if datetime.utcnow() - last_heartbeat <= timedelta(minutes=20):
+        return False
+    release_task_lease(
+        db, "analysis", job_id, False,
+        "本地小说分析租约心跳超过20分钟；已释放上次中断的孤立租约，可安全重试。",
+    )
+    return True
+
+
 @router.post("/novels/{novel_id}/analyze-ai")
 def analyze_novel_with_ai(
     novel_id: int,
     payload: AIAnalysisInput,
     db: Session = Depends(get_db),
 ):
-    require_cloud_ai_api_disabled()
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
-
     if not novel:
         raise HTTPException(404, "小说不存在")
 
     chapters = sorted(novel.chapters, key=lambda x: x.chapter_number)
-
     if not chapters:
         raise HTTPException(400, "请先导入小说或创建章节")
 
-    settings = runtime(db)
-
-    if not settings.network_enabled:
-        raise HTTPException(403, "网络调用总开关尚未开启")
-
-    config = choose_provider(db)
-
-    if not config:
-        raise HTTPException(
-            400,
-            "没有找到已启用且配置完整的文本AI模型。请先到AI设置配置DeepSeek、OpenAI、Grok、Gemini或其他文本模型。",
-        )
-
-    # 仅对明确标记为付费的服务要求付费总授权和本次确认。
-    # 免费服务无需打开付费授权；计费属性缺失时默认按付费处理。
-    is_paid = bool(getattr(config, "paid", True))
-    if is_paid and not settings.paid_api_allowed:
-        raise HTTPException(403, "该文本模型属于付费服务，尚未开启付费API总授权")
-
-    if is_paid and not payload.confirm_paid:
-        raise HTTPException(403, "本次AI分析可能产生费用，尚未获得明确确认")
-
-    try:
-        api_key = decrypt_key(config.encrypted_api_key)
-    except Exception as exc:
-        raise HTTPException(500, f"API密钥读取失败：{exc}") from exc
-
-    if not api_key:
-        raise HTTPException(400, "文本模型API密钥为空")
-
-    chunks = make_chunks(chapters)
-
+    local_model = _analysis_local_model()
+    chunks = make_chunks(chapters, limit=4000)
     if not chunks:
         raise HTTPException(400, "小说正文为空")
 
-    source_payload = "\\n".join(
+    source_payload = "\n".join(
         f"{chapter.chapter_number}|{chapter.title}|{chapter.content or ''}"
         for chapter in chapters
     )
@@ -750,16 +640,16 @@ def analyze_novel_with_ai(
     job = db.query(NovelAnalysisJob).filter(
         NovelAnalysisJob.novel_id == novel_id,
         NovelAnalysisJob.source_signature == source_signature,
-        NovelAnalysisJob.provider == config.provider,
-        NovelAnalysisJob.model == config.model,
+        NovelAnalysisJob.provider == "ollama-local",
+        NovelAnalysisJob.model == local_model,
     ).order_by(NovelAnalysisJob.id.desc()).first()
 
     if job is None:
         job = NovelAnalysisJob(
             novel_id=novel_id,
             source_signature=source_signature,
-            provider=config.provider,
-            model=config.model,
+            provider="ollama-local",
+            model=local_model,
             status="pending",
             total_chunks=len(chunks),
             completed_chunks=0,
@@ -769,46 +659,40 @@ def analyze_novel_with_ai(
         db.commit()
         db.refresh(job)
 
+    _release_stale_analysis_lease(db, job.id)
     saved_results, chunk_states = split_chunk_state(job.chunk_results)
-
-    # Legacy jobs created before per-chunk state tracking may have an incomplete
-    # next chunk but no record of whether its provider request was accepted.
-    # Treat that one chunk as uncertain rather than silently charging again.
+    # Local inference has no external billing ambiguity. Any interrupted,
+    # uncommitted chunk can be safely retried without a cloud request.
+    for key, state in list(chunk_states.items()):
+        if state in ("submitting", "submission_unknown", "interrupted_unknown"):
+            chunk_states[key] = "pending"
     if (
         not chunk_states
         and len(saved_results) < len(chunks)
         and job.status == "partial"
         and bool(job.last_error)
     ):
-        chunk_states[str(len(saved_results) + 1)] = "submission_unknown"
-        job.status = "interrupted_unknown"
-        job.chunk_results = merge_chunk_state(saved_results, chunk_states)
-        db.commit()
+        chunk_states[str(len(saved_results) + 1)] = "pending"
 
     if job.status == "running":
         updated = job.updated_at or job.created_at or datetime.utcnow()
-        if datetime.utcnow() - updated < timedelta(minutes=15):
-            raise HTTPException(409, "该小说已有分析任务正在执行，请勿重复点击；可稍后查看进度或继续。")
+        if datetime.utcnow() - updated < timedelta(minutes=20):
+            raise HTTPException(409, "该小说已有本地分析任务正在执行，请勿重复点击；可稍后查看进度或继续。")
         for key, state in list(chunk_states.items()):
             if state == "submitting":
-                chunk_states[key] = "submission_unknown"
-        if not chunk_states and len(saved_results) < len(chunks):
-            chunk_states[str(len(saved_results) + 1)] = "submission_unknown"
-        if unknown_chunk_keys(chunk_states):
-            job.status = "interrupted_unknown"
-            job.last_error = "检测到上次模型请求中断，无法确认服务商是否已受理或计费；请先核对用量记录。"
-        else:
-            job.status = "partial"
-            job.last_error = "检测到上次进程在模型请求前中断，已安全恢复为可续作状态"
+                chunk_states[key] = "pending"
+        job.status = "partial"
+        job.last_error = "检测到上次本地模型进程中断；未调用云端服务，可安全续作未完成片段。"
         job.chunk_results = merge_chunk_state(saved_results, chunk_states)
         db.commit()
 
     if job.status == "interrupted_unknown" or unknown_chunk_keys(chunk_states):
-        raise HTTPException(
-            409,
-            f"该小说分析任务 #{job.id} 有片段提交结果不确定。请先在统一任务中心核对文本模型服务商用量记录，"
-            "确认没有对应请求或待结算费用后，执行“核实后续作”；系统不会自动重复调用。",
-        )
+        for key in list(unknown_chunk_keys(chunk_states)):
+            chunk_states[key] = "pending"
+        job.status = "partial"
+        job.chunk_results = merge_chunk_state(saved_results, chunk_states)
+        job.last_error = "已将旧版本遗留的未知片段标记为可安全重试的本地任务。"
+        db.commit()
 
     job_id = job.id
     acquire_task_lease(db, "analysis", job_id, priority=10)
@@ -823,9 +707,7 @@ def analyze_novel_with_ai(
         if chunk_key in saved_results:
             continue
 
-        request_started = False
         try:
-            # Persist the exact chunk being submitted before contacting the provider.
             chunk_states[chunk_key] = "submitting"
             job.chunk_results = merge_chunk_state(saved_results, chunk_states)
             job.status = "running"
@@ -833,10 +715,8 @@ def analyze_novel_with_ai(
             db.commit()
             heartbeat_task_lease(db, "analysis", job.id)
 
-            request_started = True
             result_items = analyze_chunk(
-                config,
-                api_key,
+                local_model,
                 chunk,
                 f"第{index}/{len(chunks)}段",
             )
@@ -850,8 +730,8 @@ def analyze_novel_with_ai(
             job.updated_at = datetime.utcnow()
 
             db.add(AIUsageLog(
-                provider=config.provider,
-                model=config.model,
+                provider="ollama-local",
+                model=local_model,
                 task="novel_deep_analysis",
                 status="success",
                 detail=f"小说：{novel.title}；分析片段：{index}/{len(chunks)}；任务：{job.id}",
@@ -865,29 +745,25 @@ def analyze_novel_with_ai(
             current_results, current_states = split_chunk_state(job.chunk_results if job else {})
             result_already_saved = chunk_key in current_results
             if result_already_saved:
-                # The response and chunk result were committed; only a later
-                # local heartbeat failed. Preserve the completed result.
                 current_states[chunk_key] = "completed"
             else:
-                current_states[chunk_key] = "submission_unknown" if request_started else "pending"
+                current_states[chunk_key] = "pending"
             if job:
                 job.chunk_results = merge_chunk_state(current_results, current_states)
                 job.completed_chunks = len(current_results)
-                job.status = "partial" if result_already_saved or not request_started else "interrupted_unknown"
+                job.status = "partial"
                 job.last_error = (
-                    f"第{index}/{len(chunks)}段结果已保存，但本地任务心跳更新失败；可安全继续。"
-                    if result_already_saved else (
-                        f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。诊断详情：{str(exc)[:900]}"
-                        if request_started else f"第{index}/{len(chunks)}段请求尚未发出：{str(exc)[:1600]}"
-                    )
+                    f"第{index}/{len(chunks)}段结果已保存，但本地心跳更新失败；可安全继续。"
+                    if result_already_saved else
+                    f"第{index}/{len(chunks)}段本地分析未完成；未调用云端服务或产生 API 费用，可安全重试。诊断详情：{str(exc)[:1200]}"
                 )
                 job.updated_at = datetime.utcnow()
                 if not result_already_saved:
                     db.add(AIUsageLog(
-                        provider=config.provider,
-                        model=config.model,
+                        provider="ollama-local",
+                        model=local_model,
                         task="novel_deep_analysis",
-                        status="submission_unknown" if request_started else "failed",
+                        status="failed",
                         detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1200]}",
                     ))
                 db.commit()
@@ -895,68 +771,45 @@ def analyze_novel_with_ai(
             if result_already_saved:
                 raise HTTPException(
                     502,
-                    f"第{index}/{len(chunks)}段分析结果已保存，但本地心跳更新失败；不会重复调用该片段，可再次点击继续。",
-                ) from exc
-            if request_started:
-                raise HTTPException(
-                    502,
-                    f"第{index}/{len(chunks)}段分析结果不确定，已阻止自动重试。"
-                    f"请先核对服务商用量记录，再到统一任务中心人工确认。任务编号：{job.id if job else '未知'}",
+                    f"第{index}/{len(chunks)}段分析结果已保存，但本地心跳更新失败；不会重复分析该片段，可再次点击继续。",
                 ) from exc
             raise HTTPException(
                 502,
-                f"第{index}/{len(chunks)}段分析请求尚未发出，已保存之前完成的片段；可再次点击继续。错误：{exc}",
+                f"第{index}/{len(chunks)}段本地分析未完成，已保存之前完成的片段；可再次点击继续。错误：{exc}",
             ) from exc
 
     all_items = []
     for index in range(1, len(chunks) + 1):
         all_items.extend(saved_results.get(str(index), []))
-
     merged_items = merge_analysis_items(all_items)
 
     try:
         existing = db.query(AnalysisItem).filter(
             AnalysisItem.novel_id == novel_id
         ).all()
-
         confirmed = [x for x in existing if x.confirmed]
-
-        # 已确认人物的名称和明确别名也参与冲突保护。
         confirmed_character_keys = set()
         confirmed_exact_keys = set()
 
         for row in confirmed:
-            confirmed_exact_keys.add(
-                (row.category, normalize_entity_name(row.name))
-            )
-
+            confirmed_exact_keys.add((row.category, normalize_entity_name(row.name)))
             if row.category == "character":
-                confirmed_character_keys.update(
-                    confirmed_character_alias_keys(row)
-                )
+                confirmed_character_keys.update(confirmed_character_alias_keys(row))
 
-        # 只清理本次分析之前的未确认结果，绝不删除已确认资料。
         for old in existing:
             if not old.confirmed:
                 db.delete(old)
 
         created = []
-
         merged_items = deduplicate_character_items(merged_items)
-
         for value in merged_items:
             category = value["category"]
             name = value["name"]
             key = (category, normalize_entity_name(name))
-
             if key in confirmed_exact_keys:
                 continue
-
             if category == "character":
                 aliases = character_alias_keys(value)
-
-                # 如果新分析结果与已确认人物的正式名称或明确别名重合，
-                # 保留已确认记录，不另外制造重复人物。
                 if aliases.intersection(confirmed_character_keys):
                     continue
 
@@ -969,12 +822,11 @@ def analyze_novel_with_ai(
                     **value["data"],
                     "source": "ai_deep_analysis",
                     "needs_review": True,
-                    "provider": config.provider,
-                    "model": config.model,
+                    "provider": "ollama-local",
+                    "model": local_model,
                 },
                 confirmed=False,
             )
-
             db.add(row)
             created.append(row)
 
@@ -992,17 +844,16 @@ def analyze_novel_with_ai(
         return {
             "success": True,
             "mode": "ai_deep_analysis",
-            "provider": config.provider,
-            "model": config.model,
+            "provider": "ollama-local",
+            "model": local_model,
             "chunk_count": len(chunks),
             "job_id": job.id,
             "completed_chunks": job.completed_chunks,
             "total_chunks": job.total_chunks,
             "total": len(created),
             "message": (
-                f"AI深度分析完成。使用{config.display_name}，"
-                f"共分析{len(chunks)}个文本片段，"
-                f"提取{len(created)}条待确认信息。"
+                f"本地模型 {local_model} 完成小说深度分析，共分析{len(chunks)}个文本片段，"
+                f"提取{len(created)}条待确认信息；不会调用云端或付费 API。"
             ),
             "items": [
                 {
@@ -1018,6 +869,7 @@ def analyze_novel_with_ai(
             ],
         }
 
-    except Exception:
+    except Exception as exc:
         db.rollback()
+        release_task_lease(db, "analysis", job.id, False, str(exc)[:2000])
         raise

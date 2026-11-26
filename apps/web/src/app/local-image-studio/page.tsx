@@ -535,6 +535,18 @@ export default function LocalImageStudioPage() {
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const incomingPrompt = params.get("prompt");
+    const incomingNegative = params.get("negative");
+    const incomingStyle = params.get("style");
+    if (incomingPrompt) setPrompt(incomingPrompt);
+    if (incomingNegative) setNegative(incomingNegative);
+    if (incomingStyle && styles.includes(incomingStyle as (typeof styles)[number])) {
+      setStyle(incomingStyle as (typeof styles)[number]);
+    }
+  }, []);
+
 
   useEffect(() => {
     if (!targetShotId) { setShotImages([]); return; }

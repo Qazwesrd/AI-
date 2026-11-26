@@ -4,8 +4,6 @@ import uuid
 import math
 import shutil
 import subprocess
-import urllib.request
-import urllib.error
 from pathlib import Path
 
 from app.services.media_service import (
@@ -16,147 +14,73 @@ EDIT_DIR = STORAGE / "edit-jobs"
 EDIT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def decrypt_key(config):
-    from app.services.media_service import decrypt_api_key
-
-    encrypted = (
-        getattr(config, "api_key_encrypted", None)
-        or getattr(config, "encrypted_api_key", None)
-    )
-    if not encrypted:
-        raise RuntimeError("AI 服务商没有保存 API Key")
-    return decrypt_api_key(encrypted)
-
-
-def get_ai_config(db, provider_name):
-    from app.models.studio import AIProviderConfig, AIRuntimeSetting
-
-    config = db.query(AIProviderConfig).filter(
-        AIProviderConfig.provider == provider_name
-    ).first()
-
-    if not config:
-        raise RuntimeError(f"AI 服务商 {provider_name} 尚未配置")
-
-    if not getattr(config, "enabled", False):
-        raise RuntimeError("该 AI 服务商尚未启用")
-
-    runtime = db.query(AIRuntimeSetting).first()
-    if not runtime or not getattr(runtime, "network_enabled", False):
-        raise RuntimeError("全局网络调用开关已关闭")
-
-    # 只有明确标记为付费的服务才要求付费总授权。
-    # 缺失计费信息时默认按付费处理，避免未知费用被放行。
-    paid = bool(getattr(config, "paid", True))
-    if paid and not getattr(runtime, "paid_api_allowed", False):
-        raise RuntimeError("付费 API 总授权未开启")
-
-    base_url = getattr(config, "base_url", None)
-    if not base_url:
-        raise RuntimeError("AI 服务商缺少 Base URL")
-
-    return config, decrypt_key(config), base_url.rstrip("/")
-
-
 def call_ai_for_edit_plan(db, provider, model, instruction, source_files,
                           confirm_paid=False):
-    config, key, base = get_ai_config(db, provider)
+    """Generate a video edit plan using an already-installed local Ollama model only."""
+    from app.routers.local_ai_runtime import _installed_models, _ollama_request
 
-    if bool(getattr(config, "paid", True)) and not confirm_paid:
-        raise RuntimeError("本次 AI 剪辑分析可能产生费用，请先明确确认")
+    installed = _installed_models()
+    names = [item["name"] for item in installed if isinstance(item, dict) and item.get("name")]
+    selected = next((name for name in ("qwen3.5:4b", "qwen3:4b") if name in names), None)
+    if not selected:
+        raise RuntimeError("没有已安装的 Qwen 本地文本模型；离线剪辑不会联网下载模型。")
 
     system_prompt = """
-你是专业影视剪辑师。你必须把用户的剪辑要求转换成严格 JSON。
-只能使用用户提供的视频文件路径，不得编造路径。
-只返回 JSON，不要 Markdown，不要解释。
-
-JSON 格式：
-{
-  "title": "剪辑项目名称",
-  "summary": "剪辑方案说明",
-  "segments": [
-    {
-      "file_path": "必须是输入文件中的路径",
-      "start": 0,
-      "end": 10,
-      "description": "该片段的用途"
-    }
-  ],
-  "width": 1920,
-  "height": 1080,
-  "subtitle_text": "",
-  "notes": []
-}
-
-规则：
-1. start 和 end 是视频原始时间，单位秒。
-2. end 必须大于 start。
-3. 片段必须来自用户提供的文件。
-4. 按用户要求排序 segments。
-5. 不要编造画面内容；无法判断的内容写入 notes。
-6. 用户没有要求删除内容时，尽量保留相关内容。
-7. 不要在 JSON 外输出任何文字。
+你是专业影视剪辑师。请将用户要求转换为严格 JSON。
+只允许引用下方输入文件列表中的 file_path，必须逐字复制完整路径，不得生成新路径。
+不得假设你看到了视频画面；只依据文件名、时长、分辨率和用户文字要求。每段 end 不得超过对应视频时长。未知画面写入 notes。
+只输出 JSON，格式：
+{"title":"项目名称","summary":"方案说明","segments":[{"file_path":"完整输入路径","start":0,"end":5,"description":"用途"}],"width":1920,"height":1080,"subtitle_text":"","notes":[]}
+segments 必须非空；start/end 为秒，start >= 0 且 end > start；每段路径必须来自输入列表。
 """
-
+    source_manifest = []
+    for raw_path in source_files:
+        path = safe_storage_file(raw_path)
+        info = probe_media(path)
+        fmt = info.get("format") or {}
+        streams = info.get("streams") or []
+        video = next((item for item in streams if item.get("codec_type") == "video"), {})
+        source_manifest.append({
+            "file_path": str(path),
+            "file_name": path.name,
+            "duration_seconds": round(float(fmt.get("duration") or 0), 3),
+            "width": video.get("width"),
+            "height": video.get("height"),
+        })
     user_prompt = (
-        "用户剪辑要求：\n" + instruction +
-        "\n\n允许使用的视频文件：\n" +
-        json.dumps(source_files, ensure_ascii=False)
+        "剪辑要求：\n" + str(instruction)[:12000] +
+        "\n\n允许使用的输入文件及媒体信息（只能引用 file_path）：\n" +
+        json.dumps(source_manifest, ensure_ascii=False)
     )
-
-    payload = {
-        "model": model,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-    }
-
-    request = urllib.request.Request(
-        base + "/chat/completions",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json"
-        },
-        method="POST"
-    )
-
     try:
-        with urllib.request.urlopen(request, timeout=300) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"AI 剪辑分析 API 错误 HTTP {exc.code}: {detail[:2000]}")
-    except Exception as exc:
-        raise RuntimeError(f"AI 剪辑分析请求失败：{exc}")
-
-    content = (
-        result.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-
-    if isinstance(content, list):
-        content = "".join(
-            part.get("text", "") for part in content
-            if isinstance(part, dict)
+        result = _ollama_request(
+            "/api/generate",
+            {
+                "model": selected,
+                "system": system_prompt,
+                "prompt": user_prompt,
+                "stream": False,
+                "format": "json",
+                "think": False,
+                "options": {"temperature": 0.2, "num_ctx": 8192, "num_predict": 4096},
+            },
+            timeout=900.0,
         )
+    except Exception as exc:
+        raise RuntimeError("本地 AI 剪辑分析失败：" + str(exc)[:1000]) from exc
 
-    content = str(content).strip()
-    content = re.sub(r"^```(?:json)?\s*", "", content)
-    content = re.sub(r"\s*```$", "", content)
-
+    content = result.get("response") if isinstance(result, dict) else None
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("本地模型没有返回有效剪辑方案")
+    content = re.sub(r"^\x60\x60\x60(?:json)?\s*", "", content.strip(), flags=re.I)
+    content = re.sub(r"\s*\x60\x60\x60$", "", content)
     try:
         plan = json.loads(content)
     except Exception as exc:
-        raise RuntimeError("AI 返回的剪辑方案不是有效 JSON：" + content[:1500]) from exc
-
+        raise RuntimeError("本地模型返回的剪辑方案不是有效 JSON：" + content[:1500]) from exc
     if not isinstance(plan, dict) or not isinstance(plan.get("segments"), list):
-        raise RuntimeError("AI 返回的剪辑方案缺少 segments")
-
-    return plan, result
+        raise RuntimeError("本地模型返回的剪辑方案缺少 segments")
+    return plan, {"provider": "ollama-local", "model": selected}
 
 
 def validate_plan(plan, allowed_files):

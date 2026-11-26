@@ -1232,7 +1232,7 @@ class LocalVaceVideoInput(BaseModel):
     negative_prompt: str = Field(default="blurry, low quality, watermark, text", max_length=1000)
     width: int = Field(default=256, ge=256, le=512)
     height: int = Field(default=256, ge=256, le=512)
-    frames: int = Field(default=9, ge=5, le=33)
+    frames: int = Field(default=5, ge=5, le=33)
     steps: int = Field(default=4, ge=4, le=20)
 
 

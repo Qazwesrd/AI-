@@ -26,17 +26,7 @@ type LocalVaceTask = {
 };
 
 export default function MediaStudioPage() {
-  const [provider, setProvider] = useState("openai");
-  const [model, setModel] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [videoPromptMode, setVideoPromptMode] = useState("cinematic");
-  const [duration, setDuration] = useState(10);
-  const [confirmPaid, setConfirmPaid] = useState(false);
   const [tasks, setTasks] = useState<MediaTask[]>([]);
-  const [speechText, setSpeechText] = useState("");
-  const [speechModel, setSpeechModel] = useState("");
-  const [voice, setVoice] = useState("alloy");
-  const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
   const [localVacePrompt, setLocalVacePrompt] = useState("");
   const [localVaceTasks, setLocalVaceTasks] = useState<LocalVaceTask[]>([]);
@@ -70,7 +60,7 @@ export default function MediaStudioPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: localVacePrompt.trim(),
-          width: 256, height: 256, frames: 9, steps: 4
+          width: 256, height: 256, frames: 5, steps: 4
         })
       });
       const data = await response.json();
@@ -104,69 +94,6 @@ export default function MediaStudioPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  async function createVideo() {
-    if (!prompt.trim()) {
-      setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
-      return;
-    }
-    const styleInstruction = videoPromptMode === "animation"
-      ? "采用高质量动画电影视觉表现，动作自然流畅，角色造型稳定，色彩统一。"
-      : videoPromptMode === "realistic"
-      ? "采用真人电影写实视觉，真实光影、自然运动、可信材质和摄影机语言。"
-      : "采用电影级镜头语言，强调构图、景深、光影、情绪节奏和连续性。";
-    const effectivePrompt = `视频内容与动作：${prompt.trim()}。\n\n生成要求：严格围绕上述内容，不擅自改变人物身份、服装、场景和关键动作；镜头运动平滑，动作前后连贯，避免画面闪烁、肢体畸形、主体漂移和无关文字水印。\n视觉方案：${styleInstruction}\n时长：${duration} 秒。请输出完整、可执行的视频生成结果。`;
-    setMessage("正在自动组合视频提示词并提交真实视频生成请求……");
-    try {
-      const response = await fetch(`${API}/api/media/video/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider, model, prompt: effectivePrompt, duration,
-          confirm_paid: confirmPaid
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "视频任务提交失败");
-      setMessage(`视频任务已提交，远程任务编号：${data.remote_task_id}`);
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "请求失败");
-    }
-  }
-
-  async function refreshTask(id: number) {
-    try {
-      const response = await fetch(`${API}/api/media/video/tasks/${id}/refresh`, {
-        method: "POST"
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "查询失败");
-      setMessage(`任务状态：${data.status}`);
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "查询失败");
-    }
-  }
-
-  async function generateSpeech() {
-    setMessage("正在调用真实语音生成 API……");
-    try {
-      const response = await fetch(`${API}/api/media/speech/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          provider, model: speechModel, text: speechText,
-          voice, confirm_paid: confirmPaid, force_regenerate: forceRegenerate
-        })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "配音失败");
-      setMessage(`配音完成：任务 #${data.task_id} · ${data.file}${data.reused ? "（复用已有配音，未重复调用 AI）" : ""}`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "配音失败");
-    }
-  }
-
   return (
     <main className="min-h-screen p-8 text-white">
       <div className="mx-auto max-w-6xl space-y-8">
@@ -188,7 +115,7 @@ export default function MediaStudioPage() {
             <div>
               <h2 className="text-xl font-semibold text-cyan-100">本地离线视频生成 · Wan 2.1 VACE</h2>
               <p className="mt-2 text-sm text-white/65">使用安装包内置模型和 sd-cli.exe，在本机生成；不调用云端、不下载模型、不产生 API 费用。</p>
-              <p className="mt-1 text-xs text-amber-200/80">当前默认低负载预览：256×256、9 帧、4 步，CPU 卸载模式。Ryzen 7 4800U 可先按 CPU 路径运行，尚未完成该设备的实机性能认证。</p>
+              <p className="mt-1 text-xs text-amber-200/80">当前默认低负载预览：256×256、5 帧、4 步，CPU 卸载模式。Ryzen 7 4800U 可先按 CPU 路径运行，尚未完成该设备的实机性能认证。</p>
             </div>
             <span className="rounded-lg border border-cyan-300/25 px-3 py-1 text-xs text-cyan-100">完全本地</span>
           </div>
@@ -233,66 +160,15 @@ export default function MediaStudioPage() {
         </section>
 
         <section className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-purple-300/20 bg-slate-950/65 p-6">
-            <h2 className="mb-5 text-xl font-semibold">真实 AI 视频生成</h2>
-            <label className="mb-2 block text-sm">服务商 ID</label>
-            <input value={provider} onChange={e => setProvider(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">视频模型名称</label>
-            <input value={model} onChange={e => setModel(e.target.value)}
-              placeholder="填写服务商提供的视频模型 ID"
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">视频内容描述</label>
-            <textarea value={prompt} onChange={e => setPrompt(e.target.value)}
-              rows={5} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3"
-              placeholder="描述人物动作、场景、镜头内容；软件会自动将描述组合成完整视频提示词。" />
-            <label className="mb-2 block text-sm">提示词方案（自动应用）</label>
-            <select value={videoPromptMode} onChange={e => setVideoPromptMode(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3">
-              <option value="cinematic">电影级镜头语言（推荐）</option>
-              <option value="realistic">真人电影写实</option>
-              <option value="animation">动画电影风格</option>
-            </select>
-            <label className="mb-2 block text-sm">视频时长（秒）</label>
-            <input type="number" min={1} max={600} value={duration}
-              onChange={e => setDuration(Number(e.target.value))}
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-4 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={confirmPaid}
-                onChange={e => setConfirmPaid(e.target.checked)} />
-              我已确认本次请求可能产生 API 费用
-            </label>
-            <button onClick={createVideo}
-              className="rounded-xl bg-purple-600 px-6 py-3 font-semibold hover:bg-purple-500">
-              提交视频生成
-            </button>
+          <div className="rounded-2xl border border-amber-300/20 bg-slate-950/65 p-6">
+            <h2 className="mb-3 text-xl font-semibold">云端 AI 视频生成</h2>
+            <p className="text-sm text-white/70">此版本不启用第三方视频 API。离线包尚未完成可交付级的本地文本生成视频质量验收，因此不显示可付费提交入口。</p>
+            <button disabled className="mt-4 rounded-xl bg-slate-700 px-6 py-3 font-semibold opacity-60">当前版本不可用</button>
           </div>
-
-          <div className="rounded-2xl border border-purple-300/20 bg-slate-950/65 p-6">
-            <h2 className="mb-5 text-xl font-semibold">AI 配音</h2>
-            <label className="mb-2 block text-sm">服务商 ID</label>
-            <input value={provider} onChange={e => setProvider(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">语音模型名称</label>
-            <input value={speechModel} onChange={e => setSpeechModel(e.target.value)}
-              placeholder="填写已开通的语音模型 ID"
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">声音 ID</label>
-            <input value={voice} onChange={e => setVoice(e.target.value)}
-              className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">配音文本</label>
-            <textarea value={speechText} onChange={e => setSpeechText(e.target.value)}
-              rows={5} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3"
-              placeholder="输入需要生成语音的台词或旁白" />
-            <label className="mb-4 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={forceRegenerate}
-                onChange={e => setForceRegenerate(e.target.checked)} />
-              忽略已有相同配音并重新生成（可能再次收费）
-            </label>
-            <button onClick={generateSpeech}
-              className="rounded-xl bg-indigo-600 px-6 py-3 font-semibold hover:bg-indigo-500">
-              生成配音
-            </button>
+          <div className="rounded-2xl border border-amber-300/20 bg-slate-950/65 p-6">
+            <h2 className="mb-3 text-xl font-semibold">AI 配音</h2>
+            <p className="text-sm text-white/70">当前离线资源包没有包含可用的本地 TTS 声音模型。为避免任何未经确认的费用，云端语音服务已关闭。</p>
+            <button disabled className="mt-4 rounded-xl bg-slate-700 px-6 py-3 font-semibold opacity-60">等待本地 TTS 模型</button>
           </div>
         </section>
 
@@ -311,8 +187,7 @@ export default function MediaStudioPage() {
                     <div className="font-semibold">任务 #{task.id} · {task.provider}</div>
                     <div className="mt-1 text-sm text-white/60">{task.model} · {task.status}</div>
                   </div>
-                  <button onClick={() => refreshTask(task.id)}
-                    className="rounded-lg bg-purple-700 px-4 py-2">查询任务</button>
+                  <button disabled className="rounded-lg bg-slate-700 px-4 py-2 opacity-60">历史任务只读</button>
                 </div>
                 <p className="mt-3 text-sm text-white/70">{task.prompt}</p>
                 {task.result_path && <p className="mt-2 break-all text-xs text-green-300">{task.result_path}</p>}

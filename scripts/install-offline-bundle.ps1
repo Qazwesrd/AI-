@@ -51,7 +51,7 @@ if ($InstallDirectory.Equals($DataDirectory, [System.StringComparison]::OrdinalI
 
 function Assert-ManagedEnginesStopped {
     $engineRoot = Normalize-DirectoryPath (Join-Path $DataDirectory "engines")
-    $enginePrefix = $engineRoot.TrimEnd([char[]]@('\\','/')) + [System.IO.Path]::DirectorySeparatorChar
+    $enginePrefix = $engineRoot.TrimEnd([char[]]@([char]92,[char]47)) + [System.IO.Path]::DirectorySeparatorChar
     try {
         $processes = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
     } catch {
@@ -83,10 +83,20 @@ try {
     [long]$uncompressedBytes = 0
     $zipFilePaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $zip.Entries) {
+        $entryPath = [string]$entry.FullName
+        if ([string]::IsNullOrWhiteSpace($entryPath)) { continue }
+        if ([System.IO.Path]::IsPathRooted($entryPath) -or $entryPath.Contains(':') -or
+            $entryPath -match '(^|[\\/])\.\.([\\/]|$)') { throw "资源 ZIP 包含不安全路径：$entryPath" }
+        $unixFileType = ($entry.ExternalAttributes -shr 16) -band 0xF000
+        $windowsAttributes = $entry.ExternalAttributes -band 0xFFFF
+        if ($unixFileType -eq 0xA000 -or
+            ($windowsAttributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "资源 ZIP 不允许包含符号链接或重解析点：$entryPath"
+        }
+        # Validate directory entries too; only regular files participate in the inventory.
         if ([string]::IsNullOrEmpty($entry.Name)) { continue }
-        if ([System.IO.Path]::IsPathRooted($entry.FullName) -or $entry.FullName.Contains(':') -or
-            $entry.FullName -match '(^|[\\/])\.\.([\\/]|$)') { throw "资源 ZIP 包含不安全路径：$($entry.FullName)" }
-        if (!$zipFilePaths.Add($entry.FullName.Replace('\','/'))) { throw "资源 ZIP 包含重复文件路径：$($entry.FullName)" }
+        $normalizedZipPath = $entryPath.Replace('\','/')
+        if (!$zipFilePaths.Add($normalizedZipPath)) { throw "资源 ZIP 包含重复文件路径：$entryPath" }
         $uncompressedBytes += [long]$entry.Length
     }
 } finally { $zip.Dispose() }
@@ -103,7 +113,7 @@ $staging = Join-Path $DataDirectory (".ai-resource-staging-" + [guid]::NewGuid()
 $engines = Join-Path $DataDirectory "engines"
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 try {
-    Write-Host "[3/5] 解压 AI 离线资源包（约 15 GiB），请勿关闭窗口。"
+    Write-Host "[3/5] 解压 AI 离线资源包（约 18.5 GiB），请勿关闭窗口。"
     [System.IO.Compression.ZipFile]::ExtractToDirectory($ResourceBundlePath, $staging)
 
     $manifestPath = Join-Path $staging "resource-manifest.json"
@@ -134,7 +144,7 @@ try {
     $seenInventoryPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $inventory) {
         $relative = [string]$entry.path
-        if (!$seenInventoryPaths.Add($relative.Replace('/', '\'))) { throw "资源清单存在重复路径：$relative" }
+        if (!$seenInventoryPaths.Add($relative.Replace('\', '/'))) { throw "资源清单存在重复路径：$relative" }
         if ([System.IO.Path]::IsPathRooted($relative) -or $relative.Contains(':') -or $relative -match '(^|[\\/])\.\.([\\/]|$)') {
             throw "资源清单包含不安全路径：$relative"
         }
@@ -144,12 +154,30 @@ try {
         if (!(Test-Path -LiteralPath $file -PathType Leaf)) { throw "资源文件缺失：$relative" }
         $item = Get-Item -LiteralPath $file -Force
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "资源文件不允许是重解析点：$relative" }
+        $directoryToCheck = Split-Path -Path $file -Parent
+        while ($directoryToCheck -and $directoryToCheck.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $directoryItem = Get-Item -LiteralPath $directoryToCheck -Force
+            if (($directoryItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "资源目录不允许是重解析点：$relative"
+            }
+            $directoryToCheck = Split-Path -Path $directoryToCheck -Parent
+        }
         if ($null -eq $entry.size -or $item.Length -ne [long]$entry.size) { throw "资源文件大小不匹配：$relative" }
         $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "资源文件 SHA-256 不匹配：$relative" }
         if (!$zipFilePaths.Contains($relative.Replace('\','/'))) { throw "资源清单文件不在 ZIP 中：$relative" }
     }
-    if ($zipFilePaths.Count -ne $seenInventoryPaths.Count) { throw "ZIP 文件集合与 file-inventory.json 不一致。" }
+    if ($seenInventoryPaths.Contains("file-inventory.json")) { throw "file-inventory.json 不得把自身列入哈希清单。" }
+    $extraZipFiles = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($zipPath in $zipFilePaths) {
+        if (!$seenInventoryPaths.Contains($zipPath)) { $extraZipFiles.Add($zipPath) }
+    }
+    if ($extraZipFiles.Count -ne 1 -or $extraZipFiles[0] -ne "file-inventory.json") {
+        throw "ZIP 文件集合与 file-inventory.json 不一致；只允许 file-inventory.json 自身作为唯一额外文件。"
+    }
+    if ($seenInventoryPaths.Count -ne ($zipFilePaths.Count - 1)) {
+        throw "ZIP 文件集合与 file-inventory.json 的数量不一致。"
+    }
 
     Write-Host "[5/5] 事务式全量替换托管引擎（不清理用户项目、作品、素材和存档）。"
     $backup = Join-Path $DataDirectory (".ai-resource-backup-" + [guid]::NewGuid().ToString("N"))
@@ -168,13 +196,10 @@ try {
             $backupPath = Join-Path $backup $name
             $hadPrevious = Test-Path -LiteralPath $destination
             if ($hadPrevious) { Move-Item -LiteralPath $destination -Destination $backupPath }
-            try {
-                Move-Item -LiteralPath $source -Destination $destination
-                $deployed.Add([pscustomobject]@{ Destination = $destination; Backup = $backupPath; HadPrevious = $hadPrevious })
-            } catch {
-                if ($hadPrevious -and (Test-Path -LiteralPath $backupPath) -and !(Test-Path -LiteralPath $destination)) { Move-Item -LiteralPath $backupPath -Destination $destination }
-                throw
-            }
+            # Record before moving the new directory so outer rollback can restore
+            # the previous engine if deployment fails midway.
+            $deployed.Add([pscustomobject]@{ Destination = $destination; Backup = $backupPath; HadPrevious = $hadPrevious })
+            Move-Item -LiteralPath $source -Destination $destination
         }
         $ollama = Join-Path $engines "Ollama\runtime\ollama.exe"
         $ffmpeg = Join-Path $engines "FFmpeg\ffmpeg.exe"
@@ -191,8 +216,9 @@ try {
         $manifestBackup = Join-Path $backup "resource-manifest.json"
         $hadManifest = Test-Path -LiteralPath $manifestDestination
         if ($hadManifest) { Copy-Item -LiteralPath $manifestDestination -Destination $manifestBackup -Force }
-        Copy-Item -LiteralPath $manifestPath -Destination $manifestDestination -Force
+        # Mark before copying so a partial manifest write is also rolled back.
         $manifestWasUpdated = $true
+        Copy-Item -LiteralPath $manifestPath -Destination $manifestDestination -Force
         Write-Host "[6/6] 启动桌面程序安装器。请确认程序安装目录：$InstallDirectory"
         $installerArgument = '/D="' + $InstallDirectory + '"'
         $installer = Start-Process -FilePath $InstallerPath -ArgumentList $installerArgument -Wait -PassThru
@@ -201,21 +227,60 @@ try {
         $env:AICOMICS_DATA_DIR = $DataDirectory
         $deploymentSucceeded = $true
     } catch {
+        $originalError = $_.Exception.Message
+        $rollbackErrors = New-Object 'System.Collections.Generic.List[string]'
         Write-Host "安装失败，正在回滚本次替换的托管引擎……" -ForegroundColor Yellow
         for ($i = $deployed.Count - 1; $i -ge 0; $i--) {
             $item = $deployed[$i]
-            if (Test-Path -LiteralPath $item.Destination) { Remove-Item -LiteralPath $item.Destination -Recurse -Force }
-            if ($item.HadPrevious -and (Test-Path -LiteralPath $item.Backup)) { Move-Item -LiteralPath $item.Backup -Destination $item.Destination }
+            try {
+                if (Test-Path -LiteralPath $item.Destination) {
+                    Remove-Item -LiteralPath $item.Destination -Recurse -Force
+                }
+            } catch {
+                $rollbackErrors.Add("无法移除新引擎目录 $($item.Destination)：$($_.Exception.Message)")
+            }
+            if ($item.HadPrevious -and (Test-Path -LiteralPath $item.Backup)) {
+                try {
+                    if (Test-Path -LiteralPath $item.Destination) {
+                        throw "目标目录仍存在，不能覆盖恢复。"
+                    }
+                    Move-Item -LiteralPath $item.Backup -Destination $item.Destination
+                } catch {
+                    $rollbackErrors.Add("无法恢复旧引擎 $($item.Destination)，备份位于 $($item.Backup)：$($_.Exception.Message)")
+                }
+            }
         }
         $manifestDestination = Join-Path $DataDirectory "resource-manifest.json"
         $manifestBackup = Join-Path $backup "resource-manifest.json"
-        if ($manifestWasUpdated -and (Test-Path -LiteralPath $manifestBackup)) { Copy-Item -LiteralPath $manifestBackup -Destination $manifestDestination -Force }
-        elseif ($manifestWasUpdated -and !$hadManifest -and (Test-Path -LiteralPath $manifestDestination)) { Remove-Item -LiteralPath $manifestDestination -Force }
-        [Environment]::SetEnvironmentVariable("AICOMICS_DATA_DIR", $oldUserData, "User")
-        $env:AICOMICS_DATA_DIR = $oldProcessData
-        # Rollback completed: safe to discard the backup copy.
-        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
-        throw
+        try {
+            if ($manifestWasUpdated -and (Test-Path -LiteralPath $manifestBackup)) {
+                Copy-Item -LiteralPath $manifestBackup -Destination $manifestDestination -Force
+            } elseif ($manifestWasUpdated -and !$hadManifest -and (Test-Path -LiteralPath $manifestDestination)) {
+                Remove-Item -LiteralPath $manifestDestination -Force
+            }
+        } catch {
+            $rollbackErrors.Add("无法恢复 resource-manifest.json：$($_.Exception.Message)")
+        }
+        try {
+            [Environment]::SetEnvironmentVariable("AICOMICS_DATA_DIR", $oldUserData, "User")
+            $env:AICOMICS_DATA_DIR = $oldProcessData
+        } catch {
+            $rollbackErrors.Add("无法恢复 AICOMICS_DATA_DIR 环境变量：$($_.Exception.Message)")
+        }
+        if ($rollbackErrors.Count -eq 0) {
+            try {
+                if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+            } catch {
+                $rollbackErrors.Add("无法清理回滚备份；备份已保留：$($_.Exception.Message)")
+            }
+        }
+        if ($rollbackErrors.Count -gt 0) {
+            $details = $rollbackErrors -join [Environment]::NewLine
+            throw "安装失败：$originalError" + [Environment]::NewLine +
+                "回滚未完全成功，旧引擎备份必须保留在：$backup" + [Environment]::NewLine +
+                "回滚错误：" + [Environment]::NewLine + $details
+        }
+        throw $originalError
     } finally {
         if ($deploymentSucceeded -and (Test-Path -LiteralPath $backup)) { Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction SilentlyContinue }
     }

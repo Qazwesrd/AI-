@@ -75,19 +75,6 @@ export default function StoryboardPage() {
   const [additionalPromptInstructions, setAdditionalPromptInstructions] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [videoProvider, setVideoProvider] = useState("custom_video");
-  const [videoModel, setVideoModel] = useState("");
-  const [videoPaidConfirmed, setVideoPaidConfirmed] = useState(false);
-  const [videoCreatePath, setVideoCreatePath] = useState("/videos/generations");
-  const [videoStatusPath, setVideoStatusPath] = useState("/videos/{task_id}");
-  const [videoIdField, setVideoIdField] = useState("id");
-  const [videoUrlField, setVideoUrlField] = useState("video_url");
-  const [videoReferenceMode, setVideoReferenceMode] = useState<"none" | "data_uri">("none");
-  const [videoReferenceField, setVideoReferenceField] = useState("image");
-  const [speechProvider, setSpeechProvider] = useState("openai");
-  const [speechModel, setSpeechModel] = useState("");
-  const [speechVoice, setSpeechVoice] = useState("alloy");
-  const [speechPaidConfirmed, setSpeechPaidConfirmed] = useState(false);
   const [backgroundMusicPath, setBackgroundMusicPath] = useState("");
 
   const [shotForm, setShotForm] = useState({
@@ -187,7 +174,7 @@ export default function StoryboardPage() {
 
   async function planEpisodesAI() {
     if (!projectId) return setMessage("请先选择剧本项目");
-    const approved = window.confirm("AI 将按每批最多3章的方式分析剧情；每章完成后立即保存。886章小说需要多批处理，过程中可关闭软件，之后再次点击会从上次进度继续。若当前模型为付费服务，可能产生费用。是否开始/继续？");
+    const approved = window.confirm("将使用本机已安装的 Ollama 模型离线规划分集，每次处理1章并立即保存进度。不会调用云端 API 或产生 API 费用。是否开始/继续？");
     if (!approved) return;
     setBusy(true);
     try {
@@ -198,7 +185,6 @@ export default function StoryboardPage() {
         const batchResult = await request(`/api/story/projects/${projectId}/plan-ai`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            confirm_paid: true,
             prompt_style: promptStyle,
             additional_instructions: additionalPromptInstructions,
           }),
@@ -230,14 +216,14 @@ export default function StoryboardPage() {
   }
 
   async function generateEpisodeScriptAI(episode: Episode) {
-    const approved = window.confirm("将调用已启用的文本 AI，根据本集原著生成影视剧本和对应分镜。若当前模型属于付费服务，可能产生 API 费用。是否继续？");
+    const approved = window.confirm("将使用本机已安装的 Ollama 模型，根据本集原著离线生成影视剧本和分镜。不会调用云端 API 或产生 API 费用。是否继续？");
     if (!approved) return;
     setBusy(true);
     try {
       const result = await request(`/api/story/episodes/${episode.id}/generate-ai`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            confirm_paid: true,
+
             prompt_style: promptStyle,
             additional_instructions: additionalPromptInstructions,
           }),
@@ -278,79 +264,6 @@ export default function StoryboardPage() {
     } finally { setBusy(false); }
   }
 
-  async function refreshEpisodeVideoTasks(id: number) {
-    setBusy(true);
-    try {
-      const result = await request("/api/media/video/episodes/" + id + "/refresh", { method: "POST" });
-      await loadEpisodeVideoTasks(id);
-      setMessage("已查询 " + result.checked + " 个镜头任务状态；请留意仍在排队或生成中的任务。");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "查询视频任务失败"); }
-    finally { setBusy(false); }
-  }
-  async function generateEpisodeVideos(episode: Episode) {
-    if (!videoModel.trim()) return setMessage("请填写已开通的视频模型 ID");
-    setBusy(true);
-    try {
-      const episodeShots = episodeId === episode.id ? shots : await request(`/api/story/episodes/${episode.id}/shots`);
-      const preflight = inspectEpisodeShots(episode, episodeShots as Shot[]);
-      if (preflight.blockers.length) {
-        setMessage("视频生成前检查未通过：\n" + preflight.blockers.join("；"));
-        return;
-      }
-      const consistency = await request(`/api/story/episodes/${episode.id}/asset-consistency`) as ConsistencyReport;
-      if (consistency.error_count > 0) {
-        setConsistencyReport(consistency);
-        setMessage("视觉素材一致性检查发现 " + consistency.error_count + " 项错误，已阻止提交视频任务。请先修正跨小说素材或素材分类关联错误。");
-        return;
-      }
-      const consistencyWarnings = consistency.issues.map(issue => `镜头 ${issue.shot_number}：${issue.message}`);
-      const allWarnings = [...preflight.warnings, ...consistencyWarnings];
-      const warningText = allWarnings.length ? "\n\n预检提醒：\n" + allWarnings.join("\n") : "";
-      if (!window.confirm("预检完成：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒；已检查 " + consistency.checked_link_count + " 项素材关联。" + warningText + "\n\n将按每批最多3个镜头提交视频生成请求，并保存每个镜头的任务编号。每个镜头都可能产生费用，是否继续？")) return;
-      let done = false;
-      let batches = 0;
-      let totalCreated = 0;
-      while (!done && batches < 12) {
-        const result = await request("/api/media/video/episodes/" + episode.id + "/generate", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: videoProvider, model: videoModel, batch_size: 3, confirm_paid: videoPaidConfirmed, create_path: videoCreatePath, status_path_template: videoStatusPath, task_id_field: videoIdField, video_url_field: videoUrlField, status_field: "status", aspect_ratio: "16:9", reference_image_mode: videoReferenceMode, reference_image_field: videoReferenceField }),
-        });
-        totalCreated += (result.created || []).length;
-        done = Boolean(result.done);
-        batches += 1;
-        await loadEpisodeVideoTasks(episode.id);
-        setMessage(result.message || "正在分批提交镜头视频任务");
-        if (result.failures?.length) {
-          throw new Error("有 " + result.failures.length + " 个镜头提交失败；已成功提交的任务已保存，请修正服务商配置后再次点击重试。");
-        }
-      }
-      if (!done) throw new Error("本次已达到批次上限，已提交任务全部保存，再次点击即可继续。");
-      setMessage("本集镜头视频任务提交完成，共提交 " + totalCreated + " 个任务。接下来查询任务状态并下载成片。");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "提交镜头视频失败");
-    } finally { setBusy(false); }
-  }
-
-  async function generateEpisodeSpeech(episode: Episode) {
-    if (!speechModel.trim()) return setMessage("请填写已开通的语音模型 ID");
-    setBusy(true);
-    try {
-      const episodeShots = episodeId === episode.id ? shots : await request(`/api/story/episodes/${episode.id}/shots`);
-      const preflight = inspectEpisodeShots(episode, episodeShots as Shot[]);
-      if (preflight.blockers.length) {
-        setMessage("配音生成前检查未通过：\n" + preflight.blockers.join("；"));
-        return;
-      }
-      const warningText = preflight.warnings.length ? "\n\n预检提醒：\n" + preflight.warnings.join("\n") : "";
-      if (!window.confirm("预检通过：共 " + episodeShots.length + " 个镜头，镜头总时长 " + preflight.totalSeconds + " 秒。" + warningText + "\n\n将按分镜对白/旁白生成语音，并按镜头时长合成整集配音轨。语音 API 可能产生费用，是否继续？")) return;
-      const result = await request("/api/media/speech/episodes/" + episode.id + "/generate", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: speechProvider, model: speechModel, voice: speechVoice, confirm_paid: speechPaidConfirmed }),
-      });
-      setMessage(result.message || "本集对白配音完成");
-    } catch (error) { setMessage(error instanceof Error ? error.message : "本集配音失败"); }
-    finally { setBusy(false); }
-  }
   async function renderEpisodeVideo(episode: Episode) {
     setBusy(true);
     try {
@@ -600,8 +513,8 @@ export default function StoryboardPage() {
               <p className="mt-2 line-clamp-2 text-xs text-slate-400">原著内容：{ep.source_text?.slice(0, 180) || "暂无内容"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className="rounded-lg border border-fuchsia-300/30 bg-fuchsia-700/40 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeScriptAI(ep)}>AI生成剧本与分镜</button>
-                <button className="rounded-lg border border-cyan-300/30 bg-cyan-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeVideos(ep)}>按分镜生成视频</button>
-                <button className="rounded-lg border border-amber-300/30 bg-amber-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => generateEpisodeSpeech(ep)}>生成本集配音</button>
+                <button className="rounded-lg border border-slate-500/30 bg-slate-700/40 px-3 py-1.5 text-xs opacity-60" disabled title="本地逐镜头 VACE 集成尚未完成">本地逐镜头视频暂不可用</button>
+                <button className="rounded-lg border border-slate-500/30 bg-slate-700/40 px-3 py-1.5 text-xs opacity-60" disabled title="离线包未包含 TTS 模型">本地配音暂不可用</button>
                 <button className="rounded-lg border border-emerald-300/30 bg-emerald-800/50 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy || Boolean(selectedProject?.generation_blocked)} onClick={() => renderEpisodeVideo(ep)}>合成本集视频</button>
                 <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs" disabled={busy} onClick={() => checkEpisodeConsistency(ep.id)}>检查视觉一致性</button>
                 <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs" onClick={() => loadShots(ep.id)}>打开分镜</button>
@@ -617,40 +530,11 @@ export default function StoryboardPage() {
       </section>
 
       <section className={panel}>
-        <h2 className="mb-4 text-xl font-semibold">分镜视频生成配置</h2>
-        <p className="mb-3 text-xs text-slate-400">使用已在 AI 管理中心配置并启用的视频服务商，填写该服务商实际支持的模型 ID 和任务接口路径。当前会将分镜文字及已确认素材描述作为提示词；需要远程图片上传的专用图生视频接口还需按服务商协议单独适配。</p>
-        <div className="grid gap-3 md:grid-cols-2">
-          <input className={field} value={videoProvider} onChange={e => setVideoProvider(e.target.value)} placeholder="服务商 ID，例如 doubao" />
-          <input className={field} value={videoModel} onChange={e => setVideoModel(e.target.value)} placeholder="视频模型 ID（必填）" />
-          <input className={field} value={videoCreatePath} onChange={e => setVideoCreatePath(e.target.value)} placeholder="创建任务 API 路径" />
-          <input className={field} value={videoStatusPath} onChange={e => setVideoStatusPath(e.target.value)} placeholder="查询任务路径，保留 {task_id}" />
-          <input className={field} value={videoIdField} onChange={e => setVideoIdField(e.target.value)} placeholder="任务编号返回字段" />
-          <input className={field} value={videoUrlField} onChange={e => setVideoUrlField(e.target.value)} placeholder="视频 URL 返回字段" />
-        </div>
-        <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3">
-          <label className="mb-2 block text-xs font-semibold text-cyan-100">分镜参考图输入（仅适用于明确支持 JSON Base64 Data URI 的视频 API）</label>
-          <div className="grid gap-3 md:grid-cols-2">
-            <select className={field} value={videoReferenceMode} onChange={e => setVideoReferenceMode(e.target.value as "none" | "data_uri")}>
-              <option value="none">关闭参考图（纯文字提示词）</option>
-              <option value="data_uri">发送已关联素材图片（Data URI）</option>
-            </select>
-            <input className={field} value={videoReferenceField} onChange={e => setVideoReferenceField(e.target.value)} placeholder="图片字段名，例如 image 或 input.image" />
-          </div>
-          <p className="mt-2 text-xs leading-5 text-slate-400">开启后会从本镜头关联的已确认视觉素材中选择一张图片，优先人物、其次场景和道具，作为 Base64 Data URI 发送。服务商必须明确支持这种字段和格式；不支持时请保持关闭。单张图片上限 8 MB。不会自动上传到第三方图床。</p>
-        </div>
-        <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={videoPaidConfirmed} onChange={e => setVideoPaidConfirmed(e.target.checked)} />我已确认本次镜头视频生成可能产生费用</label>
-        <div className="mt-5 border-t border-purple-300/15 pt-4">
-          <h3 className="mb-3 text-sm font-semibold">对白配音配置</h3>
-          <div className="grid gap-3 md:grid-cols-3">
-            <input className={field} value={speechProvider} onChange={e => setSpeechProvider(e.target.value)} placeholder="语音服务商 ID" />
-            <input className={field} value={speechModel} onChange={e => setSpeechModel(e.target.value)} placeholder="语音模型 ID" />
-            <input className={field} value={speechVoice} onChange={e => setSpeechVoice(e.target.value)} placeholder="声音 ID" />
-          </div>
-          <label className="mt-3 flex items-center gap-2 text-xs text-amber-200"><input type="checkbox" checked={speechPaidConfirmed} onChange={e => setSpeechPaidConfirmed(e.target.checked)} />我已确认本次配音可能产生费用</label>
-          <div className="mt-4">
-            <label className="mb-2 block text-xs text-slate-300">背景音乐文件路径（可选，需先上传到媒体素材库）</label>
-            <input className={field} value={backgroundMusicPath} onChange={e => setBackgroundMusicPath(e.target.value)} placeholder="填写 storage 目录中的背景音乐完整路径" />
-          </div>
+        <h2 className="mb-4 text-xl font-semibold">本地视频与配音能力</h2>
+        <div className="space-y-3 text-sm text-slate-300">
+          <p>逐镜头自动视频生成尚未接入本地 VACE 工作流；本页面已关闭云端视频 API，不会提交可能收费的任务。</p>
+          <p>你仍可在“媒体工坊”单独使用已打包的本地 VACE 视频引擎，但当前不能自动回填本集分镜。</p>
+          <p>本版离线资源包未包含 TTS 声音模型，整集自动配音暂不可用。背景音乐和已有音轨仍可用于本地成片合成。</p>
         </div>
       </section>
 
@@ -680,7 +564,7 @@ export default function StoryboardPage() {
           <div className="mb-4 rounded-xl border border-cyan-300/20 bg-cyan-950/30 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <strong className="text-sm">本集视频任务</strong>
-              <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => refreshEpisodeVideoTasks(episodeId)}>查询并下载已完成视频</button>
+              <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs disabled:opacity-50" disabled={busy} onClick={() => loadEpisodeVideoTasks(episodeId)}>刷新本地任务记录</button>
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               <button className="rounded-lg border border-emerald-300/30 bg-emerald-900/30 px-3 py-1.5 text-xs disabled:opacity-50"
