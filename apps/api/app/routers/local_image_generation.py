@@ -131,7 +131,7 @@ class LocalImageGenerateInput(BaseModel):
 
 
 def _local_request(path: str, payload: dict | None = None, timeout: float = 8.0):
-    allowed = path in {"/system_stats", "/object_info/CheckpointLoaderSimple", "/prompt"}
+    allowed = path in {"/system_stats", "/object_info/CheckpointLoaderSimple", "/object_info/UpscaleModelLoader", "/object_info/ImageUpscaleWithModel", "/prompt"}
     allowed = allowed or bool(re.fullmatch(r"/object_info/(?:LoadImage|CLIPVisionLoader|IPAdapterUnifiedLoader|IPAdapter|IPAdapterAdvanced|IPAdapterModelLoader|PrepImageForClipVision)", path))
     allowed = allowed or bool(re.fullmatch(r"/history/[0-9a-fA-F-]{32,36}", path))
     if not allowed:
@@ -203,6 +203,48 @@ def _node_input_choices(node_info: dict, input_name: str):
         if isinstance(spec, list) and spec and isinstance(spec[0], list):
             return [value for value in spec[0] if isinstance(value, str)]
     return []
+
+
+@router.get("/upscale-capabilities")
+def inspect_local_upscale_capabilities():
+    """Inspect whether ComfyUI has a usable model-based image upscaler already installed."""
+    nodes = {}
+    for node_type in ("UpscaleModelLoader", "ImageUpscaleWithModel"):
+        try:
+            info = _local_request("/object_info/" + node_type, timeout=4.0)
+        except HTTPException as exc:
+            if exc.status_code == 502:
+                nodes[node_type] = {"available": False, "reason": "节点不存在"}
+                continue
+            raise
+        node_info = info.get(node_type)
+        available = isinstance(node_info, dict)
+        nodes[node_type] = {
+            "available": available,
+            "input_names": sorted(
+                set((node_info.get("input", {}).get("required", {}) if available else {}).keys())
+                | set((node_info.get("input", {}).get("optional", {}) if available else {}).keys())
+            ),
+        } if available else {"available": False, "reason": "ComfyUI 未提供该节点"}
+        if available and node_type == "UpscaleModelLoader":
+            nodes[node_type]["models"] = _node_input_choices(node_info, "model_name")
+    models = nodes.get("UpscaleModelLoader", {}).get("models", [])
+    nodes_ready = all(nodes.get(name, {}).get("available", False) for name in ("UpscaleModelLoader", "ImageUpscaleWithModel"))
+    ready = nodes_ready and bool(models)
+    return {
+        "engine": "ComfyUI",
+        "status": "ready" if ready else "incomplete",
+        "upscale_ready": ready,
+        "nodes_ready": nodes_ready,
+        "models_found": len(models),
+        "models": models,
+        "nodes": nodes,
+        "local_only": True,
+        "network_used": False,
+        "downloaded": False,
+        "generation_started": False,
+        "message": "已发现可用的本机 AI 放大节点和模型；尚需执行工作流验收。" if ready else "尚未发现完整的本机 AI 放大组件；不会自动下载模型或安装节点。",
+    }
 
 
 @router.get("/reference-capabilities")
