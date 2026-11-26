@@ -32,6 +32,23 @@ from app.services.media_service import (
 router = APIRouter(prefix="/api/media", tags=["媒体生产"])
 
 
+def build_episode_export_video_filter(width, height, fps, duration):
+    """Build a validated per-shot normalization filter for final MP4 export."""
+    if (width, height) not in ((1280, 720), (1920, 1080)):
+        raise ValueError("输出分辨率仅支持 1280x720 或 1920x1080")
+    if fps not in (24, 30):
+        raise ValueError("输出帧率仅支持 24 或 30 FPS")
+    duration = float(duration)
+    if duration <= 0 or duration > 600:
+        raise ValueError("镜头时长超出允许范围")
+    return (
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
+        f"fps={fps},setsar=1,format=yuv420p,"
+        f"trim=duration={duration},setpts=PTS-STARTPTS"
+    )
+
+
 def build_episode_audio_filter(shot_ids, transitions):
     """Build audio concat/acrossfade graph matching the video transition groups."""
     transition_by_shot = {
@@ -862,11 +879,11 @@ def render_episode_from_shots(
             duration = max(1.0, duration)
             actual_durations.append(duration)
             ffmpeg_args += ["-i", str(clip)]
-            filters.append(
-                f"[{input_index}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease,"
-                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,fps={fps},setsar=1,format=yuv420p,"
-                f"trim=duration={duration},setpts=PTS-STARTPTS[v{index}]"
-            )
+            try:
+                shot_video_filter = build_episode_export_video_filter(width, height, fps, duration)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(422, str(exc)) from exc
+            filters.append(f"[{input_index}:v:0]{shot_video_filter}[v{index}]")
             has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
             if has_audio:
                 filters.append(
