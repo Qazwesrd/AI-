@@ -1,5 +1,5 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electron");
-const { spawn, execFile } = require("child_process");
+const { spawn, execFile, execFileSync } = require("child_process");
 const path = require("path");
 const { inspectUpdateInventory } = require("./update-inventory.cjs");
 const { verifySignedPatch, createRollbackSnapshot, verifyRollbackSnapshot, TRUSTED_PATCH_PUBLIC_KEY_PEM, MAX_PACKAGE_BYTES } = require("./patch-package-verifier.cjs");
@@ -261,6 +261,34 @@ function findComfyUiRuntime() {
   return layouts.find(item => fs.existsSync(item.python) && fs.existsSync(item.main)) || null;
 }
 
+function detectComfyUiAcceleration(runtime) {
+  try {
+    const probe = [
+      "import json, torch",
+      "print(json.dumps({",
+      "  'available': bool(torch.cuda.is_available()),",
+      "  'hip': getattr(torch.version, 'hip', None),",
+      "  'cuda': getattr(torch.version, 'cuda', None)",
+      "}))",
+    ].join("\n");
+    const output = execFileSync(runtime.python, ["-c", probe], {
+      cwd: path.dirname(runtime.main),
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 15000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = output.trim().split(/\r?\n/).filter(Boolean).pop();
+    const result = JSON.parse(line || "{}");
+    if (result.available === true) {
+      return { enabled: true, backend: result.hip ? "AMD/ROCm" : "CUDA" };
+    }
+  } catch (error) {
+    console.warn("[ComfyUI] GPU capability probe failed; falling back to CPU:", error.message);
+  }
+  return { enabled: false, backend: "CPU" };
+}
+
 function startComfyUiRuntime() {
   const baseUrl = "http://127.0.0.1:8188";
   const runtime = findComfyUiRuntime();
@@ -268,11 +296,12 @@ function startComfyUiRuntime() {
     console.warn("[ComfyUI] Offline engine bundle not found; image generation remains unavailable until the resource bundle is installed.");
     return null;
   }
+  const acceleration = detectComfyUiAcceleration(runtime);
   comfyUiProcess = spawn(runtime.python, [
     "-s", runtime.main,
     "--listen", "127.0.0.1",
     "--port", "8188",
-    ...(String(process.env.PATH || "").split(path.delimiter).some(dir => fs.existsSync(path.join(dir, "nvidia-smi.exe"))) ? [] : ["--cpu"]),
+    ...(acceleration.enabled ? [] : ["--cpu"]),
   ], {
     cwd: path.dirname(runtime.main),
     windowsHide: true,
@@ -286,7 +315,7 @@ function startComfyUiRuntime() {
   managedChild.once("error", error => {
     console.error("[ComfyUI] Failed to start managed local image engine:", error);
   });
-  console.log("[ComfyUI] Starting managed local image engine at", baseUrl);
+  console.log("[ComfyUI] Starting managed local image engine at", baseUrl, "backend:", acceleration.backend);
   return managedChild;
 }
 
