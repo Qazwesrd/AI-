@@ -7,7 +7,7 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type LocalVideoRuntime = {
   status: string;
   node_count: number;
-  nodes: { node_type: string; model_choices: string[] }[];
+  nodes: { node_type: string; model_choices: string[]; input_schema?: Record<string, { required?: boolean; type?: string; options?: string[]; default?: unknown; min?: number; max?: number }> }[];
   vace_node_found: boolean;
   wan_video_nodes_found: boolean;
   workflow_node_set_complete: boolean;
@@ -176,6 +176,31 @@ export default function MediaStudioPage() {
                 {localVideoRuntime.nodes.length > 0 && (
                   <div className="space-y-2">
                     <p className="break-words text-white/60">已发现节点：{localVideoRuntime.nodes.map(node => node.node_type).join("、")}</p>
+                    {localVideoRuntime.nodes.some(node => Object.keys(node.input_schema || {}).length > 0) && (
+                      <details className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <summary className="cursor-pointer text-cyan-100">展开本机节点真实输入参数（以当前 ComfyUI 返回值为准）</summary>
+                        <div className="mt-3 space-y-3">
+                          {localVideoRuntime.nodes.filter(node => Object.keys(node.input_schema || {}).length > 0).map(node => (
+                            <div key={node.node_type}>
+                              <p className="font-medium text-cyan-100">{node.node_type}</p>
+                              <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                                {Object.entries(node.input_schema || {}).map(([name, schema]) => (
+                                  <div key={name} className="rounded border border-white/10 p-2 text-xs">
+                                    <p className="break-all text-white/90">{name} {schema.required ? "· 必填" : "· 可选"}</p>
+                                    <p className="mt-1 break-all text-white/50">
+                                      {schema.type || "类型未报告"}
+                                      {schema.options?.length ? ` · 选项：${schema.options.join("、")}` : ""}
+                                      {schema.default !== undefined ? ` · 默认：${String(schema.default)}` : ""}
+                                      {schema.min !== undefined || schema.max !== undefined ? ` · 范围：${schema.min ?? "—"} 至 ${schema.max ?? "—"}` : ""}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                     {localVideoRuntime.nodes.some(node => node.model_choices.length > 0) && (
                       <div className="rounded-lg border border-white/10 bg-black/20 p-3">
                         <p className="mb-2 text-white/70">ComfyUI 节点实际提供的模型选项（仅为下拉清单，不代表模型已完整加载或可成功推理）：</p>
