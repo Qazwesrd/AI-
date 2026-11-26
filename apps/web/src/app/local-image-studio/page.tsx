@@ -487,9 +487,9 @@ export default function LocalImageStudioPage() {
   const [prompt, setPrompt] = useState("");
   const [negative, setNegative] = useState("低质量、模糊、畸形肢体、多余手指、文字、水印");
   const [style, setStyle] = useState<(typeof styles)[number]>("国漫");
-  const [width, setWidth] = useState("768");
-  const [height, setHeight] = useState("768");
-  const [steps, setSteps] = useState("24");
+  const [width, setWidth] = useState("512");
+  const [height, setHeight] = useState("512");
+  const [steps, setSteps] = useState("8");
   const [seed, setSeed] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [task, setTask] = useState<ImageTask | null>(null);
