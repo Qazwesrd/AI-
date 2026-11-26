@@ -132,6 +132,44 @@
       "notes": "Corrected from the earlier GGUF assumption: upstream stable-diffusion.cpp documentation lists Wan 2.1 T2V 1.3B as safetensors, while its listed Wan GGUF examples concern 14B variants. Do not use an unverified third-party 1.3B GGUF file. The model card reports Apache-2.0. Qualify a real CPU-mode MP4 generation with the required UMT5 encoder and Wan VAE, recording peak RAM, elapsed time, output validity and hashes before bundling."
     },
     {
+      "id": "wan2.1-vace-1.3b-q4_0-gguf",
+      "engine": "stable-diffusion-cpp",
+      "repository": "calcuis/wan-1.3b-gguf",
+      "file": "wan2.1-vace-1.3b-q4_0.gguf",
+      "file_size_gb": 1.35,
+      "official_model_family": "Wan-AI/Wan2.1 VACE 1.3B",
+      "companion_repository": "calcuis/wan-1.3b-gguf",
+      "companion_files": [
+        {
+          "file": "umt5-xxl-encoder-q4_k_m.gguf",
+          "size_gb": 3.66,
+          "purpose": "UMT5-XXL quantized text encoder"
+        },
+        {
+          "file": "pig_wan_vae_fp32-f16.gguf",
+          "size_mb": 254,
+          "purpose": "Wan VAE companion; confirm compatibility against the pinned stable-diffusion.cpp build"
+        }
+      ],
+      "workflow": "stable-diffusion.cpp Wan 2.1 VACE 1.3B; qualify reference-to-video and text-to-video recipes before enabling",
+      "license": "Apache-2.0-declared-by-quantized-repository; verify base model redistribution terms before bundling",
+      "recommended": false,
+      "status": "candidate-not-bundled-awaiting-pinned-hashes-and-real-reference-to-video-and-text-to-video-inference",
+      "hardware": {
+        "windows_x64": "candidate runtime available; full inference still to be tested",
+        "cpu_backend": "experimental candidate; no successful CPU video generation claim",
+        "ryzen_7_4800u": "experimental-only; likely slow and memory constrained",
+        "ram_16_gib": "unverified; model plus 3.66 GB encoder and runtime overhead may exceed practical memory",
+        "vega_integrated_gpu": "do-not-assume-ROCm-or-GPU-acceleration"
+      },
+      "purpose": [
+        "reference-image-to-video",
+        "text-to-video",
+        "video-to-video"
+      ],
+      "notes": "Third-party GGUF quantization, not an official Wan-AI release asset. The quantized repository documents VACE 1.3B and reports reference-image/video conditioning without CLIP vision; verify exact compatibility, checksums, license chain and real MP4 inference before bundling or marking available. Q4_0 selected only as a lower-storage qualification candidate."
+    },
+    {
       "id": "wan2.2-ti2v-5b",
       "engine": "comfyui",
       "repository": "Wan-AI/Wan2.2-TI2V-5B",
