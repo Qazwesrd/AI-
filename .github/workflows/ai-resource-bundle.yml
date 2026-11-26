@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ai-offline-resource-bundle-${{ github.ref }}
+  group: ai-offline-resource-bundle-fastzip-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
