@@ -11,9 +11,7 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models.media import MediaFile, MediaTask
 from app.services.media_service import VIDEO_DIR, probe_media
-from app.services.task_runtime import (
-    acquire_task_lease, heartbeat_task_lease, release_task_lease, remove_queued_task,
-)
+from app.services.task_runtime import acquire_task_lease, heartbeat_task_lease, release_task_lease
 
 logger = logging.getLogger("ai_comic_studio.local_vace")
 _STOP = threading.Event()
@@ -52,10 +50,12 @@ def _runtime():
     return cli, models
 
 
-def _write_state(db, task, status=None, stage=None, error=None):
+def _write_state(db, task, status=None, stage=None, error=None, progress=None):
     request = dict(task.request_data or {})
     if stage is not None:
         request["stage"] = stage
+    if progress is not None:
+        request["progress"] = max(0, min(100, int(progress)))
     request["stage_updated_at"] = datetime.utcnow().isoformat()
     task.request_data = request
     if status is not None:
@@ -128,7 +128,7 @@ def _run_task(task_id):
             release_task_lease(db, "media", task_id, False, "任务在启动前已取消或状态已变化")
             lease = False
             return
-        _write_state(db, task, status="starting", stage="preparing_runtime")
+        _write_state(db, task, status="starting", stage="preparing_runtime", progress=3)
 
         options = dict(task.request_data or {})
         prompt = (task.prompt or "").strip()
@@ -169,13 +169,7 @@ def _run_task(task_id):
             "--steps", str(steps), "-W", str(width), "-H", str(height),
             "--video-frames", str(frames), "--offload-to-cpu", "-o", str(output),
         ]
-        db.expire_all()
-        task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
-        if task is None or task.status == "cancel_requested":
-            if task:
-                _write_state(db, task, status="cancelled", stage="cancelled")
-            return
-        _write_state(db, task, status="running", stage="generating")
+        _write_state(db, task, status="running", stage="generating", progress=8)
         flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         with open(log_path, "w", encoding="utf-8", errors="replace") as log:
             process = subprocess.Popen(
@@ -188,6 +182,8 @@ def _run_task(task_id):
 
             started = time.monotonic()
             last_heartbeat = started
+            last_progress_update = started
+            observed_progress = 8
             while process.poll() is None:
                 if _STOP.is_set():
                     _terminate_tree(process)
@@ -207,9 +203,20 @@ def _run_task(task_id):
                     _terminate_tree(process)
                     failure = "本地 VACE 生成超过 6 小时上限，已停止进程。"
                     break
-                if time.monotonic() - last_heartbeat >= 10:
+                now = time.monotonic()
+                if now - last_heartbeat >= 10:
                     heartbeat_task_lease(db, "media", task_id)
-                    last_heartbeat = time.monotonic()
+                    last_heartbeat = now
+                if now - last_progress_update >= 5:
+                    # Different sd.cpp builds format progress differently; only accept explicit percentages.
+                    match = __import__("re").search(r"(?<!\d)(\d{1,3})\s*%", _tail(log_path, 12000))
+                    if match:
+                        observed_progress = max(observed_progress, min(85, int(match.group(1))))
+                    db.expire_all()
+                    progress_task = db.query(MediaTask).filter(MediaTask.id == task_id).first()
+                    if progress_task and progress_task.status == "running":
+                        _write_state(db, progress_task, stage="generating", progress=observed_progress)
+                    last_progress_update = now
                 time.sleep(1)
 
         current = db.query(MediaTask).filter(MediaTask.id == task_id).first()
@@ -238,7 +245,7 @@ def _run_task(task_id):
         current = db.query(MediaTask).filter(MediaTask.id == task_id).first()
         if current is None:
             raise RuntimeError("视频任务记录不存在。")
-        _write_state(db, current, status="validating", stage="validating_output")
+        _write_state(db, current, status="validating", stage="validating_output", progress=92)
         info = probe_media(output)
         streams = info.get("streams") or []
         video = next((item for item in streams if item.get("codec_type") == "video"), None)
@@ -278,8 +285,9 @@ def _run_task(task_id):
         current.updated_at = datetime.utcnow()
         db.add(media)
         db.flush()
-        current.result_data = dict(current.result_data or {})
-        current.result_data["media_file_id"] = media.id
+        result_data = dict(current.result_data or {})
+        result_data["media_file_id"] = media.id
+        current.result_data = result_data
         db.commit()
         succeeded = True
     except Exception as exc:
@@ -375,7 +383,6 @@ def request_cancel_local_vace(db, task):
         task.request_data = request
         task.updated_at = datetime.utcnow()
         db.commit()
-        remove_queued_task(db, "media", task.id)
         return {"task_id": task.id, "status": task.status, "message": "已取消排队中的本地 VACE 任务。"}
     task.status = "cancel_requested"
     task.updated_at = datetime.utcnow()

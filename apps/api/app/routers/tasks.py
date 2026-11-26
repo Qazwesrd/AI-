@@ -62,7 +62,7 @@ def _status_group(status: str) -> str:
         return "cancelled"
     if value in {"paused"}:
         return "paused"
-    if value in {"submission_unknown", "awaiting_video_url", "submitting", "interrupted_unknown", "interrupted"}:
+    if value in {"submission_unknown", "awaiting_video_url", "submitting", "interrupted_unknown"}:
         return "attention"
     if value in {"pending", "queued", "submitted", "processing", "running", "starting", "validating", "cancel_requested"}:
         return "active"

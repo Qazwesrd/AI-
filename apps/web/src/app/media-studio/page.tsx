@@ -213,6 +213,10 @@ export default function MediaStudioPage() {
                   <div>
                     <div className="font-semibold">任务 #{task.id} · {task.status}</div>
                     <div className="mt-1 text-xs text-white/55">阶段：{task.stage || "等待执行"}</div>
+                    {task.progress !== null && <div className="mt-2 h-2 w-56 max-w-full overflow-hidden rounded-full bg-white/10">
+                      <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${Math.max(0, Math.min(100, task.progress))}%` }} />
+                    </div>}
+                    {task.progress !== null && <div className="mt-1 text-xs text-white/45">{task.progress}%</div>}
                   </div>
                   <div className="flex gap-2">
                     {task.download_url && <a href={API + task.download_url} className="rounded-lg border border-green-300/25 px-3 py-2 text-xs text-green-200">下载成片</a>}
