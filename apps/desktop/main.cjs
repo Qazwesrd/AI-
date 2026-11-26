@@ -43,6 +43,9 @@ function resolveAiResourcePaths(dataDir) {
     process.env.OLLAMA_MODELS,
     path.join(dataDir, "engines", "Ollama", "models"),
     path.join(dataDir, "Ollama", "models"),
+    "E:\\\\AI\\\\数据\\\\engines\\\\Ollama\\\\models",
+    "E:\\\\AI\\\\数据\\\\Ollama\\\\models",
+    "E:\\\\123\\\\ai-comic-studio-desktop-Data\\\\engines\\\\Ollama\\\\models",
     path.join(userProfile, ".ollama", "models")
   ]);
   const ollamaModels = modelsCandidates.find((candidate) =>
@@ -73,6 +76,9 @@ function resolveAiResourcePaths(dataDir) {
     process.env.COMFYUI_PATH,
     path.join(dataDir, "engines", "ComfyUI"),
     path.join(dataDir, "ComfyUI"),
+    "E:\\\\AI\\\\数据\\\\engines\\\\ComfyUI",
+    "E:\\\\AI\\\\数据\\\\ComfyUI",
+    "E:\\\\123\\\\ai-comic-studio-desktop-Data\\\\engines\\\\ComfyUI",
     path.join(path.dirname(dataDir), "ComfyUI"),
     path.join(userProfile, "ComfyUI")
   ]);
@@ -115,6 +121,9 @@ function resolveManagedDataDirectory() {
   const appData = app.getPath("appData");
   const candidates = uniquePaths([
     configured,
+    // Known legacy data locations are searched before creating a new empty profile.
+    "E:\\\\AI\\\\数据",
+    "E:\\\\123\\\\ai-comic-studio-desktop-Data",
     adjacentData,
     legacyUserData,
     path.join(appData, "AI漫剧制作大师"),
@@ -369,6 +378,17 @@ function findFfmpegPair() {
   return null;
 }
 
+function localServiceResponds(port, route) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}${route}`, { timeout: 1800 }, (res) => {
+      res.resume();
+      resolve(res.statusCode >= 200 && res.statusCode < 500);
+    });
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+  });
+}
+
 function startManagedAiEngines(dataDir) {
   if (process.platform !== "win32") return;
   const resources = resolveAiResourcePaths(dataDir);
@@ -380,7 +400,7 @@ function startManagedAiEngines(dataDir) {
       OLLAMA_MODELS: resources.ollamaModels,
       OLLAMA_NO_CLOUD: "1"
     };
-    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
+    if (localServiceResponds(11435, "/api/tags")) {\n      console.log("[OLLAMA] Reusing the already-running local Ollama service and its existing models.");\n    } else {\n    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
       cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
       windowsHide: true,
       env: ollamaEnv,
