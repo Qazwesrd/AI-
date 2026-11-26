@@ -70,9 +70,12 @@ try {
     }
 
     Write-Host "[4/5] 校验资源清单中的全部文件 SHA-256。"
-    $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
+    $inventory = @(Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json)
+    if ($inventory.Count -eq 0) { throw "资源文件清单为空。" }
+    $seenInventoryPaths = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $inventory) {
         $relative = [string]$entry.path
+        if (!$seenInventoryPaths.Add($relative.Replace('/', '\'))) { throw "资源清单存在重复路径：$relative" }
         if ([System.IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\\/])\.\.([\\/]|$)') {
             throw "资源清单包含不安全路径：$relative"
         }
