@@ -2326,6 +2326,7 @@ class RenderInput(BaseModel):
     original_volume: float = Field(default=1.0, ge=0, le=2)
     width: int = Field(default=1920, ge=256, le=3840)
     height: int = Field(default=1080, ge=256, le=3840)
+    fps: Literal[24, 30] = 24
 
 
 @router.post("/render")
@@ -2378,8 +2379,9 @@ def render_video(data: RenderInput):
         args += ["-vf", ",".join(video_filters)]
 
         args += [
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-c:a", "aac", "-movflags", "+faststart", str(output)
+            "-r", str(data.fps), "-fps_mode", "cfr",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(output)
         ]
         run_ffmpeg(args)
         quality_report = validate_rendered_video(
@@ -2404,11 +2406,17 @@ def media_probe(path: str):
 
 @router.get("/health")
 def media_health():
-    import shutil
+    from app.services.media_service import _bundled_media_path
+    tools = {}
+    for key, filename in (("ffmpeg", "ffmpeg.exe"), ("ffprobe", "ffprobe.exe")):
+        try:
+            tools[key] = {"available": True, "path": _bundled_media_path(filename)}
+        except FileNotFoundError:
+            tools[key] = {"available": False, "path": None}
     return {
         "media_api": "ready",
-        "ffmpeg": shutil.which(os.environ.get("FFMPEG_PATH", "ffmpeg")),
-        "ffprobe": shutil.which(os.environ.get("FFPROBE_PATH", "ffprobe")),
+        "ffmpeg": tools["ffmpeg"],
+        "ffprobe": tools["ffprobe"],
         "storage": str(STORAGE)
     }
 
