@@ -89,6 +89,9 @@ const navigation = [
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
+      ["🧩", "本地模型与引擎", "/local-models"],
+      ["🖼️", "本地图片生成工作台", "/local-image-studio"],
+      ["🎞️", "视频生成与音频中心", "/media-studio"],
       ["📊", "AI调用记录", "/ai-center#usage-logs"],
       ["🗄️", "素材库", "/assets"],
       ["🔧", "网络与付费权限", "/ai-center"],
