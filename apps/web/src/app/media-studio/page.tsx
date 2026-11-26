@@ -4,6 +4,18 @@ import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+type LocalVideoRuntime = {
+  status: string;
+  node_count: number;
+  nodes: { node_type: string; model_choices: string[] }[];
+  vace_node_found: boolean;
+  wan_video_nodes_found: boolean;
+  generation_ready: boolean;
+  workflow_execution_verified: boolean;
+  reason: string;
+  message: string;
+};
+
 type MediaTask = {
   id: number;
   provider: string;
@@ -28,6 +40,28 @@ export default function MediaStudioPage() {
   const [voice, setVoice] = useState("alloy");
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
+  const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
+  const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
+
+  async function loadLocalVideoRuntime() {
+    setVideoRuntimeLoading(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-runtime`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本地视频引擎检测失败");
+      setLocalVideoRuntime(data);
+    } catch (error) {
+      setLocalVideoRuntime({
+        status: "unavailable", node_count: 0, nodes: [],
+        vace_node_found: false, wan_video_nodes_found: false,
+        generation_ready: false, workflow_execution_verified: false,
+        reason: error instanceof Error ? error.message : "无法连接本地视频引擎",
+        message: "未能完成本地 Wan/VACE 检测。",
+      });
+    } finally {
+      setVideoRuntimeLoading(false);
+    }
+  }
 
   async function loadTasks() {
     try {
@@ -36,7 +70,7 @@ export default function MediaStudioPage() {
     } catch {}
   }
 
-  useEffect(() => { loadTasks(); }, []);
+  useEffect(() => { loadTasks(); loadLocalVideoRuntime(); }, []);
 
   async function createVideo() {
     if (!prompt.trim()) {
@@ -112,6 +146,31 @@ export default function MediaStudioPage() {
           <h1 className="text-3xl font-bold">AI 视频与音频生产中心</h1>
           <p className="mt-2 text-white/60">视频生成、AI 配音、任务查询与媒体合成</p>
           <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100/80">本地免费模式优先：Wan 2.1 VACE 尚未完成接入。外部视频 API 只有在你手动填写服务商、模型并勾选费用确认后才会提交；默认不选择任何服务商。</p>
+          <section className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/15 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-cyan-100">本地 Wan 2.1 / VACE 引擎检测</h2>
+                <p className="mt-1 text-sm text-white/65">
+                  {videoRuntimeLoading ? "正在检查本机 ComfyUI 节点……" : localVideoRuntime?.message || "尚未检测"}
+                </p>
+              </div>
+              <button onClick={loadLocalVideoRuntime} disabled={videoRuntimeLoading}
+                className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-50">
+                重新检测
+              </button>
+            </div>
+            {localVideoRuntime && (
+              <div className="mt-3 space-y-2 text-sm">
+                <p>检测状态：{localVideoRuntime.status} · Wan 节点：{localVideoRuntime.node_count}</p>
+                <p>VACE 节点：{localVideoRuntime.vace_node_found ? "已发现" : "未发现"} · Wan Video 节点：{localVideoRuntime.wan_video_nodes_found ? "已发现" : "未发现"}</p>
+                <p className="text-amber-200">{localVideoRuntime.reason}</p>
+                <p className="text-white/50">工作流实际生成验收：{localVideoRuntime.workflow_execution_verified ? "已通过" : "尚未通过"}。检测不会下载模型、安装节点或提交生成任务。</p>
+                {localVideoRuntime.nodes.length > 0 && (
+                  <p className="break-words text-white/60">节点：{localVideoRuntime.nodes.map(node => node.node_type).join("、")}</p>
+                )}
+              </div>
+            )}
+          </section>
           <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
             查看统一任务中心（含配音任务）
           </a>
