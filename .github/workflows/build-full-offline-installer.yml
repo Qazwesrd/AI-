@@ -75,6 +75,8 @@ jobs:
           if ($resourceExpected -ne $resourceActual) { throw "AI resource SHA-256 verification failed." }
 
           Copy-Item $setup.FullName (Join-Path $stage "AI漫剧制作大师-Setup.exe")
+          Copy-Item $setupHashFile.FullName (Join-Path $stage "AI漫剧制作大师-Setup.exe.sha256")
+          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $stage "仅更新桌面程序.ps1")
           Copy-Item $resource.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip")
           Copy-Item $resourceHashFile.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip.sha256")
           Copy-Item "scripts/install-offline-bundle.ps1" (Join-Path $stage "一键离线安装.ps1")
@@ -88,8 +90,10 @@ jobs:
             "3. 按提示选择程序安装目录和 AI 模型数据目录。",
             "4. 安装程序会校验资源包 SHA-256、解压资源并逐文件校验。",
             "5. 完成后重新启动 Windows 或重新登录，使环境变量生效。",
+            "6. 日后升级只运行：powershell -ExecutionPolicy Bypass -File .\\仅更新桌面程序.ps1 -InstallerPath .\\AI漫剧制作大师-Setup.exe；不要再次运行一键离线安装脚本。",
             "",
             "本交付物包含 Windows 程序安装器和完整 AI 离线资源包，不需要安装时联网下载模型。",
+            "桌面程序升级与 AI 资源部署分离：升级脚本只校验并运行程序安装器，不读取、解压、替换或删除现有引擎、模型和项目数据。",
             "首次安装建议数据盘至少预留约 32 GiB 可用空间。",
             "Ryzen 7 4800U / Vega 集显尚未获得本机性能认证；不承诺 GPU 加速。"
           ) -join [Environment]::NewLine
