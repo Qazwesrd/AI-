@@ -1,6 +1,6 @@
 name: Build complete offline Windows installer
 
-on:
+"on":
   push:
     branches: [master]
     paths:
