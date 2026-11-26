@@ -467,7 +467,7 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
         ...process.env,
         APP_DATA_DIR: dataDir,
         AICOMICS_DATA_DIR: dataDir,
-        OLLAMA_HOST: "http://127.0.0.1:11435",
+        OLLAMA_HOST: process.env.OLLAMA_HOST || "http://127.0.0.1:11435",
         OLLAMA_MODELS: resolveAiResourcePaths(dataDir).ollamaModels || process.env.OLLAMA_MODELS || path.join(dataDir, "engines", "Ollama", "models"),
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
