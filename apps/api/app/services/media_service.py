@@ -187,6 +187,19 @@ def _bundled_media_path(filename: str) -> str:
     )
 
 
+def _parse_frame_rate(value):
+    """Parse FFprobe rates such as 24/1 or 30000/1001 without raising."""
+    try:
+        numerator, denominator = str(value or "").split("/", 1)
+        denominator = float(denominator)
+        if denominator == 0:
+            return None
+        rate = float(numerator) / denominator
+        return round(rate, 3) if rate > 0 else None
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0, require_audio=False):
     """Validate a completed MP4 with FFprobe before it is registered as a deliverable."""
     file_path = Path(path)
@@ -218,6 +231,9 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
         raise ValueError("导出文件缺少音频流")
     width = int(video_stream.get("width") or 0)
     height = int(video_stream.get("height") or 0)
+    frame_rate = _parse_frame_rate(
+        video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate")
+    )
     warnings = []
     if not audio_stream:
         warnings.append("文件没有音频流；如果这是静音视频则无需处理")
@@ -229,6 +245,7 @@ def validate_rendered_video(path, expected_duration=None, duration_tolerance=2.0
         "duration_seconds": round(duration, 3),
         "width": width,
         "height": height,
+        "frame_rate": frame_rate,
         "video_codec": video_stream.get("codec_name"),
         "audio_codec": audio_stream.get("codec_name") if audio_stream else None,
         "has_audio": bool(audio_stream),
