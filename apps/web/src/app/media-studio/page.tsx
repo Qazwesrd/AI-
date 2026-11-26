@@ -10,6 +10,9 @@ type LocalVideoRuntime = {
   nodes: { node_type: string; model_choices: string[] }[];
   vace_node_found: boolean;
   wan_video_nodes_found: boolean;
+  workflow_node_set_complete: boolean;
+  required_nodes: Record<string, boolean>;
+  missing_required_nodes: string[];
   generation_ready: boolean;
   workflow_execution_verified: boolean;
   reason: string;
@@ -54,6 +57,7 @@ export default function MediaStudioPage() {
       setLocalVideoRuntime({
         status: "unavailable", node_count: 0, nodes: [],
         vace_node_found: false, wan_video_nodes_found: false,
+        workflow_node_set_complete: false, required_nodes: {}, missing_required_nodes: [],
         generation_ready: false, workflow_execution_verified: false,
         reason: error instanceof Error ? error.message : "无法连接本地视频引擎",
         message: "未能完成本地 Wan/VACE 检测。",
@@ -163,7 +167,11 @@ export default function MediaStudioPage() {
               <div className="mt-3 space-y-2 text-sm">
                 <p>检测状态：{localVideoRuntime.status} · Wan 节点：{localVideoRuntime.node_count}</p>
                 <p>VACE 节点：{localVideoRuntime.vace_node_found ? "已发现" : "未发现"} · Wan Video 节点：{localVideoRuntime.wan_video_nodes_found ? "已发现" : "未发现"}</p>
+                <p>完整工作流节点集：{localVideoRuntime.workflow_node_set_complete ? "齐全" : "不齐全"}</p>
                 <p className="text-amber-200">{localVideoRuntime.reason}</p>
+                {localVideoRuntime.missing_required_nodes.length > 0 && (
+                  <p className="break-words text-white/60">缺少节点：{localVideoRuntime.missing_required_nodes.join("、")}</p>
+                )}
                 <p className="text-white/50">工作流实际生成验收：{localVideoRuntime.workflow_execution_verified ? "已通过" : "尚未通过"}。检测不会下载模型、安装节点或提交生成任务。</p>
                 {localVideoRuntime.nodes.length > 0 && (
                   <p className="break-words text-white/60">节点：{localVideoRuntime.nodes.map(node => node.node_type).join("、")}</p>
