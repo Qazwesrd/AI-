@@ -204,22 +204,21 @@ export default function NovelsPage() {
     if (!selected) return;
 
     const approved = window.confirm(
-      "即将调用已配置的文本AI模型进行小说深度分析。\n\n" +
-      "本次可能按文本长度分多次请求，并产生API费用。\n" +
-      "请确认已在AI设置中开启网络调用和付费API授权。\n\n" +
+      "将使用本机已安装的 Qwen 模型进行小说深度分析，按文本长度分批保存进度。\n\n" +
+      "不会调用云端 API 或产生 API 费用；未完成片段可安全重试。\n\n" +
       "是否继续？"
     );
 
     if (!approved) return;
 
     setLoading(true);
-    setMessage("正在调用AI模型分析小说，请稍候……");
+    setMessage("正在使用本机 Qwen 模型离线分析小说，请稍候……");
 
     try {
       const data = await request(`/api/novels/${selected.id}/analyze-ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm_paid: true }),
+        body: JSON.stringify({}),
       });
 
       const result = await request(`/api/novels/${selected.id}/analysis`);
@@ -231,9 +230,7 @@ export default function NovelsPage() {
       try {
         const progress = await request(`/api/novels/${selected.id}/analysis-progress`);
         setAnalysisProgress(progress.has_job ? progress : null);
-        if (progress.has_job && progress.status === "interrupted_unknown") {
-          setMessage(`分析已暂停：已完成 ${progress.completed_chunks}/${progress.total_chunks} 段。第一个未完成片段的提交结果尚不确定，请先到统一任务中心核对服务商用量记录；确认没有对应请求或待结算费用后，才能人工续作。`);
-        } else if (progress.has_job && progress.status === "partial") {
+        if (progress.has_job && progress.status === "partial") {
           setMessage(`分析进度已安全保存：${progress.completed_chunks}/${progress.total_chunks} 段（${progress.progress_percent}%）。可以再次点击分析，从未完成部分继续。`);
         } else if (progress.has_job) {
           setMessage(`分析任务状态：${progress.status}；当前进度 ${progress.completed_chunks}/${progress.total_chunks} 段。请先查看任务中心，不要重复提交。`);
@@ -326,11 +323,6 @@ export default function NovelsPage() {
               <div className="h-full rounded-full bg-cyan-400 transition-all" style={{ width: `${analysisProgress.progress_percent}%` }} />
             </div>
             {analysisProgress.last_error && <p className="mt-2 text-xs text-amber-200">{analysisProgress.last_error}</p>}
-            {analysisProgress.status === "interrupted_unknown" && (
-              <a href="/tasks" className="mt-2 inline-flex rounded-lg border border-amber-300/30 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-950/40">
-                前往统一任务中心核对服务商记录 →
-              </a>
-            )}
           </div>
         )}
         {message && (
@@ -420,7 +412,7 @@ export default function NovelsPage() {
                     <button onClick={importTxt} disabled={loading} className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
                       导入小说文件（支持多种格式）
                     </button>
-                    <button onClick={analyze} disabled={loading || chapters.length === 0 || analysisProgress?.status === "interrupted_unknown"} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
+                    <button onClick={analyze} disabled={loading || chapters.length === 0} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
                       ✨ AI深度分析小说
                     </button>
                   </div>

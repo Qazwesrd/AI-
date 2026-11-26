@@ -72,8 +72,6 @@ export default function VisualStudioPage() {
   const [generatedPrompt, setGeneratedPrompt] = useState("");
   const [promptMode, setPromptMode] = useState("professional");
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null);
-  const [confirmPaid, setConfirmPaid] = useState(false);
-  const [confirm3dPaid, setConfirm3dPaid] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -162,8 +160,8 @@ export default function VisualStudioPage() {
     }
   }
 
-  function buildPrompt() {
-    const selected = assets.find((item) => item.id === selectedAsset);
+  function buildPrompt(assetOverride?: Asset) {
+    const selected = assetOverride || assets.find((item) => item.id === selectedAsset);
     const base = selected
       ? `${selected.name}。原文设定：${selected.description}。外观：${selected.appearance}。服装/装备：${selected.clothing}。性格/气质：${selected.personality}。必须保持的固定特征：${selected.consistency_prompt}。`
       : "";
@@ -178,7 +176,8 @@ export default function VisualStudioPage() {
       : category === "buildings"
       ? "生成建筑正立面、侧立面和整体轴测参考图，保持建筑结构、层数、屋顶、门窗、材质和比例一致。"
       : "生成电影级环境概念设定图，建立明确空间布局、地形、建筑位置、光照方向、天气、时间和可供人物行动的区域；保持可复用的场景地理结构。";
-    const subject = prompt.trim() ? `用户补充要求：${prompt.trim()}。` : (name.trim() ? `素材名称：${name.trim()}。` : `请根据${category === "characters" ? "人物" : category === "scenes" ? "场景" : "道具"}类别创作一个符合项目设定的视觉资产。`);
+    const subjectName = name.trim() || selected?.name || "";
+    const subject = prompt.trim() ? `用户补充要求：${prompt.trim()}。` : (subjectName ? `素材名称：${subjectName}。` : `请根据${category === "characters" ? "人物" : category === "scenes" ? "场景" : "道具"}类别创作一个符合项目设定的视觉资产。`);
     const continuity = category === "characters"
       ? "角色一致性锁定：固定脸型、五官间距、年龄感、肤色、发型、发色、身高体型、四肢比例、服装层次和标志性配饰；不同视角必须是同一个角色，不得换脸、换装或改变年龄。"
       : category === "scenes"
@@ -202,55 +201,26 @@ export default function VisualStudioPage() {
     return `正向提示词：${positive}\n\n${negative}`;
   }
 
+  function localImageStudioUrl(text: string) {
+    const negativeMatch = text.match(/\n\n负面(?:约束|提示词)：([\s\S]*)$/);
+    const positive = text
+      .replace(/\n\n负面(?:约束|提示词)：[\s\S]*$/, "")
+      .replace(/^正向提示词：/, "")
+      .trim();
+    const params = new URLSearchParams();
+    params.set("prompt", positive);
+    params.set("style", style);
+    if (negativeMatch?.[1]) params.set("negative", negativeMatch[1].trim());
+    return "/local-image-studio?" + params.toString();
+  }
+
   async function createTask() {
-    const effectivePrompt = generatedPrompt.trim() || buildPrompt();
-    if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
-    setGeneratedPrompt(effectivePrompt);
-    setBusy(true);
-    try {
-      const response = await fetch(`${API}/api/visual/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          asset_id: selectedAsset,
-          provider: "doubao",
-          task_type: category,
-          prompt: effectivePrompt,
-          size: "2K",
-          confirm_paid: confirmPaid,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "创建任务失败");
-      setMessage(`图片任务 #${result.task_id} 已加入队列`);
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建任务失败");
-    } finally {
-      setBusy(false);
-    }
+    setMessage("云端图片 API 已关闭。请使用下方“打开本地图片工作室生成”，提示词会自动带入本机 ComfyUI。");
   }
 
-  async function runTask(id: number) {
-    setBusy(true);
-    try {
-      const response = await fetch(
-        `${API}/api/visual/tasks/${id}/run?confirm_paid=${confirmPaid}`,
-        { method: "POST" }
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "生成失败");
-      setMessage(`图片任务 #${id} 已完成`);
-      await loadTasks();
-      await loadAssets();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "生成失败");
-      await loadTasks();
-    } finally {
-      setBusy(false);
-    }
+  async function runTask(_id: number) {
+    setMessage("旧版云端图片任务已停用；请使用本机 ComfyUI 重新生成。");
   }
-
 
   async function manageTask(id: number, action: "pause" | "resume" | "retry" | "cancel") {
     setBusy(true);
@@ -276,27 +246,18 @@ export default function VisualStudioPage() {
       if (!response.ok) throw new Error(result.detail || "提示词生成失败");
       setGeneratedPrompt("正向提示词：" + result.positive_prompt + (prompt.trim() ? "\n\n用户补充要求：" + prompt.trim() : "") + "\n\n负面提示词：" + result.negative_prompt);
       setSelectedAsset(assetId);
-      setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
+      setMessage("已生成专业正向/负面提示词，可检查后转入本地图片工作室生成。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "提示词生成失败");
     } finally { setBusy(false); }
   }
 
-  async function createViewBatch(assetId: number) {
-    setBusy(true);
-    try {
-      const response = await fetch(API + "/api/visual/assets/" + assetId + "/views?provider=doubao", { method: "POST" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "创建多视角任务失败");
-      setMessage(result.message);
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建多视角任务失败");
-    } finally { setBusy(false); }
+  async function createViewBatch(_assetId: number) {
+    setMessage("云端多视角任务已关闭。可为当前素材打开本地图片工作室，按需生成参考图。");
   }
 
   async function confirmAsset(asset: Asset) {
-    if (!window.confirm("确认“" + asset.name + "”的设定已审核无误？确认后，AI 分镜和三维生成将优先复用这份素材。")) return;
+    if (!window.confirm("确认“" + asset.name + "”的设定已审核无误？确认后，AI 分镜和本地图片工作室将优先复用这份素材。")) return;
     setBusy(true);
     try {
       const response = await fetch(API + "/api/visual/assets/" + asset.id + "/confirm", { method: "POST" });
@@ -309,42 +270,12 @@ export default function VisualStudioPage() {
     } finally { setBusy(false); }
   }
 
-  async function generateEditable3D(asset: Asset) {
-    if (!asset.confirmed) {
-      setMessage("请先确认素材设定，再生成真实三维模型。");
-      return;
-    }
-    if (!window.confirm("将把已生成的正面、侧面、背面参考图上传到 Tripo，并调用多视图转 3D 模型 API。该服务可能消耗付费额度，是否继续？")) return;
-    setBusy(true);
-    try {
-      const response = await fetch(API + "/api/visual/assets/" + asset.id + "/model3d/tripo", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "tripo3d", model: "v3.1-20260211", texture: true, pbr: true, texture_quality: "detailed", geometry_quality: "standard", confirm_paid: confirm3dPaid }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "3D 模型任务提交失败");
-      setMessage("已提交 Tripo 三维模型任务 #" + result.task_id + "。输入视角：" + (result.input_views || []).join("、") + "。稍后可点击查询并下载 GLB。");
-      await loadAssets();
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "3D 模型生成失败");
-    } finally { setBusy(false); }
+  async function generateEditable3D(_asset: Asset) {
+    setMessage("Tripo 云端 3D 服务已关闭；本地 3D 建模尚未集成，不会提交任何云端任务。");
   }
 
-  async function refreshEditable3D(asset: Asset) {
-    const taskId = asset.data?.model3d_task?.task_id;
-    if (!taskId) return setMessage("该素材尚无 3D 模型任务。");
-    setBusy(true);
-    try {
-      const response = await fetch(API + "/api/visual/tasks/" + taskId + "/refresh-model3d", { method: "POST" });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "查询 3D 模型失败");
-      setMessage(result.status === "completed" ? "GLB 三维模型已下载到本地素材库。" : result.status === "failed" ? (result.error || "3D 任务失败") : "3D 模型仍在生成，当前进度：" + (result.progress ?? "未知") + "%");
-      await loadAssets();
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "查询 3D 模型失败");
-    } finally { setBusy(false); }
+  async function refreshEditable3D(_asset: Asset) {
+    setMessage("云端 3D 查询已关闭；已有本地 GLB 文件仍可下载。");
   }
 
   async function addEvolution(asset: Asset) {
@@ -419,6 +350,10 @@ export default function VisualStudioPage() {
           统一管理人物、场景、普通道具、武器刀具、服装、建筑和特殊物品，并为后续镜头生成提供统一视觉参考。
         </p>
       </header>
+
+      <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+        图片生成仅使用本机 ComfyUI；云端图片 API、Tripo 3D 生成与查询入口已关闭，不会产生第三方 API 费用。
+      </div>
 
       {message && (
         <div className="rounded-xl border border-purple-300/20 bg-purple-950/50 p-3 text-sm text-purple-100">
@@ -504,19 +439,20 @@ export default function VisualStudioPage() {
               <textarea className={field} rows={8} readOnly value={generatedPrompt || "创建图片任务时会自动组合完整提示词；也可点击“生成 / 更新预览”提前查看。"} />
               {generatedPrompt && <button type="button" className="mt-2 rounded-lg border border-purple-300/30 px-3 py-1.5 text-xs" onClick={() => navigator.clipboard?.writeText(generatedPrompt)}>复制实际提示词</button>}
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} />
-              我已了解本次图片生成可能产生费用，并确认执行
-            </label>
+            <div className="rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+              本页面不提交云端图片 API。使用本机 ComfyUI 生成图片，提示词和风格会自动带入本地图片工作室。
+            </div>
             <div className="flex flex-wrap gap-2">
-              <button className={button} disabled={busy} onClick={createTask}>创建图片任务</button>
+              <button className={button} disabled onClick={createTask}>云端图片生成已关闭</button>
+              <a className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500"
+                href={localImageStudioUrl(generatedPrompt.trim() || buildPrompt())}>打开本地图片工作室生成</a>
               <label className="cursor-pointer rounded-xl border border-purple-300/30 px-4 py-2 text-sm hover:bg-purple-950/50">
                 上传参考图片
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadReference(e.target.files?.[0])} />
               </label>
             </div>
             <p className="text-xs leading-5 text-slate-400">
-              图片生成只在你主动点击执行后调用。付费服务还需要 AI 管理中心开启付费授权并在本页确认。
+              图片生成由本机 ComfyUI 执行；本页不会发起第三方付费图片请求。
             </p>
           </div>
         </div>
@@ -570,13 +506,14 @@ export default function VisualStudioPage() {
                   <button className="rounded-lg border border-sky-300/20 px-3 py-1.5 text-xs hover:bg-sky-900/40" disabled={busy} onClick={() => generateProfessionalPrompt(item.id)}>生成专业提示词</button>
                   {item.confirmed && (
                     <>
-                      <label className="flex items-center gap-1 text-xs text-amber-200"><input type="checkbox" checked={confirm3dPaid} onChange={e => setConfirm3dPaid(e.target.checked)} />确认本次 3D 生成可能收费</label>
-                      <button className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30 disabled:opacity-50" disabled={busy} onClick={() => generateEditable3D(item)}>生成真实3D模型（Tripo）</button>
+                      <span className="text-xs text-amber-200">Tripo 云端 3D 服务已关闭；本地 3D 建模尚未集成。</span>
+                      <button className="rounded-lg border border-slate-500/30 px-3 py-1.5 text-xs text-slate-400 opacity-60" disabled onClick={() => generateEditable3D(item)}>本地 3D 模型暂不可用</button>
                     </>
                   )}
-                  {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-900/30" disabled={busy} onClick={() => refreshEditable3D(item)}>查询/下载3D模型</button>}
+                  {item.data?.model3d_task?.task_id && <button className="rounded-lg border border-slate-500/30 px-3 py-1.5 text-xs text-slate-400 opacity-60" disabled onClick={() => refreshEditable3D(item)}>云端 3D 查询已关闭</button>}
                   {item.data?.model3d?.path && <a className="rounded-lg border border-green-300/30 px-3 py-1.5 text-xs text-green-200 hover:bg-green-900/30" href={API + "/api/visual/models3d/" + encodeURIComponent(item.data.model3d.path.split(/[\\/]/).pop() || "")} target="_blank" rel="noreferrer">下载 GLB 模型</a>}
-                  <button className="rounded-lg border border-purple-300/20 px-3 py-1.5 text-xs hover:bg-purple-900/50" disabled={busy} onClick={() => createViewBatch(item.id)}>创建多视角任务</button>
+                  <button className="rounded-lg border border-slate-500/30 px-3 py-1.5 text-xs text-slate-400 opacity-60" disabled onClick={() => createViewBatch(item.id)}>云端多视角任务已关闭</button>
+                  <a className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-900/30" href={localImageStudioUrl(buildPrompt(item))}>本地生成此素材图</a>
                   <button className="rounded-lg border border-amber-300/20 px-3 py-1.5 text-xs hover:bg-amber-900/30" disabled={busy} onClick={() => addEvolution(item)}>记录剧情变化</button>
                   {item.data?.evolution_history?.length ? <span className="self-center text-xs text-amber-200">剧情变化 {item.data.evolution_history.length} 条</span> : null}
                 </div>
@@ -603,19 +540,19 @@ export default function VisualStudioPage() {
               <span className="text-xs text-purple-300">{task.status}</span>
               {task.status === "pending" && (
                 <>
-                  <button className={button} disabled={busy} onClick={() => runTask(task.id)}>执行生成</button>
+                  <button className={button} disabled onClick={() => runTask(task.id)}>云端生成已关闭</button>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "pause")}>暂停</button>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "cancel")}>取消</button>
                 </>
               )}
               {task.status === "paused" && (
                 <>
-                  <button className={button} disabled={busy} onClick={() => manageTask(task.id, "resume")}>继续</button>
+                  <button className={button} disabled onClick={() => manageTask(task.id, "resume")}>云端任务已停用</button>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "cancel")}>取消</button>
                 </>
               )}
               {(task.status === "failed" || task.status === "cancelled") && (
-                <button className={button} disabled={busy} onClick={() => manageTask(task.id, "retry")}>重新排队</button>
+                <button className={button} disabled onClick={() => manageTask(task.id, "retry")}>云端重试已关闭</button>
               )}
             </div>
           ))}

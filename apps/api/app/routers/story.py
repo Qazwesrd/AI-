@@ -20,6 +20,52 @@ from app.routers.studio import decrypt_key
 router = APIRouter(prefix="/api/story", tags=["剧本改编与智能分镜"])
 
 
+
+
+def _story_local_model():
+    # Lazy import avoids router-import cycles; this is the same fixed localhost
+    # Ollama client used by the local runtime diagnostics.
+    from app.routers.local_ai_runtime import _installed_models
+
+    installed = _installed_models()
+    names = [item["name"] for item in installed if isinstance(item, dict) and item.get("name")]
+    for preferred in ("qwen3.5:4b", "qwen3:4b"):
+        if preferred in names:
+            return preferred
+    raise HTTPException(503, "没有已安装的 Qwen 本地文本模型；离线模式不会联网下载。")
+
+
+def _story_local_generate(model, system_prompt, prompt, temperature=0.2):
+    from app.routers.local_ai_runtime import _ollama_request
+
+    try:
+        result = _ollama_request(
+            "/api/generate",
+            {
+                "model": model,
+                "system": system_prompt,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "think": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_ctx": 8192,
+                    "num_predict": 4096,
+                },
+            },
+            timeout=900.0,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, "本地模型生成失败：" + str(exc)[:800]) from exc
+    raw = result.get("response") if isinstance(result, dict) else None
+    if not isinstance(raw, str) or not raw.strip():
+        raise HTTPException(502, "本地模型未返回有效 JSON 内容")
+    return raw.strip()
+
+
 def serialize_model(obj):
     result = {}
     for column in sa_inspect(obj.__class__).mapper.column_attrs:
@@ -317,27 +363,7 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
         raise HTTPException(404, "剧本项目不存在")
     ensure_project_source_current(project)
 
-    runtime = db.query(AIRuntimeSetting).first()
-    if not runtime or not runtime.network_enabled:
-        raise HTTPException(403, "网络调用总开关尚未开启")
-
-    providers = db.query(AIProviderConfig).filter(
-        AIProviderConfig.enabled == True,
-        AIProviderConfig.purpose == "text",
-        AIProviderConfig.base_url != "",
-        AIProviderConfig.model != "",
-        AIProviderConfig.encrypted_api_key != "",
-    ).all()
-    priority = {"deepseek": 0, "openai": 1, "xai": 2, "grok": 2, "gemini": 3, "cloudflare": 4}
-    providers.sort(key=lambda item: priority.get(item.provider.lower(), 99))
-    if not providers:
-        raise HTTPException(400, "没有已启用的文本 AI 模型，请先完成 AI 管理中心配置")
-    provider = providers[0]
-    paid = bool(getattr(provider, "paid", True))
-    if paid and not runtime.paid_api_allowed:
-        raise HTTPException(403, "当前模型属于付费服务，请先开启付费 API 总授权")
-    if paid and not payload.confirm_paid:
-        raise HTTPException(403, "本次 AI 分集规划可能产生费用，尚未确认")
+    local_model = _story_local_model()
 
     chapters = get_novel_chapters(db, project.novel_id)
     if not chapters:
@@ -364,10 +390,9 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
             "message": "AI 分集规划此前已完成，无需重复调用模型。",
         }
 
-    # 每次只处理少量章节；每章完成后立即提交，断网/关闭软件后可从断点继续。
-    batch_end = min(cursor + 3, len(chapters))
+    # 每次只处理一章；每章完成后立即提交，关闭软件后可从断点继续。
+    batch_end = min(cursor + 1, len(chapters))
     try:
-        api_key = decrypt_key(provider.encrypted_api_key)
         batch_chapters = []
         for chapter_index in range(cursor, batch_end):
             chapter = chapters[chapter_index]
@@ -376,17 +401,17 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                 batch_chapters.append({
                     "chapter_index": chapter_index,
                     "title": get_chapter_title(chapter),
-                    "content": source[:18000],
+                    "content": source[:7000],
                 })
 
         decisions_by_index = {}
         if batch_chapters:
             prompt = (
-                "你是资深影视编剧和漫剧分集导演。下面一次提供多章小说，请逐章独立判断每章应改编为1集还是2集。"
+                "你是资深影视编剧和漫剧分集导演。下面提供一章小说，请判断本章应改编为1集还是2集。"
                 "必须依据剧情完整性、冲突转折、场景变化、人物弧线和约2分钟单集节奏判断，禁止按字数机械对半切。"
                 "若一集能完整表达本章核心剧情，返回1集；只有剧情确实过长且存在自然戏剧断点时才返回2集。"
                 "若拆为2集，split_quote必须是原文中连续、逐字一致的一段短句，作为第二集开始位置。"
-                "每章都必须返回一条结果，chapter_index必须与输入完全一致。"
+                "必须返回本章一条结果，chapter_index必须与输入完全一致。"
                 "提示词方案：" + prompt_style_guidance(payload.prompt_style) + "。"
                 + ("用户补充要求：" + payload.additional_instructions.strip() + "。" if payload.additional_instructions.strip() else "")
                 + '只返回JSON：{"chapters":[{"chapter_index":0,"episode_count":1,"split_quote":"",'
@@ -395,19 +420,11 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                 '"episode2_synopsis":"下集摘要"}]}'
                 "\\n章节原文数据：\\n" + json.dumps(batch_chapters, ensure_ascii=False)
             )
-            body = json.dumps({"model": provider.model, "temperature": 0.2, "messages": [
-                {"role": "system", "content": "严格输出JSON，不要Markdown；每个输入章节都必须有对应结果，不得混淆章节编号，不得编造剧情。"},
-                {"role": "user", "content": prompt},
-            ]}, ensure_ascii=False).encode("utf-8")
-            request = urllib.request.Request(
-                provider.base_url.rstrip("/") + "/chat/completions",
-                data=body,
-                headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"},
-                method="POST",
+            raw = _story_local_generate(
+                local_model,
+                "严格输出JSON，不要Markdown；每个输入章节都必须有对应结果，不得混淆章节编号，不得编造剧情。",
+                prompt, temperature=0.2,
             )
-            with urllib.request.urlopen(request, timeout=300) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            raw = result["choices"][0]["message"]["content"]
             if isinstance(raw, list):
                 raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
             raw = str(raw).strip()
@@ -468,15 +485,15 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
                 "status": "running",
                 "chapter_cursor": chapter_index + 1,
                 "total_chapters": len(chapters),
-                "provider": provider.provider,
-                "model": provider.model,
+                "provider": "ollama-local",
+                "model": local_model,
                 "updated_at": datetime.utcnow().isoformat(),
             })
             settings["ai_episode_planning"] = progress
             project.settings = settings
             project.status = "planning"
             db.add(AIUsageLog(
-                provider=provider.provider, model=provider.model,
+                provider="ollama-local", model=local_model,
                 task="ai_episode_planning", status="success",
                 detail=f"项目#{project_id}；章节{chapter_index + 1}/{len(chapters)}",
             ))
@@ -490,10 +507,9 @@ def plan_episodes_with_ai(project_id: int, payload: AIPlanInput, db: Session = D
             project.settings = settings
             db.commit()
 
-    except urllib.error.HTTPError as exc:
+    except HTTPException:
         db.rollback()
-        detail = exc.read().decode("utf-8", errors="replace")[:1500]
-        raise HTTPException(502, "AI 分集规划接口错误：" + str(exc.code) + " " + detail) from exc
+        raise
     except Exception as exc:
         db.rollback()
         raise HTTPException(502, "AI 分集规划失败：" + str(exc) + "；已完成章节已保存，再次点击可从断点继续。") from exc
@@ -529,24 +545,7 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         raise HTTPException(400, "本集原著内容为空")
     if db.query(StoryboardShot).filter(StoryboardShot.episode_id == episode_id).count():
         raise HTTPException(409, "本集已有分镜。请先备份现有成果，再决定是否清除后重新生成。")
-    runtime = db.query(AIRuntimeSetting).first()
-    if not runtime or not runtime.network_enabled:
-        raise HTTPException(403, "网络调用总开关尚未开启")
-    providers = db.query(AIProviderConfig).filter(
-        AIProviderConfig.enabled == True, AIProviderConfig.purpose == "text",
-        AIProviderConfig.base_url != "", AIProviderConfig.model != "",
-        AIProviderConfig.encrypted_api_key != "",
-    ).all()
-    priority = {"deepseek": 0, "openai": 1, "xai": 2, "grok": 2, "gemini": 3, "cloudflare": 4}
-    providers.sort(key=lambda item: priority.get(item.provider.lower(), 99))
-    if not providers:
-        raise HTTPException(400, "没有已启用的文本 AI 模型，请先完成 AI 管理中心配置")
-    provider = providers[0]
-    paid = bool(getattr(provider, "paid", True))
-    if paid and not runtime.paid_api_allowed:
-        raise HTTPException(403, "当前模型属于付费服务，请先开启付费 API 总授权")
-    if paid and not payload.confirm_paid:
-        raise HTTPException(403, "本次剧本与分镜生成可能产生费用，尚未确认")
+    local_model = _story_local_model()
     project = db.query(StoryProject).filter(StoryProject.id == episode.project_id).first()
     if project:
         ensure_project_source_current(project)
@@ -567,7 +566,7 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
             "consistency": (asset.consistency_prompt or "")[:200],
         })
     asset_catalog_text = json.dumps(catalog_rows[:160], ensure_ascii=False)
-    source = (episode.source_text or "")[:28000]
+    source = (episode.source_text or "")[:7000]
     prompt = (
         "你是专业影视编剧、漫剧导演和分镜师。把原著改编成可直接制作的短篇漫剧。"
         "提示词方案：" + prompt_style_guidance(payload.prompt_style) + "。"
@@ -582,16 +581,11 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
         "小说章节原文：\n" + source
     )
     try:
-        api_key = decrypt_key(provider.encrypted_api_key)
-        body = json.dumps({"model": provider.model, "temperature": 0.35, "messages": [
-            {"role": "system", "content": "你只输出符合结构的 JSON，不输出 Markdown。"},
-            {"role": "user", "content": prompt},
-        ]}, ensure_ascii=False).encode("utf-8")
-        request = urllib.request.Request(provider.base_url.rstrip("/") + "/chat/completions", data=body,
-            headers={"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(request, timeout=360) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        raw = result["choices"][0]["message"]["content"]
+        raw = _story_local_generate(
+            local_model,
+            "你只输出符合结构的 JSON，不输出 Markdown。",
+            prompt, temperature=0.35,
+        )
         if isinstance(raw, list):
             raw = "".join(part.get("text", "") for part in raw if isinstance(part, dict))
         raw = re.sub(r"^```(?:json)?\s*", "", str(raw).strip())
@@ -675,18 +669,15 @@ def generate_episode_script_and_shots(episode_id: int, payload: AIPlanInput, db:
             created += 1
         if created == 0:
             raise ValueError("AI返回的分镜列表没有有效镜头")
-        db.add(AIUsageLog(provider=provider.provider, model=provider.model, task="episode_screenplay_storyboard", status="success", detail="分集：" + episode.title + "；镜头数：" + str(created)))
+        db.add(AIUsageLog(provider="ollama-local", model=local_model, task="episode_screenplay_storyboard", status="success", detail="分集：" + episode.title + "；镜头数：" + str(created)))
         db.commit()
-        return {"success": True, "episode_id": episode.id, "provider": provider.provider, "model": provider.model, "shot_count": created, "message": "AI影视剧本和分镜生成完成，共" + str(created) + "个镜头。"}
-    except urllib.error.HTTPError as exc:
+        return {"success": True, "episode_id": episode.id, "provider": "ollama-local", "model": local_model, "shot_count": created, "message": "AI影视剧本和分镜生成完成，共" + str(created) + "个镜头。"}
+    except HTTPException:
         db.rollback()
-        detail = exc.read().decode("utf-8", errors="replace")[:2000]
-        db.add(AIUsageLog(provider=provider.provider, model=provider.model, task="episode_screenplay_storyboard", status="failed", detail=detail))
-        db.commit()
-        raise HTTPException(502, "AI剧本生成接口错误 HTTP " + str(exc.code) + "：" + detail) from exc
+        raise
     except Exception as exc:
         db.rollback()
-        db.add(AIUsageLog(provider=provider.provider, model=provider.model, task="episode_screenplay_storyboard", status="failed", detail=str(exc)[:2000]))
+        db.add(AIUsageLog(provider="ollama-local", model=local_model, task="episode_screenplay_storyboard", status="failed", detail=str(exc)[:2000]))
         db.commit()
         raise HTTPException(502, "AI剧本与分镜生成失败：" + str(exc)) from exc
 

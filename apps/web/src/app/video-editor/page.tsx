@@ -16,11 +16,8 @@ export default function VideoEditorPage() {
   const [audioFiles, setAudioFiles] = useState<MediaFile[]>([]);
   const [subtitleFiles, setSubtitleFiles] = useState<MediaFile[]>([]);
   const [jobs, setJobs] = useState<EditJob[]>([]);
-  const [provider, setProvider] = useState("deepseek");
-  const [model, setModel] = useState("");
   const [instruction, setInstruction] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
-  const [confirmPaid, setConfirmPaid] = useState(false);
   const [subtitlePath, setSubtitlePath] = useState("");
   const [audioPath, setAudioPath] = useState("");
   const [audioMode, setAudioMode] = useState<"replace" | "mix">("replace");
@@ -97,14 +94,14 @@ export default function VideoEditorPage() {
   async function createPlan() {
     if (!selected.length) return setMessage("请先选择至少一个视频文件。");
     setBusy(true);
-    setMessage("正在调用已配置的 AI API 分析剪辑要求……");
+    setMessage("正在使用本机 Ollama 模型离线分析剪辑要求……");
     try {
       const response = await fetch(`${API}/api/video-editor/jobs`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          provider, model,
+          provider: "ollama-local", model: "auto",
           instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
-          source_paths: selected, confirm_paid: confirmPaid
+          source_paths: selected
         })
       });
       const data = await response.json();
@@ -226,7 +223,7 @@ export default function VideoEditorPage() {
       <div className="mx-auto max-w-7xl space-y-7">
         <header>
           <h1 className="text-3xl font-bold">AI 视频剪辑中心</h1>
-          <p className="mt-2 text-white/60">可使用已配置的 AI API，也可把任务交给网页版 AI 分析，再由本地 FFmpeg 执行剪辑。</p>
+          <p className="mt-2 text-white/60">本地 Ollama 负责离线分析，FFmpeg 负责本地剪辑；也可生成网页版 AI 交接包，是否上传视频由你自行决定。</p>
           <a href="/subtitle-studio" className="mt-3 inline-flex rounded-lg border border-cyan-300/40 bg-cyan-900/30 px-4 py-2 text-sm text-cyan-100 hover:bg-cyan-800/40">打开 AI 字幕翻译与多语言配音工作室</a>
         </header>
 
@@ -255,21 +252,16 @@ export default function VideoEditorPage() {
 
           <div className={panel}>
             <h2 className="mb-4 text-xl font-semibold">第二步：描述剪辑要求</h2>
-            <label className="mb-2 block text-sm">AI 服务商 ID（内置 API 模式）</label>
-            <input value={provider} onChange={e => setProvider(e.target.value)} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-2 block text-sm">AI 模型名称</label>
-            <input value={model} onChange={e => setModel(e.target.value)} placeholder="例如 deepseek-chat" className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
+            <div className="mb-4 rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm">
+              使用本机已安装的 Ollama 文本模型自动分析，不需要 API Key，不调用云端，也不会产生 API 费用。
+            </div>
             <label className="mb-2 block text-sm">剪辑要求（两种 AI 模式共用）</label>
             <textarea value={instruction} onChange={e => setInstruction(e.target.value)} rows={7}
               placeholder="例如：保留人物说话和动作的部分，删除等待和空镜头。开头使用最精彩的画面，按故事发展顺序拼接，输出横屏 1080P 视频。"
               className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            <label className="mb-4 flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={confirmPaid} onChange={e => setConfirmPaid(e.target.checked)} />
-              我确认内置 API 本次分析可能产生费用
-            </label>
             <div className="flex flex-wrap gap-3">
-              <button disabled={busy || !model.trim() || !instruction.trim() || !selected.length} onClick={() => void createPlan()}
-                className="rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-40">使用内置 AI API</button>
+              <button disabled={busy || !instruction.trim() || !selected.length} onClick={() => void createPlan()}
+                className="rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-40">使用本地 AI 离线分析</button>
               <button disabled={busy || !instruction.trim() || !selected.length} onClick={() => void createWebHandoff()}
                 className="rounded-xl border border-cyan-300/40 bg-cyan-900/40 px-5 py-3 font-semibold text-cyan-100 disabled:opacity-40">使用网页版 AI</button>
             </div>

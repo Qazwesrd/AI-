@@ -7,6 +7,10 @@ const {
   REQUIRED_FREE_BYTES,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
+  resolveAppDataDirectory,
+  getBundledRuntimePath,
+  getBundledModelsPath,
+  getBundledRuntimeEnvironment,
 } = require("./ollama-runtime-installer.cjs");
 
 test("installer source is the fixed official HTTPS URL", () => {
@@ -30,6 +34,39 @@ test("signature requires both a valid Authenticode status and Ollama Inc organiz
   assert.equal(isTrustedOllamaSignature(null), false);
 });
 
+test("configured app data directory overrides Electron default and supports E drive", () => {
+  assert.equal(
+    resolveAppDataDirectory("C:\\Users\\Administrator\\AppData\\Roaming\\ai-comic-studio-desktop", {
+      AICOMICS_DATA_DIR: "E:\\123\\ai-comic-studio-desktop-Data",
+    }),
+    "E:\\123\\ai-comic-studio-desktop-Data"
+  );
+});
+
+test("app-managed runtime path follows the Electron userData directory", () => {
+  assert.equal(
+    getBundledRuntimePath("E:\\123\\ai-comic-studio-desktop-Data"),
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\runtime\\ollama.exe"
+  );
+});
+
 test("runtime install disk reserve is at least five GiB", () => {
   assert.equal(REQUIRED_FREE_BYTES, 5 * 1024 ** 3);
+});
+
+test("bundled runtime uses the sibling E-drive models directory", () => {
+  const runtime = "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\runtime\\ollama.exe";
+  assert.equal(
+    getBundledModelsPath(runtime),
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\models"
+  );
+});
+
+test("bundled runtime is pinned to port 11435 and offline model storage", () => {
+  const runtime = "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\runtime\\ollama.exe";
+  const env = getBundledRuntimeEnvironment(runtime, { PATH: "test-path" });
+  assert.equal(env.OLLAMA_HOST, "127.0.0.1:11435");
+  assert.equal(env.OLLAMA_MODELS, "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\models");
+  assert.equal(env.OLLAMA_NO_CLOUD, "1");
+  assert.equal(env.PATH, "test-path");
 });

@@ -35,6 +35,7 @@ ROUTER_MODULES = [
     "app.routers.tasks",
     "app.routers.web_ai_tools",
     "app.routers.ai_collaboration",
+    "app.routers.patch_center",
 ]
 
 _loaded_routers: list[str] = []
@@ -73,9 +74,14 @@ async def lifespan(application: FastAPI):
         logger.warning("Task runtime startup scan found %s stale leases (active=%s); none were auto-released.", lease_scan["stale_count"], lease_scan["active_count"])
     elif lease_scan["active_count"]:
         logger.warning("Task runtime startup scan found %s active lease(s) from a previous process; none were auto-released.", lease_scan["active_count"])
+    from app.services.local_vace import start_local_vace_worker, stop_local_vace_worker
+    start_local_vace_worker()
     logger.info("AI Comic Studio API started. Registered routers: %s", len(_loaded_routers))
-    yield
-    logger.info("AI Comic Studio API stopped.")
+    try:
+        yield
+    finally:
+        stop_local_vace_worker()
+        logger.info("AI Comic Studio API stopped.")
 
 
 app = FastAPI(

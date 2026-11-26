@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "product": "AI漫剧制作大师",
+  "resource_bundle_version": "2026.11",
+  "policy": {
+    "offline_first": true,
+    "no_cloud_fallback": true,
+    "no_automatic_model_download": true,
+    "preserve_existing_models": false,
+    "program_updates_reuse_resource_bundle": true,
+    "replace_managed_engine_directories": true,
+    "preserve_user_projects_and_media": true
+  },
+  "engines": [
+    {
+      "id": "ollama",
+      "version": "0.40.18",
+      "platform": "windows-x64",
+      "official_source": "https://github.com/ollama/ollama/releases",
+      "install_path": "engines/Ollama/runtime",
+      "models_path": "engines/Ollama/models",
+      "port": 11435,
+      "status": "existing-user-resource-and-runtime-target"
+    },
+    {
+      "id": "comfyui",
+      "version": "0.46.0",
+      "platform": "windows",
+      "official_source": "https://github.com/Comfy-Org/ComfyUI/releases",
+      "install_path": "engines/ComfyUI",
+      "port": 8188,
+      "status": "bundled-runtime-and-cpu-inference-verified",
+      "notes": "Use a pinned Python environment and hardware-aware PyTorch build. CPU fallback is required for unsupported integrated GPUs."
+    },
+    {
+      "id": "ffmpeg",
+      "version": "N-129288-gc81e35cf2b",
+      "official_source": "https://ffmpeg.org/download.html",
+      "install_path": "engines/FFmpeg",
+      "executables": [
+        "ffmpeg.exe",
+        "ffprobe.exe"
+      ],
+      "status": "pinned-build-sha256-verified"
+    },
+    {
+      "id": "stable-diffusion-cpp",
+      "version": "master-1133-52491bd",
+      "platform": "windows-x64",
+      "official_source": "https://github.com/leejet/stable-diffusion.cpp",
+      "install_path": "engines/StableDiffusionCpp",
+      "status": "bundled-runtime-and-vace-cpu-smoke-tested",
+      "notes": "Pinned official Windows CPU runtime. CLI capability smoke test can verify Wan video mode/options, but does not certify the target PC can complete video inference.",
+      "license": "MIT",
+      "release_asset": "sd-master-52491bd-bin-win-cpu-x64.zip",
+      "release_url": "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1133-52491bd/sd-master-52491bd-bin-win-cpu-x64.zip",
+      "sha256": "7d1c819708f7b922bebda2e1454b6224fa524480cb98bb7b0aea111f3c15678b"
+    }
+  ],
+  "text_models": [
+    {
+      "id": "qwen3.5:4b",
+      "version": "latest",
+      "engine": "ollama",
+      "official_source": "https://ollama.com/library/qwen3.5:4b",
+      "license": "Apache-2.0",
+      "recommended": true,
+      "status": "target-model-not-yet-verified-in-local-resource-bundle",
+      "purpose": [
+        "novel-analysis",
+        "screenplay",
+        "dialogue",
+        "plot-review",
+        "storyboard-prompts"
+      ]
+    },
+    {
+      "id": "qwen3:4b",
+      "version": "existing",
+      "engine": "ollama",
+      "official_source": "https://ollama.com/library/qwen3:4b",
+      "license": "Apache-2.0",
+      "recommended": false,
+      "status": "preserve-existing-user-model"
+    }
+  ],
+  "image_models": [
+    {
+      "id": "sd15-fp16-baseline",
+      "engine": "comfyui",
+      "repository": "Comfy-Org/stable-diffusion-1.5",
+      "file": "v1-5-pruned-emaonly-fp16.safetensors",
+      "license": "CreativeML OpenRAIL-M",
+      "status": "compatibility-baseline-not-latest-generation",
+      "recommended_for": "low-memory-cpu-fallback-and-legacy-workflows",
+      "notes": "Not a claim that SD 1.5 is the newest image model. A newer high-parameter model is not suitable as the default for Ryzen 7 4800U integrated graphics and 16 GiB RAM."
+    }
+  ],
+  "video_models": [
+    {
+      "id": "wan2.1-vace-1.3b-q4_0",
+      "engine": "stable-diffusion-cpp",
+      "repository": "Wan-AI/Wan2.1-VACE-1.3B",
+      "quantized_repository": "calcuis/wan-1.3b-gguf",
+      "license": "Apache-2.0 (upstream Wan2.1 VACE model; include upstream LICENSE and attribution notice)",
+      "status": "bundled-and-cpu-smoke-tested-on-github-windows-runner; target-device-not-certified",
+      "files": [
+        {
+          "file": "VACE/models/wan2.1-v3-vace-1.3b-q4_0.gguf",
+          "size_bytes": null,
+          "sha256": "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74",
+          "revision": "5c6903353adb75f32eed988471bd3c73f30db7f5"
+        },
+        {
+          "file": "VACE/models/umt5-xxl-encoder-q4_k_m.gguf",
+          "size_bytes": null,
+          "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+          "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+        },
+        {
+          "file": "VACE/models/pig_wan_vae_fp32-f16.gguf",
+          "size_bytes": null,
+          "sha256": "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd",
+          "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+        }
+      ],
+      "workflow": "stable-diffusion.cpp -M vid_gen; VACE diffusion GGUF + UMT5-XXL Q4_K_M + Wan VAE GGUF",
+      "purpose": [
+        "text-to-video",
+        "reference-image-to-video"
+      ],
+      "hardware": {
+        "github_windows_cpu": "T2V and R2V smoke tests passed at 256x256, 5 frames, 4 steps",
+        "ryzen_7_4800u": "not certified; CPU fallback may be extremely slow",
+        "vega_integrated_gpu": "no ROCm/GPU acceleration claim"
+      },
+      "notes": "Third-party quantized GGUF files pinned by revision and SHA-256. Package includes upstream Apache-2.0 license and attribution notice. CI smoke tests prove inference can run on hosted Windows CPU only; they do not certify target PC speed, RAM use or production-quality output."
+    },
+    {
+      "id": "wan2.1-t2v-1.3b-bf16-safetensors",
+      "engine": "stable-diffusion-cpp",
+      "repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "file": "split_files/diffusion_models/wan2.1_t2v_1.3B_bf16.safetensors",
+      "file_size_gb": 2.84,
+      "file_sha256": "6f999b0d6cb9a72b3d98ac386ed96f57f8cecae13994a69232514ea4974ad5fd",
+      "official_model_card": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "companion_repository": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+      "companion_files": [
+        {
+          "file": "split_files/text_encoders/umt5_xxl_fp16.safetensors",
+          "purpose": "required UMT5-XXL text encoder; evaluate a compatible quantized GGUF build to reduce RAM"
+        },
+        {
+          "file": "split_files/vae/wan_2.1_vae.safetensors",
+          "size_mb": 254,
+          "purpose": "required Wan 2.1 VAE"
+        }
+      ],
+      "workflow": "stable-diffusion.cpp Wan 2.1 T2V 1.3B official safetensors workflow; -M vid_gen",
+      "license": "Apache-2.0",
+      "recommended": false,
+      "status": "candidate-not-bundled-awaiting-real-CPU-generation-and-memory-qualification",
+      "hardware": {
+        "windows_x64": "upstream-platform-support; packaged binary still to be built and tested",
+        "cpu_backend": "candidate for CPU fallback; real target-device video inference not yet verified",
+        "ryzen_7_4800u": "experimental-only; no successful target-device video generation claim",
+        "ram_16_gib": "unverified; diffusion weights alone are 2.84 GB and peak RAM will be substantially higher",
+        "vega_integrated_gpu": "do-not-assume-ROCm-or-GPU-acceleration"
+      },
+      "purpose": [
+        "text-to-video"
+      ],
+      "notes": "Corrected from the earlier GGUF assumption: upstream stable-diffusion.cpp documentation lists Wan 2.1 T2V 1.3B as safetensors, while its listed Wan GGUF examples concern 14B variants. Do not use an unverified third-party 1.3B GGUF file. The model card reports Apache-2.0. Qualify a real CPU-mode MP4 generation with the required UMT5 encoder and Wan VAE, recording peak RAM, elapsed time, output validity and hashes before bundling."
+    },
+    {
+      "id": "wan2.2-ti2v-5b",
+      "engine": "comfyui",
+      "repository": "Wan-AI/Wan2.2-TI2V-5B",
+      "workflow": "ComfyUI Wan 2.2 5B text-to-video and image-to-video",
+      "license": "review-model-card-before-redistribution",
+      "recommended": false,
+      "status": "model-weights-not-yet-bundled-or-inference-tested",
+      "hardware": {
+        "official_workflow_vram_gib": 8,
+        "integrated_gpu": "not-supported-as-default",
+        "ryzen_7_4800u": "not-recommended; shared-memory Vega graphics does not provide 8 GiB dedicated VRAM"
+      },
+      "purpose": [
+        "text-to-video",
+        "image-to-video"
+      ],
+      "notes": "Primary full local video-generation candidate for supported GPUs. Do not mark ready on the Ryzen 7 4800U integrated GPU."
+    },
+    {
+      "id": "ltx-video-2b-0.9.6-distilled",
+      "engine": "comfyui",
+      "repository": "Lightricks/LTX-Video",
+      "workflow": "official LTX-Video image-to-video workflow",
+      "license": "model-weight-license-review-required",
+      "recommended": false,
+      "status": "candidate-not-yet-bundled-or-hardware-tested",
+      "hardware": {
+        "integrated_gpu": "not-certified",
+        "ryzen_7_4800u": "experimental-only; no performance or successful inference claim"
+      },
+      "purpose": [
+        "image-to-video",
+        "video-extension"
+      ],
+      "notes": "Smaller candidate for testing on supported accelerators; the official repository documents a 2B distilled variant. Model weights have separate license terms."
+    },
+    {
+      "id": "wan2.2-14b",
+      "engine": "comfyui",
+      "repository": "Wan-AI/Wan2.2",
+      "workflow": "ComfyUI Wan 2.2 14B text-to-video and image-to-video",
+      "license": "review-model-card-before-redistribution",
+      "recommended": false,
+      "status": "optional-high-end-model-not-bundled",
+      "hardware": {
+        "integrated_gpu": "not-supported",
+        "ryzen_7_4800u": "not-supported"
+      },
+      "purpose": [
+        "text-to-video",
+        "image-to-video",
+        "video-to-video"
+      ],
+      "notes": "Optional high-end tier for future GPU upgrades; not included in the default low-resource bundle."
+    }
+  ],
+  "bundle_policy": {
+    "video_bundle_includes_vace": true,
+    "video_bundle_scope": "VACE 1.3B quantized CPU smoke-tested model plus UMT5/VAE/runtime; no claim of target-device acceleration"
+  }
+}

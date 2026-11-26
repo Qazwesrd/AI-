@@ -535,6 +535,18 @@ export default function LocalImageStudioPage() {
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const incomingPrompt = params.get("prompt");
+    const incomingNegative = params.get("negative");
+    const incomingStyle = params.get("style");
+    if (incomingPrompt) setPrompt(incomingPrompt);
+    if (incomingNegative) setNegative(incomingNegative);
+    if (incomingStyle && styles.includes(incomingStyle as (typeof styles)[number])) {
+      setStyle(incomingStyle as (typeof styles)[number]);
+    }
+  }, []);
+
 
   useEffect(() => {
     if (!targetShotId) { setShotImages([]); return; }
@@ -715,6 +727,10 @@ export default function LocalImageStudioPage() {
           {!models.length && <option value="">未发现已安装模型</option>}
           {models.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
+        {!models.length && <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100">
+          当前没有可用于生成的本地图片模型。请先检查离线资源包中的 ComfyUI 引擎和 checkpoint 模型；此工作台不会伪装模型已安装，也不会自动联网下载。
+          <a href="/local-ai-center" className="ml-2 inline-block underline">打开本地 AI 引擎与模型中心 →</a>
+        </div>}
       </section>
 
       <section className="rounded-2xl border border-white/10 bg-slate-950/70 p-5">

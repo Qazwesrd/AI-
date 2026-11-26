@@ -1,0 +1,267 @@
+name: Build full offline AI resource bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [offline-bundle-installer-repair]
+    paths:
+      - "scripts/package-ai-resource-bundle.ps1"
+      - "apps/desktop/build-resources/ai-resources/resource-manifest.json"
+      - ".github/workflows/ai-resource-bundle.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-offline-resource-bundle-fastzip-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ai-resource-bundle:
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare resource directories
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = Join-Path $PWD "resource-stage"
+          foreach ($name in @("Ollama\runtime", "Ollama\models", "ComfyUI", "FFmpeg", "StableDiffusionCpp")) {
+            New-Item -ItemType Directory -Path (Join-Path $root $name) -Force | Out-Null
+          }
+          "RESOURCE_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Download and verify Ollama 0.40.18 runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "ollama-windows-amd64.zip"
+          Invoke-WebRequest -Uri "https://github.com/ollama/ollama/releases/download/v0.40.18/ollama-windows-amd64.zip" -OutFile $archive
+          $expected = "ca97292ac1e9acc77fcf473bb2741fa6acd12e3798f261b419680068b7cc4c16"
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Ollama archive SHA-256 mismatch: $actual" }
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $env:RESOURCE_ROOT "Ollama\runtime") -Force
+          if (!(Test-Path (Join-Path $env:RESOURCE_ROOT "Ollama\runtime\ollama.exe"))) { throw "ollama.exe missing after extraction." }
+
+      - name: Pull Qwen3.5 4B into the offline model store
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:OLLAMA_MODELS = Join-Path $env:RESOURCE_ROOT "Ollama\models"
+          $env:OLLAMA_HOST = "127.0.0.1:11435"
+          $ollama = Join-Path $env:RESOURCE_ROOT "Ollama\runtime\ollama.exe"
+          $server = Start-Process -FilePath $ollama -ArgumentList "serve" -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 90; $i++) {
+              try { Invoke-RestMethod -Uri "http://127.0.0.1:11435/api/version" -TimeoutSec 2 | Out-Null; $ready = $true; break } catch { Start-Sleep -Seconds 2 }
+            }
+            if (!$ready) { throw "Ollama server did not start." }
+            & $ollama pull qwen3.5:4b
+            if ($LASTEXITCODE -ne 0) { throw "Ollama failed to pull qwen3.5:4b." }
+            $body = @{ model = "qwen3.5:4b"; prompt = "Reply with exactly: OFFLINE_MODEL_OK"; stream = $false } | ConvertTo-Json
+            $result = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:11435/api/generate" -ContentType "application/json" -Body $body -TimeoutSec 600
+            if (!$result.response -or $result.response -notmatch "OFFLINE_MODEL_OK") { throw "Qwen3.5:4b generation smoke test failed." }
+          } finally {
+            if ($server -and !$server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Download and verify stable-diffusion.cpp Windows CPU video runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sd-master-52491bd-bin-win-cpu-x64.zip"
+          $url = "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1133-52491bd/sd-master-52491bd-bin-win-cpu-x64.zip"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $expected = "7d1c819708f7b922bebda2e1454b6224fa524480cb98bb7b0aea111f3c15678b"
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "stable-diffusion.cpp archive SHA-256 mismatch: $actual" }
+          $target = Join-Path $env:RESOURCE_ROOT "StableDiffusionCpp"
+          Expand-Archive -LiteralPath $archive -DestinationPath $target -Force
+          $cli = Get-ChildItem -LiteralPath $target -Filter "sd-cli.exe" -File -Recurse | Select-Object -First 1
+          if (!$cli) { throw "stable-diffusion.cpp sd-cli.exe missing after extraction." }
+          $help = (& $cli.FullName --help 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "stable-diffusion.cpp CLI help smoke test failed." }
+          foreach ($required in @("vid_gen", "--diffusion-model", "--t5xxl")) {
+            if ($help -notmatch [regex]::Escape($required)) { throw "Video CLI capability missing: $required" }
+          }
+          "SD_CPP_CLI=$($cli.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Verified stable-diffusion.cpp CPU runtime and Wan video CLI options."
+          Remove-Item -LiteralPath $archive -Force
+
+      - name: Download and verify ComfyUI Windows portable runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "ComfyUI_windows_portable_amd.7z"
+          Invoke-WebRequest -Uri "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.46.0/ComfyUI_windows_portable_amd.7z" -OutFile $archive
+          $expected = "00f42ed58381e194892b74e9085d4d5666fac1aab8f021094c3a745e9b52ad97"
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "ComfyUI portable archive SHA-256 mismatch: $actual" }
+          $sevenZip = Join-Path $env:RUNNER_TEMP "7zr.exe"
+          Invoke-WebRequest -Uri "https://www.7-zip.org/a/7zr.exe" -OutFile $sevenZip
+          $extract = Join-Path $env:RUNNER_TEMP "comfy-extract"
+          New-Item -ItemType Directory -Path $extract -Force | Out-Null
+          & $sevenZip x $archive "-o$extract" -y
+          if ($LASTEXITCODE -ne 0) { throw "ComfyUI portable archive extraction failed." }
+          $portable = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1
+          if (!$portable) { throw "ComfyUI portable directory not found." }
+          $comfyDestination = Join-Path $env:RESOURCE_ROOT "ComfyUI"
+          New-Item -ItemType Directory -Path $comfyDestination -Force | Out-Null
+          Get-ChildItem -LiteralPath $portable.FullName | Copy-Item -Destination $comfyDestination -Recurse -Force
+          Remove-Item -LiteralPath $archive -Force
+          Remove-Item -LiteralPath $extract -Recurse -Force
+          $python = Join-Path $env:RESOURCE_ROOT "ComfyUI\python_embeded\python.exe"
+          $main = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\main.py"
+          if (!(Test-Path $python) -or !(Test-Path $main)) { throw "ComfyUI portable runtime layout is incomplete." }
+          & $python -c "import torch; print('torch', torch.__version__)"
+          if ($LASTEXITCODE -ne 0) { throw "ComfyUI bundled Python/PyTorch smoke test failed." }
+
+      - name: Download and verify Stable Diffusion 1.5 FP16 weights
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\models\checkpoints\v1-5-pruned-emaonly-fp16.safetensors"
+          New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+          Invoke-WebRequest -Uri "https://huggingface.co/Comfy-Org/stable-diffusion-1.5/resolve/ce8e3e3657a9b767b33fc0171ff91fb04aed1b2f/v1-5-pruned-emaonly-fp16.safetensors" -OutFile $target
+          $expected = "e9476a13728cd75d8279f6ec8bad753a66a1957ca375a1464dc63b37db6e3916"
+          $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Stable Diffusion 1.5 checkpoint SHA-256 mismatch: $actual" }
+
+      - name: CPU image generation inference test
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          $ErrorActionPreference = "Stop"
+          $python = Join-Path $env:RESOURCE_ROOT "ComfyUI\python_embeded\python.exe"
+          $main = Join-Path $env:RESOURCE_ROOT "ComfyUI\ComfyUI\main.py"
+          $process = Start-Process -FilePath $python -ArgumentList @($main, "--cpu", "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch") -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 90; $i++) {
+              try { Invoke-WebRequest -Uri "http://127.0.0.1:8188/system_stats" -TimeoutSec 3 | Out-Null; $ready = $true; break } catch { Start-Sleep -Seconds 2 }
+            }
+            if (!$ready) { throw "ComfyUI CPU-mode startup smoke test failed." }
+
+            $workflow = @{
+              "1" = @{ class_type = "CheckpointLoaderSimple"; inputs = @{ ckpt_name = "v1-5-pruned-emaonly-fp16.safetensors" } }
+              "2" = @{ class_type = "CLIPTextEncode"; inputs = @{ text = "a detailed anime character portrait, clean line art"; clip = @("1", 1) } }
+              "3" = @{ class_type = "CLIPTextEncode"; inputs = @{ text = "blurry, low quality, distorted"; clip = @("1", 1) } }
+              "4" = @{ class_type = "EmptyLatentImage"; inputs = @{ width = 512; height = 512; batch_size = 1 } }
+              "5" = @{ class_type = "KSampler"; inputs = @{ seed = 42; steps = 8; cfg = 7; sampler_name = "euler"; scheduler = "normal"; denoise = 1; model = @("1", 0); positive = @("2", 0); negative = @("3", 0); latent_image = @("4", 0) } }
+              "6" = @{ class_type = "VAEDecode"; inputs = @{ samples = @("5", 0); vae = @("1", 2) } }
+              "7" = @{ class_type = "SaveImage"; inputs = @{ filename_prefix = "AIComic-Offline-Smoke"; images = @("6", 0) } }
+            }
+            $body = @{ prompt = $workflow; client_id = "ai-comic-offline-ci" } | ConvertTo-Json -Depth 20
+            $queued = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8188/prompt" -ContentType "application/json" -Body $body -TimeoutSec 30
+            if (!$queued.prompt_id) { throw "ComfyUI did not accept the image generation workflow." }
+            $completed = $false
+            for ($i = 0; $i -lt 1800; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $history = Invoke-RestMethod -Uri ("http://127.0.0.1:8188/history/" + $queued.prompt_id) -TimeoutSec 5
+                $entry = $history.($queued.prompt_id)
+                if ($entry.status.completed -eq $true) {
+                  if (!$entry.outputs."7".images -or $entry.outputs."7".images.Count -lt 1) { throw "Image inference finished without an output image." }
+                  $completed = $true
+                  break
+                }
+                if ($entry.status.status_str -eq "error") { throw "ComfyUI image inference returned an error." }
+              } catch {
+                if ($_.Exception.Message -match "image inference") { throw }
+              }
+            }
+            if (!$completed) { throw "CPU image inference timed out after 30 minutes." }
+            Write-Host "ComfyUI CPU image inference succeeded."
+          } finally {
+            if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+          }
+
+      - name: Download and verify pinned FFmpeg Windows runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg-N-129288-gc81e35cf2b-win64-gpl.zip"
+          $url = "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-25-12-41/ffmpeg-N-129288-gc81e35cf2b-win64-gpl.zip"
+          $expected = "ee17bc29170b6f1d6685985260900c57c92967aaaabaf6f2bc8c65b67d76b8c5"
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Pinned FFmpeg archive SHA-256 mismatch: $actual" }
+          $extract = Join-Path $env:RUNNER_TEMP "ffmpeg-extract"
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $ffmpeg = Get-ChildItem $extract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          $ffprobe = Get-ChildItem $extract -Filter ffprobe.exe -File -Recurse | Select-Object -First 1
+          if (!$ffmpeg -or !$ffprobe) { throw "FFmpeg archive is incomplete." }
+          Copy-Item $ffmpeg.FullName (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe") -Force
+          Copy-Item $ffprobe.FullName (Join-Path $env:RESOURCE_ROOT "FFmpeg\ffprobe.exe") -Force
+          $ffmpegExe = Join-Path $env:RESOURCE_ROOT "FFmpeg\ffmpeg.exe"
+          $ffprobeExe = Join-Path $env:RESOURCE_ROOT "FFmpeg\ffprobe.exe"
+          $version = (& $ffmpegExe -version | Select-Object -First 1)
+          $probeVersion = (& $ffprobeExe -version | Select-Object -First 1)
+          if ($version -notmatch "N-129288-gc81e35cf2b") { throw "Unexpected FFmpeg build: $version" }
+          if ($probeVersion -notmatch "N-129288-gc81e35cf2b") { throw "Unexpected FFprobe build: $probeVersion" }
+          Write-Host "Verified pinned FFmpeg: $version"
+          Write-Host "Verified pinned FFprobe: $probeVersion"
+          Remove-Item -LiteralPath $archive -Force
+          Remove-Item -LiteralPath $extract -Recurse -Force
+
+
+      - name: Download, verify and CPU-test Wan 2.1 VACE 1.3B
+        shell: pwsh
+        timeout-minutes: 55
+        run: |
+          $ErrorActionPreference = "Stop"
+          $models = Join-Path $env:RESOURCE_ROOT "VACE\\models"
+          New-Item -ItemType Directory -Path $models -Force | Out-Null
+          $items = @(
+            @{ name = "wan2.1-v3-vace-1.3b-q4_0.gguf"; sha = "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74"; revision = "5c6903353adb75f32eed988471bd3c73f30db7f5" },
+            @{ name = "umt5-xxl-encoder-q4_k_m.gguf"; sha = "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40"; revision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f" },
+            @{ name = "pig_wan_vae_fp32-f16.gguf"; sha = "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd"; revision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f" }
+          )
+          foreach ($item in $items) {
+            $dest = Join-Path $models $item.name
+            $url = "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/$($item.revision)/$($item.name)"
+            Invoke-WebRequest -Uri $url -OutFile $dest
+            $actual = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $item.sha) { throw "VACE SHA-256 mismatch for $($item.name): $actual" }
+            Write-Host "Verified $($item.name) ($((Get-Item $dest).Length) bytes)"
+          }
+          $licenseUrl = "https://huggingface.co/Wan-AI/Wan2.1-VACE-1.3B/resolve/c43fab4b82d10af8195d0d7d1d115c99aed745cb/LICENSE.txt"
+          Invoke-WebRequest -Uri $licenseUrl -OutFile (Join-Path $env:RESOURCE_ROOT "VACE\\LICENSE-Wan2.1.txt")
+          @"
+          Wan2.1 VACE 1.3B quantized model package
+          Upstream model: Wan-AI/Wan2.1-VACE-1.3B
+          Quantized files: calcuis/wan-1.3b-gguf (pinned revisions and SHA-256 values are recorded in resource-manifest.json)
+          Upstream implementation/model information: https://github.com/Wan-Video/Wan2.1
+          VACE project: https://github.com/TMCADV/vace
+          Model license: Apache-2.0; retain LICENSE-Wan2.1.txt and this notice with the model files.
+          This package contains a third-party GGUF quantization. The CI smoke test is not a performance certification for Ryzen 7 4800U/Vega integrated graphics.
+          "@ | Set-Content -LiteralPath (Join-Path $env:RESOURCE_ROOT "VACE\\THIRD-PARTY-NOTICES.txt") -Encoding utf8
+
+          $out = Join-Path $env:RESOURCE_ROOT "VACE\\vace-t2v.avi"
+          $args = @("-M","vid_gen","--diffusion-model",(Join-Path $models "wan2.1-v3-vace-1.3b-q4_0.gguf"),"--vae",(Join-Path $models "pig_wan_vae_fp32-f16.gguf"),"--t5xxl",(Join-Path $models "umt5-xxl-encoder-q4_k_m.gguf"),"-p","A small golden-orange bird flying slowly above a calm lake at sunrise, cinematic anime style","-n","blurry, low quality, watermark, text","--cfg-scale","4.0","--sampling-method","euler","--steps","4","-W","256","-H","256","--video-frames","5","--offload-to-cpu","-o",$out)
+          & $env:SD_CPP_CLI @args 2>&1 | Tee-Object -FilePath (Join-Path $env:RESOURCE_ROOT "VACE\\t2v.log")
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $out) -or (Get-Item $out).Length -lt 4096) { throw "VACE T2V CPU inference smoke test failed." }
+          & (Join-Path $env:RESOURCE_ROOT "FFmpeg\\ffprobe.exe") -v error -show_entries stream=codec_type,width,height,nb_frames -of json $out
+          if ($LASTEXITCODE -ne 0) { throw "VACE output ffprobe validation failed." }
+          Write-Host "VACE T2V CPU inference and output validation succeeded."
+
+      - name: Package resource bundle and SHA-256 inventory
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:AI_RESOURCE_BUNDLE_TESTS = "passed"
+          ./scripts/package-ai-resource-bundle.ps1 -ResourceRoot $env:RESOURCE_ROOT -OutputDirectory (Join-Path $PWD "dist\ai-resources")
+
+      - name: Upload complete offline resource bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-AI-Offline-Resources-2026.11
+          path: |
+            dist/ai-resources/AI漫剧大师-AI离线资源包-2026.11.zip
+            dist/ai-resources/AI漫剧大师-AI离线资源包-2026.11.zip.sha256
+          if-no-files-found: error
+          retention-days: 30

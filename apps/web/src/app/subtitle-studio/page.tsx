@@ -7,15 +7,10 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 export default function SubtitleStudioPage() {
   const [subtitlePath, setSubtitlePath] = useState("");
   const [videoPath, setVideoPath] = useState("");
-  const [provider, setProvider] = useState("deepseek");
-  const [model, setModel] = useState("");
-  const [voiceModel, setVoiceModel] = useState("");
-  const [voice, setVoice] = useState("alloy");
   const [language, setLanguage] = useState("en");
   const [font, setFont] = useState("Arial");
   const [fontSize, setFontSize] = useState(28);
   const [position, setPosition] = useState(2);
-  const [confirmPaid, setConfirmPaid] = useState(false);
   const [files, setFiles] = useState<any[]>([]);
   const [videos, setVideos] = useState<any[]>([]);
   const [message, setMessage] = useState("");
@@ -88,20 +83,10 @@ export default function SubtitleStudioPage() {
                 {videos.map(f => <option key={f.id} value={f.path}>{f.name}</option>)}
               </select>
             </label>
-            <label className="text-sm">文本 AI 服务商 ID
-              <input value={provider} onChange={e => setProvider(e.target.value)} className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            </label>
-            <label className="text-sm">文本 AI 模型
-              <input value={model} onChange={e => setModel(e.target.value)} placeholder="例如 deepseek-chat" className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            </label>
-            <label className="text-sm">语音 AI 模型
-              <input value={voiceModel} onChange={e => setVoiceModel(e.target.value)} placeholder="填写已配置的语音模型" className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            </label>
-            <label className="text-sm">声音 ID
-              <input value={voice} onChange={e => setVoice(e.target.value)} className="mt-2 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
-            </label>
+            <div className="rounded-lg border border-emerald-300/20 bg-emerald-500/10 p-3 text-sm md:col-span-2">
+              字幕翻译使用本机已安装的 Ollama 模型，不需要 API Key，不会调用云端服务，也不会产生 API 费用。
+            </div>
           </div>
-          <label className="mt-4 flex items-center gap-2 text-sm"><input type="checkbox" checked={confirmPaid} onChange={e => setConfirmPaid(e.target.checked)} />我确认本次 AI 调用可能产生费用</label>
           <div className="mt-4 flex flex-wrap gap-3">
             <label className="cursor-pointer rounded-lg border border-dashed border-purple-300/40 px-4 py-3">上传 SRT 字幕
               <input type="file" accept=".srt" className="hidden" onChange={async e => { const f=e.target.files?.[0]; if(f){try{setSubtitlePath(await upload(f,"other"));setMessage("字幕已上传。");await loadFiles();}catch(err){setMessage(err instanceof Error?err.message:"上传失败");}} }} />
@@ -110,7 +95,7 @@ export default function SubtitleStudioPage() {
               <input type="file" accept="video/*" className="hidden" onChange={async e => { const f=e.target.files?.[0]; if(f){try{setVideoPath(await upload(f,"video"));setMessage("视频已上传。");await loadFiles();}catch(err){setMessage(err instanceof Error?err.message:"上传失败");}} }} />
             </label>
           </div>
-          <p className="mt-3 text-xs text-amber-200/70">当前翻译、逐句配音和样式烧录支持 SRT；ASS/SSA/VTT 请先转换为 SRT。翻译和配音需要已配置且启用的 AI 服务商，付费服务仍遵循全局授权和本次确认。</p>
+          <p className="mt-3 text-xs text-amber-200/70">当前翻译和字幕样式烧录支持 SRT；ASS/SSA/VTT 请先转换为 SRT。翻译完全离线；本版尚未包含本地 TTS 声音模型。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">AI 字幕翻译</h2>
@@ -118,13 +103,13 @@ export default function SubtitleStudioPage() {
           <select value={language} onChange={e => setLanguage(e.target.value)} className="mt-2 w-full max-w-md rounded-lg border border-white/15 bg-black/30 p-3">
             <option value="zh">翻译为简体中文</option><option value="en">Translate to English</option><option value="zh-en">中英双语（每条两行）</option>
           </select>
-          <button disabled={busy || !subtitlePath || !model.trim()} onClick={() => void run(subtitlePath,"/api/subtitle-tools/translate",{provider,model,target_language:language,confirm_paid:confirmPaid},d=>setSubtitlePath(d.path))} className="mt-4 rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-40">翻译并保存新字幕</button>
+          <button disabled={busy || !subtitlePath} onClick={() => void run(subtitlePath,"/api/subtitle-tools/translate",{target_language:language},d=>setSubtitlePath(d.path))} className="mt-4 rounded-xl bg-purple-600 px-5 py-3 font-semibold disabled:opacity-40">翻译并保存新字幕</button>
           <p className="mt-2 text-xs text-white/45">原字幕不会被覆盖；系统会校验翻译条数和编号，保持原开始/结束时间及顺序。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">多语言逐句配音</h2>
-          <button disabled={busy || !subtitlePath || !voiceModel.trim()} onClick={() => void run(subtitlePath,"/api/subtitle-tools/voice",{provider,model:voiceModel,voice,confirm_paid:confirmPaid},d=>setMessage(d.message))} className="rounded-xl bg-indigo-600 px-5 py-3 font-semibold disabled:opacity-40">生成配音并按时间轴合成</button>
-          <p className="mt-2 text-xs text-white/45">每条字幕单独生成语音，并按字幕起止时间定位；若台词过长、需要超过 2 倍语速才能放入时间窗，系统会停止而不是直接截断台词。重复任务会优先复用已有结果，避免重复调用。</p>
+          <button disabled className="rounded-xl bg-slate-700 px-5 py-3 font-semibold opacity-60">本地配音模型尚未打包，暂不可用</button>
+          <p className="mt-2 text-xs text-amber-200/70">当前离线安装包没有包含 TTS 声音模型，因此此按钮已禁用；不会尝试连接云端，也不会产生费用。</p>
         </section>
         <section className={panel}>
           <h2 className="mb-4 text-xl font-semibold">字幕样式与视频烧录</h2>

@@ -3,6 +3,7 @@
 No model pulls, cloud fallback, arbitrary endpoints, or automatic process startup.
 """
 import json
+import os
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -12,9 +13,9 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地 AI 引擎"])
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11435").rstrip("/")
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
-TEST_PROMPT = "请用简体中文写一句话，说明你已成功在本机运行。"
+TEST_PROMPT = "只输出四个汉字：测试成功"
 OPENER = build_opener(ProxyHandler({}))
 
 
@@ -68,11 +69,11 @@ def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0
     """Call a fixed localhost Ollama endpoint without honoring external proxies."""
     if path not in {"/api/tags", "/api/generate", "/api/show", "/api/create"}:
         raise ValueError("Unsupported local Ollama endpoint")
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") if payload is not None else None
     request = Request(
         OLLAMA_BASE_URL + path,
         data=data,
-        headers={"Content-Type": "application/json"} if data is not None else {},
+        headers={"Content-Type": "application/json; charset=utf-8", "Accept": "application/json"} if data is not None else {},
         method="POST" if data is not None else "GET",
     )
     try:
@@ -152,7 +153,8 @@ def test_local_model(payload: LocalModelTestInput):
             "model": model,
             "prompt": TEST_PROMPT,
             "stream": False,
-            "options": {"num_predict": 48},
+            "think": False,
+            "options": {"num_predict": 32, "temperature": 0},
         },
         timeout=45.0,
     )

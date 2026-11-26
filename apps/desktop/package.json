@@ -27,7 +27,9 @@
             "main.cjs",
             "preload.cjs",
             "ollama-runtime-installer.cjs",
-            "package.json"
+            "package.json",
+            "update-inventory.cjs",
+            "patch-package-verifier.cjs"
         ],
         "extraResources": [
             {
@@ -57,6 +59,14 @@
             {
                 "to": "media/ffprobe.exe",
                 "from": "build-resources/ffmpeg/ffprobe.exe"
+            },
+            {
+                "to": "update/manifest.json",
+                "from": "build-resources/update-manifest.json"
+            },
+            {
+                "to": "ai-resources/resource-manifest.json",
+                "from": "build-resources/ai-resources/resource-manifest.json"
             }
         ],
         "win": {

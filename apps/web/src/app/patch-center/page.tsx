@@ -1,0 +1,263 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+
+type InstalledInventory = {
+  available: boolean; valid: boolean; app_version: string; manifest_version: string | null;
+  generated_at: string | null; declared_file_count: number; verified_file_count: number;
+  updateable_file_count: number; missing_file_count: number; changed_file_count: number;
+  invalid_file_count: number; message: string;
+};
+
+declare global {
+  interface Window {
+    patchCenterDesktop?: {
+      getInstalledInventory: () => Promise<InstalledInventory>;
+      importSignedPackage: () => Promise<{ canceled?: boolean; valid?: boolean; trusted?: boolean; package_id?: string; file_count?: number; total_bytes?: number; snapshot_id?: string; message?: string }>;
+    };
+  }
+}
+
+const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+
+type PatchPackage = {
+  id: string;
+  title: string;
+  description?: string;
+  target_version?: string;
+  patch_format: string;
+  created_at: string;
+  sha256: string;
+  size_bytes: number;
+  changed_files?: string[];
+  status: string;
+};
+
+export default function PatchCenterPage() {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [targetVersion, setTargetVersion] = useState("current");
+  const [format, setFormat] = useState("unified-diff");
+  const [targetPath, setTargetPath] = useState("");
+  const [code, setCode] = useState("");
+  const [packages, setPackages] = useState<PatchPackage[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [status, setStatus] = useState<{ package_count?: number; apply_supported?: boolean; message?: string } | null>(null);
+  const [preview, setPreview] = useState<any>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [inventory, setInventory] = useState<InstalledInventory | null>(null);
+  const [inventoryBusy, setInventoryBusy] = useState(false);
+  const [desktopBridgeAvailable, setDesktopBridgeAvailable] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importResult, setImportResult] = useState("");
+
+  const refreshInstalledInventory = useCallback(async () => {
+    if (!window.patchCenterDesktop?.getInstalledInventory) {
+      setInventory(null);
+      return;
+    }
+    setDesktopBridgeAvailable(true);
+    setInventoryBusy(true);
+    try {
+      const result = await window.patchCenterDesktop.getInstalledInventory();
+      setInventory(result);
+    } catch {
+      setInventory({
+        available: false, valid: false, app_version: "", manifest_version: null,
+        generated_at: null, declared_file_count: 0, verified_file_count: 0,
+        updateable_file_count: 0, missing_file_count: 0, changed_file_count: 0,
+        invalid_file_count: 0, message: "读取桌面安装清单失败，请重启软件后重试。"
+      });
+    } finally {
+      setInventoryBusy(false);
+    }
+  }, []);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [s, p] = await Promise.all([
+        fetch(`${API}/api/patch-center/status`, { cache: "no-store" }),
+        fetch(`${API}/api/patch-center/packages`, { cache: "no-store" }),
+      ]);
+      if (!s.ok || !p.ok) throw new Error("补丁中心服务暂不可用");
+      const [sd, pd] = await Promise.all([s.json(), p.json()]);
+      setStatus(sd);
+      setPackages(pd.packages || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "读取补丁记录失败");
+    }
+  }, []);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refreshInstalledInventory(); }, [refreshInstalledInventory]);
+
+  async function showPreview(id: string) {
+    setPreviewBusy(true); setError(""); setPreview(null);
+    try {
+      const response = await fetch(`${API}/api/patch-center/packages/${id}/preview`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "补丁预览失败");
+      setPreview(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "补丁预览失败");
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  async function importSignedPackage() {
+    if (!window.patchCenterDesktop?.importSignedPackage) {
+      setError("签名补丁导入仅支持 Windows 桌面安装版。");
+      return;
+    }
+    setImportBusy(true); setError(""); setImportResult("");
+    try {
+      const result = await window.patchCenterDesktop.importSignedPackage();
+      if (result.canceled) return;
+      if (!result.valid) throw new Error(result.message || "签名补丁导入失败");
+      setImportResult(`${result.message || "签名补丁已暂存。"}${result.snapshot_id ? ` 回滚备份编号：${result.snapshot_id}；文件数：${result.file_count ?? 0}。` : ""}`);
+      await refreshInstalledInventory();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "签名补丁导入失败");
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
+  async function generatePatch() {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const response = await fetch(`${API}/api/patch-center/packages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title, description, target_version: targetVersion,
+          patch_format: format, target_path: targetPath, code,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "补丁包生成失败");
+      setMessage(`补丁包已生成：${data.id}；大小 ${data.size_bytes} 字节；SHA256：${data.sha256}`);
+      setTitle(""); setDescription(""); setTargetPath(""); setCode("");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "补丁包生成失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <main className="cosmic min-h-screen text-white">
+    <div className="nebula nebula-one" /><div className="nebula nebula-two" />
+    <div className="relative z-10 mx-auto max-w-6xl p-5 lg:p-8">
+      <header className="mb-7">
+        <a href="/" className="text-sm text-purple-300">← 返回首页</a>
+        <h1 className="mt-3 text-3xl font-black">🩹 补丁中心</h1>
+        <p className="mt-2 text-sm text-purple-200">后续小功能和代码修复通过补丁包交付，不重复下载整套程序或 AI 模型。</p>
+      </header>
+
+      <section className="mb-5 rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h2 className="font-bold">补丁服务状态</h2><p className="mt-1 text-xs text-purple-300">本机已暂存 {status?.package_count ?? packages.length} 个补丁包</p></div>
+          <span className="rounded-full bg-emerald-500/15 px-3 py-1 text-xs text-emerald-200">本地补丁仓库</span>
+        </div>
+        <p className="mt-3 text-sm text-amber-200">{status?.message || "补丁包生成和暂存已启用；自动应用器尚未启用。"}</p>
+      </section>
+
+      
+      <section className="mb-5 rounded-2xl border border-cyan-300/20 bg-[#101b2acc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold">本机安装清单核验</h2>
+            <p className="mt-1 text-xs text-cyan-200">只读取安装目录中的静态网页文件，不修改任何文件。</p>
+          </div>
+          <button onClick={() => void refreshInstalledInventory()} disabled={inventoryBusy} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs disabled:opacity-50">{inventoryBusy ? "正在核验…" : "重新核验"}</button>
+        </div>
+        {!desktopBridgeAvailable ? (
+          <p className="mt-3 text-sm text-amber-200">当前运行环境不是桌面安装版，无法读取本机安装清单。</p>
+        ) : inventory ? (
+          <>
+            <p className="mt-3 text-sm text-amber-100">{inventory.message}</p>
+            <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">当前程序版本</p><p className="mt-1 font-mono text-sm">{inventory.app_version || "未知"}</p></div>
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">清单版本</p><p className="mt-1 font-mono text-sm">{inventory.manifest_version || "未读取"}</p></div>
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">清单文件数</p><p className="mt-1 text-lg font-bold">{inventory.declared_file_count}</p></div>
+              <div className="rounded-xl bg-black/25 p-3"><p className="text-xs text-purple-300">校验一致 / 可更新候选</p><p className="mt-1 text-lg font-bold">{inventory.verified_file_count} / {inventory.updateable_file_count}</p></div>
+            </div>
+            <p className="mt-3 text-xs text-purple-300">缺失 {inventory.missing_file_count} · 已变化 {inventory.changed_file_count} · 不合规 {inventory.invalid_file_count}</p>
+            <p className="mt-2 text-xs text-amber-200">说明：这里的“可更新候选”仅表示文件与清单基线一致，不代表已有可安装补丁。签名验证、备份、替换和回滚尚未启用。</p>
+          </>
+        ) : <p className="mt-3 text-sm text-purple-300">{inventoryBusy ? "正在读取本机清单…" : "尚未获取到本机安装清单状态。"}</p>}
+      </section>
+
+      {error && <div className="mb-4 rounded-xl border border-rose-400/30 bg-rose-950/30 p-4 text-sm text-rose-200">{error}</div>}
+      {message && <div className="mb-4 rounded-xl border border-emerald-400/30 bg-emerald-950/30 p-4 text-sm text-emerald-100 break-all">{message}</div>}
+
+      <section className="rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-5">
+        <h2 className="mb-4 text-xl font-bold">生成新补丁</h2>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="text-sm">补丁名称
+            <input value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder="例如：修复分镜导出按钮" className="mt-2 w-full rounded-xl border border-purple-300/20 bg-black/30 p-3 text-white outline-none focus:border-fuchsia-300" />
+          </label>
+          <label className="text-sm">目标程序版本
+            <input value={targetVersion} onChange={e => setTargetVersion(e.target.value)} maxLength={40} className="mt-2 w-full rounded-xl border border-purple-300/20 bg-black/30 p-3 text-white outline-none focus:border-fuchsia-300" />
+          </label>
+        </div>
+        <label className="mt-4 block text-sm">补丁说明
+          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} maxLength={1000} placeholder="说明本次增加或修复什么功能" className="mt-2 w-full rounded-xl border border-purple-300/20 bg-black/30 p-3 text-white outline-none focus:border-fuchsia-300" />
+        </label>
+        <label className="mt-4 block text-sm">补丁格式
+          <select value={format} onChange={e => setFormat(e.target.value)} className="mt-2 w-full rounded-xl border border-purple-300/20 bg-[#21143c] p-3 text-white">
+            <option value="unified-diff">标准代码差异（Unified Diff）</option>
+            <option value="source-code">源代码片段</option>
+            <option value="json-patch">JSON 配置补丁</option>
+          </select>
+        </label>
+        <label className="mt-4 block text-sm">粘贴补丁代码
+          <textarea value={code} onChange={e => setCode(e.target.value)} rows={15} spellCheck={false} placeholder={"在这里粘贴代码或补丁内容……\n标准差异格式示例：\n--- a/apps/web/src/example.ts\n+++ b/apps/web/src/example.ts\n@@ -1,1 +1,1 @@\n-old\n+new"} className="mt-2 w-full rounded-xl border border-purple-300/20 bg-[#090611] p-4 font-mono text-xs leading-6 text-emerald-100 outline-none focus:border-fuchsia-300" />
+        </label>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-purple-300">单个补丁上限 512 KiB。模型权重、视频模型、运行时和大型素材仍走独立资源包。</p>
+          <button onClick={() => void generatePatch()} disabled={busy || !title.trim() || !code.trim() || (format !== "unified-diff" && !targetPath.trim())} className="rounded-xl bg-fuchsia-700 px-5 py-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-40">{busy ? "正在生成…" : "生成并保存补丁包"}</button>
+        </div>
+      </section>
+
+      <section className="mb-5 rounded-2xl border border-amber-300/20 bg-[#21190dcc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-bold">导入签名补丁</h2>
+            <p className="mt-1 text-xs text-amber-100/80">仅接受 Ed25519 签名的静态网页资源补丁；导入时先验证签名和文件哈希，再生成原文件备份。</p>
+          </div>
+          <button onClick={() => void importSignedPackage()} disabled={importBusy || !desktopBridgeAvailable} className="rounded-lg border border-amber-300/40 px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40">{importBusy ? "正在验证…" : "选择 .aicpatch 文件"}</button>
+        </div>
+        {importResult && <p className="mt-3 text-sm text-emerald-200">{importResult}</p>}
+        <p className="mt-3 text-xs text-amber-200">安全状态：正式发行公钥尚未配置前，导入会被拒绝。当前仅建立签名验证与备份机制，不会应用补丁或修改安装文件。</p>
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-purple-300/20 bg-[#160d2acc] p-5">
+        <div className="mb-4 flex items-center justify-between gap-3"><h2 className="text-xl font-bold">已生成补丁</h2><button onClick={() => void refresh()} className="rounded-lg border border-purple-300/30 px-3 py-2 text-xs">刷新</button></div>
+        {packages.length === 0 ? <p className="text-sm text-purple-300">暂无补丁包。</p> : <div className="space-y-3">{packages.map(item => <article key={item.id} className="rounded-xl bg-black/25 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2"><b>{item.title}</b><span className="rounded-full bg-amber-500/15 px-2 py-1 text-xs text-amber-200">已暂存</span></div>
+          <p className="mt-1 text-xs text-purple-300">{item.description || "无补丁说明"} · {item.patch_format} · {item.size_bytes} bytes</p>
+          <p className="mt-2 text-xs text-purple-300">涉及文件：{item.changed_files?.join("、") || "未提供"}</p><p className="mt-2 break-all font-mono text-[11px] text-purple-400">ID: {item.id} · SHA256: {item.sha256}</p><button onClick={() => void showPreview(item.id)} disabled={previewBusy} className="mt-3 rounded-lg border border-purple-300/30 px-3 py-2 text-xs disabled:opacity-50">只读预览差异</button>
+        </article>)}</div>}
+      </section>
+      {preview && <section className="mt-6 rounded-2xl border border-cyan-300/20 bg-[#101b2acc] p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">补丁差异预览：{preview.title}</h2><button onClick={() => setPreview(null)} className="rounded-lg border border-white/20 px-3 py-2 text-xs">关闭预览</button></div>
+        <p className="mt-2 break-all text-xs text-cyan-200">SHA256：{preview.sha256}</p>
+        <p className="mt-1 text-xs text-amber-200">{preview.message}</p>
+        {preview.files?.map((file: any, index: number) => <article key={index} className="mt-4 overflow-hidden rounded-xl border border-white/10">
+          <div className="bg-black/30 px-3 py-2 font-mono text-xs text-cyan-100">{file.path || file.new_path || file.old_path}</div>
+          {file.hunks ? file.hunks.map((hunk: any, hindex: number) => <div key={hindex} className="border-t border-white/10">
+            <div className="bg-cyan-950/30 px-3 py-2 font-mono text-xs text-cyan-200">{hunk.header}</div>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all p-3 text-xs leading-5">{hunk.changes.join("\\n")}</pre>
+          </div>) : <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all p-3 text-xs leading-5">{file.preview}</pre>}
+        </article>)}
+        <p className="mt-4 text-xs text-amber-200">当前仅展示差异，不会写入文件；应用和回滚功能仍未开放。</p>
+      </section>}
+      <p className="mt-5 text-xs leading-6 text-purple-300">安全说明：当前版本只负责生成、校验和本机暂存补丁，不会执行粘贴的代码，也不会覆盖程序文件。自动应用、备份和一键回滚需要下一阶段接入受限更新器并通过桌面端测试后才会开放。</p>
+    </div>
+  </main>;
+}

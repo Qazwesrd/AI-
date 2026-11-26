@@ -1,10 +1,24 @@
 const { app, BrowserWindow, dialog, ipcMain, shell, session } = require("electron");
-const { spawn, execFile } = require("child_process");
+const { spawn, execFile, execFileSync } = require("child_process");
 const path = require("path");
+const { inspectUpdateInventory } = require("./update-inventory.cjs");
+const { verifySignedPatch, createRollbackSnapshot, verifyRollbackSnapshot, TRUSTED_PATCH_PUBLIC_KEY_PEM, MAX_PACKAGE_BYTES } = require("./patch-package-verifier.cjs");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
-const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
+const {
+  registerOllamaRuntimeInstaller,
+  resolveAppDataDirectory,
+  getBundledRuntimePath,
+  ensureBundledRuntime,
+} = require("./ollama-runtime-installer.cjs");
+
+// Allow the user-selected data directory (including an E: drive) to be reused
+// consistently by Electron, the local API, and the bundled Ollama runtime.
+const appDataDirectory = resolveAppDataDirectory(app.getPath("userData"));
+if (appDataDirectory !== app.getPath("userData")) {
+  app.setPath("userData", appDataDirectory);
+}
 
 const API_PORT = 8000;
 const WEB_PORT = 3000;
@@ -12,6 +26,7 @@ const WEB_PORT = 3000;
 let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
+let comfyUiProcess = null;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -180,8 +195,10 @@ function stopChild(child) {
 }
 
 function stopServices() {
+  stopChild(comfyUiProcess);
   stopChild(webProcess);
   stopChild(apiProcess);
+  comfyUiProcess = null;
   webProcess = null;
   apiProcess = null;
 }
@@ -193,6 +210,7 @@ function findFfmpegPair() {
     process.env.AICOMICS_FFMPEG_DIR,
     process.env.FFMPEG_PATH && path.dirname(process.env.FFMPEG_PATH),
     path.join(app.getPath("userData"), "ffmpeg"),
+    path.join(app.getPath("userData"), "engines", "FFmpeg"),
     "D:\\下载"
   ].filter(Boolean);
   const visited = new Set();
@@ -233,6 +251,74 @@ function findFfmpegPair() {
   return null;
 }
 
+function findComfyUiRuntime() {
+  const root = path.join(app.getPath("userData"), "engines", "ComfyUI");
+  const layouts = [
+    { python: path.join(root, "python_embeded", "python.exe"), main: path.join(root, "ComfyUI", "main.py") },
+    { python: path.join(root, "venv", "Scripts", "python.exe"), main: path.join(root, "main.py") },
+    { python: path.join(root, "python", "python.exe"), main: path.join(root, "main.py") },
+  ];
+  return layouts.find(item => fs.existsSync(item.python) && fs.existsSync(item.main)) || null;
+}
+
+function detectComfyUiAcceleration(runtime) {
+  try {
+    const probe = [
+      "import json, torch",
+      "print(json.dumps({",
+      "  'available': bool(torch.cuda.is_available()),",
+      "  'hip': getattr(torch.version, 'hip', None),",
+      "  'cuda': getattr(torch.version, 'cuda', None)",
+      "}))",
+    ].join("\n");
+    const output = execFileSync(runtime.python, ["-c", probe], {
+      cwd: path.dirname(runtime.main),
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 15000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const line = output.trim().split(/\r?\n/).filter(Boolean).pop();
+    const result = JSON.parse(line || "{}");
+    if (result.available === true) {
+      return { enabled: true, backend: result.hip ? "AMD/ROCm" : "CUDA" };
+    }
+  } catch (error) {
+    console.warn("[ComfyUI] GPU capability probe failed; falling back to CPU:", error.message);
+  }
+  return { enabled: false, backend: "CPU" };
+}
+
+function startComfyUiRuntime() {
+  const baseUrl = "http://127.0.0.1:8188";
+  const runtime = findComfyUiRuntime();
+  if (!runtime) {
+    console.warn("[ComfyUI] Offline engine bundle not found; image generation remains unavailable until the resource bundle is installed.");
+    return null;
+  }
+  const acceleration = detectComfyUiAcceleration(runtime);
+  comfyUiProcess = spawn(runtime.python, [
+    "-s", runtime.main,
+    "--listen", "127.0.0.1",
+    "--port", "8188",
+    ...(acceleration.enabled ? [] : ["--cpu"]),
+  ], {
+    cwd: path.dirname(runtime.main),
+    windowsHide: true,
+    stdio: "ignore",
+    env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
+  });
+  const managedChild = comfyUiProcess;
+  managedChild.once("exit", () => {
+    if (comfyUiProcess === managedChild) comfyUiProcess = null;
+  });
+  managedChild.once("error", error => {
+    console.error("[ComfyUI] Failed to start managed local image engine:", error);
+  });
+  console.log("[ComfyUI] Starting managed local image engine at", baseUrl, "backend:", acceleration.backend);
+  return managedChild;
+}
+
 function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
@@ -266,6 +352,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
+        OLLAMA_HOST: process.env.OLLAMA_HOST || "http://127.0.0.1:11435",
         ...(ffmpegPair ? { FFMPEG_PATH: ffmpeg, FFPROBE_PATH: ffprobe } : {})
       }
     });
@@ -330,6 +417,23 @@ async function createWindow() {
       throw new Error(
         "本地端口 3000 已被其他程序占用，而且不是 AI 漫剧制作大师网页服务。请关闭占用程序后重新启动。软件不会强行结束其他程序。"
       );
+    }
+
+    // Start the managed ComfyUI engine when its offline resource bundle exists.
+    // Unsupported GPU environments fall back to CPU; no cloud service is used.
+    const comfyUiAlreadyListening = !(await checkPort(8188));
+    if (!comfyUiAlreadyListening) startComfyUiRuntime();
+
+    // Start the app-managed E: drive Ollama runtime before the API boots so
+    // /api/local-ai/runtime can discover existing offline models on first launch.
+    const managedOllamaPath = getBundledRuntimePath(app.getPath("userData"));
+    if (fs.existsSync(managedOllamaPath)) {
+      const ollama = await ensureBundledRuntime(managedOllamaPath);
+      if (!ollama) {
+        console.warn("[Ollama] Bundled runtime exists but its local endpoint did not become ready; preserving model files.");
+      } else {
+        console.log("[Ollama] Managed local runtime ready:", ollama.baseUrl, "models:", ollama.data.models?.length || 0);
+      }
     }
 
     startProductionServices({
@@ -676,6 +780,89 @@ ipcMain.handle("ai-browser:open", async (_event, payload = {}) => {
   return { opened: true, taskId };
 });
 
+
+// Read-only inventory check for the installed static web files. No file is modified.
+ipcMain.handle("patch-center:installed-inventory", async (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    throw new Error("不允许的补丁中心调用来源");
+  }
+  return inspectUpdateInventory({
+    resourcesPath: process.resourcesPath,
+    appVersion: app.getVersion()
+  });
+});
+
+// Import only signed, data-only static-web patches. No code execution or file replacement.
+ipcMain.handle("patch-center:import-signed-package", async (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents) {
+    throw new Error("不允许的补丁中心调用来源");
+  }
+  if (!TRUSTED_PATCH_PUBLIC_KEY_PEM.trim()) {
+    return { valid: false, trusted: false, message: "正式发行签名公钥尚未配置；为安全起见，暂不接受签名补丁导入。" };
+  }
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: "导入签名补丁包",
+    properties: ["openFile"],
+    filters: [{ name: "AI 漫剧签名补丁", extensions: ["aicpatch", "json"] }]
+  });
+  if (selected.canceled || !selected.filePaths.length) return { canceled: true };
+  const filePath = selected.filePaths[0];
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size < 2 || stat.size > MAX_PACKAGE_BYTES) {
+    return { valid: false, trusted: false, message: "补丁包文件大小不符合要求（最大 20 MiB）。" };
+  }
+  let envelope;
+  try {
+    envelope = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return { valid: false, trusted: false, message: "补丁包不是有效的 JSON 格式。" };
+  }
+  const verified = verifySignedPatch(envelope);
+  if (!verified.valid || !verified.trusted) {
+    return { valid: false, trusted: false, message: verified.error || "签名验证失败。" };
+  }
+  if (verified.target_version !== app.getVersion()) {
+    return { valid: false, trusted: true, message: "补丁目标版本与当前程序版本不一致，已拒绝导入。" };
+  }
+
+  const inventory = inspectUpdateInventory({ resourcesPath: process.resourcesPath, appVersion: app.getVersion() });
+  if (!inventory.valid || inventory.missing_file_count || inventory.changed_file_count || inventory.invalid_file_count) {
+    return { valid: false, trusted: true, message: "本机安装文件未通过完整基线核验，已拒绝导入补丁。" };
+  }
+  const verifiedPaths = new Set(inventory.files.filter(item => item.status === "verified").map(item => item.path));
+  if (verified.files.some(item => !verifiedPaths.has(item.path))) {
+    return { valid: false, trusted: true, message: "补丁目标不在本机已核验文件清单中；当前版本只允许替换已有静态资源文件。" };
+  }
+
+  const patchRoot = path.join(app.getPath("userData"), "patch-center");
+  const backupRoot = path.join(patchRoot, "backups");
+  let snapshot;
+  try {
+    snapshot = createRollbackSnapshot({
+      resourcesPath: process.resourcesPath,
+      backupRoot,
+      verifiedPatch: verified
+    });
+    const rollbackCheck = verifyRollbackSnapshot({ backupRoot, snapshotId: snapshot.snapshot_id });
+    if (!rollbackCheck.valid) {
+      throw new Error("回滚备份完整性复核失败：" + rollbackCheck.error);
+    }
+    const packageRoot = path.join(patchRoot, "verified");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    const packagePath = path.join(packageRoot, verified.package_id + ".json");
+    const tempPath = packagePath + ".tmp";
+    fs.writeFileSync(tempPath, JSON.stringify(envelope), { flag: "wx" });
+    fs.renameSync(tempPath, packagePath);
+  } catch (error) {
+    return { valid: false, trusted: true, message: "补丁验证通过，但备份/暂存失败：" + String(error && error.message || error) };
+  }
+  return {
+    valid: true, trusted: true, package_id: verified.package_id,
+    target_version: verified.target_version, file_count: verified.files.length,
+    total_bytes: verified.total_bytes, snapshot_id: snapshot.snapshot_id,
+    message: "签名验证通过，补丁已安全暂存，并已生成原文件回滚备份；尚未修改安装目录。"
+  };
+});
 
 // Install Ollama only after explicit user confirmation from the local model page.
 registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow });

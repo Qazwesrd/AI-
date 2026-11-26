@@ -1227,6 +1227,80 @@ async def replace_episode_shot_video(
 
 
 
+class LocalVaceVideoInput(BaseModel):
+    prompt: str = Field(min_length=1, max_length=2000)
+    negative_prompt: str = Field(default="blurry, low quality, watermark, text", max_length=1000)
+    width: int = Field(default=256, ge=256, le=512)
+    height: int = Field(default=256, ge=256, le=512)
+    frames: int = Field(default=5, ge=5, le=33)
+    steps: int = Field(default=4, ge=4, le=20)
+
+
+@router.post("/video/local-vace/tasks")
+def create_local_vace_task(data: LocalVaceVideoInput, db: Session = Depends(get_db)):
+    from app.services.local_vace import validate_local_vace_runtime
+    if data.width not in (256, 384, 512) or data.height not in (256, 384, 512):
+        raise HTTPException(400, "本地 VACE 分辨率仅支持 256、384 或 512。")
+    try:
+        validate_local_vace_runtime()
+    except Exception as exc:
+        raise HTTPException(503, "本地 VACE 运行环境未就绪：" + str(exc)[:500]) from exc
+    task = MediaTask(
+        task_type="local_vace_video",
+        provider="local-vace",
+        model="Wan 2.1 VACE 1.3B Q4",
+        status="queued",
+        prompt=data.prompt.strip(),
+        request_data={
+            "width": data.width, "height": data.height,
+            "frames": data.frames, "steps": data.steps,
+            "negative_prompt": data.negative_prompt,
+            "stage": "queued", "local_only": True,
+            "paid_api_used": False, "network_used": False,
+        },
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {
+        "task_id": task.id, "status": task.status,
+        "local_only": True, "paid_api_used": False,
+        "message": "已加入本地 VACE 队列；任务将在本机后台执行，不会调用云端或付费 API。",
+    }
+
+
+@router.get("/video/local-vace/tasks")
+def list_local_vace_tasks(db: Session = Depends(get_db)):
+    rows = db.query(MediaTask).filter(
+        MediaTask.task_type == "local_vace_video"
+    ).order_by(MediaTask.id.desc()).limit(100).all()
+    result = []
+    for task in rows:
+        request = task.request_data if isinstance(task.request_data, dict) else {}
+        data = task.result_data if isinstance(task.result_data, dict) else {}
+        media_id = data.get("media_file_id")
+        result.append({
+            "id": task.id, "status": task.status, "prompt": task.prompt or "",
+            "stage": request.get("stage", ""), "progress": request.get("progress"),
+            "error": task.error or "",
+            "download_url": f"/api/media/files/{media_id}/download" if media_id else None,
+            "created_at": task.created_at.isoformat() if task.created_at else None,
+        })
+    return result
+
+
+@router.post("/video/local-vace/tasks/{task_id}/cancel")
+def cancel_local_vace_task(task_id: int, db: Session = Depends(get_db)):
+    from app.services.local_vace import request_cancel_local_vace
+    task = db.query(MediaTask).filter(
+        MediaTask.id == task_id,
+        MediaTask.task_type == "local_vace_video",
+    ).first()
+    if task is None:
+        raise HTTPException(404, "本地 VACE 视频任务不存在。")
+    return request_cancel_local_vace(db, task)
+
+
 @router.post("/video/tasks")
 def create_video_task(data: VideoTaskInput, db: Session = Depends(get_db)):
     config, key, base = get_provider(db, data.provider, data.confirm_paid)
