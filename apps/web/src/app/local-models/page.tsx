@@ -405,7 +405,7 @@ export default function LocalModelsPage() {
           {imageRuntime ? (
             <>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未安装或启动" : "检测异常"}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未连接（启动中或未识别）" : "检测异常"}</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已安装图片模型</div><div className="mt-1 font-semibold">{imageRuntime.checkpoint_count} 个 checkpoint</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">显存适配初筛</div><div className="mt-1 font-semibold">{({unknown:"未知",limited:"显存紧张",basic:"基础运行",capable:"具备一定余量",strong:"较充足"} as Record<string,string>)[imageRuntime.hardware?.gpu_level] || "待检测"}</div></div>
               </div>
@@ -417,7 +417,7 @@ export default function LocalModelsPage() {
               <p className="mt-2 text-xs leading-5 text-amber-100/65">{imageRuntime.hardware?.note} {imageRuntime.limitations || "本阶段仅做本地引擎和模型检测，尚未提交图片生成任务。"}</p>
             </>
           ) : <p className="mt-3 text-sm text-white/55">正在检测本机图片引擎…</p>}
-          <p className="mt-3 text-xs leading-5 text-white/45">本检测只访问本机 127.0.0.1:8188，不会联网下载模型、启动程序、提交生成任务或调用云端 API。ComfyUI 和图片模型需要另行安装；后续会增加经过确认的安装向导。</p>
+          <p className="mt-3 text-xs leading-5 text-white/45">本检测只访问本机 127.0.0.1:8188，不会联网下载模型、提交生成任务或调用云端 API。桌面程序启动时会尝试启动已识别的数据目录中的 ComfyUI；若未检测到现有引擎或 checkpoint，会明确显示缺失，不会擅自下载。</p>
         </section>
 
         <section className="rounded-2xl border border-purple-300/25 bg-slate-950/70 p-5">
