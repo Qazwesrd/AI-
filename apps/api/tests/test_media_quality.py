@@ -3,10 +3,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.services.media_service import validate_rendered_video
+from app.services.media_service import validate_rendered_video, _parse_frame_rate
 
 
 class RenderedVideoValidationTests(unittest.TestCase):
+    def test_frame_rate_parser_handles_common_fraction_formats(self):
+        self.assertEqual(_parse_frame_rate("24/1"), 24.0)
+        self.assertEqual(_parse_frame_rate("30000/1001"), 29.97)
+        self.assertIsNone(_parse_frame_rate("0/0"))
+        self.assertIsNone(_parse_frame_rate("N/A"))
+
     def _file(self, directory):
         path = Path(directory) / "rendered.mp4"
         path.write_bytes(b"x" * 2048)
@@ -19,7 +25,7 @@ class RenderedVideoValidationTests(unittest.TestCase):
             probe.return_value = {
                 "format": {"duration": "120.25"},
                 "streams": [
-                    {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080},
+                    {"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "avg_frame_rate": "24/1"},
                     {"codec_type": "audio", "codec_name": "aac"},
                 ],
             }
@@ -28,6 +34,7 @@ class RenderedVideoValidationTests(unittest.TestCase):
             self.assertEqual(report["duration_seconds"], 120.25)
             self.assertTrue(report["has_audio"])
             self.assertEqual(report["width"], 1920)
+            self.assertEqual(report["frame_rate"], 24.0)
 
     @patch("app.services.media_service.probe_media")
     def test_rejects_video_without_video_stream(self, probe):
