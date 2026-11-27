@@ -83,3 +83,39 @@ class NovelAnalysisJob(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True
     )
+
+
+class NovelDistributionPackage(Base):
+    """A platform-specific, locally prepared manuscript package; not a platform upload."""
+    __tablename__ = "novel_distribution_packages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), index=True)
+    platform_id: Mapped[str] = mapped_column(String(60), index=True)
+    platform_name: Mapped[str] = mapped_column(String(120))
+    pen_name: Mapped[str] = mapped_column(String(120), default="")
+    language: Mapped[str] = mapped_column(String(40), default="zh-CN")
+    synopsis: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    manuscript_markdown: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    rights_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_assistance_disclosed: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(30), default="prepared", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NovelSubmissionRecord(Base):
+    __tablename__ = "novel_submission_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    package_id: Mapped[int] = mapped_column(ForeignKey("novel_distribution_packages.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="prepared", index=True)
+    external_work_url: Mapped[str] = mapped_column(Text, default="")
+    external_work_id: Mapped[str] = mapped_column(String(200), default="")
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
