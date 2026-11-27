@@ -799,7 +799,7 @@ def collect_public_source(source_id: int, db: Session):
     db.add(run)
     db.flush()
     try:
-        items = fetch_public_feed(source.feed_url)
+        items = fetch_public_feed(source.feed_url, source.platform)
         inserted = 0
         duplicates = 0
         for item in items:
