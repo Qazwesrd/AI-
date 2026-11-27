@@ -47,3 +47,16 @@ contextBridge.exposeInMainWorld("localAIInstallerDesktop", {
     return () => ipcRenderer.removeListener("local-ai:ollama-install-progress", listener);
   }
 });
+
+
+// Local update center: software release checks and explicit local model refresh.
+contextBridge.exposeInMainWorld("updatesDesktop", {
+  getStatus: () => ipcRenderer.invoke("updates:status"),
+  checkSoftware: () => ipcRenderer.invoke("updates:check-software"),
+  updateModel: (modelName, confirm) => ipcRenderer.invoke("updates:update-model", { modelName, confirm }),
+  onModelProgress: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("updates:model-progress", listener);
+    return () => ipcRenderer.removeListener("updates:model-progress", listener);
+  }
+});
