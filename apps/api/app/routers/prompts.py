@@ -221,7 +221,8 @@ def add_test_run(prompt_id: int, data: TestInput, db: Session = Depends(get_db))
     db.add(run)
     db.commit()
     db.refresh(run)
-    return {"success": True, "test_id": run.id, "message": "实测评分已记录；该评分为人工录入，不代表系统已自动生成或验证作品。"}
+    snapshot_result = save_category_ranking_snapshots(db, only_if_changed=True)
+    return {"success": True, "test_id": run.id, "ranking_snapshots_updated": snapshot_result["created_count"], "message": "实测评分已记录；提示词榜已按新评分自动重算，历史快照仅在排名数据变化时新增。该评分为人工录入，不代表系统已自动生成或验证作品。"}
 
 
 @router.get("/{prompt_id}/tests")
@@ -421,7 +422,9 @@ def verify_trend_evidence(evidence_id: int, data: EvidenceVerifyInput, db: Sessi
     row.reliability = "人工已核验"
     db.commit()
     db.refresh(row)
-    return {"success": True, "item": evidence_dict(row)}
+    snapshot_result = save_category_ranking_snapshots(db, only_if_changed=True)
+    return {"success": True, "item": evidence_dict(row), "ranking_snapshots_updated": snapshot_result["created_count"],
+            "message": "证据已核验；漫剧/剧本/公开提示词榜已立即重算，变化的榜单已保存历史快照。"}
 
 
 @router.post("/research/candidates")
@@ -694,28 +697,52 @@ def category_rankings(db: Session = Depends(get_db)):
     screenplay,screenplay_count = _verified_evidence_ranking(db,{"剧本作品证据","screenplay"})
     prompts = _prompt_test_ranking(db)
     public_prompts,prompt_evidence_count = _verified_evidence_ranking(db,{"公开提示词分享","public_prompt"})
+    latest_verified = db.query(TrendEvidence).filter(TrendEvidence.is_verified.is_(True)).order_by(TrendEvidence.created_at.desc()).first()
+    latest_source = db.query(PublicResearchSource).filter(PublicResearchSource.last_collected_at.isnot(None)).order_by(PublicResearchSource.last_collected_at.desc()).first()
+    latest_snapshot = db.query(PromptRankingSnapshot).filter(PromptRankingSnapshot.dimension.in_(["drama","prompt","screenplay"])).order_by(PromptRankingSnapshot.created_at.desc()).first()
     return {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "freshness": {
+            "mode": "recomputed_on_request",
+            "ui_poll_seconds": 30,
+            "collector_scheduler_seconds": 900,
+            "latest_verified_evidence_at": latest_verified.created_at.isoformat() + "Z" if latest_verified and latest_verified.created_at else None,
+            "latest_observed_at": latest_verified.observed_at if latest_verified else None,
+            "latest_source_collection_at": latest_source.last_collected_at.isoformat() + "Z" if latest_source and latest_source.last_collected_at else None,
+            "latest_snapshot_at": latest_snapshot.created_at.isoformat() + "Z" if latest_snapshot and latest_snapshot.created_at else None,
+        },
         "categories":{
             "drama":{"title":"漫剧作品排名","items":drama,"genre_items":drama_genres,"verified_evidence_count":drama_count,"basis":"公开作品互动热度，跨平台与跨日期交叉核验；题材榜按已核验作品聚合"},
             "prompt":{"title":"提示词排名","items":prompts,"verified_evidence_count":prompt_evidence_count,"public_share_items":public_prompts,"basis":"正式提示词版本的人工实测评分；公开分享提示词热度单独列出，不混算质量分"},
             "screenplay":{"title":"剧本排名","items":screenplay,"verified_evidence_count":screenplay_count,"basis":"已核验的公开剧本/剧本案例互动数据，跨平台与跨日期交叉核验"},
         },
-        "notice":"漫剧、剧本榜以公开作品证据为基础；提示词质量榜以版本实测评分为基础。没有样本时显示空榜，不虚构排名或数据。",
+        "notice":"榜单请求时实时重算；新实测评分或新核验证据写入后立即重算并在数据变化时保存快照。公开来源按各自采集间隔更新，不代表平台提供实时 API。没有样本时显示空榜，不虚构排名或数据。",
     }
+
+
+def save_category_ranking_snapshots(db: Session, only_if_changed: bool = True):
+    data = category_rankings(db)
+    created = []
+    for key in ("drama","prompt","screenplay"):
+        ranking = data["categories"][key]["items"]
+        latest = db.query(PromptRankingSnapshot).filter(
+            PromptRankingSnapshot.dimension == key
+        ).order_by(PromptRankingSnapshot.created_at.desc()).first()
+        if only_if_changed and latest and latest.ranking_data == ranking:
+            continue
+        snapshot = PromptRankingSnapshot(dimension=key, ranking_data=ranking)
+        db.add(snapshot)
+        db.flush()
+        created.append({"category":key,"snapshot_id":snapshot.id,"count":len(ranking)})
+    db.commit()
+    return {"created_count":len(created),"snapshots":created}
 
 
 @router.post("/research/rankings/refresh")
 def refresh_category_rankings(db: Session = Depends(get_db)):
+    result = save_category_ranking_snapshots(db, only_if_changed=False)
     data = category_rankings(db)
-    created=[]
-    for key in ("drama","prompt","screenplay"):
-        payload=data["categories"][key]
-        snapshot=PromptRankingSnapshot(dimension=key,ranking_data=payload["items"])
-        db.add(snapshot)
-        db.flush()
-        created.append({"category":key,"snapshot_id":snapshot.id,"count":len(payload["items"])})
-    db.commit()
-    return {"success":True,"snapshots":created,"categories":data["categories"],"message":"三类排名快照已保存；无证据或无实测数据的类别保持空榜。"}
+    return {"success":True,"snapshots":result["snapshots"],"categories":data["categories"],"message":"三类排名已重新计算并保存历史快照；无证据或无实测数据的类别保持空榜。"}
 
 
 @router.get("/research/rankings/history")
@@ -807,7 +834,8 @@ def collect_public_source(source_id: int, db: Session):
         source.last_collected_at = datetime.utcnow()
         db.commit()
         db.refresh(run)
-        return {"success": True, "run": collection_run_dict(run),
+        snapshot_result = save_category_ranking_snapshots(db, only_if_changed=True)
+        return {"success": True, "run": collection_run_dict(run), "ranking_snapshots_updated": snapshot_result["created_count"],
                 "message": "采集完成；新增内容均为待人工核验证据，不会自动进入正式提示词库。"}
     except (FeedCollectionError, OSError, ValueError) as exc:
         db.rollback()
