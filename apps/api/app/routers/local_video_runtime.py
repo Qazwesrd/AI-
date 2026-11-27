@@ -376,6 +376,23 @@ def _comfy_request(path, payload=None, timeout=15.0):
         raise HTTPException(502, "ComfyUI 返回了无法识别的数据。") from exc
 
 
+def _node_output_schema(node_info):
+    """Expose ComfyUI output socket names and types for type-safe graph planning."""
+    if not isinstance(node_info, dict):
+        return []
+    output_types = node_info.get("output")
+    output_names = node_info.get("output_name")
+    if not isinstance(output_types, list):
+        return []
+    result = []
+    for index, output_type in enumerate(output_types[:120]):
+        if not isinstance(output_type, str):
+            continue
+        name = output_names[index] if isinstance(output_names, list) and index < len(output_names) else f"output_{index}"
+        result.append({"index": index, "name": str(name)[:120], "type": output_type[:120]})
+    return result
+
+
 def build_video_template_capabilities(object_info):
     """Discover installed Wan/VACE building blocks without guessing workflow wiring."""
     if not isinstance(object_info, dict) or object_info.get("_error"):
@@ -413,11 +430,49 @@ def build_video_template_capabilities(object_info):
             "class_type": class_name,
             "roles": matching,
             "input_schema": _node_input_schema(info),
+            "output_schema": _node_output_schema(info),
         })
         for role in matching:
             roles.setdefault(role, []).append(class_name)
     for role in roles:
         roles[role] = sorted(roles[role])[:30]
+
+    # Build a bounded type-compatibility map. This is a planning aid only:
+    # exact socket type matches do not prove semantic compatibility or a valid
+    # Wan graph, so no links are emitted into an executable prompt here.
+    connection_candidates = []
+    if video_specific_nodes:
+        output_index = {}
+        for node in discovered:
+            for output in node["output_schema"]:
+                output_index.setdefault(output["type"], []).append({
+                    "class_type": node["class_type"],
+                    "output_index": output["index"],
+                    "output_name": output["name"],
+                })
+        for node in discovered:
+            for section in ("required", "optional"):
+                for input_name, input_info in node["input_schema"][section].items():
+                    socket_type = input_info.get("type")
+                    if not socket_type or socket_type == "COMBO" or input_info.get("choices"):
+                        continue
+                    sources = [
+                        source for source in output_index.get(socket_type, [])
+                        if source["class_type"] != node["class_type"]
+                    ]
+                    if sources:
+                        connection_candidates.append({
+                            "target_class": node["class_type"],
+                            "input": input_name,
+                            "input_type": socket_type,
+                            "sources": sources[:20],
+                        })
+                    if len(connection_candidates) >= 500:
+                        break
+                if len(connection_candidates) >= 500:
+                    break
+            if len(connection_candidates) >= 500:
+                break
 
     # Generic KSampler/SaveImage nodes alone must not imply video capability.
     available = bool(video_specific_nodes and discovered)
@@ -425,6 +480,8 @@ def build_video_template_capabilities(object_info):
         "available": available,
         "roles": roles if available else {},
         "nodes": discovered[:120] if available else [],
+        "connection_candidates": connection_candidates if available else [],
+        "connection_candidate_count": len(connection_candidates) if available else 0,
         "video_specific_nodes": sorted(video_specific_nodes)[:60],
         "message": (
             "已读取本机 Wan/VACE 节点输入和模型选项。当前只完成能力发现，尚未生成可执行模板。"
