@@ -94,6 +94,17 @@ class NovelPublishingTests(unittest.TestCase):
                 submission["id"], SubmissionUpdate(status="published"), self.db
             )
 
+    def test_rejects_language_not_listed_for_target_platform(self):
+        with self.assertRaises(Exception):
+            create_distribution_package(
+                self.novel.id,
+                DistributionPackageInput(
+                    platform_id="royalroad", language="zh-CN",
+                    rights_confirmed=True, ai_assistance_disclosed=True,
+                ),
+                self.db,
+            )
+
     def test_package_requires_rights_and_ai_disclosure_acknowledgement(self):
         with self.assertRaises(Exception):
             create_distribution_package(
