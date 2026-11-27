@@ -27,6 +27,12 @@ PLATFORM_DOMAINS = {
     "TikTok": {"tiktok.com"},
     "Facebook": {"facebook.com"},
     "红果短剧": {"hongguo.com"},
+    "Reddit": {"reddit.com"},
+    "Royal Road": {"royalroad.com"},
+    "Wattpad": {"wattpad.com"},
+    "Tapas": {"tapas.io"},
+    "Inkitt": {"inkitt.com"},
+    "Pixiv": {"pixiv.net"},
 }
 ALLOWED_DOMAINS = set().union(*PLATFORM_DOMAINS.values())
 
