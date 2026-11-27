@@ -201,7 +201,7 @@ jobs:
             $_.Name -like "*测试包*.zip" -or
             $_.Name -like "*测试包*.zip.sha256"
           } | Sort-Object Name)
-          if ($files.Count -ne 5) { throw "预期上传 5 个发布文件（含桌面专用升级脚本），实际找到 $($files.Count) 个。" }
+          if ($files.Count -ne 3) { throw "预期上传 3 个正式交付文件（安装器、SHA-256、桌面专用升级脚本），实际找到 $($files.Count) 个。" }
 
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
