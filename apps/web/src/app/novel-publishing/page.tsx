@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Novel = {id:number;title:string;genre:string;chapter_count:number;word_count:number};
-type Platform = {id:string;name:string;region:string;language:string[];portal:string;mode:string;api_publish:boolean;revenue_sync:boolean;payout:string};
+type Platform = {id:string;name:string;region:string;language:string[];portal:string;mode:string;api_publish:boolean;revenue_sync:boolean;payout:string;formats?:string[];cover_formats?:string[];workflow?:string};
 type Package = {id:number;novel_id:number;translation_id:number|null;platform_id:string;platform_name:string;pen_name:string;language:string;status:string;word_count:number;content_hash:string;created_at:string};
 type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
@@ -166,7 +166,7 @@ export default function NovelPublishingPage(){
     }catch(e){setMessage(e instanceof Error?e.message:"生成发行稿件失败");}
     finally{setBusy(false);}
   }
-  async function exportPackage(id:number,format:"md"|"txt"|"json"){
+  async function exportPackage(id:number,format:"md"|"txt"|"json"|"epub"){
     try{
       const response=await fetch(`${API}/api/novel-publishing/packages/${id}/export?format=${format}`);
       if(!response.ok){const d=await response.json().catch(()=>({}));throw new Error(d.detail||"导出失败");}
@@ -265,6 +265,9 @@ export default function NovelPublishingPage(){
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{platforms.map(p=><article key={p.id} className="rounded-xl border border-purple-400/15 bg-black/20 p-4">
           <div className="flex items-center justify-between"><strong>{p.name}</strong><span className="text-xs text-cyan-200">{p.region}</span></div>
           <p className="mt-2 text-xs text-purple-200">支持语言：{p.language.join("、")}</p>
+          {p.formats?.length&&<p className="mt-2 text-xs text-cyan-100">正文格式：{p.formats.join(" / ")}</p>}
+          {p.cover_formats?.length&&<p className="mt-1 text-xs text-purple-200">封面格式：{p.cover_formats.join(" / ")}</p>}
+          {p.workflow&&<p className="mt-2 text-xs leading-5 text-slate-300">{p.workflow}</p>}
           <p className="mt-2 text-xs text-purple-300">{p.payout}</p>
           <p className="mt-2 text-xs text-amber-300">自动发布 API：未确认 · 自动收益同步：未确认</p>
           <a href={p.portal} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block rounded-lg border border-cyan-400/30 px-3 py-2 text-xs text-cyan-100">打开官方作者入口 ↗</a>
@@ -277,7 +280,7 @@ export default function NovelPublishingPage(){
           const platform=platforms.find(x=>x.id===pkg.platform_id);
           return <article key={pkg.id} className="rounded-xl border border-purple-400/15 bg-black/20 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2"><div><strong>{pkg.platform_name}</strong><p className="mt-1 text-xs text-purple-300">小说 #{pkg.novel_id} · {pkg.language} · {pkg.word_count} 字 · {pkg.translation_id?("译本 #"+pkg.translation_id+" · "):""} {statusLabel[record?.status||pkg.status]||pkg.status}</p></div><span className="text-xs text-slate-500">SHA256 {pkg.content_hash.slice(0,12)}…</span></div>
-            <div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>void exportPackage(pkg.id,"md")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 Markdown</button><button onClick={()=>void exportPackage(pkg.id,"txt")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 TXT</button><button onClick={()=>void exportPackage(pkg.id,"json")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 JSON</button><button onClick={()=>void openSubmission(pkg.id)} className="rounded-lg bg-cyan-800 px-3 py-2 text-xs">打开官方投稿入口</button></div>
+            <div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>void exportPackage(pkg.id,"md")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 Markdown</button><button onClick={()=>void exportPackage(pkg.id,"txt")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 TXT</button><button onClick={()=>void exportPackage(pkg.id,"json")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 JSON</button><button onClick={()=>void exportPackage(pkg.id,"epub")} className="rounded-lg border border-emerald-400/30 px-3 py-2 text-xs">导出 EPUB（KDP / Google）</button><button onClick={()=>void openSubmission(pkg.id)} className="rounded-lg bg-cyan-800 px-3 py-2 text-xs">打开官方投稿入口</button></div>
             {record&&<div className="mt-3 flex flex-wrap items-center gap-2 text-xs"><span className="text-purple-200">投稿记录：{statusLabel[record.status]||record.status}</span>{record.external_work_url&&<a href={record.external_work_url} target="_blank" rel="noopener noreferrer" className="text-cyan-200">查看已发布作品 ↗</a>}
               <select className="rounded-lg bg-slate-900 p-2" value={record.status} onChange={e=>void updateSubmission(record.id,e.target.value)}><option value="prepared">已备稿</option><option value="submitted">已提交</option><option value="reviewing">审核中</option><option value="published">已发布（需提供作品链接）</option><option value="rejected">被拒绝</option><option value="paused">已暂停</option><option value="withdrawn">已撤稿</option></select>
             </div>}
