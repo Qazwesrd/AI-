@@ -137,14 +137,18 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         info = {
             "WanVideoModelLoader": {
                 "input": {"required": {"model": [["wan-vace.safetensors"]]}},
+                "output": ["WANVIDEOMODEL"],
+            },
+            "WanVideoSampler": {
+                "input": {"required": {"model": ["WANVIDEOMODEL"]}},
                 "output": ["IMAGE"],
-                "output_name": ["frames"],
             },
             "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"], "frame_rate": ["FLOAT"]}}},
         }
         workflow = {
             "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "wan-vace.safetensors"}},
-            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 0], "frame_rate": 24}},
+            "3": {"class_type": "WanVideoSampler", "inputs": {"model": ["1", 0]}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["3", 0], "frame_rate": 24}},
         }
         result = validate_local_video_workflow(workflow, info)
         self.assertTrue(result["valid"])
@@ -197,6 +201,32 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(any("不在本机可用选项" in error for error in result["errors"]))
         self.assertTrue(any("引用了不存在的节点" in error for error in result["errors"]))
+
+    def test_api_workflow_preflight_requires_connected_video_output(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoSampler": {"input": {"required": {"steps": ["INT"]}}, "output": ["IMAGE"]},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        result = validate_local_video_workflow({
+            "1": {"class_type": "WanVideoSampler", "inputs": {"steps": 20}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": "unconnected"}},
+        }, info)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("没有连接图像帧/视频输入" in error for error in result["errors"]))
+
+    def test_api_workflow_preflight_requires_wan_sampler_or_vace_processing(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoModelLoader": {"input": {"required": {"model": [["installed.safetensors"]]}}, "output": ["IMAGE"]},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        result = validate_local_video_workflow({
+            "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "installed.safetensors"}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 0]}},
+        }, info)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("Wan 视频采样或 VACE 处理节点" in error for error in result["errors"]))
 
     def test_api_workflow_preflight_requires_video_output(self):
         from app.routers.local_video_runtime import validate_local_video_workflow
