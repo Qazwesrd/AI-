@@ -1,3 +1,4 @@
+import socket
 import unittest
 from unittest.mock import patch
 
@@ -290,7 +291,10 @@ class PromptCenterTests(unittest.TestCase):
             validate_public_feed_url("https://example.com/feed.xml")
         with self.assertRaises(FeedCollectionError):
             validate_public_feed_url("https://www.youtube.com/feeds/videos.xml?channel_id=abc", "抖音")
-        reddit_url = validate_public_feed_url("https://www.reddit.com/r/noveltranslations/new/.rss", "Reddit")
+        with patch("app.services.public_source_collector.socket.getaddrinfo", return_value=[
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))
+        ]):
+            reddit_url = validate_public_feed_url("https://www.reddit.com/r/noveltranslations/new/.rss", "Reddit")
         self.assertEqual(reddit_url, "https://www.reddit.com/r/noveltranslations/new/.rss")
 
     def test_public_source_collection_creates_unverified_evidence_and_deduplicates(self):
