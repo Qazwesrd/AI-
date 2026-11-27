@@ -11,7 +11,7 @@ type TrendRank = { rank:number; work_title:string; platforms:string[]; platform_
 type ResearchSource = { id:number; platform:string; name:string; feed_url:string; enabled:boolean; refresh_interval_minutes:number; last_collected_at:string|null; last_status:string; last_error:string };
 type CollectionRun = { id:number; source_id:number; status:string; discovered_count:number; inserted_count:number; duplicate_count:number; error_message:string; started_at:string|null };
 type CategoryRankItem = {rank:number;title:string;platforms?:string[];observed_days?:string[];sample_count?:number;score:number;test_count?:number;version?:number;score_basis?:string};
-type RankingFreshness = {mode:string;ui_poll_seconds:number;collector_scheduler_seconds:number;latest_verified_evidence_at:string|null;latest_observed_at:string|null;latest_source_collection_at:string|null;latest_snapshot_at:string|null};
+type RankingFreshness = {mode:string;ui_poll_seconds:number;collector_scheduler_seconds:number;latest_verified_evidence_created_at:string|null;latest_observed_at:string|null;latest_source_collection_at:string|null;latest_snapshot_at:string|null};
 type CategoryRankings = {drama:{title:string;items:CategoryRankItem[];genre_items:{rank:number;title:string;work_count:number;sample_count:number;score:number;platforms:string[]}[];verified_evidence_count:number};prompt:{title:string;items:CategoryRankItem[];public_share_items:CategoryRankItem[];verified_evidence_count:number};screenplay:{title:string;items:CategoryRankItem[];verified_evidence_count:number}};
 
 export default function PromptResearchPage() {
@@ -287,7 +287,7 @@ export default function PromptResearchPage() {
 
         <section className="rounded-2xl border border-fuchsia-300/20 bg-fuchsia-950/10 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="text-xl font-bold">爆款分类排行榜 · 自动刷新</h2><p className="mt-1 text-xs text-white/50">榜单每 30 秒自动重新读取并计算；切回页面时立即刷新。来源数据按各自采集间隔更新，不把延迟数据伪装成实时数据。</p><p className="mt-1 text-xs text-emerald-200">最近刷新：{rankingsUpdatedAt?new Date(rankingsUpdatedAt).toLocaleString():"等待首次更新"} · 最新核验证据：{rankingFreshness?.latest_verified_evidence_at?new Date(rankingFreshness.latest_verified_evidence_at).toLocaleString():"暂无"} · 最近公开来源采集：{rankingFreshness?.latest_source_collection_at?new Date(rankingFreshness.latest_source_collection_at).toLocaleString():"暂无"}</p></div>
+            <div><h2 className="text-xl font-bold">爆款分类排行榜 · 自动刷新</h2><p className="mt-1 text-xs text-white/50">榜单每 30 秒自动重新读取并计算；切回页面时立即刷新。来源数据按各自采集间隔更新，不把延迟数据伪装成实时数据。</p><p className="mt-1 text-xs text-emerald-200">最近刷新：{rankingsUpdatedAt?new Date(rankingsUpdatedAt).toLocaleString():"等待首次更新"} · 最新已核验证据记录创建：{rankingFreshness?.latest_verified_evidence_created_at?new Date(rankingFreshness.latest_verified_evidence_created_at).toLocaleString():"暂无"} · 最近公开来源采集：{rankingFreshness?.latest_source_collection_at?new Date(rankingFreshness.latest_source_collection_at).toLocaleString():"暂无"}</p></div>
             <button disabled={busy} onClick={()=>void refreshAllRankings()} className="rounded-xl bg-fuchsia-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">刷新并保存三类榜单</button>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
