@@ -78,6 +78,7 @@ export default function AssetTimelinePage() {
 
   useEffect(() => { void loadAssets().catch((error) => setMessage(error.message)); }, [loadAssets]);
   useEffect(() => {
+    setLocalProposals([]);
     if (!selectedId) { setHistory(null); setPrompt(""); return; }
     void loadHistory(selectedId).catch((error) => setMessage(error.message));
   }, [selectedId, chapter, loadHistory]);
@@ -150,9 +151,12 @@ export default function AssetTimelinePage() {
   async function reviewLocalProposal(id: number, action: "approve" | "reject") {
     setBusy(true);
     try {
-      const result = await api<{ message?: string }>(`/api/ai-collaboration/proposals/${id}/review`, { method: "POST", body: JSON.stringify({ action, note: "" }) });
+      const result = await api<{ message?: string; asset_id?: number }>(`/api/ai-collaboration/proposals/${id}/review`, { method: "POST", body: JSON.stringify({ action, note: "" }) });
       setLocalProposals(current => current.filter(item => item.id !== id));
-      if (selectedId) await loadHistory(selectedId);
+      if (action === "approve" && result.asset_id) {
+        setSelectedId(result.asset_id);
+        await loadHistory(result.asset_id);
+      } else if (selectedId) await loadHistory(selectedId);
       setMessage(result.message || (action === "approve" ? "已确认并写入素材状态。" : "已拒绝该变化提议。"));
     } catch (error) { setMessage(error instanceof Error ? error.message : "审核失败"); }
     finally { setBusy(false); }
