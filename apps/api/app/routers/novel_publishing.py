@@ -225,6 +225,8 @@ def build_ai_assist_prompt(novel_id: int, data: AIAssistPromptInput, db: Session
     if not novel:
         raise HTTPException(404,"小说不存在")
     platform = next((item for item in PLATFORMS if item["id"] == data.platform_id),None) if data.platform_id else None
+    if data.platform_id and not platform:
+        raise HTTPException(400,"不支持的目标发行平台")
     if platform and data.target_language not in platform["language"]:
         raise HTTPException(400,"目标平台当前目录未列出该语言，请更换目标语言。")
     chapter = None
