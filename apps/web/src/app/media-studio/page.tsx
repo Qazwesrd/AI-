@@ -76,6 +76,16 @@ export default function MediaStudioPage() {
 
   useEffect(() => { loadTasks(); loadLocalVideoRuntime(); }, []);
 
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void loadLocalVideoRuntime();
+      if (attempts >= 8) window.clearInterval(timer);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   async function createVideo() {
     if (!prompt.trim()) {
       setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
