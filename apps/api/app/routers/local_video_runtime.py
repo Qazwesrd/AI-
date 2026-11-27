@@ -1,6 +1,6 @@
 """Read-only discovery for an already installed local Wan/VACE ComfyUI stack.
 
-This endpoint never downloads models, installs nodes, submits workflows, or uses cloud services.
+Discovery and workflow execution stay on the fixed local ComfyUI endpoint; no downloads or cloud fallback are used.
 A positive capability scan is not a generation test; actual workflow execution is reported separately.
 """
 import json
@@ -277,7 +277,6 @@ def assess_wan_vace_nodes(object_info):
 
 class LocalVideoWorkflowInput(BaseModel):
     workflow: dict = Field(min_length=1)
-    prompt: str = Field(default="", max_length=12000)
 
 
 def validate_local_video_workflow(workflow, object_info):
