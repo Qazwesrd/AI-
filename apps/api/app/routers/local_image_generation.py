@@ -641,17 +641,29 @@ def get_local_image_task(prompt_id: str):
                     "subfolder": subfolder if isinstance(subfolder, str) and len(subfolder) <= 240 else "",
                     "type": image.get("type", "output"),
                 })
-    completed = status_info.get("completed") is True
-    status_text = str(status_info.get("status_str") or status_info.get("status") or "").lower()
-    failed = status_text in {"error", "failed", "failure"}
+    status_text = str(status_info.get("status_str") or status_info.get("status") or "").strip().lower()
     messages = item.get("messages") if isinstance(item.get("messages"), list) else []
+    # ComfyUI versions differ in how much terminal state they expose. Prefer
+    # explicit execution_error messages and failure strings over a stale
+    # completed flag; also accept the documented success status string.
+    execution_error = any(
+        isinstance(message, (list, tuple))
+        and len(message) > 0
+        and str(message[0]).strip().lower() == "execution_error"
+        for message in messages
+    )
+    failed = status_text in {"error", "failed", "failure", "execution_error"} or execution_error
+    completed = not failed and (
+        status_info.get("completed") is True
+        or status_text in {"success", "completed"}
+    )
     error_text = ""
     if failed:
         # Return a concise diagnostic only; never expose arbitrary server paths or tracebacks.
         error_text = "ComfyUI 报告任务执行失败，请检查本机 ComfyUI 控制台日志和模型/节点配置。"
     return {
         "prompt_id": prompt_id,
-        "status": "completed" if completed else ("failed" if failed else "running"),
+        "status": "failed" if failed else ("completed" if completed else "running"),
         "error": error_text,
         "images": images[:20] if completed else [],
         "local_only": True,
