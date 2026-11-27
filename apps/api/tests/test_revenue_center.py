@@ -1,3 +1,4 @@
+import io
 import os
 import unittest
 from datetime import datetime, timedelta
@@ -13,7 +14,7 @@ from app.models.revenue import RevenueEntry, WithdrawalRecord, CreatorOAuthConne
 from app.routers.revenue import (
     RevenueInput, WithdrawalInput, WithdrawalStatusInput,
     create_revenue, create_withdrawal, update_withdrawal, summary, list_platform_capabilities,
-    sync_google_creator_revenue,
+    sync_google_creator_revenue, import_platform_report,
 )
 from app.services.google_creator_oauth import encrypt_token
 
@@ -103,6 +104,24 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertGreaterEqual(len(result["items"]), 7)
         self.assertTrue(all(item["payout_api"] is False for item in result["items"]))
         self.assertIn("不会显示软件内直接提现按钮", result["global_notice"])
+
+    def test_kdp_and_google_play_report_imports_are_idempotent_and_keep_revenue_stages(self):
+        google=b"Earnings Date\\tTitle\\tEarnings Currency\\tEarnings Amount\\n2026-10-31\\tNovel A\\tUSD\\t12.50\\n2026-10-31\\tNovel A refund\\tUSD\\t-1.25\\n"
+        first=import_platform_report("google_play_books","earnings.tsv",google,self.db)
+        second=import_platform_report("google_play_books","earnings.tsv",google,self.db)
+        self.assertEqual(first["imported"],2)
+        self.assertEqual(second["imported"],0)
+        self.assertEqual(second["updated"],2)
+        paid=self.db.query(RevenueEntry).filter_by(platform="Google Play Books",status="paid").all()
+        self.assertEqual(len(paid),2)
+        self.assertAlmostEqual(sum(row.gross_amount for row in paid),11.25)
+
+        kdp=b"Month,Title,Currency,Estimated royalties\\n2026-11,Novel B,USD,$3.45\\n"
+        imported=import_platform_report("kdp","kdp.csv",kdp,self.db)
+        self.assertEqual(imported["imported"],1)
+        kdp_row=self.db.query(RevenueEntry).filter_by(platform="Amazon KDP").one()
+        self.assertEqual(kdp_row.status,"estimated")
+        self.assertAlmostEqual(kdp_row.gross_amount,3.45)
 
     def test_kdp_and_google_play_books_are_official_report_only(self):
         result=list_platform_capabilities()
