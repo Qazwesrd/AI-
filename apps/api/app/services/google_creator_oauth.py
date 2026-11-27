@@ -1,7 +1,8 @@
 """Google OAuth and read-only creator revenue integration.
 
-Tokens are encrypted at rest with Fernet. Configure GOOGLE_OAUTH_CLIENT_ID and
-AI_COMIC_TOKEN_ENCRYPTION_KEY in the desktop app environment before connecting.
+OAuth tokens are encrypted at rest with Fernet. The desktop app stores the public
+Google Client ID locally and creates a local key protected by Windows DPAPI.
+AI_COMIC_TOKEN_ENCRYPTION_KEY can optionally override the generated key.
 """
 from __future__ import annotations
 
