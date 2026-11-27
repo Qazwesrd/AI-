@@ -15,7 +15,10 @@ from pydantic import BaseModel, Field
 router = APIRouter(prefix="/api/local-ai", tags=["本地视频生成"])
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 _OPENER = build_opener(ProxyHandler({}))
-MAX_RESPONSE_BYTES = 8 * 1024 * 1024\nMAX_WORKFLOW_BYTES = 4 * 1024 * 1024\nMAX_WORKFLOW_NODES = 500\nPROMPT_ID_PATTERN = re.compile(r"^[0-9a-fA-F-]{32,36}$")
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_WORKFLOW_BYTES = 4 * 1024 * 1024
+MAX_WORKFLOW_NODES = 500
+PROMPT_ID_PATTERN = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 VIDEO_MODEL_FOLDERS = {
     "diffusion_models": "video_model",
     "checkpoints": "video_checkpoint",
