@@ -380,55 +380,61 @@ def build_video_template_capabilities(object_info):
     """Discover installed Wan/VACE building blocks without guessing workflow wiring."""
     if not isinstance(object_info, dict) or object_info.get("_error"):
         return {"available": False, "roles": {}, "nodes": [], "message": "本机 ComfyUI 节点信息不可用。"}
+
+    # ComfyUI custom node class names commonly use CamelCase without spaces.
     role_terms = {
-        "model_loader": ("model loader", "model_loader", "load model"),
-        "text_encoder": ("text encoder", "t5", "umt5", "cliptextencode"),
-        "text_encode": ("text encode", "textencode", "prompt"),
+        "model_loader": ("modelloader", "loadmodel", "model_loader"),
+        "text_encoder": ("textencoder", "umt5", "t5encoder", "cliptextencode"),
+        "text_encode": ("textencode", "encodeprompt", "promptencode"),
         "sampler": ("sampler",),
-        "vae_loader": ("vae loader", "load vae"),
-        "decode": ("decode", "vae decode"),
-        "image_input": ("loadimage", "load image", "image loader"),
-        "video_input": ("loadvideo", "load video", "video loader"),
+        "vae_loader": ("vaeloader", "loadvae"),
+        "decode": ("decode", "vaedecode"),
+        "image_input": ("loadimage", "imageloader", "imageinput"),
+        "video_input": ("loadvideo", "videoloader", "videoinput"),
         "vace": ("vace",),
-        "video_output": ("videocombine", "savevideo", "video combine"),
+        "video_output": ("videocombine", "savevideo", "videooutput"),
     }
     roles = {}
     discovered = []
+    video_specific_nodes = []
     for class_name, info in object_info.items():
         if not isinstance(class_name, str) or not isinstance(info, dict):
             continue
-        lowered = class_name.lower().replace("_", " ")
-        schema = _node_input_schema(info)
+        compact = re.sub(r"[^a-z0-9]", "", class_name.lower())
         matching = [
             role for role, terms in role_terms.items()
-            if any(term in lowered for term in terms)
+            if any(re.sub(r"[^a-z0-9]", "", term.lower()) in compact for term in terms)
         ]
         if not matching:
             continue
-        entry = {
+        if "wanvideo" in compact or "wan" in compact or "vace" in compact:
+            video_specific_nodes.append(class_name)
+        discovered.append({
             "class_type": class_name,
             "roles": matching,
-            "input_schema": schema,
-        }
-        discovered.append(entry)
+            "input_schema": _node_input_schema(info),
+        })
         for role in matching:
             roles.setdefault(role, []).append(class_name)
     for role in roles:
         roles[role] = sorted(roles[role])[:30]
+
+    # Generic KSampler/SaveImage nodes alone must not imply video capability.
+    available = bool(video_specific_nodes and discovered)
     return {
-        "available": bool(discovered),
-        "roles": roles,
-        "nodes": discovered[:120],
+        "available": available,
+        "roles": roles if available else {},
+        "nodes": discovered[:120] if available else [],
+        "video_specific_nodes": sorted(video_specific_nodes)[:60],
         "message": (
-            "已读取本机节点输入和模型选项。下一步可据此构建模板；当前只做能力发现，不会生成猜测性的工作流。"
-            if discovered else "未发现可用于构建视频工作流的 Wan/VACE 节点。"
+            "已读取本机 Wan/VACE 节点输入和模型选项。当前只完成能力发现，尚未生成可执行模板。"
+            if available else "未发现 Wan/VACE 专用节点；通用采样器或图片节点不能证明本机具备视频生成能力。"
         ),
         "template_generated": False,
         "generation_ready": False,
         "local_only": True,
         "cloud_fallback": False,
     }
-
 
 @router.get("/video-workflow/template-capabilities")
 def video_workflow_template_capabilities():
