@@ -233,6 +233,11 @@ export default function Home() {
               <p className="mt-1 text-xs leading-5 text-purple-100/70">查看 Wan/VACE 本地视频模型，并进入视频生成与音频中心。</p>
               <span className="mt-3 inline-block text-xs text-fuchsia-200">进入视频工作台 →</span>
             </a>
+            <a href="/local-chat" className="glass rounded-2xl border border-emerald-300/30 p-4 transition hover:border-emerald-200/70">
+              <div className="text-2xl">💬</div><h2 className="mt-2 font-bold text-emerald-100">本地 AI 聊天</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">直接与本机 Ollama 模型多轮对话，不调用云端 API。</p>
+              <span className="mt-3 inline-block text-xs text-emerald-200">开始聊天 →</span>
+            </a>
             <a href="/local-models" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
               <div className="text-2xl">🧩</div><h2 className="mt-2 font-bold text-white">本地模型管理</h2>
               <p className="mt-1 text-xs leading-5 text-purple-100/70">查看模型清单、硬件建议和本地引擎识别结果。</p>
