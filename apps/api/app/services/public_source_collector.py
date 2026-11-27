@@ -141,8 +141,8 @@ def parse_feed(payload: bytes) -> list[dict]:
     return items
 
 
-def fetch_public_feed(url: str) -> list[dict]:
-    safe_url = validate_public_feed_url(url)
+def fetch_public_feed(url: str, platform: str | None = None) -> list[dict]:
+    safe_url = validate_public_feed_url(url, platform)
     request = urllib.request.Request(
         safe_url,
         headers={"User-Agent": "AIComicStudio-PublicResearch/1.0 (+user-configured public RSS reader)", "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml"},
