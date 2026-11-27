@@ -280,14 +280,16 @@ def chat_with_local_model(payload: LocalChatInput):
     model = payload.model.strip()
     if not MODEL_NAME_PATTERN.fullmatch(model) or _is_cloud_model_name(model):
         raise HTTPException(400, "仅允许使用本机模型，不能选择 Ollama Cloud 模型。")
-    installed = {item["name"] for item in _installed_models()}
-    if model not in installed:
-        raise HTTPException(404, "所选模型未安装在本机；聊天不会自动下载或切换云端模型。")
     messages = [{"role": item.role, "content": item.content.strip()} for item in payload.messages]
     if not messages[-1]["content"] or messages[-1]["role"] != "user":
         raise HTTPException(422, "最后一条消息必须是非空的用户消息。")
+    # Reject oversized requests before probing Ollama; validation must work
+    # offline and must not turn a client-side limit into a misleading 503.
     if sum(len(item["content"]) for item in messages) > 24000:
         raise HTTPException(413, "当前对话上下文过长，请新建对话或删减较早消息。")
+    installed = {item["name"] for item in _installed_models()}
+    if model not in installed:
+        raise HTTPException(404, "所选模型未安装在本机；聊天不会自动下载或切换云端模型。")
     system = (
         "你是 AI 漫剧制作大师的本地中文助手。使用简体中文，回答清楚、具体、可执行。"
         "帮助用户进行小说分析、人物设定、剧本、分镜和提示词创作。"
