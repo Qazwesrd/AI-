@@ -172,5 +172,31 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(any("视频输出节点" in error for error in result["errors"]))
 
 
+    def test_template_capabilities_discovers_installed_roles_and_input_choices(self):
+        from app.routers.local_video_runtime import build_video_template_capabilities
+        info = {
+            "WanVideoModelLoader": {"input": {"required": {"model": [["wan-t2v.safetensors", "wan-vace.safetensors"]]}}},
+            "WanVideoSampler": {"input": {"required": {"steps": ["INT", {"default": 12}]}}},
+            "VHS_VideoCombine": {"input": {"required": {"frame_rate": ["FLOAT"]}}},
+            "LoadImage": {"input": {"required": {"image": ["STRING"]}}},
+        }
+        result = build_video_template_capabilities(info)
+        self.assertTrue(result["available"])
+        self.assertIn("WanVideoModelLoader", result["roles"]["model_loader"])
+        self.assertIn("WanVideoSampler", result["roles"]["sampler"])
+        self.assertIn("VHS_VideoCombine", result["roles"]["video_output"])
+        loader = next(node for node in result["nodes"] if node["class_type"] == "WanVideoModelLoader")
+        self.assertEqual(loader["input_schema"]["required"]["model"]["choices"], ["wan-t2v.safetensors", "wan-vace.safetensors"])
+        self.assertFalse(result["template_generated"])
+        self.assertFalse(result["generation_ready"])
+
+    def test_template_capabilities_does_not_guess_when_nodes_are_missing(self):
+        from app.routers.local_video_runtime import build_video_template_capabilities
+        result = build_video_template_capabilities({"KSampler": {}, "SaveImage": {}})
+        self.assertFalse(result["available"])
+        self.assertEqual(result["roles"], {})
+        self.assertFalse(result["template_generated"])
+
+
 if __name__ == "__main__":
     unittest.main()
