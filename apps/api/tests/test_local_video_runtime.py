@@ -155,6 +155,29 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["has_wan_video_nodes"])
         self.assertTrue(result["has_video_output_node"])
 
+    def test_api_workflow_preflight_rejects_disconnected_generation_chain(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["installed.safetensors"]]}},
+                "output": ["WANVIDEOMODEL"],
+            },
+            "WanVideoSampler": {
+                "input": {"required": {"model": ["WANVIDEOMODEL"]}},
+                "output": ["IMAGE"],
+            },
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        workflow = {
+            "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "installed.safetensors"}},
+            "2": {"class_type": "WanVideoSampler", "inputs": {"model": ["1", 0]}},
+            "3": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 0]}},
+        }
+        result = validate_local_video_workflow(workflow, info)
+        self.assertFalse(result["valid"])
+        self.assertFalse(result["has_connected_generation_chain"])
+        self.assertTrue(any("未形成连续连通链路" in error for error in result["errors"]))
+
     def test_api_workflow_preflight_rejects_invalid_output_port(self):
         from app.routers.local_video_runtime import validate_local_video_workflow
         info = {
