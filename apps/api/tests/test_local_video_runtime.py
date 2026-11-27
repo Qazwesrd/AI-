@@ -569,9 +569,11 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
                  "connections": {"images": {"node_id": "2", "output_index": 0}}},
             ]
         }
-        with patch.object(runtime, "_local_object_info", return_value=self._node_info()), \\
-             patch.object(runtime, "_installed_models", return_value=[{"name": "qwen2.5:7b"}]), \\
-             patch.object(runtime, "_ollama_request", return_value={"response": json.dumps(specification, ensure_ascii=False)}) as ollama:
+        with (
+            patch.object(runtime, "_local_object_info", return_value=self._node_info()),
+            patch.object(runtime, "_installed_models", return_value=[{"name": "qwen2.5:7b"}]),
+            patch.object(runtime, "_ollama_request", return_value={"response": json.dumps(specification, ensure_ascii=False)}) as ollama,
+        ):
             client = TestClient(app)
             response = client.post("/api/local-ai/video-workflow/auto-build", json={
                 "prompt": "夜色中的城市飞行镜头", "mode": "text_to_video",
@@ -592,8 +594,10 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         from app.main import app
 
-        with patch.object(runtime, "_local_object_info", return_value={"SaveImage": {"input": {}}}), \\
-             patch.object(runtime, "_ollama_request") as ollama:
+        with (
+            patch.object(runtime, "_local_object_info", return_value={"SaveImage": {"input": {}}}),
+            patch.object(runtime, "_ollama_request") as ollama,
+        ):
             client = TestClient(app)
             response = client.post("/api/local-ai/video-workflow/auto-build", json={
                 "prompt": "测试视频提示词", "mode": "text_to_video",
