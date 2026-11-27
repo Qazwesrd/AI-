@@ -203,6 +203,13 @@ jobs:
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
+          $expectedAssetNames = @($files | ForEach-Object { $_.Name -replace '[^\\x00-\\x7F]+', '.' })
+          foreach ($asset in $assets) {
+            if ($expectedAssetNames -notcontains $asset.name) {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
+              if ($LASTEXITCODE -ne 0) { throw "无法清理非正式交付资产：$($asset.name)" }
+            }
+          }
           foreach ($file in $files) {
             # GitHub normalizes non-ASCII release asset names to a dot in the API response.
             # Compare the normalized name so retries replace the correct existing asset.
@@ -224,6 +231,7 @@ jobs:
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法核对 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
+          if ($assets.Count -ne 3) { throw "正式 Release 应只包含 3 个交付资产，实际为 $($assets.Count) 个。" }
           foreach ($file in $files) {
             $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
             $verifiedAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
