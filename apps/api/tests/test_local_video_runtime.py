@@ -30,6 +30,8 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["vace_node_found"])
         self.assertTrue(result["wan_video_nodes_found"])
         self.assertIn("wan2.1_i2v.safetensors", result["models"])
+        self.assertTrue(any(item["name"] == "wan2.1_i2v.safetensors" and item["category"] == "video_model" for item in result["model_inventory"]))
+        self.assertTrue(all(item["load_tested"] is False for item in result["model_inventory"]))
         self.assertFalse(result["generation_ready"])
         self.assertFalse(result["workflow_execution_verified"])
         self.assertFalse(result["workflow_node_set_complete"])
