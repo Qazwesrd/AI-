@@ -96,6 +96,17 @@ class PromptCenterTests(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["ranking"][0]["version"], 1)
 
+    def test_live_category_rankings_expose_freshness_and_auto_snapshot_prompt_tests(self):
+        item=self.create_prompt_row()
+        result=add_test_run(item["id"],TestInput(score_overall=88),self.db)
+        self.assertGreaterEqual(result["ranking_snapshots_updated"],1)
+        live=category_rankings(self.db)
+        self.assertTrue(live["generated_at"].endswith("Z"))
+        self.assertEqual(live["freshness"]["mode"],"recomputed_on_request")
+        prompt_rows=[row for row in self.db.query(PromptRankingSnapshot).filter_by(dimension="prompt").all()]
+        self.assertEqual(len(prompt_rows),1)
+        self.assertEqual(prompt_rows[0].ranking_data[0]["title"],"测试提示词")
+
     def test_ranking_refresh_does_not_modify_formal_prompt(self):
         item = self.create_prompt_row()
         add_test_run(item["id"], TestInput(score_overall=75), self.db)
