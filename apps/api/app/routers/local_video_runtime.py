@@ -14,6 +14,8 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.routers.local_ai_runtime import _installed_models, _ollama_request
+
 router = APIRouter(prefix="/api/local-ai", tags=["本地视频生成"])
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 _OPENER = build_opener(ProxyHandler({}))
@@ -282,6 +284,16 @@ def assess_wan_vace_nodes(object_info):
 
 class LocalVideoWorkflowInput(BaseModel):
     workflow: dict = Field(min_length=1)
+
+
+class LocalVideoAutoBuildInput(BaseModel):
+    prompt: str = Field(min_length=3, max_length=6000)
+    mode: str = Field(default="text_to_video", pattern="^(text_to_video|image_to_video|vace)$")
+    width: int = Field(default=832, ge=256, le=2048)
+    height: int = Field(default=480, ge=256, le=2048)
+    frames: int = Field(default=33, ge=1, le=241)
+    fps: int = Field(default=16, ge=1, le=60)
+    steps: int = Field(default=20, ge=1, le=100)
 
 
 class LocalVideoTemplateNode(BaseModel):
@@ -729,6 +741,117 @@ def build_video_workflow_endpoint(data: LocalVideoTemplateBuildInput):
         "local_only": True,
         "cloud_fallback": False,
     }
+
+
+def _extract_auto_workflow_json(value):
+    content = str(value or "").strip()
+    content = re.sub(r"^\x60\x60\x60(?:json)?\\s*", "", content)
+    content = re.sub(r"\\s*\x60\x60\x60$", "", content)
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("本地模型没有返回 JSON 工作流节点列表。")
+        parsed = json.loads(content[start:end + 1])
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("nodes"), list):
+        raise ValueError("本地模型返回格式错误：必须包含 nodes 数组。")
+    return parsed
+
+
+def _auto_video_node_catalog(object_info):
+    catalog = []
+    for class_name, info in object_info.items():
+        if not isinstance(class_name, str) or not isinstance(info, dict):
+            continue
+        compact = re.sub(r"[^a-z0-9]", "", class_name.lower())
+        if not any(token in compact for token in ("wanvideo", "wan_video", "vace", "videocombine", "savevideo", "loadimage", "loadvideo")):
+            continue
+        catalog.append({
+            "class_type": class_name,
+            "input_schema": _node_input_schema(info),
+            "output_schema": _node_output_schema(info),
+        })
+    return sorted(catalog, key=lambda item: item["class_type"])[:100]
+
+
+@router.post("/video-workflow/auto-build")
+def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
+    """Ask an already-installed local Ollama model to draft a Wan/VACE graph, then validate every node/link locally."""
+    object_info = _local_object_info()
+    if not isinstance(object_info, dict) or object_info.get("_error"):
+        raise HTTPException(503, "本机 ComfyUI 节点信息不可用；未生成工作流。")
+    catalog = _auto_video_node_catalog(object_info)
+    wan_nodes = [item for item in catalog if any(token in item["class_type"].lower() for token in ("wanvideo", "wan_video", "vace"))]
+    output_nodes = [item for item in catalog if any(token in item["class_type"].lower() for token in ("videocombine", "savevideo"))]
+    if not wan_nodes or not output_nodes:
+        raise HTTPException(409, detail={
+            "message": "本机尚未具备完整的 Wan/VACE 节点基础，无法自动配置。",
+            "missing": (["Wan/VACE 模型与处理节点"] if not wan_nodes else []) + (["视频输出节点"] if not output_nodes else []),
+            "cloud_fallback": False,
+        })
+    try:
+        installed = _installed_models()
+    except HTTPException as exc:
+        raise HTTPException(503, "本机 Ollama 未连接；自动配置不会切换云端。") from exc
+    if not installed:
+        raise HTTPException(404, "本机 Ollama 没有已安装的文本模型；不会自动下载模型。")
+    model = installed[0]["name"]
+    system_prompt = (
+        "你是 ComfyUI Wan/VACE 工作流工程师。只能使用用户提供的本机节点清单和接口信息，"
+        "不得虚构节点名、输入名、输出端口或模型文件。必须生成可被 ComfyUI API 接受的节点配置。"
+        "输出纯 JSON，结构为 {\\\"nodes\\\":[{\\\"node_id\\\":\\\"1\\\",\\\"class_type\\\":\\\"精确节点类名\\\","
+        "\\\"values\\\":{\\\"输入名\\\":\\\"常量\\\"},\\\"connections\\\":{\\\"输入名\\\":{\\\"node_id\\\":\\\"来源节点ID\\\","
+        "\\\"output_index\\\":0}}}]}。每个节点必填输入必须通过 values 或 connections 提供。"
+        "连接必须按输出类型与输入类型匹配。模型加载节点必须连到 Wan sampler/VACE 处理节点，"
+        "处理节点必须连到 VHS_VideoCombine/SaveVideo 视频输出节点。"
+        "COMBO 输入只能使用清单中的 choices；有 default 时优先使用 default。"
+        "文本提示词必须写入实际文本输入，不要把用户提示词写到文件路径字段。"
+        "没有可用模型选择、必需图像输入或关键节点时，不要猜测，返回 {\\\"nodes\\\":[]}。"
+    )
+    user_prompt = (
+        "任务模式：" + data.mode + "\\n"
+        "视频提示词：" + data.prompt.strip() + "\\n"
+        f"目标参数：宽度 {data.width}，高度 {data.height}，帧数 {data.frames}，FPS {data.fps}，采样步数 {data.steps}。\\n"
+        "本机节点目录（只能使用这些节点）：\\n"
+        + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
+    )
+    try:
+        response = _ollama_request("/api/generate", {
+            "model": model,
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.1, "num_predict": 4096},
+        }, timeout=600.0)
+        specification = _extract_auto_workflow_json(response.get("response") if isinstance(response, dict) else "")
+        if not specification["nodes"]:
+            raise HTTPException(422, "本机模型判断当前节点信息不足以可靠构建 Wan/VACE 工作流；未生成或提交任务。")
+        nodes = [LocalVideoTemplateNode.model_validate(item) for item in specification["nodes"]]
+        result = build_explicit_video_workflow(nodes, object_info)
+        if not result["valid"]:
+            raise HTTPException(422, detail={
+                "message": "AI 已生成工作流草稿，但本机结构预检未通过；没有提交生成任务。",
+                "errors": result["errors"],
+                "workflow": result.get("workflow"),
+            })
+        return {
+            **result,
+            "model": model,
+            "mode": data.mode,
+            "generation_ready": False,
+            "workflow_execution_verified": False,
+            "message": "本机 Ollama 已自动配置工作流并通过 ComfyUI 节点、参数、连接和视频输出结构预检。尚未实际加载模型或生成视频；请先检查草稿，再手动提交本地队列。",
+            "local_only": True,
+            "network_used": False,
+            "cloud_fallback": False,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, "本机 AI 自动配置失败：" + str(exc)[:1200]) from exc
 
 
 @router.post("/video-workflow/validate")
