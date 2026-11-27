@@ -312,24 +312,14 @@ export default function VisualStudioPage() {
     } finally { setBusy(false); }
   }
 
-  async function runTask(id: number) {
-    setBusy(true);
-    try {
-      const response = await fetch(
-        `${API}/api/visual/tasks/${id}/run?confirm_paid=${confirmPaid}`,
-        { method: "POST" }
-      );
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "生成失败");
-      setMessage(`图片任务 #${id} 已完成`);
-      await loadTasks();
-      await loadAssets();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "生成失败");
-      await loadTasks();
-    } finally {
-      setBusy(false);
-    }
+  function runTask(id: number) {
+    const task = tasks.find(item => item.id === id);
+    if (!task) { setMessage("任务不存在或已刷新，请重新加载任务列表。"); return; }
+    if (!task.prompt?.trim()) { setMessage("该旧任务没有可复用的提示词，请在本地图片工作区重新编写。"); return; }
+    // Legacy visual tasks may point at paid image providers. Never execute them
+    // directly; reuse only their text in the explicitly local ComfyUI workflow.
+    setGeneratedPrompt(task.prompt);
+    setMessage(`已载入旧任务 #${id} 的提示词。请确认本地图片引擎和生成参数，再点击“创建图片任务”；不会调用原任务的云端服务商。`);
   }
 
 
@@ -690,7 +680,7 @@ export default function VisualStudioPage() {
               <span className="text-xs text-purple-300">{task.status}</span>
               {task.status === "pending" && (
                 <>
-                  <button className={button} disabled={busy} onClick={() => runTask(task.id)}>执行生成</button>
+                  <button className={button} disabled={busy} onClick={() => runTask(task.id)}>转为本地生成</button>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "pause")}>暂停</button>
                   <button className={button} disabled={busy} onClick={() => manageTask(task.id, "cancel")}>取消</button>
                 </>
