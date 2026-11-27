@@ -8,7 +8,7 @@ from app.database import Base
 from app.models.revenue import RevenueEntry, WithdrawalRecord
 from app.routers.revenue import (
     RevenueInput, WithdrawalInput, WithdrawalStatusInput,
-    create_revenue, create_withdrawal, update_withdrawal, summary,
+    create_revenue, create_withdrawal, update_withdrawal, summary, list_platform_capabilities,
 )
 
 
@@ -32,11 +32,17 @@ class RevenueCenterTests(unittest.TestCase):
     def test_withdrawal_is_manual_record_and_arrival_requires_date(self):
         item = create_withdrawal(WithdrawalInput(platform="YouTube", amount=50, currency="USD", fee_amount=2), self.db)["item"]
         self.assertEqual(item["status"], "planned")
-        self.assertIn("不会发起资金操作", create_withdrawal.__doc__ or "不会发起资金操作")
+        self.assertIn("不会发起资金操作", create_withdrawal(item_input := WithdrawalInput(platform="Douyin", amount=1), self.db)["message"])
         with self.assertRaises(Exception):
             update_withdrawal(item["id"], WithdrawalStatusInput(status="paid"), self.db)
         updated = update_withdrawal(item["id"], WithdrawalStatusInput(status="paid", arrived_at="2026-11-27"), self.db)
         self.assertEqual(updated["item"]["status"], "paid")
+
+    def test_platform_capabilities_never_advertise_unimplemented_direct_payout(self):
+        result = list_platform_capabilities()
+        self.assertGreaterEqual(len(result["items"]), 7)
+        self.assertTrue(all(item["payout_api"] is False for item in result["items"]))
+        self.assertIn("不会显示软件内直接提现按钮", result["global_notice"])
 
     def test_reject_invalid_currency_and_overlarge_fees(self):
         with self.assertRaises(Exception):
