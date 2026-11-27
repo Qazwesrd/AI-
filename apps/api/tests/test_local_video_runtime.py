@@ -560,7 +560,7 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
                 {"node_id": "1", "class_type": "WanVideoModelLoader",
                  "values": {"model": "wan-local.safetensors"}, "connections": {}},
                 {"node_id": "2", "class_type": "WanVideoSampler",
-                 "values": {"prompt": "夜色中的城市飞行镜头"},
+                 "values": {"prompt": "模型占位文本"},
                  "connections": {"model": {"node_id": "1", "output_index": 0}}},
                 {"node_id": "3", "class_type": "VHS_VideoCombine",
                  "values": {"frame_rate": 16},
@@ -582,6 +582,7 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
         self.assertFalse(payload["cloud_fallback"])
         self.assertEqual(payload["model"], "qwen2.5:7b")
         self.assertEqual(len(payload["workflow"]), 3)
+        self.assertEqual(payload["workflow"]["2"]["inputs"]["prompt"], "夜色中的城市飞行镜头")
         ollama.assert_called_once()
         self.assertEqual(ollama.call_args.args[0], "/api/generate")
 
