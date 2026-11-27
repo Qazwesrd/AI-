@@ -63,7 +63,8 @@ export default function NovelPublishingPage(){
   }
   useEffect(()=>{void load();},[]);
   useEffect(()=>{
-    if(!novelId){setChapters([]);return;}
+    setDistributionTranslationId("");
+    if(!novelId){setChapters([]);setTranslations([]);setActiveTranslation(null);return;}
     void api<{items:Chapter[]}>(`/api/novels/${novelId}/chapters`).then(x=>setChapters(x.items||[])).catch(()=>setChapters([]));
   },[novelId]);
 
@@ -246,7 +247,7 @@ export default function NovelPublishingPage(){
             <select className={field+" mt-1"} value={platformId} onChange={e=>setPlatformId(e.target.value)}>{platforms.map(p=><option key={p.id} value={p.id}>{p.region} · {p.name}</option>)}</select>
           </label>
           <label className="text-sm">作者笔名<input className={field+" mt-1"} value={penName} onChange={e=>setPenName(e.target.value)} placeholder="填写你的作者笔名"/></label>
-          <label className="text-sm">发布版本<select className={field+" mt-1"} value={distributionTranslationId} onChange={e=>{setDistributionTranslationId(e.target.value);const selected=translations.find(x=>String(x.id)===e.target.value);if(selected)setLanguage(selected.target_language);}}><option value="">使用原文</option>{translations.filter(x=>x.status==="completed").map(x=><option key={x.id} value={x.id}>{x.target_language_name}译本 · #{x.id}</option>)}</select></label>
+          <label className="text-sm">发布版本<select className={field+" mt-1"} value={distributionTranslationId} onChange={e=>{setDistributionTranslationId(e.target.value);const selected=translations.find(x=>String(x.id)===e.target.value);if(selected)setLanguage(selected.target_language);else setLanguage("zh-CN");}}><option value="">使用原文</option>{translations.filter(x=>x.status==="completed").map(x=><option key={x.id} value={x.id}>{x.target_language_name}译本 · #{x.id}</option>)}</select></label>
           <label className="text-sm">发行语言
             <select className={field+" mt-1"} value={language} onChange={e=>setLanguage(e.target.value)}>{[["zh-CN","简体中文"],["en","英语"],["ja","日语"],["es","西班牙语"],["fr","法语"],["de","德语"],["it","意大利语"],["pt","葡萄牙语"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
           </label>
