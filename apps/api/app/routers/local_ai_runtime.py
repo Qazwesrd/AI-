@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地 AI 引擎"])
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11435").rstrip("/")
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TEST_PROMPT = "请用简体中文写一句话，说明你已成功在本机运行。"
 OPENER = build_opener(ProxyHandler({}))
