@@ -1,16 +1,29 @@
-from datetime import datetime
+import hashlib
+import json
+import os
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.revenue import RevenueEntry, WithdrawalRecord
+from app.models.revenue import (
+    RevenueEntry, WithdrawalRecord, CreatorOAuthConnection, OAuthAuthorizationState,
+)
+from app.services.google_creator_oauth import (
+    OAuthConfigurationError, OAuthProviderError, decrypt_token, encrypt_token,
+    exchange_code, get_email, google_get_json, new_authorization,
+    parse_money, refresh_access_token, token_expiry,
+)
 
 router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
 
-REVENUE_STATUSES = {"estimated", "settled", "paid"}
+REVENUE_STATUSES = {"estimated", "settled", "payable", "paid"}
 WITHDRAWAL_STATUSES = {"planned", "submitted", "processing", "paid", "rejected", "cancelled"}
 CURRENCIES = {"CNY", "USD", "EUR", "JPY", "GBP", "HKD", "KRW", "TWD"}
 
@@ -111,7 +124,7 @@ def summary(db: Session = Depends(get_db)):
         item["fees"] += row.fee_amount
         item["taxes"] += row.tax_amount
         item["net"] += net
-        if row.status in {"settled", "paid"}:
+        if row.status in {"settled", "payable", "paid"}:
             item["settled_net"] += net
     withdrawn = {}
     for row in withdrawals:
@@ -213,4 +226,304 @@ def list_platform_capabilities():
     return {
         "items": PLATFORM_CAPABILITIES,
         "global_notice": "当前没有已完成 OAuth 接入并经官方确认的提现执行适配器，因此不会显示软件内直接提现按钮；官方入口只负责跳转，资金操作仍在平台完成。",
+    }
+
+
+# Google is the first real OAuth provider. This is read-only reporting, not a payout API.
+GOOGLE_PROVIDER = "google_youtube_adsense"
+GOOGLE_ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics-monetary.readonly"
+
+
+def _connection_dict(row):
+    return {
+        "id": row.id, "provider": row.provider, "account_label": row.account_label,
+        "external_account_id": row.external_account_id, "status": row.status,
+        "granted_scopes": [scope for scope in (row.granted_scopes or "").split() if scope],
+        "token_expires_at": row.token_expires_at.isoformat() if row.token_expires_at else None,
+        "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
+        "last_sync_status": row.last_sync_status,
+        "last_sync_error": row.last_sync_error or "",
+    }
+
+
+def _google_access_token(connection, db):
+    refresh = decrypt_token(connection.refresh_token_encrypted)
+    access = decrypt_token(connection.access_token_encrypted)
+    if connection.token_expires_at and connection.token_expires_at <= datetime.utcnow() + timedelta(seconds=30):
+        if not refresh:
+            connection.status = "reauthorization_required"
+            db.commit()
+            raise HTTPException(409, "Google 授权已过期且没有可用刷新令牌，请重新授权。")
+        try:
+            token_data = refresh_access_token(refresh)
+        except OAuthProviderError as exc:
+            connection.status = "reauthorization_required"
+            connection.last_sync_error = str(exc)[:1000]
+            db.commit()
+            raise HTTPException(502, str(exc))
+        access = token_data.get("access_token", "")
+        connection.access_token_encrypted = encrypt_token(access)
+        connection.token_expires_at = token_expiry(token_data)
+        connection.status = "connected"
+        db.commit()
+    if not access:
+        raise HTTPException(409, "Google 授权令牌缺失，请重新授权。")
+    return access
+
+
+@router.get("/oauth/google/start")
+def google_oauth_start(db: Session = Depends(get_db)):
+    try:
+        url, state, verifier = new_authorization()
+    except OAuthConfigurationError as exc:
+        raise HTTPException(503, str(exc))
+    db.query(OAuthAuthorizationState).filter(
+        OAuthAuthorizationState.created_at < datetime.utcnow() - timedelta(minutes=15)
+    ).delete(synchronize_session=False)
+    db.add(OAuthAuthorizationState(
+        provider=GOOGLE_PROVIDER,
+        state_hash=hashlib.sha256(state.encode("utf-8")).hexdigest(),
+        code_verifier=verifier,
+    ))
+    db.commit()
+    return RedirectResponse(url, status_code=302)
+
+
+@router.get("/oauth/google/callback", response_class=HTMLResponse)
+def google_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    if error:
+        return HTMLResponse("<h2>Google 授权未完成</h2><p>你取消了授权或 Google 返回错误。可以关闭此窗口并返回软件。</p>", status_code=400)
+    if not code or not state:
+        raise HTTPException(400, "OAuth 回调缺少 code 或 state")
+    state_hash = hashlib.sha256(state.encode("utf-8")).hexdigest()
+    saved = db.query(OAuthAuthorizationState).filter(
+        OAuthAuthorizationState.provider == GOOGLE_PROVIDER,
+        OAuthAuthorizationState.state_hash == state_hash,
+        OAuthAuthorizationState.created_at >= datetime.utcnow() - timedelta(minutes=10),
+    ).first()
+    if not saved:
+        raise HTTPException(400, "OAuth state 无效或已过期，请重新开始授权。")
+    verifier = saved.code_verifier
+    db.delete(saved)
+    db.commit()
+    try:
+        token_data = exchange_code(code, verifier)
+        access_token = token_data.get("access_token", "")
+        if not access_token:
+            raise OAuthProviderError("Google 未返回 access_token")
+        email = get_email(access_token)
+        refresh_token = token_data.get("refresh_token", "")
+        scopes = token_data.get("scope", "")
+        existing = db.query(CreatorOAuthConnection).filter(
+            CreatorOAuthConnection.provider == GOOGLE_PROVIDER,
+            CreatorOAuthConnection.external_account_id == email,
+        ).first()
+        values = {
+            "account_label": email,
+            "access_token_encrypted": encrypt_token(access_token),
+            "granted_scopes": scopes,
+            "token_expires_at": token_expiry(token_data),
+            "status": "connected",
+            "last_sync_error": "",
+            "updated_at": datetime.utcnow(),
+        }
+        if refresh_token:
+            values["refresh_token_encrypted"] = encrypt_token(refresh_token)
+        if existing:
+            for key, value in values.items():
+                setattr(existing, key, value)
+        else:
+            existing = CreatorOAuthConnection(
+                provider=GOOGLE_PROVIDER,
+                external_account_id=email,
+                refresh_token_encrypted=encrypt_token(refresh_token),
+                **values,
+            )
+            db.add(existing)
+        db.commit()
+    except (OAuthProviderError, OAuthConfigurationError) as exc:
+        raise HTTPException(502, str(exc))
+    return HTMLResponse(
+        "<html><meta charset='utf-8'><body style='font-family:sans-serif;background:#10101a;color:#fff;padding:40px'>"
+        "<h2>Google 账户已完成授权</h2><p>只授予了请求的只读数据权限。可以关闭此窗口，返回 AI 漫剧制作大师收益中心。</p>"
+        "<p><a style='color:#8de5ff' href='http://127.0.0.1:3000/revenue'>返回收益中心</a></p></body></html>"
+    )
+
+
+@router.get("/oauth/connections")
+def list_oauth_connections(db: Session = Depends(get_db)):
+    rows = db.query(CreatorOAuthConnection).order_by(CreatorOAuthConnection.created_at.desc()).all()
+    return {"items": [_connection_dict(row) for row in rows],
+            "notice": "只返回授权状态和账户标识；访问令牌、刷新令牌永不通过 API 返回。"}
+
+
+@router.delete("/oauth/connections/{connection_id}")
+def revoke_oauth_connection(connection_id: int, db: Session = Depends(get_db)):
+    row = db.query(CreatorOAuthConnection).filter(CreatorOAuthConnection.id == connection_id).first()
+    if not row:
+        raise HTTPException(404, "授权账户不存在")
+    try:
+        token = decrypt_token(row.refresh_token_encrypted) or decrypt_token(row.access_token_encrypted)
+        if token:
+            request = urllib.request.Request(
+                "https://oauth2.googleapis.com/revoke",
+                data=urllib.parse.urlencode({"token": token}).encode("utf-8"),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=15):
+                    pass
+            except Exception:
+                # Local deletion still removes the app's ability to use the token.
+                pass
+    except OAuthConfigurationError as exc:
+        raise HTTPException(503, str(exc))
+    db.delete(row)
+    db.commit()
+    return {"success": True, "message": "本软件已删除该账户授权令牌；如需确保撤销，可同时在 Google 账户安全设置中移除应用授权。"}
+
+
+def _upsert_synced_revenue(db, *, platform, account_label, source_ref, period_start, period_end,
+                           amount, currency, status, notes):
+    if amount is None or not currency:
+        return False
+    existing = db.query(RevenueEntry).filter(
+        RevenueEntry.platform == platform,
+        RevenueEntry.source_ref == source_ref,
+    ).first()
+    if existing:
+        existing.gross_amount = max(0, float(amount))
+        existing.currency = currency
+        existing.status = status
+        existing.period_start = period_start
+        existing.period_end = period_end
+        existing.notes = notes[:5000]
+        return False
+    db.add(RevenueEntry(
+        platform=platform, account_label=account_label, source_ref=source_ref,
+        period_start=period_start, period_end=period_end,
+        gross_amount=max(0, float(amount)), currency=currency,
+        fee_amount=0, tax_amount=0, status=status, notes=notes[:5000],
+    ))
+    return True
+
+
+@router.post("/oauth/connections/{connection_id}/sync")
+def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db)):
+    connection = db.query(CreatorOAuthConnection).filter(
+        CreatorOAuthConnection.id == connection_id,
+        CreatorOAuthConnection.provider == GOOGLE_PROVIDER,
+    ).first()
+    if not connection:
+        raise HTTPException(404, "Google 授权账户不存在")
+    try:
+        access = _google_access_token(connection, db)
+        today = datetime.utcnow().date()
+        end_day = today - timedelta(days=1)
+        start_day = end_day - timedelta(days=29)
+        query = urllib.parse.urlencode({
+            "ids": "channel==MINE",
+            "startDate": start_day.isoformat(),
+            "endDate": end_day.isoformat(),
+            "metrics": "estimatedRevenue",
+            "dimensions": "day",
+            "sort": "day",
+            "currency": "USD",
+        })
+        analytics = google_get_json("https://youtubeanalytics.googleapis.com/v2/reports?" + query, access)
+        inserted = 0
+        updated = 0
+        for values in analytics.get("rows", []):
+            if len(values) < 2:
+                continue
+            day = str(values[0])
+            amount = float(values[1] or 0)
+            existed = db.query(RevenueEntry.id).filter(
+                RevenueEntry.platform == "YouTube",
+                RevenueEntry.source_ref == f"youtube-analytics:{connection.id}:{day}",
+            ).first()
+            created = _upsert_synced_revenue(
+                db, platform="YouTube", account_label=connection.account_label,
+                source_ref=f"youtube-analytics:{connection.id}:{day}",
+                period_start=day, period_end=day, amount=amount, currency="USD",
+                status="estimated",
+                notes="Google YouTube Analytics API · estimatedRevenue · USD · 只读同步；不是最终结算或已付款金额。",
+            )
+            inserted += int(created)
+            updated += int(bool(existed))
+
+        # AdSense Payments is the authoritative API source for unpaid/paid payment records.
+        adsense_accounts = google_get_json("https://adsense.googleapis.com/v2/accounts?pageSize=100", access)
+        payment_count = 0
+        for account in adsense_accounts.get("accounts", []):
+            account_name = str(account.get("name") or "")
+            account_id = account_name.rsplit("/", 1)[-1]
+            if not account_id:
+                continue
+            payments = google_get_json(
+                f"https://adsense.googleapis.com/v2/accounts/{urllib.parse.quote(account_id, safe='')}/payments",
+                access,
+            )
+            for payment in payments.get("payments", []):
+                payment_name = str(payment.get("name") or "")
+                amount, currency = parse_money(payment.get("amount", ""))
+                if amount is None or not currency:
+                    continue
+                is_unpaid = payment_name.endswith("/unpaid") or payment_name.endswith("/youtube-unpaid")
+                payment_date = str((payment.get("date") or {}).get("year", "")) + "-" + str((payment.get("date") or {}).get("month", "")).zfill(2) + "-" + str((payment.get("date") or {}).get("day", "")).zfill(2)
+                status = "payable" if is_unpaid else "paid"
+                ref = f"adsense-payment:{connection.id}:{payment_name}"
+                existed = db.query(RevenueEntry.id).filter(
+                    RevenueEntry.platform == "AdSense/YouTube付款",
+                    RevenueEntry.source_ref == ref,
+                ).first()
+                created = _upsert_synced_revenue(
+                    db, platform="AdSense/YouTube付款", account_label=connection.account_label,
+                    source_ref=ref, period_start=payment_date if not is_unpaid else "",
+                    period_end=payment_date if not is_unpaid else "",
+                    amount=amount, currency=currency, status=status,
+                    notes="Google AdSense Management API accounts.payments.list · " + ("未付款/当前应付款记录" if is_unpaid else "平台付款记录") + "；软件只读取状态，不执行付款。",
+                )
+                inserted += int(created)
+                updated += int(bool(existed))
+                payment_count += 1
+        connection.last_sync_at = datetime.utcnow()
+        connection.last_sync_status = "success"
+        connection.last_sync_error = ""
+        connection.status = "connected"
+        db.commit()
+        return {
+            "success": True, "account": connection.account_label,
+            "analytics_days": len(analytics.get("rows", [])),
+            "payment_records": payment_count, "inserted": inserted, "updated": updated,
+            "period": {"start": start_day.isoformat(), "end": end_day.isoformat()},
+            "message": "已同步 YouTube 预估收入和 Google AdSense 实际付款/未付款记录。预估收入、应付款与已付款分开保存；此同步不提供提现执行。",
+        }
+    except HTTPException:
+        raise
+    except (OAuthProviderError, OAuthConfigurationError, ValueError, KeyError) as exc:
+        connection.last_sync_at = datetime.utcnow()
+        connection.last_sync_status = "failed"
+        connection.last_sync_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(502, str(exc))
+
+
+@router.get("/oauth/status")
+def google_oauth_status():
+    return {
+        "google_oauth_configured": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID")),
+        "token_encryption_configured": bool(os.environ.get("AI_COMIC_TOKEN_ENCRYPTION_KEY")),
+        "provider": "Google / YouTube Analytics / AdSense",
+        "read_only": True,
+        "payout_execution_enabled": False,
+        "required_environment": ["GOOGLE_OAUTH_CLIENT_ID", "AI_COMIC_TOKEN_ENCRYPTION_KEY"],
+        "optional_environment": ["GOOGLE_OAUTH_CLIENT_SECRET"],
+        "note": "YouTube Analytics 提供预估收入；AdSense Payments 可读取未付款和已付款记录。API 不执行提现。",
     }
