@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -11,6 +14,7 @@ from app.routers.local_ai_runtime import (
     generate_local_creative_content,
     _installed_models,
     local_ai_runtime,
+    _resource_bundle_status,
     test_local_model,
     get_local_novel_context,
     _bounded_continuity,
@@ -188,6 +192,63 @@ class LocalAIRuntimeTests(unittest.TestCase):
                 generate_local_episode_package(payload)
         self.assertEqual(caught.exception.status_code, 404)
         request.assert_not_called()
+
+
+    def test_resource_bundle_status_detects_separate_complete_install_without_modifying(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "resource-manifest.json").write_text(json.dumps({"bundle": "test"}), encoding="utf-8")
+            engine = root / "engines"
+            files = [
+                "Ollama/runtime/ollama.exe",
+                "Ollama/models/blobs/.keep",
+                "ComfyUI/python_embeded/python.exe",
+                "ComfyUI/ComfyUI/main.py",
+                "FFmpeg/ffmpeg.exe",
+                "FFmpeg/ffprobe.exe",
+                "StableDiffusionCpp/bin/sd-cli.exe",
+                "VACE/models/wan2.1-v3-vace-1.3b-q4_0.gguf",
+                "VACE/models/umt5-xxl-encoder-q4_k_m.gguf",
+                "VACE/models/pig_wan_vae_fp32-f16.gguf",
+            ]
+            for relative in files:
+                target = engine / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"x")
+            result = _resource_bundle_status(temp)
+            self.assertEqual(result["status"], "installed")
+            self.assertTrue(result["installed"])
+            self.assertTrue(all(result["components"].values()))
+            self.assertFalse(result["modified"])
+            self.assertFalse(result["downloaded"])
+            self.assertFalse(result["cloud_fallback"])
+            self.assertTrue((root / "resource-manifest.json").is_file())
+
+    def test_resource_bundle_status_reports_missing_components_without_installing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            Path(temp, "resource-manifest.json").write_text('{"bundle":"test"}', encoding="utf-8")
+            result = _resource_bundle_status(temp)
+            self.assertEqual(result["status"], "incomplete")
+            self.assertFalse(result["installed"])
+            self.assertIn("ollama_runtime", result["missing_components"])
+            self.assertFalse(result["modified"])
+
+    def test_resource_bundle_status_handles_absent_and_invalid_manifest(self):
+        with tempfile.TemporaryDirectory() as temp:
+            absent = _resource_bundle_status(temp)
+            self.assertEqual(absent["status"], "not_installed")
+            Path(temp, "resource-manifest.json").write_text("{broken", encoding="utf-8")
+            invalid = _resource_bundle_status(temp)
+            self.assertEqual(invalid["status"], "manifest_invalid")
+            self.assertFalse(invalid["manifest_valid"])
+            self.assertFalse(invalid["modified"])
+
+    def test_resource_bundle_status_without_configured_directory(self):
+        with patch.dict("os.environ", {"AICOMICS_DATA_DIR": "", "APP_DATA_DIR": ""}):
+            result = _resource_bundle_status("")
+        self.assertEqual(result["status"], "not_configured")
+        self.assertFalse(result["installed"])
+        self.assertFalse(result["cloud_fallback"])
 
 
 if __name__ == "__main__":
