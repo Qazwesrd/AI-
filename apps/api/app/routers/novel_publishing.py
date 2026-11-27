@@ -5,6 +5,7 @@ It deliberately does not log into publisher websites or claim that a package was
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import html
 import io
@@ -609,7 +610,7 @@ def translate_next_chunk(translation_id: int, db: Session = Depends(get_db)):
             raise HTTPException(502,"本机模型未返回有效译文")
         chunk["translation"] = translated.strip()
         chunk["status"] = "completed"
-        row.chapters_data = chapter_data
+        row.chapters_data = copy.deepcopy(chapter_data)
         row.completed_chunks += 1
         row.status = "completed" if row.completed_chunks >= row.total_chunks else "pending"
         row.updated_at = datetime.utcnow()
@@ -659,7 +660,7 @@ def edit_translation_chunk(
     chunk = chapter["chunks"][chunk_index]
     chunk["translation"] = data.translation.strip()
     chunk["status"] = "completed" if chunk["translation"] else "pending"
-    row.chapters_data = row.chapters_data
+    row.chapters_data = copy.deepcopy(row.chapters_data)
     row.completed_chunks = sum(
         1 for item in (row.chapters_data or [])
         for part in item.get("chunks", [])
