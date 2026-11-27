@@ -131,5 +131,46 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertEqual(result["unavailable_choices"][0]["choice"], "not-installed.safetensors")
 
 
+
+    def test_api_workflow_preflight_accepts_installed_wan_video_graph(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoModelLoader": {"input": {"required": {"model": [["wan-vace.safetensors"]]}}},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"], "frame_rate": ["FLOAT"]}}},
+        }
+        workflow = {
+            "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "wan-vace.safetensors"}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 0], "frame_rate": 24}},
+        }
+        result = validate_local_video_workflow(workflow, info)
+        self.assertTrue(result["valid"])
+        self.assertTrue(result["has_wan_video_nodes"])
+        self.assertTrue(result["has_video_output_node"])
+
+    def test_api_workflow_preflight_rejects_missing_model_and_link(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoModelLoader": {"input": {"required": {"model": [["installed.safetensors"]]}}},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        workflow = {
+            "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "missing.safetensors"}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["99", 0]}},
+        }
+        result = validate_local_video_workflow(workflow, info)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("不在本机可用选项" in error for error in result["errors"]))
+        self.assertTrue(any("引用了不存在的节点" in error for error in result["errors"]))
+
+    def test_api_workflow_preflight_requires_video_output(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {"WanVideoSampler": {"input": {"required": {"steps": ["INT"]}}}}
+        result = validate_local_video_workflow(
+            {"1": {"class_type": "WanVideoSampler", "inputs": {"steps": 20}}}, info
+        )
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("视频输出节点" in error for error in result["errors"]))
+
+
 if __name__ == "__main__":
     unittest.main()
