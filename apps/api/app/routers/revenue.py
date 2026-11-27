@@ -341,8 +341,8 @@ def google_oauth_callback(
             existing = CreatorOAuthConnection(
                 provider=GOOGLE_PROVIDER,
                 external_account_id=email,
-                refresh_token_encrypted=encrypt_token(refresh_token),
-                **values,
+                refresh_token_encrypted=values.get("refresh_token_encrypted", ""),
+                **{key: value for key, value in values.items() if key != "refresh_token_encrypted"},
             )
             db.add(existing)
         db.commit()
