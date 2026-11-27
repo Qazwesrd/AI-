@@ -267,7 +267,7 @@ export default function PromptResearchPage() {
           <div className="mt-4 grid gap-3 md:grid-cols-4">
             <label className="text-xs">平台
               <select value={sourcePlatform} onChange={e=>setSourcePlatform(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2 text-sm">
-                {["YouTube","B站","抖音","快手","TikTok","Facebook","红果短剧"].map(x=><option key={x}>{x}</option>)}
+                {["YouTube","B站","抖音","快手","TikTok","Facebook","红果短剧","Reddit","Royal Road","Wattpad","Tapas","Inkitt","Pixiv"].map(x=><option key={x}>{x}</option>)}
               </select>
             </label>
             <label className="text-xs">来源名称<input value={sourceName} onChange={e=>setSourceName(e.target.value)} placeholder="例如：频道公开更新订阅" className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/></label>
