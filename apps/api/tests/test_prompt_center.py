@@ -17,7 +17,7 @@ from app.routers.prompts import (
     EvidenceInput, EvidenceVerifyInput, UpgradeCandidateInput, CandidateDecisionInput,
     create_trend_evidence, verify_trend_evidence, create_upgrade_candidate,
     approve_upgrade_candidate, reject_upgrade_candidate, research_trend_ranking,
-    collect_public_source,
+    collect_public_source, category_rankings, refresh_category_rankings,
 )
 from app.services.public_source_collector import (
     FeedCollectionError, parse_feed, validate_public_feed_url,
@@ -121,6 +121,32 @@ class PromptCenterTests(unittest.TestCase):
             verification_note="已人工核对另一平台及不同日期。"
         ), self.db)
         return [first["id"], second["id"]]
+
+    def test_drama_prompt_and_screenplay_rankings_are_separate(self):
+        for evidence_type,title in [
+            ("漫剧作品趋势证据","热门漫剧A"),
+            ("剧本作品证据","热门剧本B"),
+            ("公开提示词分享","公开提示词C"),
+        ]:
+            for platform,day in [("平台甲","2026-11-20"),("平台乙","2026-11-26")]:
+                item=create_trend_evidence(EvidenceInput(
+                    platform=platform,work_title=title,observed_at=day,
+                    metric_summary={"views":10000,"likes":500,"shares":60},
+                    evidence_type=evidence_type,
+                ),self.db)["item"]
+                verify_trend_evidence(item["id"],EvidenceVerifyInput(verification_note="核对公开页面和采样日期"),self.db)
+        prompt=self.create_prompt_row()
+        add_test_run(prompt["id"],TestInput(score_overall=94,score_story=96),self.db)
+        result=category_rankings(self.db)["categories"]
+        self.assertEqual([x["title"] for x in result["drama"]["items"]],["热门漫剧A"])
+        self.assertEqual([x["title"] for x in result["screenplay"]["items"]],["热门剧本B"])
+        self.assertEqual([x["title"] for x in result["prompt"]["items"]],["测试提示词"])
+        self.assertEqual([x["title"] for x in result["prompt"]["public_share_items"]],["公开提示词C"])
+
+    def test_category_ranking_refresh_persists_three_snapshots(self):
+        result=refresh_category_rankings(self.db)
+        self.assertEqual({item["category"] for item in result["snapshots"]},{"drama","prompt","screenplay"})
+        self.assertEqual(self.db.query(PromptRankingSnapshot).filter(PromptRankingSnapshot.dimension.in_(["drama","prompt","screenplay"])).count(),3)
 
     def test_upgrade_candidate_requires_verified_multi_platform_multi_date_evidence(self):
         item = self.create_prompt_row()
