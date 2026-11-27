@@ -124,7 +124,7 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertEqual(kdp_row.status,"estimated")
         self.assertAlmostEqual(kdp_row.gross_amount,3.45)
 
-        payment=b"Payment Number,Payment Status,Payment Date,Marketplace,Currency,Payment Amount\\n123,Paid,2026-10-15,Amazon.com,USD,42.50\\n124,Pending,2026-10-15,Amazon.com,USD,12.00\\n"
+        payment=b"Payment Number,Payment Status,Payment Date,Marketplace,Currency,Payment Amount\n123,Paid,2026-10-15,Amazon.com,USD,42.50\n124,Pending,2026-10-15,Amazon.com,USD,12.00\n"
         payment_result=import_platform_report("kdp","payments.csv",payment,self.db)
         self.assertEqual(payment_result["imported"],2)
         payment_rows=self.db.query(RevenueEntry).filter(RevenueEntry.platform=="Amazon KDP",RevenueEntry.source_ref.like("report-import:kdp:%")).all()
