@@ -190,6 +190,42 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertFalse(result["template_generated"])
         self.assertFalse(result["generation_ready"])
 
+    def test_template_capabilities_exposes_typed_socket_candidates_without_auto_linking(self):
+        from app.routers.local_video_runtime import build_video_template_capabilities
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["wan-t2v.safetensors"]]}},
+                "output": ["WANVIDEOMODEL"],
+                "output_name": ["model"],
+            },
+            "WanVideoSampler": {
+                "input": {"required": {"model": ["WANVIDEOMODEL"]}},
+                "output": ["LATENT"],
+                "output_name": ["samples"],
+            },
+            "VHS_VideoCombine": {
+                "input": {"required": {"images": ["IMAGE"]}},
+                "output": [],
+            },
+        }
+        result = build_video_template_capabilities(info)
+        self.assertTrue(result["available"])
+        self.assertEqual(
+            result["connection_candidates"],
+            [{
+                "target_class": "WanVideoSampler",
+                "input": "model",
+                "input_type": "WANVIDEOMODEL",
+                "sources": [{
+                    "class_type": "WanVideoModelLoader",
+                    "output_index": 0,
+                    "output_name": "model",
+                }],
+            }],
+        )
+        self.assertFalse(result["template_generated"])
+        self.assertFalse(result["generation_ready"])
+
     def test_template_capabilities_does_not_guess_when_nodes_are_missing(self):
         from app.routers.local_video_runtime import build_video_template_capabilities
         result = build_video_template_capabilities({"KSampler": {}, "SaveImage": {}})
