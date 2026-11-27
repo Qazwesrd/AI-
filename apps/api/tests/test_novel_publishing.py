@@ -13,8 +13,8 @@ from app.routers.novel_publishing import (
     DistributionPackageInput, SubmissionInput, SubmissionUpdate,
     create_distribution_package, create_submission_record, update_submission_record,
     export_distribution_package, list_novel_distribution_platforms, build_ai_assist_prompt,
-    TranslationCreateInput, TranslationChunkEditInput, create_translation, translate_next_chunk, get_translation,
-    edit_translation_chunk, export_translation, _translation_chunks,
+    TranslationCreateInput, TranslationChunkEditInput, TranslationGlossaryInput, create_translation, translate_next_chunk, get_translation,
+    edit_translation_chunk, update_translation_glossary, export_translation, _translation_chunks,
     router as novel_publishing_router,
 )
 
@@ -175,6 +175,24 @@ class NovelPublishingTests(unittest.TestCase):
         )
         self.assertEqual(cleared["item"]["completed_chunks"], 0)
         self.assertEqual(cleared["item"]["status"], "pending")
+
+    @patch("app.routers.novel_publishing._installed_models", return_value=[{"name":"local-translate-model"}])
+    def test_existing_translation_glossary_can_be_updated_for_remaining_chunks(self, mock_models):
+        created = create_translation(
+            self.novel.id,
+            TranslationCreateInput(target_language="en", model_name="local-translate-model"),
+            self.db,
+        )
+        translation_id = created["item"]["id"]
+        updated = update_translation_glossary(
+            translation_id,
+            TranslationGlossaryInput(glossary={"主角": "The Protagonist", "圣衣": "Cloth"}),
+            self.db,
+        )
+        self.assertEqual(updated["item"]["glossary"]["主角"], "The Protagonist")
+        self.db.expire_all()
+        detail = get_translation(translation_id, self.db)
+        self.assertEqual(detail["glossary"]["圣衣"], "Cloth")
 
     def test_translation_rejects_uninstalled_local_model(self):
         with patch("app.routers.novel_publishing._installed_models",return_value=[]):
