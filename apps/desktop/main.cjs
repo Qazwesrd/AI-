@@ -151,7 +151,13 @@ function resolveManagedDataDirectory() {
     path.join(appData, "ai-comic-studio-desktop")
   ]);
   const existing = candidates.find(hasManagedAiResources);
-  const selected = existing || firstExisting([configured]) || adjacentData || legacyUserData;
+  // On Windows prefer the user's requested shared AI data root when the
+  // E: drive exists, even before models are installed. This keeps the model
+  // overview and future engine installs anchored at E:\\AI\\数据 instead
+  // of silently creating an empty profile beside the application.
+  const preferredWindowsData = process.platform === "win32" && fs.existsSync("E:\\")
+    ? "E:\\AI\\数据" : "";
+  const selected = existing || firstExisting([configured]) || preferredWindowsData || adjacentData || legacyUserData;
   fs.mkdirSync(selected, { recursive: true });
   process.env.AICOMICS_DATA_DIR = selected;
   process.env.APP_DATA_DIR = selected;
