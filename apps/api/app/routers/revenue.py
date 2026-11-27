@@ -1,12 +1,15 @@
+import csv
 import hashlib
+import io
 import json
 import os
+import re
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
@@ -110,6 +113,122 @@ def withdrawal_dict(row):
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+def _report_header(row, candidates):
+    normalized = {re.sub(r"[^a-z0-9]+", "", str(key or "").lower()): value for key, value in row.items() if key}
+    for candidate in candidates:
+        key = re.sub(r"[^a-z0-9]+", "", candidate.lower())
+        if key in normalized and normalized[key] not in (None, ""):
+            return str(normalized[key]).strip()
+    return ""
+
+
+def _report_amount(value):
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    negative = raw.startswith("(") and raw.endswith(")")
+    cleaned = raw.replace(",", "").replace("(", "").replace(")", "")
+    match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+    if not match:
+        return None
+    amount = float(match.group(0))
+    return -abs(amount) if negative else amount
+
+
+def import_platform_report(platform_id: str, filename: str, content: bytes, db: Session):
+    if platform_id not in {"kdp", "google_play_books"}:
+        raise HTTPException(400, "目前只支持 Amazon KDP 与 Google Play Books 官方报表导入")
+    if not content or len(content) > 15 * 1024 * 1024:
+        raise HTTPException(413, "报表文件为空或超过 15 MB")
+    try:
+        try:
+            decoded = content.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            decoded = content.decode("utf-16")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(400, "无法识别报表编码，请导出 UTF-8 CSV/TSV 后重试") from exc
+    sample = decoded[:8192]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;")
+    except csv.Error:
+        dialect = csv.excel_tab if sample.count("\t") > sample.count(",") else csv.excel
+    reader = csv.DictReader(io.StringIO(decoded), dialect=dialect)
+    if not reader.fieldnames:
+        raise HTTPException(400, "报表缺少表头")
+    imported = updated = skipped = 0
+    warnings = []
+    for line_number, raw_row in enumerate(reader, start=2):
+        row = {str(key or "").strip().lstrip("\ufeff"): (value or "").strip() for key, value in raw_row.items()}
+        if platform_id == "google_play_books":
+            amount_header = next((key for key in row if re.sub(r"[^a-z0-9]+", "", key.lower()) == "earningsamount"), "")
+            amount_value = row.get(amount_header, "") if amount_header else _report_header(row, ["Total Publisher Earnings", "Payment Amount"])
+            currency = _report_header(row, ["Earnings Currency", "Payment Currency", "Currency"])
+            title = _report_header(row, ["Title", "Book Title"])
+            day = _report_header(row, ["Earnings Date", "Transaction Date", "Date"])
+            row_status = "paid" if amount_header else "estimated"
+        else:
+            amount_header = next((key for key in row if "estimatedroyalt" in re.sub(r"[^a-z0-9]+", "", key.lower())), "")
+            if not amount_header:
+                amount_header = next((key for key in row if re.sub(r"[^a-z0-9]+", "", key.lower()) in {"paymentamount","royaltyamount","royalties"}), "")
+            amount_value = row.get(amount_header, "") if amount_header else ""
+            currency = _report_header(row, ["Royalty Currency", "Currency", "Marketplace Currency"])
+            title = _report_header(row, ["Title", "Book Title"])
+            day = _report_header(row, ["Payment Date", "Royalty Month", "Month", "Date"])
+            row_status = "paid" if "paymentamount" in re.sub(r"[^a-z0-9]+", "", amount_header.lower()) else "estimated"
+        amount = _report_amount(amount_value)
+        currency = currency.upper().strip()
+        if amount is None or currency not in CURRENCIES:
+            skipped += 1
+            if len(warnings) < 5:
+                warnings.append(f"第 {line_number} 行金额或币种无法识别，已跳过")
+            continue
+        row_fingerprint = hashlib.sha256(
+            (platform_id + "|" + filename + "|" + json.dumps(row, sort_keys=True, ensure_ascii=False)).encode("utf-8")
+        ).hexdigest()
+        source_ref = f"report-import:{platform_id}:{row_fingerprint}"
+        existing = db.query(RevenueEntry).filter(RevenueEntry.source_ref == source_ref).first()
+        notes = f"官方报表文件导入：{filename}；标题：{title or '未提供'}；第 {line_number} 行。"
+        if amount < 0:
+            notes += "负数按退款/冲正原样保留。"
+        if platform_id == "google_play_books" and row_status == "paid":
+            notes += "Google Play Earnings Report 的平台付款周期记录；不是银行入账凭证。"
+        if existing:
+            existing.gross_amount = amount
+            existing.currency = currency
+            existing.status = row_status
+            existing.period_start = day[:20]
+            existing.period_end = day[:20]
+            existing.notes = notes[:5000]
+            updated += 1
+        else:
+            db.add(RevenueEntry(
+                platform="Amazon KDP" if platform_id == "kdp" else "Google Play Books",
+                account_label="官方报表导入", source_ref=source_ref,
+                period_start=day[:20], period_end=day[:20],
+                gross_amount=amount, currency=currency, fee_amount=0, tax_amount=0,
+                status=row_status, notes=notes[:5000],
+            ))
+            imported += 1
+    if imported or updated:
+        db.commit()
+    else:
+        db.rollback()
+    return {
+        "success": True, "platform": "Amazon KDP" if platform_id == "kdp" else "Google Play Books",
+        "imported": imported, "updated": updated, "skipped": skipped,
+        "warnings": warnings,
+        "message": "报表已导入；Google Earnings Amount 归为平台付款报告，销售汇总归为预估数据。KDP 未明确标记付款的版税数据一律保守归为预估；报表记录不等于银行到账证明。",
+    }
+
+
+@router.post("/reports/import/{platform_id}")
+async def import_creator_report(platform_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    filename = (file.filename or "creator-report.csv")[:200]
+    content = await file.read(15 * 1024 * 1024 + 1)
+    await file.close()
+    return import_platform_report(platform_id, filename, content, db)
 
 
 @router.get("/summary")
