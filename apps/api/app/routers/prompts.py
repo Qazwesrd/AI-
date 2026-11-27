@@ -328,6 +328,7 @@ from app.models.prompts import TrendEvidence, PromptUpgradeCandidate
 class EvidenceInput(BaseModel):
     platform: str = Field(min_length=1, max_length=100)
     work_title: str = Field(min_length=1, max_length=300)
+    genre: str = Field(default="未分类", max_length=100)
     work_url: str = Field(default="", max_length=2000)
     observed_at: str = Field(min_length=8, max_length=40)
     metric_summary: dict = Field(default_factory=dict)
@@ -338,6 +339,7 @@ class EvidenceInput(BaseModel):
 class EvidenceVerifyInput(BaseModel):
     verification_note: str = Field(min_length=3, max_length=5000)
     evidence_type: Optional[str] = Field(default=None, max_length=100)
+    genre: Optional[str] = Field(default=None, max_length=100)
 
 
 class UpgradeCandidateInput(BaseModel):
@@ -357,7 +359,7 @@ class CandidateDecisionInput(BaseModel):
 def evidence_dict(row):
     return {
         "id": row.id, "platform": row.platform, "work_title": row.work_title,
-        "work_url": row.work_url, "observed_at": row.observed_at,
+        "genre": row.genre or "未分类", "work_url": row.work_url, "observed_at": row.observed_at,
         "metric_summary": row.metric_summary or {}, "evidence_type": row.evidence_type,
         "reliability": row.reliability, "is_verified": bool(row.is_verified),
         "verification_note": row.verification_note,
@@ -390,7 +392,7 @@ def list_trend_evidence(verified: Optional[bool] = None, db: Session = Depends(g
 @router.post("/research/evidence")
 def create_trend_evidence(data: EvidenceInput, db: Session = Depends(get_db)):
     row = TrendEvidence(
-        platform=data.platform.strip(), work_title=data.work_title.strip(),
+        platform=data.platform.strip(), work_title=data.work_title.strip(), genre=data.genre.strip() or "未分类",
         work_url=data.work_url.strip(), observed_at=data.observed_at.strip(),
         metric_summary=data.metric_summary, evidence_type=data.evidence_type.strip(),
         reliability=data.reliability.strip(), is_verified=False,
@@ -407,11 +409,13 @@ def verify_trend_evidence(evidence_id: int, data: EvidenceVerifyInput, db: Sessi
     row = db.query(TrendEvidence).filter(TrendEvidence.id == evidence_id).first()
     if not row:
         raise HTTPException(404, "研究证据不存在")
-    allowed_types = {"漫剧作品趋势证据","作品趋势证据","剧本作品证据","公开提示词分享","创作案例证据","work_trend","screenplay","public_prompt"}
+    allowed_types = {"漫剧作品趋势证据","作品趋势证据","剧本作品证据","公开提示词分享","创作案例证据","work_trend","screenplay","public_prompt","公开榜单/公开页面"}
     if data.evidence_type is not None:
         if data.evidence_type not in allowed_types:
             raise HTTPException(400,"不支持的证据分类")
         row.evidence_type = data.evidence_type
+    if data.genre is not None:
+        row.genre = data.genre.strip() or "未分类"
     row.is_verified = True
     row.verification_note = data.verification_note.strip()
     row.reliability = "人工已核验"
@@ -529,7 +533,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
 
     rows = db.query(TrendEvidence).filter(
         TrendEvidence.is_verified.is_(True),
-        TrendEvidence.evidence_type.in_({"作品趋势证据","漫剧作品趋势证据","work_trend"}),
+        TrendEvidence.evidence_type.in_({"作品趋势证据","漫剧作品趋势证据","work_trend","公开榜单/公开页面"}),
     ).all()
     groups = defaultdict(list)
     for row in rows:
@@ -623,7 +627,7 @@ def _verified_evidence_ranking(db, accepted_types):
             signals.append(signal*decay)
         score=sum(signals)/max(1,len(signals))+min(len(platforms),5)*2+min(len(dates),7)*1.25
         ranking.append({
-            "title":samples[0].work_title,"platforms":platforms,"platform_count":len(platforms),
+            "title":samples[0].work_title,"genre":samples[0].genre or "未分类","platforms":platforms,"platform_count":len(platforms),
             "observed_days":dates,"sample_count":len(samples),"latest_observed_at":max(dates),
             "score":round(score,3),"evidence_ids":[item.id for item in samples],
             "evidence_types":sorted({item.evidence_type for item in samples}),
@@ -656,13 +660,23 @@ def _prompt_test_ranking(db, score_field="score_overall"):
 
 @router.get("/research/rankings")
 def category_rankings(db: Session = Depends(get_db)):
-    drama,drama_count = _verified_evidence_ranking(db,{"作品趋势证据","漫剧作品趋势证据","work_trend"})
+    drama,drama_count = _verified_evidence_ranking(db,{"作品趋势证据","漫剧作品趋势证据","work_trend","公开榜单/公开页面"})
+    genre_groups={}
+    for item in drama:
+        genre_groups.setdefault(item["genre"],[]).append(item)
+    drama_genres=[]
+    for genre,items in genre_groups.items():
+        drama_genres.append({"title":genre,"work_count":len(items),"sample_count":sum(item["sample_count"] for item in items),
+                             "score":round(sum(item["score"] for item in items)/len(items),3),
+                             "platforms":sorted({platform for item in items for platform in item["platforms"]})})
+    drama_genres.sort(key=lambda item:(item["score"],item["work_count"]),reverse=True)
+    for index,item in enumerate(drama_genres,1): item["rank"]=index
     screenplay,screenplay_count = _verified_evidence_ranking(db,{"剧本作品证据","screenplay"})
     prompts = _prompt_test_ranking(db)
     public_prompts,prompt_evidence_count = _verified_evidence_ranking(db,{"公开提示词分享","public_prompt"})
     return {
         "categories":{
-            "drama":{"title":"漫剧作品排名","items":drama,"verified_evidence_count":drama_count,"basis":"公开作品互动热度，跨平台与跨日期交叉核验"},
+            "drama":{"title":"漫剧作品排名","items":drama,"genre_items":drama_genres,"verified_evidence_count":drama_count,"basis":"公开作品互动热度，跨平台与跨日期交叉核验；题材榜按已核验作品聚合"},
             "prompt":{"title":"提示词排名","items":prompts,"verified_evidence_count":prompt_evidence_count,"public_share_items":public_prompts,"basis":"正式提示词版本的人工实测评分；公开分享提示词热度单独列出，不混算质量分"},
             "screenplay":{"title":"剧本排名","items":screenplay,"verified_evidence_count":screenplay_count,"basis":"已核验的公开剧本/剧本案例互动数据，跨平台与跨日期交叉核验"},
         },
