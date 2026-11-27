@@ -6,6 +6,7 @@ from cryptography.fernet import Fernet
 
 from app.services.google_creator_oauth import (
     encrypt_token, decrypt_token, new_authorization, parse_money,
+    start_loopback_listener, API_CALLBACK_URI,
 )
 
 
@@ -46,6 +47,28 @@ class GoogleCreatorOAuthTests(unittest.TestCase):
         self.assertIn("https://www.googleapis.com/auth/yt-analytics-monetary.readonly", scopes)
         self.assertIn("https://www.googleapis.com/auth/adsense.readonly", scopes)
         self.assertNotIn("https://www.googleapis.com/auth/adsense", scopes)
+
+    def test_random_loopback_listener_forwards_once_to_local_callback(self):
+        from urllib.error import HTTPError
+        from urllib.request import build_opener, HTTPRedirectHandler, Request, urlopen
+
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        redirect_uri = start_loopback_listener()
+        parsed = urlparse(redirect_uri)
+        self.assertEqual(parsed.hostname, "127.0.0.1")
+        self.assertEqual(parsed.path, "")
+        self.assertGreater(parsed.port, 0)
+        opener = build_opener(NoRedirect)
+        try:
+            opener.open(Request(redirect_uri + "?code=sample&state=sample-state"), timeout=5)
+        except HTTPError as exc:
+            self.assertEqual(exc.code, 302)
+            self.assertEqual(exc.headers.get("Location"), API_CALLBACK_URI + "?code=sample&state=sample-state")
+        else:
+            self.fail("Loopback listener should forward using HTTP 302")
 
     def test_parse_adsense_money_with_explicit_currency(self):
         self.assertEqual(parse_money("$1,234.56 USD"), (1234.56, "USD"))
