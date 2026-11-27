@@ -100,3 +100,33 @@ class PromptUpgradeCandidate(Base):
     decision_note = Column(Text, default="")
     decided_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PublicResearchSource(Base):
+    __tablename__ = "public_research_sources"
+
+    id = Column(Integer, primary_key=True, index=True)
+    platform = Column(String(100), nullable=False, index=True)
+    name = Column(String(200), nullable=False)
+    feed_url = Column(String(2000), nullable=False)
+    source_type = Column(String(20), nullable=False, default="rss")
+    enabled = Column(Boolean, nullable=False, default=True, index=True)
+    refresh_interval_minutes = Column(Integer, nullable=False, default=360)
+    last_collected_at = Column(DateTime, nullable=True)
+    last_status = Column(String(30), nullable=False, default="待采集")
+    last_error = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PublicResearchCollectionRun(Base):
+    __tablename__ = "public_research_collection_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    source_id = Column(Integer, ForeignKey("public_research_sources.id"), nullable=False, index=True)
+    status = Column(String(30), nullable=False)
+    discovered_count = Column(Integer, nullable=False, default=0)
+    inserted_count = Column(Integer, nullable=False, default=0)
+    duplicate_count = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, default="")
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
