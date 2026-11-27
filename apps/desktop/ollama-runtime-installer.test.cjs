@@ -5,6 +5,8 @@ const assert = require("node:assert/strict");
 const {
   INSTALLER_URL,
   REQUIRED_FREE_BYTES,
+  OLLAMA_PORTS,
+  findRunningOllama,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
 } = require("./ollama-runtime-installer.cjs");
@@ -32,4 +34,27 @@ test("signature requires both a valid Authenticode status and Ollama Inc organiz
 
 test("runtime install disk reserve is at least five GiB", () => {
   assert.equal(REQUIRED_FREE_BYTES, 5 * 1024 ** 3);
+});
+
+
+test("existing Ollama is detected on either supported local port", async () => {
+  assert.deepEqual(OLLAMA_PORTS, [11434, 11435]);
+  const checked = [];
+  const running = await findRunningOllama({
+    request: async (url) => {
+      checked.push(url);
+      return url.includes(":11435/") ? { models: [{ name: "qwen3:4b" }] } : null;
+    },
+  });
+  assert.deepEqual(checked, [
+    "http://127.0.0.1:11434/api/tags",
+    "http://127.0.0.1:11435/api/tags",
+  ]);
+  assert.equal(running.port, 11435);
+  assert.deepEqual(running.payload.models, [{ name: "qwen3:4b" }]);
+});
+
+test("Ollama detection returns null when neither supported port is running", async () => {
+  const running = await findRunningOllama({ request: async () => null });
+  assert.equal(running, null);
 });
