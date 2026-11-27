@@ -63,6 +63,12 @@ jobs:
           npm ci --prefix apps/web --include=dev
           npm ci --prefix apps/desktop --include=dev
 
+      - name: Test local Ollama runtime detection
+        shell: pwsh
+        run: |
+          node --check apps/desktop/ollama-runtime-installer.cjs
+          node --test apps/desktop/ollama-runtime-installer.test.cjs
+
       - name: Download FFmpeg runtime for offline installer
         shell: pwsh
         run: |
