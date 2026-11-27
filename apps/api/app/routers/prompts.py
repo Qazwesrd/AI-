@@ -555,6 +555,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
         if len(platforms) < 2 or len(dates) < 2:
             continue
         weighted_samples = []
+        has_metrics = False
         for row in evidence_rows:
             metrics = row.metric_summary if isinstance(row.metric_summary, dict) else {}
             engagement = 0.0
@@ -563,6 +564,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
                     value = max(0.0, float(metrics.get(metric, 0) or 0))
                 except (TypeError, ValueError):
                     value = 0.0
+                has_metrics = has_metrics or value > 0
                 engagement += weight * math.log1p(value)
             try:
                 observed = date.fromisoformat((row.observed_at or "")[:10])
@@ -571,6 +573,8 @@ def research_trend_ranking(db: Session = Depends(get_db)):
             except ValueError:
                 recency = 0.25
             weighted_samples.append(engagement * recency)
+        if not has_metrics:
+            continue
         average_signal = sum(weighted_samples) / max(1, len(weighted_samples))
         score = average_signal + min(len(platforms), 5) * 2.0 + min(len(dates), 7) * 1.25
         latest = max(dates) if dates else ""
@@ -593,7 +597,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
     return {
         "items": ranking,
         "verified_evidence_count": len(rows),
-        "notice": "只统计人工核验的漫剧/作品趋势证据；提示词分享证据与剧本证据分别进入独立榜单，不混入漫剧热度排名。当前仍需人工录入，尚未接入各平台自动抓取。",
+        "notice": "只统计人工核验且包含有效公开互动数值的漫剧/作品趋势证据；部分公开 RSS/Atom 来源可自动发现候选，但必须人工核验后才进入榜单。提示词分享与剧本证据分别进入独立榜单，不混入漫剧热度排名；未接入公开订阅的来源仍需人工录入。",
     }
 
 
