@@ -145,7 +145,7 @@ def summary(db: Session = Depends(get_db)):
         item["withdrawn"] = round(withdrawn.get(currency, 0.0), 2)
         item["settled_balance_estimate"] = round(max(0, item["settled_net"] + item["payable_net"]-item["withdrawn"]), 2)
     return {"currency_totals": totals, "revenue_count": len(revenues), "withdrawal_count": len(withdrawals),
-            "disclaimer": "余额为根据手动登记数据计算的估算值，不是平台实时余额或官方可提现金额。"}
+            "disclaimer": "汇总中的预估收入、待付款、已付款可能是同一收益在不同阶段的记录，不能简单相加；估算余额不是平台实时余额或官方可提现金额。"}
 
 
 @router.get("/entries")
