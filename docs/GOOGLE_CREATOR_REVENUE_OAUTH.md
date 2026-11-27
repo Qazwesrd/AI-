@@ -32,7 +32,7 @@ Client ID 会保存在本机 `storage/secrets/google-oauth.json`，不会提交�
 ## 3. 连接与同步
 
 1. 授权完成后，收益中心会显示已连接账户。
-2. 点击“同步真实收入”。
+2. 点击“同步真实收入”；也可以等待软件后台每 6 小时自动同步已授权账户。自动同步只使用你此前明确授予的只读 OAuth 权限。
 
 同步项目：
 - YouTube Analytics：最近 30 天的 `estimatedRevenue`，标记为 estimated，币种请求为 USD。
