@@ -656,6 +656,7 @@ def collect_public_source(source_id: int, db: Session):
         run.discovered_count = len(items)
         run.inserted_count = inserted
         run.duplicate_count = duplicates
+        run.finished_at = datetime.utcnow()
         source.last_status = "成功"
         source.last_error = ""
         source.last_collected_at = datetime.utcnow()
