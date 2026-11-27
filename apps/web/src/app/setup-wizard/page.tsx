@@ -25,6 +25,10 @@ export default function SetupWizardPage() {
   const [localModels, setLocalModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [modelTest, setModelTest] = useState<Check | null>(null);
+  const [imageModels, setImageModels] = useState<string[]>([]);
+  const [selectedImageModel, setSelectedImageModel] = useState("");
+  const [imageTest, setImageTest] = useState<Check | null>(null);
+  const [testingImage, setTestingImage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testingModel, setTestingModel] = useState(false);
 
@@ -36,6 +40,8 @@ export default function SetupWizardPage() {
     setOllamaCheck(null);
     setLocalModels([]);
     setModelTest(null);
+    setImageTest(null);
+    setImageModels([]);
     const checkOne = async (path: string): Promise<Check> => {
       try {
         const response = await fetch(`${API}${path}`, { cache: "no-store" });
@@ -43,7 +49,10 @@ export default function SetupWizardPage() {
         if (!response.ok) return { status: "error", message: data.detail || `检测失败（HTTP ${response.status}）` };
         if (path.endsWith("image-runtime")) {
           const count = data.model_inventory?.total ?? data.checkpoint_count ?? 0;
-          return { status: data.status || "unknown", message: data.message || "图片引擎检测完成", detail: `已发现 ${count} 个图片模型条目；硬件建议：${data.hardware?.gpu_level || "未知"}。发现条目不代表已实测加载。` };
+          const checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints.filter((name: unknown): name is string => typeof name === "string") : [];
+          setImageModels(checkpoints);
+          setSelectedImageModel(current => current && checkpoints.includes(current) ? current : (checkpoints[0] || ""));
+          return { status: data.status || "unknown", message: data.message || "图片引擎检测完成", detail: `已发现 ${count} 个图片模型条目；可测试基础 checkpoint：${checkpoints.length} 个；硬件建议：${data.hardware?.gpu_level || "未知"}。发现条目不代表已实测加载。` };
         }
         const count = data.model_inventory_count ?? data.model_inventory?.length ?? 0;
         const folders = data.model_folders ? Object.entries(data.model_folders).map(([name, item]: [string, any]) => `${name}: ${item.count ?? 0}`).join("；") : "模型目录信息未返回";
@@ -114,6 +123,32 @@ export default function SetupWizardPage() {
     }
   }
 
+  async function testSelectedImageModel() {
+    if (!selectedImageModel) return;
+    setTestingImage(true);
+    setImageTest(null);
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          checkpoint: selectedImageModel,
+          prompt: "A single cinematic anime character portrait, centered composition, clean background, detailed face and costume",
+          negative_prompt: "blurry, low quality, deformed, extra limbs, text, watermark",
+          style: "3D漫", width: 512, height: 512, steps: 4, cfg: 6,
+          confirm_local_generation: true
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || `图片测试失败（HTTP ${response.status}）`);
+      setImageTest({ status: "submitted", message: "本地图片推理任务已提交", detail: `任务编号：${data.prompt_id}；模型：${data.checkpoint}；种子：${data.seed}。这只代表已进入本机 ComfyUI 队列，等待完成并成功保存图片后才算推理通过。请到图片生成工作台查看任务结果。` });
+    } catch (error) {
+      setImageTest({ status: "error", message: error instanceof Error ? error.message : "图片测试失败" });
+    } finally {
+      setTestingImage(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#070512] px-4 py-8 text-white md:px-8">
       <div className="mx-auto max-w-5xl space-y-6">
@@ -146,6 +181,19 @@ export default function SetupWizardPage() {
               <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                 {[["独立 AI 资源包", bundleCheck], ["文字模型引擎", ollamaCheck], ["图片引擎", imageCheck], ["视频引擎", videoCheck]].map(([name, check]) => <div key={name as string} className="rounded-lg border border-white/10 bg-black/20 p-3"><p className="font-semibold">{name as string}：{statusLabel(check as Check | null)}</p><p className="mt-1 text-xs leading-5 text-slate-300">{(check as Check | null)?.message || "点击上方按钮检测"}</p>{(check as Check | null)?.detail && <p className="mt-2 break-all text-xs leading-5 text-cyan-100/70">{(check as Check).detail}</p>}</div>)}
               </div>
+              <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="font-semibold">本地图片模型实际推理测试</p>
+                <p className="mt-1 text-xs leading-5 text-slate-300">使用已安装的 checkpoint，在本机 ComfyUI 生成一张 512×512、4 步测试图。会占用本机资源；不会下载模型、调用云端或产生付费请求。</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <select value={selectedImageModel} onChange={event => { setSelectedImageModel(event.target.value); setImageTest(null); }} disabled={!imageModels.length || testingImage} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-sm">
+                    {!imageModels.length && <option value="">未发现可测试的 checkpoint</option>}
+                    {imageModels.map(model => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                  <button onClick={testSelectedImageModel} disabled={!selectedImageModel || testingImage} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">{testingImage ? "正在提交本地测试…" : "生成测试图片"}</button>
+                </div>
+                {imageTest && <div className="mt-3 rounded-lg border border-white/10 p-3 text-xs leading-6"><p className={imageTest.status === "submitted" ? "text-cyan-200" : "text-amber-200"}>{imageTest.message}</p>{imageTest.detail && <p className="mt-1 whitespace-pre-wrap text-slate-300">{imageTest.detail}</p>}</div>}
+              </div>
+
               <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
                 <p className="font-semibold">本地文字模型实际推理测试</p>
                 <p className="mt-1 text-xs leading-5 text-slate-300">只测试本机已安装模型，不会下载模型，也不会调用云端。</p>
