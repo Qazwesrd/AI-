@@ -48,7 +48,7 @@ export default function MediaStudioPage() {
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
   const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
-  const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
+  const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);\n  const [workflowJson, setWorkflowJson] = useState("");\n  const [workflowPromptId, setWorkflowPromptId] = useState("");\n  const [workflowBusy, setWorkflowBusy] = useState(false);\n  const [workflowResult, setWorkflowResult] = useState<any>(null);
 
   async function loadLocalVideoRuntime() {
     setVideoRuntimeLoading(true);
@@ -90,7 +90,69 @@ export default function MediaStudioPage() {
     return () => window.clearInterval(timer);
   }, []);
 
-  async function createVideo() {
+
+
+  async function importWorkflowFile(file?: File) {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".json") || file.size > 4 * 1024 * 1024) {
+      setMessage("请选择不超过 4 MB 的 ComfyUI API 格式 JSON 工作流文件。");
+      return;
+    }
+    try {
+      const text = await file.text();
+      JSON.parse(text);
+      setWorkflowJson(text);
+      setWorkflowResult(null);
+      setMessage("工作流文件已载入编辑区；尚未提交生成。");
+    } catch {
+      setMessage("工作流文件不是有效 JSON。");
+    }
+  }
+
+  async function runLocalVideoWorkflow(validateOnly = false) {
+    let workflow: Record<string, unknown>;
+    try {
+      workflow = JSON.parse(workflowJson);
+      if (!workflow || typeof workflow !== "object" || Array.isArray(workflow)) throw new Error("工作流根节点必须是 JSON 对象");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "工作流 JSON 格式错误");
+      return;
+    }
+    setWorkflowBusy(true);
+    setWorkflowResult(null);
+    setMessage(validateOnly ? "正在核对本机节点、模型选项和视频输出节点……" : "正在向本机 ComfyUI 提交视频生成任务……");
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-workflow/${validateOnly ? "validate" : "submit"}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow, prompt }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = typeof data.detail === "object" ? [data.detail.message, ...(data.detail.errors || [])].filter(Boolean).join("；") : data.detail;
+        throw new Error(detail || "本地工作流请求失败");
+      }
+      setWorkflowResult(data);
+      if (!validateOnly && data.prompt_id) setWorkflowPromptId(data.prompt_id);
+      setMessage(data.message || (validateOnly ? "本地工作流预检通过。" : "已提交本地生成任务。"));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "本地工作流操作失败");
+    } finally { setWorkflowBusy(false); }
+  }
+
+  async function refreshLocalWorkflow() {
+    if (!workflowPromptId) return;
+    setWorkflowBusy(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-workflow/${workflowPromptId}`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "查询本地任务失败");
+      setWorkflowResult(data);
+      setMessage(data.message || "本地视频任务状态已刷新。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "查询本地任务失败");
+    } finally { setWorkflowBusy(false); }
+  }
+\n  async function createVideo() {
     if (!prompt.trim()) {
       setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
       return;
@@ -268,7 +330,37 @@ export default function MediaStudioPage() {
 
         {message && <div className="rounded-xl border border-purple-400/30 bg-purple-500/10 p-4">{message}</div>}
 
-        <section className="grid gap-6 lg:grid-cols-2">
+
+        <section className="rounded-2xl border border-emerald-300/25 bg-emerald-950/20 p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold text-emerald-100">本地 Wan / VACE 工作流执行</h2>
+              <p className="mt-1 text-sm text-white/60">导入 ComfyUI 导出的 API 格式工作流，在本机检查节点和模型后直接排队生成。不会调用云端，也不会自动下载模型。</p>
+            </div>
+            <span className="rounded-full border border-emerald-300/30 px-3 py-1 text-xs text-emerald-200">本地执行</span>
+          </div>
+          <label className="mt-4 block text-sm">导入 ComfyUI API 工作流 JSON（最大 4 MB）</label>
+          <input type="file" accept=".json,application/json" onChange={event => void importWorkflowFile(event.target.files?.[0])} className="mt-2 block w-full text-sm text-white/70" />
+          <label className="mt-4 block text-sm">工作流 JSON 内容</label>
+          <textarea value={workflowJson} onChange={event => setWorkflowJson(event.target.value)} rows={8}
+            placeholder="从 ComfyUI 导出 API 格式工作流 JSON 后，在这里导入或粘贴。普通网页保存的 workflow JSON 不是 API 格式。"
+            className="mt-2 w-full rounded-lg border border-white/15 bg-black/40 p-3 font-mono text-xs" />
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button disabled={workflowBusy || !workflowJson.trim()} onClick={() => void runLocalVideoWorkflow(true)} className="rounded-lg border border-emerald-300/40 px-4 py-2 text-sm disabled:opacity-40">只做本地预检</button>
+            <button disabled={workflowBusy || !workflowJson.trim()} onClick={() => void runLocalVideoWorkflow(false)} className="rounded-lg bg-emerald-700 px-5 py-2 text-sm font-semibold disabled:opacity-40">预检并提交本地生成</button>
+            <button disabled={workflowBusy || !workflowPromptId} onClick={() => void refreshLocalWorkflow()} className="rounded-lg border border-white/20 px-4 py-2 text-sm disabled:opacity-40">刷新任务状态</button>
+          </div>
+          {workflowResult && <div className="mt-4 rounded-lg border border-white/10 bg-black/25 p-3 text-sm">
+            <p className="font-semibold text-emerald-100">本地工作流结果</p>
+            {workflowResult.prompt_id && <p className="mt-1 break-all text-xs">ComfyUI 任务编号：{workflowResult.prompt_id}</p>}
+            {workflowResult.node_count !== undefined && <p className="mt-1 text-xs">节点数：{workflowResult.node_count} · 预检：{workflowResult.valid ? "通过" : "未通过"}</p>}
+            {workflowResult.videos?.length > 0 && <div className="mt-2 space-y-1">{workflowResult.videos.map((video: any, index: number) => <p key={index} className="break-all text-xs text-emerald-200">{video.filename} · {video.subfolder || "output"}</p>)}</div>}
+            {workflowResult.errors?.length > 0 && <ul className="mt-2 list-disc pl-5 text-xs text-amber-200">{workflowResult.errors.map((error: string, index: number) => <li key={index}>{error}</li>)}</ul>}
+            <p className="mt-2 text-xs text-white/60">{workflowResult.message}</p>
+          </div>}
+          <p className="mt-3 text-xs leading-5 text-amber-100/70">说明：当前执行器使用你已经在 ComfyUI 中配置好的 API 工作流；需要 Wan/VACE 节点和模型已安装。预检通过不代表模型权重加载或生成一定成功。先用短时长、低分辨率工作流测试。生成结果保存在本机 ComfyUI 输出目录。</p>
+        </section>
+\n        <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-purple-300/20 bg-slate-950/65 p-6">
             <h2 className="mb-5 text-xl font-semibold">真实 AI 视频生成</h2>
             <label className="mb-2 block text-sm">服务商 ID</label>
