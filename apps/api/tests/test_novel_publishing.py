@@ -15,6 +15,7 @@ from app.routers.novel_publishing import (
     export_distribution_package, list_novel_distribution_platforms, build_ai_assist_prompt,
     TranslationCreateInput, TranslationChunkEditInput, create_translation, translate_next_chunk, get_translation,
     edit_translation_chunk, export_translation, _translation_chunks,
+    router as novel_publishing_router,
 )
 
 
@@ -32,6 +33,14 @@ class NovelPublishingTests(unittest.TestCase):
     def tearDown(self):
         self.db.close()
         self.engine.dispose()
+
+    def test_epub_export_route_is_not_shadowed_by_helper_function(self):
+        matches = [
+            route for route in novel_publishing_router.routes
+            if getattr(route, "path", None) == "/api/novel-publishing/packages/{package_id}/export"
+        ]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].endpoint.__name__, "export_distribution_package")
 
     def test_catalog_only_claims_manual_platform_submission(self):
         result = list_novel_distribution_platforms()
