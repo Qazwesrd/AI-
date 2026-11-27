@@ -79,8 +79,10 @@ class RevenueCenterTests(unittest.TestCase):
                     return {"rows":[["2026-11-26", 3.25]]}
                 if url.endswith("/v2/accounts?pageSize=100"):
                     return {"accounts":[{"name":"accounts/pub-123"}]}
+                if "/reports:generate?" in url:
+                    return {"headers":[{"name":"ESTIMATED_EARNINGS","type":"METRIC_CURRENCY","currencyCode":"USD"}],"rows":[]}
                 if "/payments" in url:
-                    return {"payments":[{"name":"accounts/pub-123/payments/unpaid","amount":"$12.50 USD","date":{}}]}
+                    return {"payments":[{"name":"accounts/pub-123/payments/unpaid","amount":"$12.50","date":{}}]}
                 raise AssertionError(url)
 
             with patch("app.routers.revenue.google_get_json", side_effect=fake_google_get):
