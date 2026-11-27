@@ -80,6 +80,25 @@ class NovelPublishingTests(unittest.TestCase):
         self.assertEqual(updated["item"]["status"], "published")
         self.assertTrue(updated["item"]["external_work_url"].startswith("https://"))
 
+    def test_amazon_and_google_play_accept_prepared_manuscript_packages(self):
+        for platform_id, expected_name in (
+            ("kdp","Amazon Kindle Direct Publishing"),
+            ("google_play_books","Google Play Books"),
+        ):
+            result=create_distribution_package(
+                self.novel.id,
+                DistributionPackageInput(
+                    platform_id=platform_id,pen_name="Writer",localized_title="A Test Novel",
+                    language="en",synopsis="A fantasy adventure.",tags=["fantasy"],
+                    rights_confirmed=True,ai_assistance_disclosed=True,
+                ),
+                self.db,
+            )
+            self.assertEqual(result["item"]["platform_name"],expected_name)
+            self.assertEqual(result["item"]["status"],"prepared")
+            exported=export_distribution_package(result["item"]["id"],"epub",self.db)
+            self.assertEqual(exported.media_type,"application/epub+zip")
+
     def test_ai_assist_prompt_is_prepared_without_automatic_paid_api_call(self):
         result = build_ai_assist_prompt(
             self.novel.id,
