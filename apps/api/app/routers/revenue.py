@@ -18,7 +18,7 @@ from app.models.revenue import (
 from app.services.google_creator_oauth import (
     OAuthConfigurationError, OAuthProviderError, decrypt_token, encrypt_token,
     exchange_code, get_email, google_get_json, new_authorization,
-    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE,
+    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE, GOOGLE_CONFIG_FILE,
 )
 
 router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
@@ -553,7 +553,7 @@ def save_google_oauth_config(data: GoogleOAuthConfigInput):
 @router.get("/oauth/status")
 def google_oauth_status():
     return {
-        "google_oauth_configured": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID")),
+        "google_oauth_configured": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID")) or GOOGLE_CONFIG_FILE.exists(),
         "token_encryption_configured": bool(os.environ.get("AI_COMIC_TOKEN_ENCRYPTION_KEY")) or OAUTH_KEY_FILE.exists(),
         "provider": "Google / YouTube Analytics / AdSense",
         "read_only": True,
