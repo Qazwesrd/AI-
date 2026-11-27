@@ -319,6 +319,18 @@ class LocalImageTaskTerminalStatusTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["images"][0]["filename"], "frame.png")
 
+    def test_failure_status_string_is_terminal_even_without_messages(self):
+        history = {
+            "e" * 32: {
+                "status": {"completed": False, "status_str": "failure"},
+                "outputs": {},
+            }
+        }
+        with patch("app.routers.local_image_generation._local_request", return_value=history):
+            result = get_local_image_task("e" * 32)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["images"], [])
+
 
 if __name__ == "__main__":
     unittest.main()
