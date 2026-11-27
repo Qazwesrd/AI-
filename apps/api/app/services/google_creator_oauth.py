@@ -227,12 +227,12 @@ def get_email(access_token: str) -> str:
 def parse_money(value: str, fallback_currency: str | None = None):
     import re
     raw = str(value or "").strip()
-    match = re.search(r"-?[0-9][0-9,]*(?:\\.[0-9]+)?", raw)
+    match = re.search(r"-?[0-9][0-9,]*(?:\.[0-9]+)?", raw)
     if not match:
         return None, None
     amount = float(match.group(0).replace(",", ""))
     upper = raw.upper()
     currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD") if code in upper), None)
-    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR"}:
+    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD"}:
         currency = fallback_currency
     return amount, currency
