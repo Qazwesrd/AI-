@@ -49,7 +49,7 @@ class ImportPayload(BaseModel):
 
 
 class LocalEvolutionAnalyzeInput(BaseModel):
-    max_assets: int = Field(default=80, ge=1, le=120)
+    max_assets: int = Field(default=30, ge=1, le=80)
 
 
 class ReviewPayload(BaseModel):
@@ -768,7 +768,7 @@ def analyze_chapter_asset_evolution_locally(
     user_prompt = (
         f"小说：{novel.title}\n章节：第{chapter_number}章\n"
         "已有素材清单：\n" + json.dumps(asset_context, ensure_ascii=False) +
-        "\n本章正文：\n" + chapter_text[:24000]
+        "\n本章正文：\n" + chapter_text[:18000]
     )
     try:
         result = _ollama_request("/api/generate", {
