@@ -9,7 +9,7 @@ type Package = {id:number;novel_id:number;translation_id:number|null;platform_id
 type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
 type LocalModel = {name:string};
-type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;chapters?:{chapter_number:number;title:string;translated_text:string;status:string}[]};
+type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;chapters?:{chapter_number:number;title:string;translated_text:string;status:string;chunks?:{index:number;source:string;translation:string;status:string}[]}[]};
 
 export default function NovelPublishingPage(){
   const [novels,setNovels]=useState<Novel[]>([]);
@@ -134,6 +134,18 @@ export default function NovelPublishingPage(){
     finally{setBusy(false);}
   }
 
+  async function saveTranslationChunk(translationId:number,chapterNumber:number,chunkIndex:number,translation:string){
+    setBusy(true);
+    try{
+      const result=await api<{message:string}>(`/api/novel-publishing/translations/${translationId}/chapters/${chapterNumber}/chunks/${chunkIndex}`,{
+        method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({translation}),
+      });
+      await refreshTranslation(translationId);
+      setMessage(result.message);
+    }catch(e){setMessage(e instanceof Error?e.message:"保存译文校对失败");}
+    finally{setBusy(false);}
+  }
+
   async function exportTranslation(id:number,format:"md"|"txt"|"json"|"epub"="md"){
     try{
       const response=await fetch(`${API}/api/novel-publishing/translations/${id}/export?format=${format}`);
@@ -220,7 +232,7 @@ export default function NovelPublishingPage(){
           <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy||item.status==="completed"} onClick={()=>void translateOne(item.id)} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-xs">翻译下一段</button><button disabled={busy||item.status==="completed"} onClick={()=>void translateAll(item.id)} className="rounded-lg bg-emerald-800 px-3 py-2 text-xs">连续翻译全文</button><button onClick={()=>void refreshTranslation(item.id)} className="rounded-lg border border-white/15 px-3 py-2 text-xs">查看进度</button><button onClick={()=>void exportTranslation(item.id,"md")} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs">导出译本</button><button onClick={()=>void exportTranslation(item.id,"txt")} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs">导出 TXT</button><button disabled={item.status!=="completed"} onClick={()=>void exportTranslation(item.id,"epub")} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-xs disabled:opacity-40">导出 EPUB（KDP / Google）</button></div>
         </div>)}
         {!translations.length&&<p className="py-4 text-center text-xs text-white/40">上传小说或选择已有小说，创建第一个独立译本。</p>}</div>
-        {activeTranslation?.chapters&&<details className="mt-4 rounded-xl border border-white/10 p-3"><summary className="cursor-pointer text-sm">预览已翻译章节（{activeTranslation.chapters.length}章）</summary><div className="mt-3 max-h-96 space-y-3 overflow-y-auto">{activeTranslation.chapters.map(ch=><article key={ch.chapter_number} className="rounded-lg bg-black/20 p-3"><strong className="text-sm">{ch.title}</strong><pre className="mt-2 whitespace-pre-wrap text-xs text-white/70">{ch.translated_text||"尚未翻译"}</pre></article>)}</div></details>}
+        {activeTranslation?.chapters&&<details className="mt-4 rounded-xl border border-white/10 p-3" open><summary className="cursor-pointer text-sm">译文校对与章节预览（{activeTranslation.chapters.length}章）</summary><p className="mt-2 text-xs text-white/50">逐段修改后点击保存；留空会将该段标记为待翻译，之后可继续由本机模型补译。</p><div className="mt-3 max-h-[36rem] space-y-3 overflow-y-auto">{activeTranslation.chapters.map(ch=><article key={ch.chapter_number} className="rounded-lg bg-black/20 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{ch.title}</strong><span className="text-xs text-cyan-200">{ch.completed_chunks}/{ch.total_chunks} 段</span></div>{(ch.chunks||[]).map(chunk=><div key={chunk.index} className="mt-3 rounded-lg border border-white/10 p-2"><p className="text-[11px] text-white/40">原文片段 {chunk.index+1}</p><pre className="mt-1 whitespace-pre-wrap text-xs text-white/60">{chunk.source}</pre><label className="mt-2 block text-xs text-emerald-200">译文（可校对）<textarea key={`${activeTranslation.id}-${ch.chapter_number}-${chunk.index}-${chunk.translation}`} defaultValue={chunk.translation} className={field+" mt-1 min-h-24 text-xs leading-5"} /></label><div className="mt-2 flex items-center justify-between gap-2"><span className="text-[11px] text-white/40">{chunk.status==="completed"?"已完成":"待翻译"}</span><button disabled={busy} onClick={event=>{const textarea=event.currentTarget.parentElement?.previousElementSibling?.querySelector("textarea");if(textarea instanceof HTMLTextAreaElement)void saveTranslationChunk(activeTranslation.id,ch.chapter_number,chunk.index,textarea.value);}} className="rounded-lg border border-emerald-300/30 px-3 py-1.5 text-xs disabled:opacity-40">保存本段校对</button></div></div>)}</article>)}</div></details>}
       </section>
       <section className="rounded-2xl border border-cyan-400/20 bg-[#101c2acc] p-5">
         <h2 className="text-xl font-bold">AI辅助小说创作与翻译</h2>
