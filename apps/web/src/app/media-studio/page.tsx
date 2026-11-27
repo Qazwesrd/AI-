@@ -158,7 +158,7 @@ export default function MediaStudioPage() {
       return;
     }
     if (!provider.trim() || !model.trim()) {
-      setMessage("尚未配置外部视频服务商和模型。当前本地 Wan 2.1 VACE 视频工作流仍在接入中；不会自动选择付费服务。");
+      setMessage("尚未配置外部视频服务商和模型。请使用上方本地 Wan/VACE 工作流导入功能；不会自动选择付费服务。");
       return;
     }
     const styleInstruction = videoPromptMode === "animation"
@@ -225,7 +225,7 @@ export default function MediaStudioPage() {
         <header>
           <h1 className="text-3xl font-bold">AI 视频与音频生产中心</h1>
           <p className="mt-2 text-white/60">视频生成、AI 配音、任务查询与媒体合成</p>
-          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100/80">本地免费模式优先：Wan 2.1 VACE 尚未完成接入。外部视频 API 只有在你手动填写服务商、模型并勾选费用确认后才会提交；默认不选择任何服务商。</p>
+          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100/80">本地免费模式优先：已支持导入 ComfyUI API 格式 Wan/VACE 工作流、预检并提交本机队列；内置自动建图模板和自动化加载验收仍在完善。外部视频 API 只有在你手动填写服务商、模型并勾选费用确认后才会提交。</p>
           <section className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/15 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -343,7 +343,7 @@ export default function MediaStudioPage() {
           <input type="file" accept=".json,application/json" onChange={event => void importWorkflowFile(event.target.files?.[0])} className="mt-2 block w-full text-sm text-white/70" />
           <label className="mt-4 block text-sm">工作流 JSON 内容</label>
           <textarea value={workflowJson} onChange={event => setWorkflowJson(event.target.value)} rows={8}
-            placeholder="从 ComfyUI 导出 API 格式工作流 JSON 后，在这里导入或粘贴。普通网页保存的 workflow JSON 不是 API 格式。"
+            placeholder="先在 ComfyUI 开启开发者模式，使用「Save (API Format)」导出 API 格式 JSON，再导入此处。普通网页保存的 workflow JSON 不是 API 格式。"
             className="mt-2 w-full rounded-lg border border-white/15 bg-black/40 p-3 font-mono text-xs" />
           <div className="mt-3 flex flex-wrap gap-3">
             <button disabled={workflowBusy || !workflowJson.trim()} onClick={() => void runLocalVideoWorkflow(true)} className="rounded-lg border border-emerald-300/40 px-4 py-2 text-sm disabled:opacity-40">只做本地预检</button>
