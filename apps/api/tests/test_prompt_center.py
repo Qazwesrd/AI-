@@ -39,6 +39,17 @@ class PromptCenterTests(unittest.TestCase):
             notes="测试备注",
         ), self.db)["item"]
 
+    def test_builtin_prompts_seed_once_and_are_editable_versions(self):
+        ensure_default_prompts(self.db)
+        first_count = self.db.query(PromptTemplate).count()
+        ensure_default_prompts(self.db)
+        second_count = self.db.query(PromptTemplate).count()
+        self.assertGreaterEqual(first_count, 8)
+        self.assertEqual(first_count, second_count)
+        builtins = self.db.query(PromptTemplate).filter(PromptTemplate.is_system.is_(True)).all()
+        self.assertGreaterEqual(len(builtins), 8)
+        self.assertTrue(all(self.db.query(PromptVersion).filter_by(prompt_id=x.id).count() == 1 for x in builtins))
+
     def test_create_prompt_records_initial_immutable_version(self):
         item = self.create_prompt_row()
         self.assertEqual(item["current_version"], 1)
