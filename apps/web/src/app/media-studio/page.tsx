@@ -48,6 +48,8 @@ export default function MediaStudioPage() {
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
   const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
+  const [runtimeDiagnostics, setRuntimeDiagnostics] = useState<any>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
   const [workflowJson, setWorkflowJson] = useState("");
   const [workflowTemplateSpec, setWorkflowTemplateSpec] = useState("");
@@ -80,6 +82,19 @@ export default function MediaStudioPage() {
     }
   }
 
+
+  async function loadRuntimeDiagnostics() {
+    setDiagnosticsLoading(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-runtime/diagnostics`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本地运行环境诊断失败");
+      setRuntimeDiagnostics(data);
+    } catch (error) {
+      setRuntimeDiagnostics({ available: false, reason: error instanceof Error ? error.message : "无法读取本机运行环境", devices: [] });
+    } finally { setDiagnosticsLoading(false); }
+  }
+
   async function loadVideoTemplateCapabilities() {
     try {
       const response = await fetch(`${API}/api/local-ai/video-workflow/template-capabilities`, { cache: "no-store" });
@@ -102,7 +117,7 @@ export default function MediaStudioPage() {
     } catch {}
   }
 
-  useEffect(() => { loadTasks(); loadLocalVideoRuntime(); loadVideoTemplateCapabilities(); }, []);
+  useEffect(() => { loadTasks(); loadLocalVideoRuntime(); loadVideoTemplateCapabilities(); loadRuntimeDiagnostics(); }, []);
 
   useEffect(() => {
     let attempts = 0;
@@ -426,6 +441,24 @@ export default function MediaStudioPage() {
                 )}
               </div>
             )}
+          </section>
+
+          <section className="mt-4 rounded-xl border border-emerald-300/20 bg-emerald-950/15 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div><h2 className="font-semibold text-emerald-100">本机视频运行环境诊断</h2><p className="mt-1 text-sm text-white/60">只读取本机 ComfyUI 系统信息，不运行压力测试、不下载模型、不提交生成任务。</p></div>
+              <button onClick={loadRuntimeDiagnostics} disabled={diagnosticsLoading} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-sm disabled:opacity-50">{diagnosticsLoading ? "检测中…" : "重新诊断"}</button>
+            </div>
+            {runtimeDiagnostics && <div className="mt-3 space-y-2 text-sm">
+              <p>{runtimeDiagnostics.available ? "本地引擎系统信息已读取" : "暂不可读取运行环境"} · {runtimeDiagnostics.reason || runtimeDiagnostics.assessment || ""}</p>
+              {runtimeDiagnostics.system && <p className="text-xs text-white/55">系统：{runtimeDiagnostics.system.os || "未报告"} · ComfyUI：{runtimeDiagnostics.system.comfyui_version || "未报告"} · PyTorch：{runtimeDiagnostics.system.pytorch_version || "未报告"}</p>}
+              {runtimeDiagnostics.devices?.length > 0 ? runtimeDiagnostics.devices.map((device: any, index: number) => <div key={device.name + index} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="font-medium text-emerald-100">{device.name}</p>
+                <p className="mt-1 text-xs text-white/65">设备类型：{device.type} · 显存总量：{device.vram_total_mb === null ? "未报告" : device.vram_total_mb + " MB"} · 当前可用：{device.vram_free_mb === null ? "未报告" : device.vram_free_mb + " MB"}</p>
+                {device.torch_vram_total_mb !== null && <p className="mt-1 text-xs text-white/45">PyTorch显存：{device.torch_vram_total_mb} MB · 可用：{device.torch_vram_free_mb ?? "未报告"} MB</p>}
+              </div>) : <p className="text-xs text-amber-200/80">没有检测到 ComfyUI 报告的加速设备信息。不能据此断定硬件不支持，需结合驱动和实际模型测试。</p>}
+              {runtimeDiagnostics.assessment && <p className="text-xs text-amber-100/70">{runtimeDiagnostics.assessment}</p>}
+              <p className="text-xs text-white/40">设备被识别不等于模型可加载。下一步仍需使用小尺寸、低显存工作流进行真实执行验收。</p>
+            </div>}
           </section>
           <section className="mt-4 rounded-xl border border-indigo-300/20 bg-indigo-950/15 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
