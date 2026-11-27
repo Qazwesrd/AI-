@@ -620,6 +620,32 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
         self.assertIn("参考图/视频输入节点", caught.exception.detail["missing"])
         ollama.assert_not_called()
 
+    def test_image_to_video_graph_requires_connected_reference_media(self):
+        from app.routers.local_video_runtime import _validate_auto_video_mode_graph
+
+        disconnected = {
+            "1": {"class_type": "LoadImage", "inputs": {"image": "reference.png"}},
+            "2": {"class_type": "WanVideoSampler", "inputs": {"steps": 20}},
+        }
+        self.assertTrue(_validate_auto_video_mode_graph(disconnected, "image_to_video"))
+        connected = {
+            "1": {"class_type": "LoadImage", "inputs": {"image": "reference.png"}},
+            "2": {"class_type": "WanVideoSampler", "inputs": {"image": ["1", 0]}},
+        }
+        self.assertEqual(_validate_auto_video_mode_graph(connected, "image_to_video"), [])
+
+    def test_vace_graph_requires_actual_vace_node_and_connected_reference_media(self):
+        from app.routers.local_video_runtime import _validate_auto_video_mode_graph
+
+        workflow = {
+            "1": {"class_type": "LoadImage", "inputs": {"image": "reference.png"}},
+            "2": {"class_type": "WanVideoSampler", "inputs": {"image": ["1", 0]}},
+        }
+        errors = _validate_auto_video_mode_graph(workflow, "vace")
+        self.assertTrue(any("VACE" in error for error in errors))
+        workflow["3"] = {"class_type": "WanVideoVACEEncode", "inputs": {"image": ["1", 0]}}
+        self.assertEqual(_validate_auto_video_mode_graph(workflow, "vace"), [])
+
     def test_auto_builder_stops_when_wan_nodes_are_missing(self):
         from app.routers import local_video_runtime as runtime
         from fastapi import HTTPException
