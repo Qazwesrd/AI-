@@ -108,15 +108,19 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertIn("不会显示软件内直接提现按钮", result["global_notice"])
 
     def test_kdp_and_google_play_report_imports_are_idempotent_and_keep_revenue_stages(self):
-        google=b"Earnings Date\tTitle\tEarnings Currency\tEarnings Amount\n2026-10-31\tNovel A\tUSD\t12.50\n2026-10-31\tNovel A refund\tUSD\t-1.25\n"
+        google=b"Id\tEarnings Date\tTitle\tEarnings Currency\tEarnings Amount\nTX-1\t2026-10-31\tNovel A\tUSD\t12.50\nTX-2\t2026-10-31\tNovel A refund\tUSD\t-1.25\n"
         first=import_platform_report("google_play_books","earnings.tsv",google,self.db)
         second=import_platform_report("google_play_books","earnings.tsv",google,self.db)
         self.assertEqual(first["imported"],2)
         self.assertEqual(second["imported"],0)
         self.assertEqual(second["updated"],2)
+        changed=google.replace(b"12.50",b"13.50")
+        third=import_platform_report("google_play_books","earnings-corrected.tsv",changed,self.db)
+        self.assertEqual(third["imported"],0)
+        self.assertEqual(third["updated"],2)
         settled=self.db.query(RevenueEntry).filter_by(platform="Google Play Books",status="settled").all()
         self.assertEqual(len(settled),2)
-        self.assertAlmostEqual(sum(row.gross_amount for row in settled),11.25)
+        self.assertAlmostEqual(sum(row.gross_amount for row in settled),12.25)
         self.assertTrue(all("不是银行到账凭证" in row.notes for row in settled))
 
         kdp=b"Month,Title,Currency,Estimated royalties\n2026-11,Novel B,USD,$3.45\n"
