@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
+const CHAT_STORAGE_KEY = "ai-comic-local-chat-v1";
 type Runtime = { status: string; models: Array<{ name: string }>; message: string };
 type Message = { role: "user" | "assistant"; content: string };
+type SavedChat = { version: 1; model: string; messages: Message[]; savedAt: number };
 
 export default function LocalChatPage() {
   const [runtime, setRuntime] = useState<Runtime | null>(null);
@@ -13,6 +15,8 @@ export default function LocalChatPage() {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [storageReady, setStorageReady] = useState(false);
+  const [storageWarning, setStorageWarning] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
@@ -27,6 +31,43 @@ export default function LocalChatPage() {
       setError(err instanceof Error ? err.message : "无法连接本地 Ollama");
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(CHAT_STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw) as Partial<SavedChat>;
+        if (saved.version === 1 && Array.isArray(saved.messages)) {
+          const restored = saved.messages.filter((item): item is Message =>
+            !!item && (item.role === "user" || item.role === "assistant") &&
+            typeof item.content === "string" && item.content.length <= 16000
+          ).slice(-100);
+          setMessages(restored);
+          if (typeof saved.model === "string") setModel(saved.model);
+        }
+      }
+    } catch {
+      setStorageWarning("无法读取本机聊天记录；本次对话仍可正常使用。");
+    } finally {
+      setStorageReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    try {
+      const saved: SavedChat = {
+        version: 1,
+        model,
+        messages: messages.slice(-100),
+        savedAt: Date.now(),
+      };
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(saved));
+      setStorageWarning("");
+    } catch {
+      setStorageWarning("浏览器本机存储不可用或空间不足；请注意刷新页面可能丢失聊天记录。");
+    }
+  }, [model, messages, storageReady]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, busy]);
@@ -65,7 +106,7 @@ export default function LocalChatPage() {
       <header>
         <p className="text-sm text-cyan-300">完全本机推理 · 不调用云端 API</p>
         <h1 className="mt-1 text-2xl font-bold">本地 AI 聊天</h1>
-        <p className="mt-2 text-sm text-white/60">选择已安装的 Ollama 本地模型，直接提问。当前对话在本页内保留；刷新页面后不会自动上传或同步到云端。</p>
+        <p className="mt-2 text-sm text-white/60">选择已安装的 Ollama 本地模型，直接提问。聊天记录和模型选择保存在当前电脑的浏览器本机存储中，不会上传或云同步；最多保留最近 100 条消息。</p>
       </header>
 
       <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -106,11 +147,12 @@ export default function LocalChatPage() {
           <div ref={bottomRef} />
         </div>
         {error && <p role="alert" className="mt-3 rounded-lg border border-red-400/20 bg-red-950/30 p-3 text-sm text-red-200">{error}</p>}
+        {storageWarning && <p role="status" className="mt-3 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100">{storageWarning}</p>}
         <div className="mt-4 flex flex-col gap-2 sm:flex-row">
           <textarea value={draft} onChange={event => setDraft(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} rows={3} maxLength={12000} placeholder="输入你想问本地 AI 的内容；Enter 发送，Shift+Enter 换行" className="min-h-20 flex-1 resize-y rounded-xl border border-white/15 bg-slate-900 p-3 text-sm outline-none focus:border-cyan-300/60" />
           <button onClick={() => void send()} disabled={busy || !draft.trim() || !model} className="rounded-xl bg-cyan-500 px-6 py-3 font-semibold text-slate-950 disabled:opacity-40">{busy ? "正在回答…" : "发送"}</button>
         </div>
-        <p className="mt-2 text-xs text-white/40">本地模型请求失败时只显示错误，不会自动切换云端。对话最多携带最近 20 条消息。</p>
+        <p className="mt-2 text-xs text-white/40">本地模型请求失败时只显示错误，不会自动切换云端。每次请求最多携带最近 20 条消息；本机页面最多保留最近 100 条。</p>
       </section>
     </main>
   );
