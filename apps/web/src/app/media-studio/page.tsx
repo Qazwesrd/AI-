@@ -53,6 +53,7 @@ export default function MediaStudioPage() {
   const [workflowPromptId, setWorkflowPromptId] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowResult, setWorkflowResult] = useState<any>(null);
+  const [templateCapabilities, setTemplateCapabilities] = useState<any>(null);
 
   async function loadLocalVideoRuntime() {
     setVideoRuntimeLoading(true);
@@ -75,6 +76,21 @@ export default function MediaStudioPage() {
     }
   }
 
+  async function loadVideoTemplateCapabilities() {
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-workflow/template-capabilities`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "节点能力扫描失败");
+      setTemplateCapabilities(data);
+    } catch (error) {
+      setTemplateCapabilities({
+        available: false, roles: {}, nodes: [],
+        message: error instanceof Error ? error.message : "无法读取本机视频节点能力",
+        template_generated: false, generation_ready: false,
+      });
+    }
+  }
+
   async function loadTasks() {
     try {
       const response = await fetch(`${API}/api/media/video/tasks`);
@@ -82,7 +98,7 @@ export default function MediaStudioPage() {
     } catch {}
   }
 
-  useEffect(() => { loadTasks(); loadLocalVideoRuntime(); }, []);
+  useEffect(() => { loadTasks(); loadLocalVideoRuntime(); loadVideoTemplateCapabilities(); }, []);
 
   useEffect(() => {
     let attempts = 0;
@@ -324,6 +340,35 @@ export default function MediaStudioPage() {
                 )}
               </div>
             )}
+          </section>
+          <section className="mt-4 rounded-xl border border-indigo-300/20 bg-indigo-950/15 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-indigo-100">本机视频工作流节点能力映射</h2>
+                <p className="mt-1 text-sm text-white/60">{templateCapabilities?.message || "正在读取 ComfyUI 节点真实输入结构……"}</p>
+              </div>
+              <button onClick={loadVideoTemplateCapabilities} className="rounded-lg border border-indigo-300/30 px-3 py-2 text-sm">重新扫描节点能力</button>
+            </div>
+            {templateCapabilities?.available && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {Object.entries(templateCapabilities.roles || {}).map(([role, nodes]: [string, any]) => (
+                  <div key={role} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                    <p className="text-sm font-medium text-indigo-100">{({
+                      model_loader: "视频模型加载器", text_encoder: "文本编码器", text_encode: "提示词编码",
+                      sampler: "视频采样器", vae_loader: "VAE 加载器", decode: "视频解码",
+                      image_input: "图片输入", video_input: "视频输入", vace: "VACE 编辑节点",
+                      video_output: "视频输出",
+                    } as Record<string, string>)[role] || role}</p>
+                    <p className="mt-1 break-all text-xs text-white/55">{(nodes as string[]).join("、")}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="mt-3 text-xs text-amber-100/70">
+              {templateCapabilities?.available
+                ? "已识别本机节点及其输入参数，可用于后续自动建图；当前尚未生成工作流，也未验证模型加载或实际视频生成。"
+                : "未发现可确认的 Wan/VACE 专用节点时，不会用普通图片节点伪造视频工作流。"}
+            </p>
           </section>
           <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
             查看统一任务中心（含配音任务）
