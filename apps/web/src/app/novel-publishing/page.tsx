@@ -97,8 +97,8 @@ export default function NovelPublishingPage(){
     setBusy(true);
     try{
       const result=await api<{item:Translation;message:string}>(`/api/novel-publishing/novels/${novelId}/translations`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target_language:translationLanguage,model_name:translationModel,glossary})});
-      setActiveTranslation(result.item);setMessage(result.message);
-      const list=await api<{items:Translation[]}>(`/api/novel-publishing/translations?novel_id=${novelId}`);setTranslations(list.items||[]);
+      setMessage(result.message);
+      await refreshTranslation(result.item.id);
     }catch(e){setMessage(e instanceof Error?e.message:"创建译本失败");}
     finally{setBusy(false);}
   }
