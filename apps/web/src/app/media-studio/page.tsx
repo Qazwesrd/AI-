@@ -664,6 +664,13 @@ export default function MediaStudioPage() {
           </div>
           {workflowResult && <div className="mt-4 rounded-lg border border-white/10 bg-black/25 p-3 text-sm">
             <p className="font-semibold text-emerald-100">本地工作流结果</p>
+            {workflowResult.resource_assessment && <div className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs">
+              <p className="font-semibold text-amber-100">本机资源预检</p>
+              <p className="mt-1">识别设备：{workflowResult.resource_assessment.device_count} 个 · 工作流参数：{Object.entries(workflowResult.resource_assessment.workflow_settings || {}).map(([key, value]) => `${key}=${value}`).join("、") || "未识别"}</p>
+              {(workflowResult.resource_assessment.warnings || []).map((item: string, index: number) => <p key={index} className="mt-1 text-amber-100">风险：{item}</p>)}
+              {(workflowResult.resource_assessment.recommendations || []).map((item: string, index: number) => <p key={index} className="mt-1 text-white/70">建议：{item}</p>)}
+              <p className="mt-1 text-white/50">预检只读，不会修改工作流；有风险时需再次确认才会提交本机任务。</p>
+            </div>}
             {workflowResult.prompt_id && <p className="mt-1 break-all text-xs">ComfyUI 任务编号：{workflowResult.prompt_id}</p>}
             {workflowResult.node_count !== undefined && <p className="mt-1 text-xs">节点数：{workflowResult.node_count} · 预检：{workflowResult.valid ? "通过" : "未通过"}</p>}
             {workflowResult.has_connected_generation_chain !== undefined && (
