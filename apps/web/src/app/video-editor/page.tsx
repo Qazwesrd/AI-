@@ -29,6 +29,44 @@ export default function VideoEditorPage() {
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
   const [webResult, setWebResult] = useState("");
+  const [localModels, setLocalModels] = useState<{name: string; size_bytes?: number | null}[]>([]);
+  const [localModel, setLocalModel] = useState("");
+  const [localRuntimeMessage, setLocalRuntimeMessage] = useState("正在检测本地 Ollama…");
+
+  async function loadLocalModels() {
+    try {
+      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本地模型检测失败");
+      const models = Array.isArray(data.models) ? data.models : [];
+      setLocalModels(models);
+      setLocalRuntimeMessage(data.message || "本地模型检测完成");
+      if (models.length && !localModel) setLocalModel(models[0].name);
+    } catch (error) {
+      setLocalModels([]);
+      setLocalRuntimeMessage(error instanceof Error ? error.message : "本地模型引擎未连接");
+    }
+  }
+
+  async function analyzeWithLocalModel() {
+    if (!selected.length) return setMessage("请先选择要分析的视频。");
+    if (!localModel) return setMessage("本机没有检测到已安装的 Ollama 模型，请先配置本地模型。");
+    if (!instruction.trim()) return setMessage("请先填写剪辑要求。");
+    setBusy(true);
+    setMessage("正在用本地视觉模型分析视频关键帧，请稍候……");
+    try {
+      const response = await fetch(`${API}/api/video-editor/local-analyze`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: localModel, instruction, source_paths: selected })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本地视频分析失败");
+      setMessage(`${data.message} 已分析 ${data.frames_analyzed} 帧，任务编号：${data.id}`);
+      await loadAll();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "本地视频分析失败");
+    } finally { setBusy(false); }
+  }
 
   async function loadAll() {
     try {
@@ -50,7 +88,7 @@ export default function VideoEditorPage() {
     }
   }
 
-  useEffect(() => { void loadAll(); }, []);
+  useEffect(() => { void loadAll(); void loadLocalModels(); }, []);
 
   async function uploadFiles(list: FileList | null) {
     if (!list?.length) return;
@@ -103,7 +141,9 @@ export default function VideoEditorPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           provider, model,
-          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          instruction: `${instruction}
+
+字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
           source_paths: selected, confirm_paid: confirmPaid
         })
       });
@@ -126,7 +166,9 @@ export default function VideoEditorPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: "网页版 AI 视频剪辑任务",
-          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          instruction: `${instruction}
+
+字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
           source_paths: selected, confirm_selected_videos: true
         })
       });
@@ -255,6 +297,17 @@ export default function VideoEditorPage() {
 
           <div className={panel}>
             <h2 className="mb-4 text-xl font-semibold">第二步：描述剪辑要求</h2>
+            <div className="mb-5 rounded-xl border border-emerald-300/25 bg-emerald-950/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-emerald-100">本地 AI 视频理解与剪辑</h3><button onClick={() => void loadLocalModels()} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs">重新检测</button></div>
+              <p className="mt-2 text-xs leading-5 text-white/60">{localRuntimeMessage}</p>
+              <label className="mb-2 mt-3 block text-sm">本地视觉模型（Ollama）</label>
+              <select value={localModel} onChange={e => setLocalModel(e.target.value)} className="w-full rounded-lg border border-white/15 bg-black/30 p-3">
+                <option value="">请选择本机已安装模型</option>
+                {localModels.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}
+              </select>
+              <button disabled={busy || !localModel || !instruction.trim() || !selected.length} onClick={() => void analyzeWithLocalModel()} className="mt-3 rounded-xl bg-emerald-700 px-5 py-3 font-semibold disabled:opacity-40">用本地 AI 分析视频并生成剪辑方案</button>
+              <p className="mt-2 text-xs text-emerald-100/60">只抽取少量关键帧发送到本机 Ollama；原视频不上传云端。需要支持图像输入的视觉模型。此步骤生成剪辑方案，不是生成全新视频。</p>
+            </div>
             <label className="mb-2 block text-sm">AI 服务商 ID（内置 API 模式）</label>
             <input value={provider} onChange={e => setProvider(e.target.value)} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
             <label className="mb-2 block text-sm">AI 模型名称</label>

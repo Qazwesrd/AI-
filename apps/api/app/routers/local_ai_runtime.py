@@ -3,6 +3,7 @@
 No model pulls, cloud fallback, arbitrary endpoints, or automatic process startup.
 """
 import json
+import os
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
@@ -12,7 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地 AI 引擎"])
-OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11435").rstrip("/")
 MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
 TEST_PROMPT = "请用简体中文写一句话，说明你已成功在本机运行。"
 OPENER = build_opener(ProxyHandler({}))
@@ -82,7 +83,23 @@ def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0
             raise HTTPException(502, "本地引擎返回数据过大，已停止读取")
         return json.loads(raw.decode("utf-8"))
     except HTTPError as exc:
-        raise HTTPException(502, f"本地 Ollama 返回错误：HTTP {exc.code}") from exc
+        # Preserve Ollama's actionable validation message instead of hiding it
+        # behind a generic HTTP status. The response is bounded and never logs
+        # prompts, model files, or environment secrets.
+        try:
+            raw_detail = exc.read(4096).decode("utf-8", errors="replace").strip()
+        except Exception:
+            raw_detail = ""
+        try:
+            parsed_detail = json.loads(raw_detail) if raw_detail else None
+        except json.JSONDecodeError:
+            parsed_detail = None
+        if isinstance(parsed_detail, dict):
+            detail = parsed_detail.get("error") or parsed_detail.get("message")
+        else:
+            detail = raw_detail
+        safe_detail = str(detail or "未提供具体原因").replace("\r", " ").replace("\n", " ")[:500]
+        raise HTTPException(502, f"本地 Ollama 拒绝了请求（HTTP {exc.code}）：{safe_detail}") from exc
     except (URLError, TimeoutError, OSError):
         raise HTTPException(503, "未连接到本机 Ollama。请先自行启动 Ollama，再刷新检测。")
     except (UnicodeDecodeError, json.JSONDecodeError):

@@ -3,18 +3,23 @@ name: Windows desktop installer
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, offline-ai-engine-integration]
     paths:
       - "apps/**"
       - "packages/**"
       - "scripts/build-windows.ps1"
+      - "scripts/update-desktop-only.ps1"
+      - "scripts/test-desktop-only-update.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
+      - ".github/workflows/build-full-offline-installer.yml"
   pull_request:
     paths:
       - "apps/**"
       - "packages/**"
       - "scripts/build-windows.ps1"
+      - "scripts/update-desktop-only.ps1"
+      - "scripts/test-desktop-only-update.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
 
@@ -59,6 +64,13 @@ jobs:
           npm ci --prefix apps/web --include=dev
           npm ci --prefix apps/desktop --include=dev
 
+      - name: Test local Ollama runtime detection
+        shell: pwsh
+        run: |
+          node --check apps/desktop/main.cjs
+          node --check apps/desktop/ollama-runtime-installer.cjs
+          node --test apps/desktop/ollama-runtime-installer.test.cjs
+
       - name: Download FFmpeg runtime for offline installer
         shell: pwsh
         run: |
@@ -87,6 +99,11 @@ jobs:
             if ($file.Length -lt 1MB) { throw "$name is unexpectedly small." }
             Write-Host "$name : $($file.Length) bytes"
           }
+
+      - name: Verify desktop-only update safety
+        shell: pwsh
+        run: |
+          ./scripts/test-desktop-only-update.ps1
 
       - name: Build Windows installer
         shell: pwsh
@@ -123,9 +140,8 @@ jobs:
           name: AI-Comic-Studio-Windows-Setup
           path: |
             apps/desktop/release/*Setup*.exe
-            apps/desktop/release/*.sha256
-            apps/desktop/release/*测试包*.zip
-            apps/desktop/release/*测试包*.zip.sha256
+            apps/desktop/release/*Setup*.exe.sha256
+            scripts/update-desktop-only.ps1
           if-no-files-found: error
           retention-days: 14
 
@@ -144,8 +160,8 @@ jobs:
 
           - 包含桌面启动器、本地 API 和 Web 前端。
           - 安装包内置 FFmpeg / FFprobe，无需用户另行下载。
-          - 同时提供包含安装程序、中文 PDF 使用说明书和实际界面截图的本地测试 ZIP。
-          - 安装后请先完成 AI 服务商配置；第三方 AI 费用由用户自行确认。
+          - 提供桌面专用升级脚本；升级只更新程序，不部署或覆盖本地 AI 引擎和模型。
+          - 本地模型与本地图片引擎按已安装资源运行；任何外部 AI 服务均需用户主动配置和确认。
           '@
 
           # Ensure the git tag exists before creating or resolving the Release.
@@ -177,17 +193,24 @@ jobs:
           if (!$release.id) { throw "Release 信息缺少 ID，无法安全上传资产。" }
 
           $releaseDir = Join-Path $PWD "apps/desktop/release"
+          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $releaseDir "update-desktop-only.ps1") -Force
           $files = @(Get-ChildItem $releaseDir -File | Where-Object {
             $_.Name -like "*Setup*.exe" -or
             $_.Name -like "*Setup*.exe.sha256" -or
-            $_.Name -like "*测试包*.zip" -or
-            $_.Name -like "*测试包*.zip.sha256"
+            $_.Name -eq "update-desktop-only.ps1"
           } | Sort-Object Name)
-          if ($files.Count -ne 4) { throw "预期上传 4 个发布文件，实际找到 $($files.Count) 个。" }
+          if ($files.Count -ne 3) { throw "预期上传 3 个正式交付文件（安装器、SHA-256、桌面专用升级脚本），实际找到 $($files.Count) 个。" }
 
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
+          $expectedAssetNames = @($files | ForEach-Object { $_.Name -replace '[^\x00-\x7F]+', '.' })
+          foreach ($asset in $assets) {
+            if ($expectedAssetNames -notcontains $asset.name) {
+              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
+              if ($LASTEXITCODE -ne 0) { throw "无法清理非正式交付资产：$($asset.name)" }
+            }
+          }
           foreach ($file in $files) {
             # GitHub normalizes non-ASCII release asset names to a dot in the API response.
             # Compare the normalized name so retries replace the correct existing asset.
@@ -209,6 +232,7 @@ jobs:
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法核对 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
+          if ($assets.Count -ne 3) { throw "正式 Release 应只包含 3 个交付资产，实际为 $($assets.Count) 个。" }
           foreach ($file in $files) {
             $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
             $verifiedAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1

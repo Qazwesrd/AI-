@@ -70,6 +70,7 @@ const navigation = [
       ["🎬", "AI漫剧制作", "/novels"],
       ["🖼️", "本地图片生成", "/local-image-studio"],
       ["✂️", "AI视频剪辑", "/video-editor"],
+      ["🎞️", "本地视频工作台", "/media-studio"],
       ["📜", "剧本与分镜", "/storyboard"],
       ["🧊", "三维素材生成", "/visual-studio"],
       ["🧭", "统一任务中心", "/tasks"],
@@ -89,6 +90,10 @@ const navigation = [
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
+      ["🧩", "本地模型与引擎", "/local-models"],
+      ["🧭", "AI资源包新手配置向导", "/setup-wizard"],
+      ["🖼️", "本地图片生成工作台", "/local-image-studio"],
+      ["🎞️", "视频生成与音频中心", "/media-studio"],
       ["📊", "AI调用记录", "/ai-center#usage-logs"],
       ["🗄️", "素材库", "/assets"],
       ["🔧", "网络与付费权限", "/ai-center"],
@@ -212,6 +217,28 @@ export default function Home() {
           </section>
 
           {/* 新手与专业模式快速开始 */}
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <a href="/setup-wizard" className="glass rounded-2xl border border-cyan-300/30 p-4 transition hover:border-cyan-200/70">
+              <div className="text-2xl">🧭</div><h2 className="mt-2 font-bold text-cyan-100">AI资源包配置向导</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">一步一步检查图片模型、视频模型、目录与引擎状态。</p>
+              <span className="mt-3 inline-block text-xs text-cyan-200">开始配置 →</span>
+            </a>
+            <a href="/media-studio" className="glass rounded-2xl border border-fuchsia-300/30 p-4 transition hover:border-fuchsia-200/70">
+              <div className="text-2xl">🎞️</div><h2 className="mt-2 font-bold text-fuchsia-100">本地视频工作台</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">查看 Wan/VACE 本地视频模型，并进入视频生成与音频中心。</p>
+              <span className="mt-3 inline-block text-xs text-fuchsia-200">进入视频工作台 →</span>
+            </a>
+            <a href="/local-models" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
+              <div className="text-2xl">🧩</div><h2 className="mt-2 font-bold text-white">本地模型管理</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">查看模型清单、硬件建议和本地引擎识别结果。</p>
+              <span className="mt-3 inline-block text-xs text-purple-200">管理模型 →</span>
+            </a>
+            <a href="/help" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
+              <div className="text-2xl">📘</div><h2 className="mt-2 font-bold text-white">完整使用说明书</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">查看每个功能的用途、入口、操作流程与常见问题。</p>
+              <span className="mt-3 inline-block text-xs text-purple-200">阅读说明 →</span>
+            </a>
+          </div>
           <BeginnerQuickStart />
 
           {/* 四大功能卡片 */}
@@ -281,7 +308,8 @@ export default function Home() {
                   ["📖", "小说解析", "/novels"],
                   ["👥", "人物识别", "/visual-studio"],
                   ["🎞️", "智能分镜", "/storyboard"],
-                  ["🎥", "视频生成", "/media-studio"],
+                  ["🎥", "本地视频工作台", "/media-studio"],
+                  ["✂️", "智能视频剪辑", "/video-editor"],
                   ["🧭", "统一任务", "/tasks"],
                   ["📘", "使用说明", "/help"]
                 ].map(([icon, name, href]) => (

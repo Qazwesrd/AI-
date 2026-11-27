@@ -4,6 +4,25 @@ import { useEffect, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
+type LocalVideoRuntime = {
+  status: string;
+  node_count: number;
+  nodes: { node_type: string; model_choices: string[]; input_schema?: { required?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }>; optional?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }> } }[];
+  model_inventory?: Array<{ name: string; category: string; source: string; selector_node: string; model_folder?: string; status: string; load_tested: boolean }>;
+  model_inventory_count?: number;
+  model_folders?: Record<string, { available: boolean; count: number; reason?: string }>;
+  model_folder_scan_available?: boolean;
+  vace_node_found: boolean;
+  wan_video_nodes_found: boolean;
+  workflow_node_set_complete: boolean;
+  required_nodes: Record<string, boolean>;
+  missing_required_nodes: string[];
+  generation_ready: boolean;
+  workflow_execution_verified: boolean;
+  reason: string;
+  message: string;
+};
+
 type MediaTask = {
   id: number;
   provider: string;
@@ -16,7 +35,7 @@ type MediaTask = {
 };
 
 export default function MediaStudioPage() {
-  const [provider, setProvider] = useState("openai");
+  const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [prompt, setPrompt] = useState("");
   const [videoPromptMode, setVideoPromptMode] = useState("cinematic");
@@ -28,6 +47,29 @@ export default function MediaStudioPage() {
   const [voice, setVoice] = useState("alloy");
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
+  const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
+  const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
+
+  async function loadLocalVideoRuntime() {
+    setVideoRuntimeLoading(true);
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-runtime`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "本地视频引擎检测失败");
+      setLocalVideoRuntime(data);
+    } catch (error) {
+      setLocalVideoRuntime({
+        status: "unavailable", node_count: 0, nodes: [],
+        vace_node_found: false, wan_video_nodes_found: false,
+        workflow_node_set_complete: false, required_nodes: {}, missing_required_nodes: [],
+        generation_ready: false, workflow_execution_verified: false,
+        reason: error instanceof Error ? error.message : "无法连接本地视频引擎",
+        message: "未能完成本地 Wan/VACE 检测。",
+      });
+    } finally {
+      setVideoRuntimeLoading(false);
+    }
+  }
 
   async function loadTasks() {
     try {
@@ -36,11 +78,25 @@ export default function MediaStudioPage() {
     } catch {}
   }
 
-  useEffect(() => { loadTasks(); }, []);
+  useEffect(() => { loadTasks(); loadLocalVideoRuntime(); }, []);
+
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void loadLocalVideoRuntime();
+      if (attempts >= 8) window.clearInterval(timer);
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   async function createVideo() {
     if (!prompt.trim()) {
       setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
+      return;
+    }
+    if (!provider.trim() || !model.trim()) {
+      setMessage("尚未配置外部视频服务商和模型。当前本地 Wan 2.1 VACE 视频工作流仍在接入中；不会自动选择付费服务。");
       return;
     }
     const styleInstruction = videoPromptMode === "animation"
@@ -107,6 +163,101 @@ export default function MediaStudioPage() {
         <header>
           <h1 className="text-3xl font-bold">AI 视频与音频生产中心</h1>
           <p className="mt-2 text-white/60">视频生成、AI 配音、任务查询与媒体合成</p>
+          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-sm text-amber-100/80">本地免费模式优先：Wan 2.1 VACE 尚未完成接入。外部视频 API 只有在你手动填写服务商、模型并勾选费用确认后才会提交；默认不选择任何服务商。</p>
+          <section className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/15 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-semibold text-cyan-100">本地 Wan 2.1 / VACE 引擎检测</h2>
+                <p className="mt-1 text-sm text-white/65">
+                  {videoRuntimeLoading ? "正在检查本机 ComfyUI 节点……" : localVideoRuntime?.message || "尚未检测"}
+                </p>
+              </div>
+              <button onClick={loadLocalVideoRuntime} disabled={videoRuntimeLoading}
+                className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-50">
+                重新检测
+              </button>
+            </div>
+            {localVideoRuntime && (
+              <div className="mt-3 space-y-2 text-sm">
+                <p>检测状态：{localVideoRuntime.status} · Wan 节点：{localVideoRuntime.node_count}</p>
+                <p>VACE 节点：{localVideoRuntime.vace_node_found ? "已发现" : "未发现"} · Wan Video 节点：{localVideoRuntime.wan_video_nodes_found ? "已发现" : "未发现"}</p>
+                <p>完整工作流节点集：{localVideoRuntime.workflow_node_set_complete ? "齐全" : "不齐全"}</p>
+        <p>视频模型条目：{localVideoRuntime.model_inventory_count ?? localVideoRuntime.model_inventory?.length ?? 0} 个（包含节点选择器与本地模型目录扫描）</p>
+        {localVideoRuntime.model_folders && (
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="mb-2 text-cyan-100">本地视频模型目录检查</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {Object.entries(localVideoRuntime.model_folders).map(([folder, status]) => (
+                <div key={folder} className="rounded border border-white/10 p-2">
+                  <p className="break-all">{folder}</p>
+                  <p className="mt-1 text-xs text-white/55">{status.available ? `已扫描 · ${status.count} 个文件` : status.reason || "未扫描"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {localVideoRuntime.model_inventory && localVideoRuntime.model_inventory.length > 0 && (
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="mb-2 font-medium text-cyan-100">已识别的视频模型清单</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {localVideoRuntime.model_inventory.slice(0,100).map((item,index) => (
+                <div key={item.category + ":" + item.selector_node + ":" + item.name + ":" + index} className="rounded-lg border border-white/10 p-2">
+                  <p className="break-all text-white/90">{item.name}</p>
+                  <p className="mt-1 text-xs text-white/50">{item.category} · {item.source} · {item.selector_node || item.model_folder || "本地目录"} · {item.load_tested ? "已实测加载" : item.status === "file_listed" ? "已发现文件，未实测加载" : "节点可见，未实测加载"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+                <p className="text-amber-200">{localVideoRuntime.reason}</p>
+                {localVideoRuntime.missing_required_nodes.length > 0 && (
+                  <p className="break-words text-white/60">缺少节点：{localVideoRuntime.missing_required_nodes.join("、")}</p>
+                )}
+                <p className="text-white/50">工作流实际生成验收：{localVideoRuntime.workflow_execution_verified ? "已通过" : "尚未通过"}。检测不会下载模型、安装节点或提交生成任务。</p>
+                {localVideoRuntime.nodes.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="break-words text-white/60">已发现节点：{localVideoRuntime.nodes.map(node => node.node_type).join("、")}</p>
+                    {localVideoRuntime.nodes.some(node => Object.keys({ ...(node.input_schema?.required || {}), ...(node.input_schema?.optional || {}) }).length > 0) && (
+                      <details className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <summary className="cursor-pointer text-cyan-100">展开本机节点真实输入参数（以当前 ComfyUI 返回值为准）</summary>
+                        <div className="mt-3 space-y-3">
+                          {localVideoRuntime.nodes.filter(node => Object.keys(node.input_schema || {}).length > 0).map(node => (
+                            <div key={node.node_type}>
+                              <p className="font-medium text-cyan-100">{node.node_type}</p>
+                              <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                                {Object.entries({ ...(node.input_schema?.required || {}), ...(node.input_schema?.optional || {}) }).map(([name, schema]) => (
+                                  <div key={name} className="rounded border border-white/10 p-2 text-xs">
+                                    <p className="break-all text-white/90">{name} {node.input_schema?.required && Object.prototype.hasOwnProperty.call(node.input_schema.required, name) ? "· 必填" : "· 可选"}</p>
+                                    <p className="mt-1 break-all text-white/50">
+                                      {schema.type || "类型未报告"}
+                                      {schema.choices?.length ? ` · 选项：${schema.choices.join("、")}` : ""}
+                                      {schema.default !== undefined ? ` · 默认：${String(schema.default)}` : ""}
+                                      {schema.min !== undefined || schema.max !== undefined ? ` · 范围：${schema.min ?? "—"} 至 ${schema.max ?? "—"}` : ""}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
+                    {localVideoRuntime.nodes.some(node => node.model_choices.length > 0) && (
+                      <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+                        <p className="mb-2 text-white/70">ComfyUI 节点实际提供的模型选项（仅为下拉清单，不代表模型已完整加载或可成功推理）：</p>
+                        {localVideoRuntime.nodes.filter(node => node.model_choices.length > 0).map(node => (
+                          <div key={node.node_type} className="mb-2 last:mb-0">
+                            <p className="text-cyan-100">{node.node_type}</p>
+                            <p className="break-all text-xs text-white/55">{node.model_choices.join("、")}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
           <a href="/tasks" className="mt-3 inline-flex rounded-lg border border-purple-300/25 px-3 py-2 text-sm text-purple-200 hover:bg-purple-950/40">
             查看统一任务中心（含配音任务）
           </a>
@@ -125,7 +276,7 @@ export default function MediaStudioPage() {
               className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
             <label className="mb-2 block text-sm">视频模型名称</label>
             <input value={model} onChange={e => setModel(e.target.value)}
-              placeholder="填写服务商提供的视频模型 ID"
+              placeholder="仅在你明确选择外部服务时填写模型 ID"
               className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
             <label className="mb-2 block text-sm">视频内容描述</label>
             <textarea value={prompt} onChange={e => setPrompt(e.target.value)}

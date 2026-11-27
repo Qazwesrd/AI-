@@ -36,6 +36,13 @@ type InstallerInfo = { engine_status: string; model: string; model_size_bytes: n
 
 type LocalImageRuntime = {
   status: string; message: string; checkpoint_count: number; checkpoints: string[];
+  model_inventory?: {
+    items: Array<{ name: string; category: string; source: string; selector_node: string; status: string; load_tested: boolean }>;
+    total: number;
+    counts_by_category: Record<string, number>;
+    selectors: Record<string, { available: boolean; model_count?: number; reason?: string }>;
+    note: string;
+  };
   hardware: { ram_bytes: number | null; vram_bytes: number | null; gpu_level: string; reasons: string[]; note: string };
   limitations?: string;
 };
@@ -80,6 +87,37 @@ function size(value?: number | null) {
   if (value === undefined || value === null) return "未知";
   if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   return `${(value / 1024 ** 3).toFixed(2)} GB`;
+}
+
+function describeApiError(detail: unknown, fallback: string) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const entry = item as { msg?: unknown; loc?: unknown };
+        const location = Array.isArray(entry.loc) ? entry.loc.join(" → ") : "";
+        return [location, typeof entry.msg === "string" ? entry.msg : ""].filter(Boolean).join("：");
+      }
+      return String(item);
+    }).filter(Boolean).join("；") || fallback;
+  }
+  if (detail && typeof detail === "object") {
+    const entry = detail as { message?: unknown; error?: unknown; detail?: unknown };
+    return describeApiError(entry.detail ?? entry.message ?? entry.error, fallback);
+  }
+  return fallback;
+}
+
+async function readApiResponse(response: Response, fallback: string) {
+  const raw = await response.text();
+  let result: any = {};
+  try { result = raw ? JSON.parse(raw) : {}; }
+  catch { result = { detail: raw }; }
+  if (!response.ok) {
+    throw new Error(describeApiError(result?.detail ?? result?.message ?? result?.error, `${fallback}（HTTP ${response.status}）`));
+  }
+  return result;
 }
 
 export default function LocalModelsPage() {
@@ -163,8 +201,6 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
-
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
     if (!desktop) return;
@@ -199,7 +235,7 @@ export default function LocalModelsPage() {
     return () => window.clearInterval(timer);
   }, [installerInfo?.job.status, refreshInstaller]);
 
-  const refreshRuntime = async () => {
+  const refreshRuntime = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
       const result = await response.json();
@@ -209,7 +245,29 @@ export default function LocalModelsPage() {
     } catch (err) {
       setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    void refreshRuntime();
+    void refreshInstaller();
+    void refreshHardwareReadiness();
+    void refreshImageRuntime();
+  }, [refresh, refreshRuntime, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
+
+  // Local engines may still be starting after the desktop window appears.
+  // Refresh their read-only status briefly so the page does not stay stuck on
+  // the initial "not connected" result.
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void refreshRuntime();
+      void refreshImageRuntime();
+      if (attempts >= 12) window.clearInterval(timer);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshRuntime, refreshImageRuntime]);
 
   const installOllamaRuntime = async () => {
     const desktop = window.localAIInstallerDesktop;
@@ -284,8 +342,7 @@ export default function LocalModelsPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ base_model: baseModel, name: newModelName, role: modelRole, style: modelStyle, instructions: modelInstructions }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "专用模型创建失败");
+      const result = await readApiResponse(response, "专用模型创建失败");
       setMessage(`专用模型 ${result.model} 已在本机创建。刷新模型列表即可选择使用。`);
       setNewModelName("");
       await refreshRuntime();
@@ -405,19 +462,38 @@ export default function LocalModelsPage() {
           {imageRuntime ? (
             <>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未安装或启动" : "检测异常"}</div></div>
-                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已安装图片模型</div><div className="mt-1 font-semibold">{imageRuntime.checkpoint_count} 个 checkpoint</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未连接（启动中或未识别）" : "检测异常"}</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">ComfyUI 可见图片模型</div><div className="mt-1 font-semibold">{imageRuntime.model_inventory?.total ?? imageRuntime.checkpoint_count} 个模型条目</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">显存适配初筛</div><div className="mt-1 font-semibold">{({unknown:"未知",limited:"显存紧张",basic:"基础运行",capable:"具备一定余量",strong:"较充足"} as Record<string,string>)[imageRuntime.hardware?.gpu_level] || "待检测"}</div></div>
               </div>
               <div className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm">
                 <p>{imageRuntime.message}</p>
-                {imageRuntime.checkpoints.length > 0 && <div className="mt-2 space-y-1 text-white/65">{imageRuntime.checkpoints.slice(0,12).map((name) => <p key={name} className="break-all">• {name}</p>)}</div>}
+                {imageRuntime.model_inventory?.items?.length ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="font-medium text-fuchsia-100">已扫描模型清单</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(imageRuntime.model_inventory.counts_by_category || {}).map(([category, count]) => (
+                        <span key={category} className="rounded-full border border-fuchsia-300/20 px-2 py-1 text-xs">{({checkpoint:"基础图片模型",vae:"VAE",lora:"LoRA",upscaler:"图片放大",controlnet:"ControlNet",clip_vision:"视觉编码器",ip_adapter:"IP-Adapter"} as Record<string,string>)[category] || category}：{count}</span>
+                      ))}
+                    </div>
+                    <div className="grid gap-1 sm:grid-cols-2">
+                      {imageRuntime.model_inventory.items.slice(0,100).map((item) => (
+                        <div key={item.category + ":" + item.name} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                          <p className="break-all text-white/90">{item.name}</p>
+                          <p className="mt-1 text-xs text-white/45">{item.category} · {item.selector_node} · {item.load_tested ? "已实测加载" : "已发现，未实测加载"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : imageRuntime.checkpoints.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-white/65">{imageRuntime.checkpoints.slice(0,12).map((name) => <p key={name} className="break-all">• {name}</p>)}</div>
+                ) : <p className="mt-2 text-amber-100/70">当前没有从 ComfyUI 模型选择节点读取到图片模型条目。</p>}
                 {imageRuntime.hardware?.reasons?.map((reason,index) => <p key={index} className="mt-2 text-white/65">• {reason}</p>)}
               </div>
               <p className="mt-2 text-xs leading-5 text-amber-100/65">{imageRuntime.hardware?.note} {imageRuntime.limitations || "本阶段仅做本地引擎和模型检测，尚未提交图片生成任务。"}</p>
             </>
           ) : <p className="mt-3 text-sm text-white/55">正在检测本机图片引擎…</p>}
-          <p className="mt-3 text-xs leading-5 text-white/45">本检测只访问本机 127.0.0.1:8188，不会联网下载模型、启动程序、提交生成任务或调用云端 API。ComfyUI 和图片模型需要另行安装；后续会增加经过确认的安装向导。</p>
+          <p className="mt-3 text-xs leading-5 text-white/45">本检测只访问本机 127.0.0.1:8188，不会联网下载模型、提交生成任务或调用云端 API。桌面程序启动时会尝试启动已识别的数据目录中的 ComfyUI；若未检测到现有引擎或 checkpoint，会明确显示缺失，不会擅自下载。</p>
         </section>
 
         <section className="rounded-2xl border border-purple-300/25 bg-slate-950/70 p-5">

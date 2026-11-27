@@ -17,7 +17,15 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "release-assets.githubusercontent.com",
 ]);
 const REQUIRED_FREE_BYTES = 5 * 1024 ** 3;
-const API_URL = "http://127.0.0.1:11434/api/tags";
+const OLLAMA_PORTS = [11434, 11435];
+
+async function findRunningOllama({ ports = OLLAMA_PORTS, request = requestJson } = {}) {
+  for (const port of ports) {
+    const payload = await request(`http://127.0.0.1:${port}/api/tags`);
+    if (payload && Array.isArray(payload.models)) return { port, payload };
+  }
+  return null;
+}
 
 function isAllowedDownloadUrl(value) {
   try {
@@ -121,8 +129,8 @@ function runInstaller(filePath) {
 async function waitForOllama(timeoutMs = 90000) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const data = await requestJson(API_URL);
-    if (data && Array.isArray(data.models)) return true;
+    const running = await findRunningOllama();
+    if (running) return true;
     await new Promise(resolve => setTimeout(resolve, 1500));
   }
   return false;
@@ -144,10 +152,11 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const home = app.getPath("home");
     let freeBytes = null;
     try { freeBytes = getFreeBytes(home); } catch {}
-    const api = await requestJson(API_URL);
+    const running = await findRunningOllama();
     return {
-      installed: Boolean(api),
-      status: api ? "ready" : "not_installed",
+      installed: Boolean(running),
+      status: running ? "ready" : "not_installed",
+      port: running?.port ?? null,
       freeBytes,
       requiredFreeBytes: REQUIRED_FREE_BYTES,
       enoughSpace: freeBytes !== null && freeBytes >= REQUIRED_FREE_BYTES,
@@ -162,7 +171,8 @@ function registerOllamaRuntimeInstaller({ ipcMain, app, BrowserWindow }) {
     const home = app.getPath("home");
     const freeBytes = getFreeBytes(home);
     if (freeBytes < REQUIRED_FREE_BYTES) throw new Error("系统盘可用空间不足。Ollama 官方 Windows 安装至少需要约 4 GB，请预留 5 GiB 后重试。");
-    if (await requestJson(API_URL)) return { status: "already_installed" };
+    const existingService = await findRunningOllama();
+    if (existingService) return { status: "already_installed", port: existingService.port };
 
     cancelRequested = false;
     const installerPath = path.join(app.getPath("temp"), "AI-Comic-Studio-OllamaSetup.exe");
@@ -210,6 +220,8 @@ module.exports = {
   INSTALLER_URL,
   ALLOWED_DOWNLOAD_HOSTS,
   REQUIRED_FREE_BYTES,
+  OLLAMA_PORTS,
+  findRunningOllama,
   isAllowedDownloadUrl,
   isTrustedOllamaSignature,
   getFreeBytes,

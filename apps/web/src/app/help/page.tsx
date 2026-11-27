@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 const sections = [
+  { title: "AI 资源包与本地模型配置", icon: "🧭", href: "/setup-wizard", steps: ["从首页打开「AI资源包配置向导」，按步骤检查本地 ComfyUI 图片与视频引擎。", "先完整解压 AI 资源包并保留目录结构；配置前备份现有模型目录，不要覆盖同名文件。", "图片模型按资源说明放入 checkpoints、loras、vae、upscale_models、controlnet 等对应目录；视频模型按当前节点要求放入 diffusion_models、checkpoints、vae、text_encoders 或 clip。", "回到图片模型管理和视频中心重新扫描，核对文件名、类别和节点选择器。", "扫描到文件或节点可见都不代表加载成功；分别进入图片工作台和视频中心做低分辨率、短时长的实际生成测试。"] },
   { title: "从小说开始制作", icon: "📖", href: "/novels", steps: ["进入「小说创作 / 项目管理」，新建项目或选择已有项目。", "导入 TXT 小说，检查章节目录和正文是否完整。", "进入小说深度分析，先分析剧情、人物关系、时间线和世界观。", "确认识别结果后，再进入视觉素材、剧本和分镜制作。"] },
   { title: "人物、场景和道具", icon: "🎭", href: "/visual-studio", steps: ["打开「三维素材生成 / 视觉工作室」。", "选择项目与素材类别，检查 AI 生成提示词。", "选择已配置的图片服务商或使用网页版 AI 交接。", "生成结果导入后先预览、确认，再保存为项目素材。"] },
   { title: "剧本与分镜", icon: "🎞️", href: "/storyboard", steps: ["打开「剧本与分镜」，选择小说和章节。", "检查分集计划、镜头顺序、场景、人物和道具关联。", "按需要合并、拆分或调整镜头；锁定已经确认的素材。", "生成前检查缺失素材和连续性提醒。"] },
@@ -30,6 +31,7 @@ export default function HelpPage() {
           <h1 className="mt-3 text-3xl font-black md:text-4xl">使用说明与快速入门</h1>
           <p className="mt-3 max-w-3xl text-sm leading-7 text-purple-100/75">按实际创作流程查找功能入口、用途和操作步骤。第一次使用建议从小说导入开始，再逐步完成剧情分析、素材确认、剧本分镜、视频制作和发布。</p>
           <div className="mt-6 flex flex-wrap gap-3">
+            <Link href="/setup-wizard" className="rounded-xl bg-cyan-700 px-5 py-3 text-sm font-semibold hover:bg-cyan-600">开始配置 AI 资源包</Link>
             <Link href="/novels" className="rounded-xl bg-purple-600 px-5 py-3 text-sm font-semibold hover:bg-purple-500">开始创建项目</Link>
             <Link href="/tasks" className="rounded-xl border border-cyan-300/30 px-5 py-3 text-sm text-cyan-100 hover:bg-cyan-950/40">查看任务中心</Link>
             <Link href="/backup-center" className="rounded-xl border border-white/15 px-5 py-3 text-sm hover:bg-white/5">备份项目数据</Link>
@@ -39,7 +41,7 @@ export default function HelpPage() {
         <section>
           <div className="mb-4 flex items-end justify-between gap-3">
             <div><h2 className="text-2xl font-bold">功能入口与操作步骤</h2><p className="mt-1 text-sm text-purple-200/60">每张卡片都可以直接打开对应功能。</p></div>
-            <span className="text-xs text-purple-300">9 个常用模块</span>
+            <span className="text-xs text-purple-300">10 个常用模块</span>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             {sections.map((section, index) => (
@@ -80,7 +82,7 @@ export default function HelpPage() {
             <li>不要删除数据库或素材目录；先创建完整工作空间备份，再处理数据问题。</li>
           </ol>
         </section>
-        <footer className="pb-10 text-center text-xs text-purple-300/50">AI漫剧制作大师 · 使用说明会随正式测试版本同步更新</footer>
+        <footer className="pb-10 text-center text-xs text-purple-300/50">AI漫剧制作大师 · 使用说明会随正式桌面版本同步更新</footer>
       </div>
     </main>
   );

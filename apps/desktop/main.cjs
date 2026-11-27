@@ -6,12 +6,172 @@ const http = require("http");
 const net = require("net");
 const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
 
+ 
+// Discover existing user data and AI runtimes without moving, copying,
+// overwriting, or deleting any model files. This runs before services start.
+function uniquePaths(values) {
+  const seen = new Set();
+  return values.filter((value) => {
+    if (!value) return false;
+    const resolved = path.resolve(String(value).trim());
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((value) => path.resolve(String(value).trim()));
+}
+
+function firstExisting(paths) {
+  return uniquePaths(paths).find((candidate) => {
+    try { return fs.existsSync(candidate); } catch { return false; }
+  }) || "";
+}
+
+function comfyLayouts(root) {
+  if (!root) return [];
+  return [
+    { root, python: path.join(root, "python_embeded", "python.exe"), main: path.join(root, "ComfyUI", "main.py"), cwd: root },
+    { root, python: path.join(root, "python_embeded", "python.exe"), main: path.join(root, "main.py"), cwd: root },
+    { root, python: path.join(root, "venv", "Scripts", "python.exe"), main: path.join(root, "main.py"), cwd: root },
+    { root, python: path.join(root, ".venv", "Scripts", "python.exe"), main: path.join(root, "main.py"), cwd: root }
+  ];
+}
+
+function resolveAiResourcePaths(dataDir) {
+  const userProfile = process.env.USERPROFILE || process.env.HOME || "";
+  const modelsCandidates = uniquePaths([
+    process.env.OLLAMA_MODELS,
+    path.join(dataDir, "engines", "Ollama", "models"),
+    path.join(dataDir, "Ollama", "models"),
+    "E:\\AI\\数据\\engines\\Ollama\\models",
+    "E:\\AI\\数据\\Ollama\\models",
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\Ollama\\models",
+    path.join(userProfile, ".ollama", "models")
+  ]);
+  const ollamaModels = modelsCandidates.find((candidate) =>
+    fs.existsSync(path.join(candidate, "blobs")) || fs.existsSync(path.join(candidate, "manifests"))
+  ) || "";
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const ollamaRoots = uniquePaths([
+    process.env.AICOMICS_OLLAMA_DIR,
+    process.env.OLLAMA_DIR,
+    path.join(dataDir, "engines", "Ollama"),
+    path.join(dataDir, "Ollama"),
+    path.join(localAppData, "Programs", "Ollama"),
+    path.join(programFiles, "Ollama"),
+    path.join(programFilesX86, "Ollama"),
+    path.join(userProfile, ".ollama")
+  ]);
+  let ollamaExe = "";
+  let ollamaRoot = "";
+  for (const root of ollamaRoots) {
+    const candidate = firstExisting([path.join(root, "runtime", "ollama.exe"), path.join(root, "ollama.exe")]);
+    if (candidate) { ollamaExe = candidate; ollamaRoot = root; break; }
+  }
+
+  const comfyRoots = uniquePaths([
+    process.env.AICOMICS_COMFYUI_DIR,
+    process.env.COMFYUI_PATH,
+    path.join(dataDir, "engines", "ComfyUI"),
+    path.join(dataDir, "ComfyUI"),
+    // Common official Windows portable bundle directory names.
+    path.join(dataDir, "engines", "ComfyUI_windows_portable"),
+    path.join(dataDir, "ComfyUI_windows_portable"),
+    path.join(dataDir, "engines", "ComfyUI_windows_portable_nvidia"),
+    path.join(dataDir, "ComfyUI_windows_portable_nvidia"),
+    path.join(dataDir, "engines", "ComfyUI_windows_portable_amd"),
+    path.join(dataDir, "ComfyUI_windows_portable_amd"),
+    "E:\\AI\\数据\\engines\\ComfyUI",
+    "E:\\AI\\数据\\ComfyUI",
+    "E:\\AI\\数据\\engines\\ComfyUI_windows_portable",
+    "E:\\AI\\数据\\ComfyUI_windows_portable",
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\ComfyUI",
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\ComfyUI_windows_portable",
+    path.join(path.dirname(dataDir), "ComfyUI"),
+    path.join(path.dirname(dataDir), "ComfyUI_windows_portable"),
+    path.join(userProfile, "ComfyUI"),
+    path.join(userProfile, "ComfyUI_windows_portable")
+  ]);
+  let comfy = null;
+  for (const root of comfyRoots) {
+    comfy = comfyLayouts(root).find((layout) =>
+      fs.existsSync(layout.python) && fs.existsSync(layout.main)
+    ) || null;
+    if (comfy) break;
+  }
+  return { ollamaExe, ollamaRoot, ollamaModels, comfy };
+}
+
+function hasManagedAiResources(directory) {
+  if (!directory) return false;
+  // Only count assets physically inside this candidate directory. Global
+  // USERPROFILE/.ollama or Program Files runtimes must never make an empty
+  // candidate look like the user's data folder.
+  const localModels = [
+    path.join(directory, "engines", "Ollama", "models"),
+    path.join(directory, "Ollama", "models")
+  ].some((models) =>
+    fs.existsSync(path.join(models, "blobs")) || fs.existsSync(path.join(models, "manifests"))
+  );
+  const localComfyRoots = [
+    "ComfyUI",
+    "ComfyUI_windows_portable",
+    "ComfyUI_windows_portable_nvidia",
+    "ComfyUI_windows_portable_amd"
+  ].flatMap((name) => [
+    path.join(directory, "engines", name),
+    path.join(directory, name)
+  ]);
+  const localComfy = localComfyRoots.some((root) =>
+    comfyLayouts(root).some((layout) =>
+      fs.existsSync(layout.python) && fs.existsSync(layout.main)
+    )
+  );
+  return localModels || localComfy;
+}
+
+function resolveManagedDataDirectory() {
+  const configured = String(process.env.AICOMICS_DATA_DIR || process.env.APP_DATA_DIR || "").trim();
+  const executableDir = process.platform === "win32" && app.isPackaged
+    ? path.dirname(app.getPath("exe")) : "";
+  const adjacentData = executableDir ? path.resolve(executableDir, "..", "数据") : "";
+  const legacyUserData = app.getPath("userData");
+  const appData = app.getPath("appData");
+  const candidates = uniquePaths([
+    configured,
+    // Known legacy data locations are searched before creating a new empty profile.
+    "E:\\AI\\数据",
+    "E:\\123\\ai-comic-studio-desktop-Data",
+    adjacentData,
+    legacyUserData,
+    path.join(appData, "AI漫剧制作大师"),
+    path.join(appData, "ai-comic-studio-desktop")
+  ]);
+  const existing = candidates.find(hasManagedAiResources);
+  const selected = existing || firstExisting([configured]) || adjacentData || legacyUserData;
+  fs.mkdirSync(selected, { recursive: true });
+  process.env.AICOMICS_DATA_DIR = selected;
+  process.env.APP_DATA_DIR = selected;
+  app.setPath("userData", selected);
+  const resources = resolveAiResourcePaths(selected);
+  console.log("[DATA] Persistent user data directory:", selected);
+  console.log("[DATA] Existing Ollama models:", resources.ollamaModels || "not detected");
+  console.log("[DATA] Existing ComfyUI:", resources.comfy?.root || "not detected");
+  return selected;
+}
+
+resolveManagedDataDirectory();
+
 const API_PORT = 8000;
 const WEB_PORT = 3000;
 
 let mainWindow = null;
 let apiProcess = null;
 let webProcess = null;
+let ollamaProcess = null;
+let comfyProcess = null;
 let quitting = false;
 let startupFailed = false;
 let aiBrowserSession = null;
@@ -182,8 +342,12 @@ function stopChild(child) {
 function stopServices() {
   stopChild(webProcess);
   stopChild(apiProcess);
+  stopChild(comfyProcess);
+  stopChild(ollamaProcess);
   webProcess = null;
   apiProcess = null;
+  comfyProcess = null;
+  ollamaProcess = null;
 }
 
 
@@ -193,6 +357,7 @@ function findFfmpegPair() {
     process.env.AICOMICS_FFMPEG_DIR,
     process.env.FFMPEG_PATH && path.dirname(process.env.FFMPEG_PATH),
     path.join(app.getPath("userData"), "ffmpeg"),
+    process.env.AICOMICS_DATA_DIR && path.join(process.env.AICOMICS_DATA_DIR, "engines", "FFmpeg"),
     "D:\\下载"
   ].filter(Boolean);
   const visited = new Set();
@@ -233,7 +398,99 @@ function findFfmpegPair() {
   return null;
 }
 
-function startProductionServices({ startApi = true, startWeb = true } = {}) {
+function localServiceResponds(port, route) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}${route}`, { timeout: 1800 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => { body += chunk; if (body.length > 1024 * 1024) req.destroy(); });
+      res.on("end", () => {
+        if (res.statusCode !== 200) return resolve(false);
+        try {
+          const payload = JSON.parse(body);
+          if (route === "/api/tags") return resolve(Array.isArray(payload.models));
+          return resolve(Boolean(payload && typeof payload === "object"));
+        } catch {
+          resolve(false);
+        }
+      });
+    });
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+  });
+}
+
+async function waitForLocalService(port, route, child, timeout = 45000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      return false;
+    }
+    if (await localServiceResponds(port, route)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  return false;
+}
+
+async function startManagedAiEngines(dataDir) {
+  if (process.platform !== "win32") return;
+  const resources = resolveAiResourcePaths(dataDir);
+
+  // Prefer an already-running Ollama service on either supported local port.
+  // Reusing it preserves its existing model store and avoids downloading or copying models.
+  let ollamaPort = 0;
+  if (await localServiceResponds(11435, "/api/tags")) ollamaPort = 11435;
+  else if (await localServiceResponds(11434, "/api/tags")) ollamaPort = 11434;
+
+  if (ollamaPort) {
+    process.env.OLLAMA_HOST = `http://127.0.0.1:${ollamaPort}`;
+    console.log(`[OLLAMA] Reusing the existing local service on port ${ollamaPort}; model files will not be changed.`);
+  } else if (resources.ollamaExe && resources.ollamaModels) {
+    process.env.OLLAMA_HOST = "http://127.0.0.1:11435";
+    const ollamaEnv = {
+      ...process.env,
+      OLLAMA_HOST: "127.0.0.1:11435",
+      OLLAMA_MODELS: resources.ollamaModels,
+      OLLAMA_NO_CLOUD: "1"
+    };
+    ollamaProcess = spawn(resources.ollamaExe, ["serve"], {
+      cwd: resources.ollamaRoot || path.dirname(resources.ollamaExe),
+      windowsHide: true,
+      env: ollamaEnv,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    logChild("OLLAMA", ollamaProcess);
+    void waitForLocalService(11435, "/api/tags", ollamaProcess, 30000).then((ready) => {
+      if (ready) console.log("[OLLAMA] Local service is ready on 127.0.0.1:11435.");
+      else console.warn("[OLLAMA] Process was started but the service did not become ready within 30 seconds. Existing model files were not changed; check the local engine status and logs.");
+    });
+  } else {
+    console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download, replacement, or migration will be attempted.");
+  }
+
+  if (await localServiceResponds(8188, "/system_stats")) {
+    console.log("[COMFYUI] Reusing the already-running local ComfyUI service and installed models.");
+  } else if (resources.comfy) {
+    // Preserve the installed Python/GPU backend; do not force CPU-only startup.
+    comfyProcess = spawn(resources.comfy.python, [
+      resources.comfy.main, "--listen", "127.0.0.1", "--port", "8188", "--disable-auto-launch"
+    ], {
+      cwd: resources.comfy.cwd,
+      windowsHide: true,
+      env: { ...process.env, PYTHONUNBUFFERED: "1" },
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    logChild("COMFYUI", comfyProcess);
+    void waitForLocalService(8188, "/system_stats", comfyProcess, 45000).then((ready) => {
+      if (ready) console.log("[COMFYUI] Local service is ready on 127.0.0.1:8188.");
+      else console.warn("[COMFYUI] Process was started but the service did not become ready within 45 seconds. Existing files were not changed; check the local engine status and logs.");
+    });
+  } else {
+    console.warn("[COMFYUI] Existing runtime was not detected; no runtime download, replacement, or migration will be attempted.");
+  }
+}
+
+async function startProductionServices({ startApi = true, startWeb = true } = {}) {
   const resources = process.resourcesPath;
   const apiExe = path.join(resources, "api", "ai-comic-api.exe");
   const webServer = path.join(resources, "web", "server.js");
@@ -250,6 +507,7 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
   }
 
   fs.mkdirSync(dataDir, { recursive: true });
+  await startManagedAiEngines(dataDir);
 
   if (fs.existsSync(dataDir)) {
     const storageDir = path.join(dataDir, "storage");
@@ -263,6 +521,9 @@ function startProductionServices({ startApi = true, startWeb = true } = {}) {
       env: {
         ...process.env,
         APP_DATA_DIR: dataDir,
+        AICOMICS_DATA_DIR: dataDir,
+        OLLAMA_HOST: process.env.OLLAMA_HOST || "http://127.0.0.1:11435",
+        OLLAMA_MODELS: resolveAiResourcePaths(dataDir).ollamaModels || process.env.OLLAMA_MODELS || path.join(dataDir, "engines", "Ollama", "models"),
         PYTHONUNBUFFERED: "1",
         PYTHONIOENCODING: "utf-8",
         PYTHONUTF8: "1",
@@ -332,7 +593,7 @@ async function createWindow() {
       );
     }
 
-    startProductionServices({
+    await startProductionServices({
       startApi: apiPortFree,
       startWeb: webPortFree
     });

@@ -1,5 +1,7 @@
 import json
 import uuid
+import base64
+import tempfile
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -13,7 +15,8 @@ from app.models.media import MediaFile
 from app.services.editing_service import (
     call_ai_for_edit_plan, validate_plan, execute_edit_plan
 )
-from app.services.media_service import safe_storage_file, probe_media
+from app.services.media_service import safe_storage_file, probe_media, run_ffmpeg
+from app.routers.local_ai_runtime import _installed_models, _ollama_request
 
 router = APIRouter(prefix="/api/video-editor", tags=["AI 视频剪辑"])
 
@@ -25,6 +28,12 @@ class CreateEditInput(BaseModel):
     instruction: str = Field(min_length=2, max_length=12000)
     source_paths: list[str] = Field(min_length=1, max_length=30)
     confirm_paid: bool = False
+
+
+class LocalVideoAnalyzeInput(BaseModel):
+    model: str = Field(min_length=1, max_length=128)
+    instruction: str = Field(min_length=2, max_length=12000)
+    source_paths: list[str] = Field(min_length=1, max_length=5)
 
 
 class WebHandoffInput(BaseModel):
@@ -296,6 +305,120 @@ def execute_job(job_id: int, data: ExecuteEditInput, db: Session = Depends(get_d
         job.error = str(exc)
         db.commit()
         raise HTTPException(500, f"视频剪辑执行失败：{exc}")
+
+
+@router.post("/local-analyze")
+def analyze_video_with_local_vision_model(data: LocalVideoAnalyzeInput, db: Session = Depends(get_db)):
+    """Analyze sampled frames with an already-installed local Ollama vision model.
+
+    Original video files stay on disk. Only a bounded set of sampled frames is
+    sent to the loopback Ollama service; no cloud provider or model download.
+    """
+    model = data.model.strip()
+    try:
+        installed = {item["name"] for item in _installed_models()}
+        if model not in installed:
+            raise HTTPException(404, "所选模型未安装在本机；不会自动下载模型。")
+        sources = [safe_storage_file(raw) for raw in data.source_paths]
+        frame_images = []
+        frame_manifest = []
+        with tempfile.TemporaryDirectory(prefix="ai-video-analysis-") as temp_dir:
+            for file_index, path in enumerate(sources, 1):
+                info = probe_media(path)
+                duration = float((info.get("format") or {}).get("duration") or 0)
+                streams = info.get("streams") or []
+                if not any(stream.get("codec_type") == "video" for stream in streams):
+                    raise ValueError(f"{path.name} 不包含视频流")
+                if duration <= 0 or duration > 7200:
+                    raise ValueError(f"{path.name} 时长无效或超过 2 小时")
+                # Sample representative frames at 20% and 70% of each clip.
+                for frame_number, ratio in enumerate((0.2, 0.7), 1):
+                    timestamp = min(max(0.1, duration * ratio), max(0.1, duration - 0.1))
+                    frame_path = Path(temp_dir) / f"video_{file_index}_{frame_number}.jpg"
+                    run_ffmpeg([
+                        "-ss", f"{timestamp:.3f}", "-i", str(path),
+                        "-frames:v", "1", "-vf", "scale=768:-1",
+                        "-q:v", "5", str(frame_path)
+                    ])
+                    if not frame_path.is_file() or frame_path.stat().st_size > 2 * 1024 * 1024:
+                        raise RuntimeError(f"{path.name} 第 {frame_number} 个抽帧失败或文件过大")
+                    encoded = base64.b64encode(frame_path.read_bytes()).decode("ascii")
+                    frame_images.append(encoded)
+                    frame_manifest.append({
+                        "file_index": file_index,
+                        "file_name": path.name,
+                        "timestamp_seconds": round(timestamp, 3),
+                        "duration_seconds": round(duration, 3),
+                    })
+        if not frame_images:
+            raise RuntimeError("没有提取到可供本地视觉模型分析的画面")
+        prompt = (
+            "你是专业视频剪辑师。你将收到按顺序排列的视频关键帧，"
+            "每帧的来源文件和时间戳如下。请根据用户要求分析实际可见画面，"
+            "生成可执行剪辑 JSON。不要虚构帧中看不到的细节；声音、对白和镜头间动作"
+            "无法仅凭静态抽帧确认时，必须写入 notes。"
+            "输出格式：title, summary, segments, width, height, subtitle_text, notes。"
+            "segments 每项必须含 file_index（从 1 开始）、start、end、description。"
+            "时间必须在对应源视频时长内，start >= 0，end > start。"
+            "\\n用户剪辑要求：\\n" + data.instruction
+            + "\\n抽帧清单：\\n" + json.dumps(frame_manifest, ensure_ascii=False)
+            + "\\n源视频清单：\\n" + json.dumps([
+                {"file_index": i, "file_name": path.name,
+                 "duration_seconds": round(float((probe_media(path).get("format") or {}).get("duration") or 0), 3)}
+                for i, path in enumerate(sources, 1)
+            ], ensure_ascii=False)
+            + "\\n只返回 JSON，不要 Markdown。"
+        )
+        result = _ollama_request("/api/generate", {
+            "model": model, "prompt": prompt, "images": frame_images,
+            "stream": False, "format": "json",
+            "options": {"temperature": 0.2},
+        }, timeout=600.0)
+        raw = str(result.get("response") or "").strip()
+        plan = json.loads(raw)
+        segments = plan.get("segments")
+        if not isinstance(segments, list):
+            raise ValueError("本地视觉模型未返回有效 segments")
+        mapped = []
+        for index, segment in enumerate(segments, 1):
+            if not isinstance(segment, dict):
+                raise ValueError(f"第 {index} 个片段格式错误")
+            file_index = int(segment.get("file_index", 0))
+            if file_index < 1 or file_index > len(sources):
+                raise ValueError(f"第 {index} 个片段引用了不存在的视频")
+            mapped.append({
+                "file_path": str(sources[file_index - 1]),
+                "start": segment.get("start"),
+                "end": segment.get("end"),
+                "description": segment.get("description", ""),
+            })
+        plan["segments"] = mapped
+        validated = validate_plan(plan, [str(path) for path in sources])
+        job = VideoEditJob(
+            title=validated["title"] or "本地 AI 视频剪辑",
+            provider="ollama_local",
+            model=model,
+            instruction=data.instruction,
+            status="planned",
+            source_files=[str(path) for path in sources],
+            edit_plan=validated,
+        )
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        return {
+            "id": job.id, "status": job.status, "provider": "ollama_local",
+            "model": model, "plan": validated,
+            "frames_analyzed": len(frame_images),
+            "frame_manifest": frame_manifest,
+            "local_only": True, "cloud_fallback": False,
+            "message": "本地视觉模型已分析抽取的关键帧并生成剪辑方案。请先检查时间点和片段，再执行 FFmpeg 导出。原视频未上传到云端。",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(422, f"本地视频分析失败：{str(exc)[:1200]}") from exc
 
 
 @router.get("/health")
