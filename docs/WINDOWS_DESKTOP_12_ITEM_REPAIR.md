@@ -34,8 +34,9 @@ Scope: the installed Windows desktop application on `offline-ai-engine-integrati
 ## Additional local chat and cost-safety work
 
 - [x] Added a dedicated `/local-chat` page and homepage/navigation entry so the user can chat with an installed Ollama model using multi-turn context.
-- [x] Added `POST /api/local-ai/chat` using Ollama's local `/api/chat` endpoint; the API accepts only installed local models, bounds history to 20 messages / 24,000 characters, and never downloads or falls back to cloud.
+- [x] Added `POST /api/local-ai/chat` using Ollama's local `/api/chat` endpoint; the API accepts only installed local models, bounds each request to 20 messages / 24,000 characters, and never downloads or falls back to cloud.
 - [x] Filtered obvious Ollama Cloud aliases (for example `*-cloud` and `:cloud`) from the local model inventory so they cannot be selected in local workflows.
+- [x] Added browser-local persistence for the selected model and the latest 100 chat messages. The transcript is stored in this computer's browser localStorage only; it is not uploaded or cloud-synced by this feature. This is one saved conversation, not a multi-chat archive.
 - [ ] Verify the chat end-to-end on the user's Windows machine with their installed model; GitHub CI and hardware inference are still pending.
 
 ## Final acceptance gate
