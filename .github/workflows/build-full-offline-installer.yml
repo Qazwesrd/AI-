@@ -75,9 +75,12 @@ jobs:
           if ($expected -ne $actual) { throw "Windows Setup SHA-256 verification failed." }
           $output = Join-Path $PWD "desktop-installer"
           New-Item -ItemType Directory -Path $output -Force | Out-Null
-          Copy-Item $setup.FullName (Join-Path $output "AI漫剧制作大师-Setup.exe")
-          Copy-Item $hashFile.FullName (Join-Path $output "AI漫剧制作大师-Setup.exe.sha256")
+          $finalInstaller = Join-Path $output "AI漫剧制作大师-Setup.exe"
+          Copy-Item $setup.FullName $finalInstaller
+          $finalHash = (Get-FileHash $finalInstaller -Algorithm SHA256).Hash
+          "$finalHash  AI漫剧制作大师-Setup.exe" | Set-Content (Join-Path $output "AI漫剧制作大师-Setup.exe.sha256") -Encoding ascii
           Write-Host ("Verified desktop installer: {0:N2} MiB" -f ($setup.Length / 1MB))
+          Write-Host "Final download name SHA256: $finalHash"
           Write-Host "AI resources are intentionally not downloaded or repackaged; the user already has them locally."
 
       - name: Upload desktop installer only
