@@ -1,14 +1,17 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.prompts import (
     PromptCategory, PromptTemplate, PromptVersion, PromptTestRun,
-    PromptRankingSnapshot,
+    PromptRankingSnapshot, PublicResearchSource, PublicResearchCollectionRun,
+)
+from app.services.public_source_collector import (
+    FeedCollectionError, fetch_public_feed, parse_observed_date, validate_public_feed_url,
 )
 
 router = APIRouter(prefix="/api/prompts", tags=["提示词中心"])
@@ -576,3 +579,193 @@ def research_trend_ranking(db: Session = Depends(get_db)):
         "verified_evidence_count": len(rows),
         "notice": "只统计人工核验的公开证据；作品热度证据不等于作品实际使用的内部提示词。当前采集仍需人工录入，尚未接入各平台自动抓取。",
     }
+
+
+# User-configured public RSS/Atom sources. No platform login, private API, or hidden-content scraping.
+class PublicSourceInput(BaseModel):
+    platform: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=200)
+    feed_url: str = Field(min_length=12, max_length=2000)
+    refresh_interval_minutes: int = Field(default=360, ge=60, le=10080)
+
+
+class PublicSourceUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    refresh_interval_minutes: Optional[int] = Field(default=None, ge=60, le=10080)
+
+
+def public_source_dict(row):
+    return {
+        "id": row.id, "platform": row.platform, "name": row.name,
+        "feed_url": row.feed_url, "source_type": row.source_type,
+        "enabled": bool(row.enabled), "refresh_interval_minutes": row.refresh_interval_minutes,
+        "last_collected_at": row.last_collected_at.isoformat() if row.last_collected_at else None,
+        "last_status": row.last_status, "last_error": row.last_error or "",
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def collection_run_dict(row):
+    return {
+        "id": row.id, "source_id": row.source_id, "status": row.status,
+        "discovered_count": row.discovered_count, "inserted_count": row.inserted_count,
+        "duplicate_count": row.duplicate_count, "error_message": row.error_message or "",
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+    }
+
+
+def collect_public_source(source_id: int, db: Session):
+    source = db.query(PublicResearchSource).filter(PublicResearchSource.id == source_id).first()
+    if not source:
+        raise HTTPException(404, "公开来源不存在")
+    if not source.enabled:
+        raise HTTPException(409, "该来源已暂停")
+    run = PublicResearchCollectionRun(source_id=source.id, status="running")
+    db.add(run)
+    db.flush()
+    try:
+        items = fetch_public_feed(source.feed_url)
+        inserted = 0
+        duplicates = 0
+        for item in items:
+            exists = db.query(TrendEvidence.id).filter(
+                TrendEvidence.platform == source.platform,
+                TrendEvidence.work_url == item["url"],
+            ).first()
+            if exists:
+                duplicates += 1
+                continue
+            db.add(TrendEvidence(
+                platform=source.platform,
+                work_title=item["title"],
+                work_url=item["url"],
+                observed_at=parse_observed_date(item["published"]),
+                metric_summary={
+                    "source_name": source.name,
+                    "source_type": "rss_atom",
+                    "published": item["published"],
+                    "summary_excerpt": item["summary_excerpt"],
+                },
+                evidence_type="公开订阅源发现（作品/创作内容，待人工核验）",
+                reliability="自动采集待核验",
+                is_verified=False,
+            ))
+            inserted += 1
+        run.status = "success"
+        run.discovered_count = len(items)
+        run.inserted_count = inserted
+        run.duplicate_count = duplicates
+        source.last_status = "成功"
+        source.last_error = ""
+        source.last_collected_at = datetime.utcnow()
+        db.commit()
+        db.refresh(run)
+        return {"success": True, "run": collection_run_dict(run),
+                "message": "采集完成；新增内容均为待人工核验证据，不会自动进入正式提示词库。"}
+    except (FeedCollectionError, OSError, ValueError) as exc:
+        db.rollback()
+        source = db.query(PublicResearchSource).filter(PublicResearchSource.id == source_id).first()
+        run = PublicResearchCollectionRun(
+            source_id=source_id, status="failed", error_message=str(exc)[:1000],
+            finished_at=datetime.utcnow(),
+        )
+        db.add(run)
+        if source:
+            source.last_status = "失败"
+            source.last_error = str(exc)[:1000]
+            source.last_collected_at = datetime.utcnow()
+        db.commit()
+        return {"success": False, "run": collection_run_dict(run), "message": str(exc)}
+
+
+@router.get("/research/sources")
+def list_public_research_sources(db: Session = Depends(get_db)):
+    rows = db.query(PublicResearchSource).order_by(PublicResearchSource.platform, PublicResearchSource.id).all()
+    return {"items": [public_source_dict(row) for row in rows],
+            "supported_platform_domains": [
+                "youtube.com", "bilibili.com", "douyin.com", "kuaishou.com",
+                "tiktok.com", "facebook.com", "hongguo.com"
+            ],
+            "notice": "仅支持用户明确配置的 HTTPS RSS/Atom 公开订阅源；平台域名须在允许范围内。当前不代表这些平台均提供官方 RSS 接口。采集内容全部待人工核验。"
+    }
+
+
+@router.post("/research/sources")
+def create_public_research_source(data: PublicSourceInput, db: Session = Depends(get_db)):
+    try:
+        safe_url = validate_public_feed_url(data.feed_url)
+    except FeedCollectionError as exc:
+        raise HTTPException(400, str(exc))
+    duplicate = db.query(PublicResearchSource).filter(PublicResearchSource.feed_url == safe_url).first()
+    if duplicate:
+        raise HTTPException(409, "该公开订阅源已经添加")
+    row = PublicResearchSource(
+        platform=data.platform.strip(), name=data.name.strip(), feed_url=safe_url,
+        source_type="rss_atom", enabled=True,
+        refresh_interval_minutes=data.refresh_interval_minutes,
+        last_status="待采集",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "item": public_source_dict(row),
+            "message": "来源已添加；首次采集将在后台周期任务到期时运行，也可立即手动采集。请确保该地址是平台允许访问的公开 RSS/Atom 源。"
+    }
+
+
+@router.patch("/research/sources/{source_id}")
+def update_public_research_source(source_id: int, data: PublicSourceUpdate, db: Session = Depends(get_db)):
+    row = db.query(PublicResearchSource).filter(PublicResearchSource.id == source_id).first()
+    if not row:
+        raise HTTPException(404, "公开来源不存在")
+    changes = data.model_dump(exclude_unset=True)
+    for key, value in changes.items():
+        setattr(row, key, value)
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "item": public_source_dict(row)}
+
+
+@router.post("/research/sources/{source_id}/collect")
+def collect_public_research_source(source_id: int, db: Session = Depends(get_db)):
+    return collect_public_source(source_id, db)
+
+
+@router.post("/research/sources/collect-due")
+def collect_due_public_research_sources(db: Session = Depends(get_db)):
+    now = datetime.utcnow()
+    rows = db.query(PublicResearchSource).filter(PublicResearchSource.enabled.is_(True)).all()
+    due = [
+        row.id for row in rows
+        if row.last_collected_at is None
+        or row.last_collected_at <= now - timedelta(minutes=row.refresh_interval_minutes)
+    ]
+    results = [collect_public_source(source_id, db) for source_id in due[:10]]
+    return {"success": True, "checked": len(rows), "due_count": len(due),
+            "processed_count": len(results), "results": results}
+
+
+@router.get("/research/sources/runs")
+def list_public_research_collection_runs(source_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(PublicResearchCollectionRun)
+    if source_id is not None:
+        query = query.filter(PublicResearchCollectionRun.source_id == source_id)
+    rows = query.order_by(PublicResearchCollectionRun.started_at.desc()).limit(100).all()
+    return {"items": [collection_run_dict(row) for row in rows]}
+
+
+def collect_due_public_sources_background():
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        rows = db.query(PublicResearchSource).filter(PublicResearchSource.enabled.is_(True)).all()
+        due_ids = [
+            row.id for row in rows
+            if row.last_collected_at is None
+            or row.last_collected_at <= now - timedelta(minutes=row.refresh_interval_minutes)
+        ][:10]
+        for source_id in due_ids:
+            collect_public_source(source_id, db)
+    finally:
+        db.close()
