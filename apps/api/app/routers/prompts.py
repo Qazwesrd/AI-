@@ -337,6 +337,7 @@ class EvidenceInput(BaseModel):
 
 class EvidenceVerifyInput(BaseModel):
     verification_note: str = Field(min_length=3, max_length=5000)
+    evidence_type: Optional[str] = Field(default=None, max_length=100)
 
 
 class UpgradeCandidateInput(BaseModel):
@@ -406,6 +407,11 @@ def verify_trend_evidence(evidence_id: int, data: EvidenceVerifyInput, db: Sessi
     row = db.query(TrendEvidence).filter(TrendEvidence.id == evidence_id).first()
     if not row:
         raise HTTPException(404, "研究证据不存在")
+    allowed_types = {"漫剧作品趋势证据","作品趋势证据","剧本作品证据","公开提示词分享","创作案例证据","work_trend","screenplay","public_prompt"}
+    if data.evidence_type is not None:
+        if data.evidence_type not in allowed_types:
+            raise HTTPException(400,"不支持的证据分类")
+        row.evidence_type = data.evidence_type
     row.is_verified = True
     row.verification_note = data.verification_note.strip()
     row.reliability = "人工已核验"
