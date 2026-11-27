@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.routers.local_image_runtime import (
-    GIB, _checkpoint_names, _local_json, _selector_choices, assess_image_hardware,
+    GIB, _checkpoint_names, _local_json, _selector_choices, assess_image_hardware, local_image_runtime,
 )
 
 
@@ -51,6 +51,18 @@ class LocalImageRuntimeTests(unittest.TestCase):
         result = _local_json("/system_stats", opener=opener)
         self.assertEqual(result["system"]["devices"], [])
         self.assertEqual(opener.url, "http://127.0.0.1:8188/system_stats")
+
+    def test_image_runtime_reads_comfyui_devices_from_top_level(self):
+        stats = {
+            "system": {"os": "Windows", "comfyui_version": "test"},
+            "devices": [{"name": "AMD Radeon Graphics", "type": "cpu", "vram_total": 0, "vram_free": 0}],
+        }
+        with patch("app.routers.local_image_runtime._local_json", return_value=stats), patch(
+            "app.routers.local_image_runtime._scan_comfy_models",
+            return_value={"items": [], "total": 0, "counts_by_category": {}, "selectors": {}},
+        ), patch("app.routers.local_image_runtime._get_hardware_profile", return_value={"memory": {}, "gpu": {}}):
+            result = local_image_runtime()
+        self.assertEqual(result["device_count"], 1)
 
     def test_hardware_assessment_warns_for_low_vram(self):
         result = assess_image_hardware({
