@@ -365,7 +365,7 @@ export default function MediaStudioPage() {
           </div>}
           <p className="mt-3 text-xs leading-5 text-amber-100/70">说明：当前执行器使用你已经在 ComfyUI 中配置好的 API 工作流；需要 Wan/VACE 节点和模型已安装。预检通过不代表模型权重加载或生成一定成功。先用短时长、低分辨率工作流测试。生成结果保存在本机 ComfyUI 输出目录。</p>
         </section>
-\n        <section className="grid gap-6 lg:grid-cols-2">
+        <section className="grid gap-6 lg:grid-cols-2">
           <div className="rounded-2xl border border-purple-300/20 bg-slate-950/65 p-6">
             <h2 className="mb-5 text-xl font-semibold">真实 AI 视频生成</h2>
             <label className="mb-2 block text-sm">服务商 ID</label>
