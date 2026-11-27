@@ -360,7 +360,7 @@ def choose_local_provider():
         with _LOCAL_OLLAMA_OPENER.open(request, timeout=5) as response:
             payload = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise HTTPException(503, "本机 Ollama 未连接（127.0.0.1:11435）。请先启动本地引擎；不会切换到云端。") from exc
+        raise HTTPException(503, f"本机 Ollama 未连接（{LOCAL_OLLAMA_BASE_URL}）。请先启动本地引擎；不会切换到云端。") from exc
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(502, "本机 Ollama 返回的数据无法识别；未提交任何云端请求。") from exc
 
