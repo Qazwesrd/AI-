@@ -163,7 +163,7 @@ export default function AssetTimelinePage() {
       <header className="mx-auto max-w-7xl">
         <div className="text-xs tracking-[0.25em] text-purple-300">AI COMIC STUDIO / ASSET TIMELINE</div>
         <h1 className="mt-2 text-3xl font-bold">人物与素材剧情状态追踪</h1>
-        <p className="mt-2 max-w-4xl text-sm leading-6 text-purple-100/75">按章节查看人物、场景、服装、道具、武器和特殊物品的状态变化；保留原始记录、原文证据和确认状态。分镜匹配会使用对应章节的状态快照。</p>
+        <p className="mt-2 max-w-4xl text-sm leading-6 text-purple-100/75">先让本机 Ollama 自动识别章节中的人物、场景、服装和道具变化，再核对原文证据并确认写入；历史版本会保留，分镜匹配使用对应章节的状态快照。</p>
       </header>
 
       <div className="mx-auto grid max-w-7xl gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
@@ -209,6 +209,7 @@ export default function AssetTimelinePage() {
                 </label>
                 <button onClick={() => void generatePrompt()} disabled={busy} className="rounded-lg bg-violet-700 px-4 py-2.5 text-sm disabled:opacity-50">生成该章节提示词</button>
                 <button onClick={() => void analyzeLocalEvolution()} disabled={busy || !selected.data?.source_novel_id || !chapter.trim()} className="rounded-lg bg-emerald-700 px-4 py-2.5 text-sm disabled:opacity-50">本机 AI 自动识别本章素材变化</button>
+                {!selected.data?.source_novel_id && <span className="text-xs text-amber-200">该素材尚未关联小说，无法自动分析。</span>}
                 {prompt && <button onClick={() => void copyPrompt()} className="rounded-lg border border-cyan-300/30 px-4 py-2.5 text-sm text-cyan-100">复制提示词</button>}
               </div>
               {history?.effective_state && <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-4">
