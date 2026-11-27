@@ -328,9 +328,45 @@ def validate_local_video_workflow(workflow, object_info):
             if input_name not in known_inputs:
                 errors.append(f"节点 {node_id}（{class_type}）存在未知参数 {input_name}。")
                 continue
-            if isinstance(value, list) and len(value) == 2 and isinstance(value[0], (str, int)):
-                if str(value[0]) not in node_ids:
+            if (
+                isinstance(value, list) and len(value) == 2 and
+                isinstance(value[0], (str, int)) and not isinstance(value[0], bool)
+            ):
+                source_id = str(value[0])
+                output_index = value[1]
+                if source_id not in node_ids:
                     errors.append(f"节点 {node_id} 的参数 {input_name} 引用了不存在的节点 {value[0]}。")
+                    continue
+                if source_id == str(node_id):
+                    errors.append(f"节点 {node_id} 的参数 {input_name} 不允许连接自身。")
+                    continue
+                if not isinstance(output_index, int) or isinstance(output_index, bool) or output_index < 0:
+                    errors.append(f"节点 {node_id} 的参数 {input_name} 输出端口序号无效。")
+                    continue
+                source_node = workflow.get(source_id)
+                source_class = source_node.get("class_type") if isinstance(source_node, dict) else None
+                source_info = object_info.get(source_class) if isinstance(source_class, str) else None
+                if not isinstance(source_info, dict):
+                    errors.append(f"节点 {node_id} 的参数 {input_name} 来源节点类型无法验证。")
+                    continue
+                source_outputs = _node_output_schema(source_info)
+                if output_index >= len(source_outputs):
+                    errors.append(
+                        f"节点 {node_id} 的参数 {input_name} 引用了 {source_class} 不存在的输出端口 {output_index}。"
+                    )
+                    continue
+                input_type = known_inputs[input_name].get("type")
+                output_type = source_outputs[output_index].get("type")
+                wildcard_types = {"*", "ANY", "ANY_TYPE"}
+                if (
+                    input_type and output_type and
+                    input_type not in wildcard_types and output_type not in wildcard_types and
+                    input_type != output_type
+                ):
+                    errors.append(
+                        f"节点 {node_id} 的参数 {input_name} 类型 {input_type} "
+                        f"与来源节点 {source_id} 输出类型 {output_type} 不匹配。"
+                    )
                 continue
             choices = known_inputs[input_name].get("choices", [])
             if choices and value not in choices:
