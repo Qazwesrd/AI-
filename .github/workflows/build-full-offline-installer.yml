@@ -8,12 +8,14 @@ name: Build complete offline Windows installer
   workflow_dispatch:
     inputs:
       setup_run_id:
-        description: "Successful Windows installer workflow run ID"
+        description: "Successful Windows installer workflow run ID for the current desktop build"
         required: true
-        resource_run_id:
+        type: string
+      resource_run_id:
         description: "Verified full AI offline resource workflow run ID"
         required: true
         default: "45748921430"
+        type: string
 
 permissions:
   actions: read
