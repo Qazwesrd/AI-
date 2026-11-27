@@ -18,7 +18,8 @@ const guide = [
 
 export default function SetupWizardPage() {
   const [step, setStep] = useState(0);
-  const [bundleCheck, setBundleCheck] = useState<Check | null>(null);\n  const [imageCheck, setImageCheck] = useState<Check | null>(null);
+  const [bundleCheck, setBundleCheck] = useState<Check | null>(null);
+  const [imageCheck, setImageCheck] = useState<Check | null>(null);
   const [videoCheck, setVideoCheck] = useState<Check | null>(null);
   const [busy, setBusy] = useState(false);
 
