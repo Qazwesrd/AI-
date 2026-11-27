@@ -32,6 +32,7 @@ export default function NovelPublishingPage(){
   const [novelId,setNovelId]=useState("");
   const [platformId,setPlatformId]=useState("fanqie");
   const [penName,setPenName]=useState("");
+  const [localizedTitle,setLocalizedTitle]=useState("");
   const [language,setLanguage]=useState("zh-CN");
   const [synopsis,setSynopsis]=useState("");
   const [tags,setTags]=useState("");
@@ -159,7 +160,7 @@ export default function NovelPublishingPage(){
     try{
       const result=await api<{item:Package;message:string}>(`/api/novel-publishing/novels/${novelId}/packages`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({platform_id:platformId,pen_name:penName,language,synopsis,tags:tags.split(/[,，、]/).map(x=>x.trim()).filter(Boolean),rights_confirmed:rights,ai_assistance_disclosed:aiDisclosure,translation_id:distributionTranslationId?Number(distributionTranslationId):null}),
+        body:JSON.stringify({platform_id:platformId,pen_name:penName,localized_title:localizedTitle,language,synopsis,tags:tags.split(/[,，、]/).map(x=>x.trim()).filter(Boolean),rights_confirmed:rights,ai_assistance_disclosed:aiDisclosure,translation_id:distributionTranslationId?Number(distributionTranslationId):null}),
       });
       await api(`/api/novel-publishing/packages/${result.item.id}/submissions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"prepared",note:"已在本机生成发行稿件包，尚未向平台提交。"})});
       setMessage(result.message);await load();
@@ -248,6 +249,7 @@ export default function NovelPublishingPage(){
           </label>
           <label className="text-sm">作者笔名<input className={field+" mt-1"} value={penName} onChange={e=>setPenName(e.target.value)} placeholder="填写你的作者笔名"/></label>
           <label className="text-sm">发布版本<select className={field+" mt-1"} value={distributionTranslationId} onChange={e=>{setDistributionTranslationId(e.target.value);const selected=translations.find(x=>String(x.id)===e.target.value);if(selected)setLanguage(selected.target_language);else setLanguage("zh-CN");}}><option value="">使用原文</option>{translations.filter(x=>x.status==="completed").map(x=><option key={x.id} value={x.id}>{x.target_language_name}译本 · #{x.id}</option>)}</select></label>
+          <label className="text-sm md:col-span-2">目标语言书名<input className={field+" mt-1"} value={localizedTitle} onChange={e=>setLocalizedTitle(e.target.value)} placeholder="填写译本标题；留空则沿用原小说标题"/></label>
           <label className="text-sm">发行语言
             <select className={field+" mt-1"} value={language} onChange={e=>setLanguage(e.target.value)}>{[["zh-CN","简体中文"],["en","英语"],["ja","日语"],["es","西班牙语"],["fr","法语"],["de","德语"],["it","意大利语"],["pt","葡萄牙语"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
           </label>
