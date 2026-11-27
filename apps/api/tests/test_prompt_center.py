@@ -230,10 +230,10 @@ class PromptCenterTests(unittest.TestCase):
         self.assertIn("尚未接入各平台自动抓取", result["notice"])
 
     def test_rss_parser_extracts_only_public_metadata(self):
-        payload = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+        payload = """<?xml version="1.0"?><rss version="2.0"><channel>
         <item><title>公开漫剧更新</title><link>https://www.youtube.com/watch?v=abc</link>
         <pubDate>Fri, 27 Nov 2026 10:00:00 GMT</pubDate><description>公开摘要内容</description></item>
-        </channel></rss>"""
+        </channel></rss>""".encode("utf-8")
         items = parse_feed(payload)
         self.assertEqual(len(items), 1)
         self.assertEqual(items[0]["title"], "公开漫剧更新")
