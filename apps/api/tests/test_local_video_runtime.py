@@ -586,6 +586,40 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
         ollama.assert_called_once()
         self.assertEqual(ollama.call_args.args[0], "/api/generate")
 
+    def test_auto_builder_requires_reference_media_nodes_for_image_to_video(self):
+        from app.routers import local_video_runtime as runtime
+        from fastapi import HTTPException
+
+        data = runtime.LocalVideoAutoBuildInput(prompt="图生视频", mode="image_to_video")
+        with (
+            patch.object(runtime, "_local_object_info", return_value=self._node_info()),
+            patch.object(runtime, "_ollama_request") as ollama,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                runtime.auto_build_local_video_workflow(data)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("参考图/视频输入节点", caught.exception.detail["missing"])
+        ollama.assert_not_called()
+
+    def test_auto_builder_requires_vace_processing_and_reference_media_for_vace_mode(self):
+        from app.routers import local_video_runtime as runtime
+        from fastapi import HTTPException
+
+        info = {
+            **self._node_info(),
+            "WanVideoVACEEncode": {"input": {"required": {"image": ["IMAGE"]}}},
+        }
+        data = runtime.LocalVideoAutoBuildInput(prompt="首尾帧约束视频", mode="vace")
+        with (
+            patch.object(runtime, "_local_object_info", return_value=info),
+            patch.object(runtime, "_ollama_request") as ollama,
+        ):
+            with self.assertRaises(HTTPException) as caught:
+                runtime.auto_build_local_video_workflow(data)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("参考图/视频输入节点", caught.exception.detail["missing"])
+        ollama.assert_not_called()
+
     def test_auto_builder_stops_when_wan_nodes_are_missing(self):
         from app.routers import local_video_runtime as runtime
         from fastapi import HTTPException
