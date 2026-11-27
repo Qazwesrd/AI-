@@ -760,12 +760,12 @@ class PublicSourceInput(BaseModel):
     platform: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=200)
     feed_url: str = Field(min_length=12, max_length=2000)
-    refresh_interval_minutes: int = Field(default=360, ge=60, le=10080)
+    refresh_interval_minutes: int = Field(default=360, ge=15, le=10080)
 
 
 class PublicSourceUpdate(BaseModel):
     enabled: Optional[bool] = None
-    refresh_interval_minutes: Optional[int] = Field(default=None, ge=60, le=10080)
+    refresh_interval_minutes: Optional[int] = Field(default=None, ge=15, le=10080)
 
 
 def public_source_dict(row):
