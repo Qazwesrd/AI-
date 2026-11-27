@@ -19,10 +19,16 @@ from html.parser import HTMLParser
 MAX_FEED_BYTES = 2 * 1024 * 1024
 MAX_ITEMS = 100
 TIMEOUT_SECONDS = 12
-ALLOWED_DOMAINS = {
-    "youtube.com", "youtube.googleapis.com", "bilibili.com", "douyin.com",
-    "kuaishou.com", "tiktok.com", "facebook.com", "hongguo.com",
+PLATFORM_DOMAINS = {
+    "YouTube": {"youtube.com", "youtube.googleapis.com"},
+    "B站": {"bilibili.com"},
+    "抖音": {"douyin.com"},
+    "快手": {"kuaishou.com"},
+    "TikTok": {"tiktok.com"},
+    "Facebook": {"facebook.com"},
+    "红果短剧": {"hongguo.com"},
 }
+ALLOWED_DOMAINS = set().union(*PLATFORM_DOMAINS.values())
 
 
 class FeedCollectionError(ValueError):
@@ -44,7 +50,7 @@ class _TextExtractor(HTMLParser):
             self.parts.append(data.strip())
 
 
-def validate_public_feed_url(url: str) -> str:
+def validate_public_feed_url(url: str, platform: str | None = None) -> str:
     parsed = urllib.parse.urlsplit((url or "").strip())
     if parsed.scheme.lower() != "https" or not parsed.hostname:
         raise FeedCollectionError("仅允许 HTTPS 公开订阅源")
@@ -58,8 +64,11 @@ def validate_public_feed_url(url: str) -> str:
         raise FeedCollectionError("不接受 IP 地址形式的订阅源")
     except ValueError:
         pass
-    if not any(host == domain or host.endswith("." + domain) for domain in ALLOWED_DOMAINS):
-        raise FeedCollectionError("该域名不在当前允许的平台公开来源范围内")
+    allowed_domains = PLATFORM_DOMAINS.get(platform, ALLOWED_DOMAINS) if platform else ALLOWED_DOMAINS
+    if platform and platform not in PLATFORM_DOMAINS:
+        raise FeedCollectionError("当前平台暂不支持该采集适配器")
+    if not any(host == domain or host.endswith("." + domain) for domain in allowed_domains):
+        raise FeedCollectionError("订阅源域名与所选平台不匹配，或不在允许的公开来源范围内")
     try:
         addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except OSError as exc:
