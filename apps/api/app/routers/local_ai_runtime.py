@@ -123,6 +123,16 @@ def local_resource_bundle_status():
 
 
 
+class LocalChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=12000)
+
+
+class LocalChatInput(BaseModel):
+    model: str = Field(min_length=1, max_length=128)
+    messages: list[LocalChatMessage] = Field(min_length=1, max_length=20)
+
+
 class LocalModelTestInput(BaseModel):
     model: str = Field(min_length=1, max_length=128)
 
@@ -171,7 +181,7 @@ CREATIVE_TASKS = {
 
 def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0):
     """Call a fixed localhost Ollama endpoint without honoring external proxies."""
-    if path not in {"/api/tags", "/api/generate", "/api/show", "/api/create"}:
+    if path not in {"/api/tags", "/api/generate", "/api/show", "/api/create", "/api/chat"}:
         raise ValueError("Unsupported local Ollama endpoint")
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = Request(
@@ -210,6 +220,12 @@ def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0
         raise HTTPException(502, "本地 Ollama 返回了无法识别的数据")
 
 
+def _is_cloud_model_name(name: str) -> bool:
+    """Reject Ollama-hosted model aliases so local workflows cannot incur cloud usage."""
+    normalized = name.strip().lower()
+    return normalized.endswith("-cloud") or normalized.endswith(":cloud")
+
+
 def _installed_models():
     payload = _ollama_request("/api/tags")
     models = payload.get("models", []) if isinstance(payload, dict) else []
@@ -218,7 +234,7 @@ def _installed_models():
         if not isinstance(item, dict):
             continue
         name = item.get("name") or item.get("model")
-        if isinstance(name, str) and MODEL_NAME_PATTERN.fullmatch(name):
+        if isinstance(name, str) and MODEL_NAME_PATTERN.fullmatch(name) and not _is_cloud_model_name(name):
             result.append({
                 "name": name,
                 "size_bytes": item.get("size") if isinstance(item.get("size"), int) else None,
@@ -255,6 +271,53 @@ def local_ai_runtime():
         "downloaded": False,
         "cloud_fallback": False,
         "message": "已连接本机 Ollama；只列出本机已安装模型，不会自动下载。",
+    }
+
+
+@router.post("/chat")
+def chat_with_local_model(payload: LocalChatInput):
+    """Multi-turn chat with a preinstalled local model only; no cloud aliases or fallback."""
+    model = payload.model.strip()
+    if not MODEL_NAME_PATTERN.fullmatch(model) or _is_cloud_model_name(model):
+        raise HTTPException(400, "仅允许使用本机模型，不能选择 Ollama Cloud 模型。")
+    installed = {item["name"] for item in _installed_models()}
+    if model not in installed:
+        raise HTTPException(404, "所选模型未安装在本机；聊天不会自动下载或切换云端模型。")
+    messages = [{"role": item.role, "content": item.content.strip()} for item in payload.messages]
+    if not messages[-1]["content"] or messages[-1]["role"] != "user":
+        raise HTTPException(422, "最后一条消息必须是非空的用户消息。")
+    if sum(len(item["content"]) for item in messages) > 24000:
+        raise HTTPException(413, "当前对话上下文过长，请新建对话或删减较早消息。")
+    system = (
+        "你是 AI 漫剧制作大师的本地中文助手。使用简体中文，回答清楚、具体、可执行。"
+        "帮助用户进行小说分析、人物设定、剧本、分镜和提示词创作。"
+        "区分原文事实、推断和待确认事项；不要谎称已保存文件或生成图片、视频。"
+        "你只能回答和规划，不得声称已经执行未实际完成的操作。"
+    )
+    result = _ollama_request(
+        "/api/chat",
+        {
+            "model": model,
+            "messages": [{"role": "system", "content": system}, *messages],
+            "stream": False,
+            "options": {"num_predict": 1200, "temperature": 0.4, "num_ctx": 8192},
+        },
+        timeout=180.0,
+    )
+    message = result.get("message") if isinstance(result, dict) else None
+    response = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(response, str) or not response.strip():
+        raise HTTPException(502, "本机模型没有返回有效回答，请检查模型状态和电脑资源。")
+    return {
+        "status": "success",
+        "engine": "ollama",
+        "model": model,
+        "response": response.strip()[:16000],
+        "local_only": True,
+        "network_used": False,
+        "cloud_fallback": False,
+        "downloaded": False,
+        "saved_automatically": False,
     }
 
 
