@@ -10,6 +10,8 @@ type LocalVideoRuntime = {
   nodes: { node_type: string; model_choices: string[]; input_schema?: { required?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }>; optional?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }> } }[];
   model_inventory?: Array<{ name: string; category: string; source: string; selector_node: string; status: string; load_tested: boolean }>;
   model_inventory_count?: number;
+  model_folders?: Record<string, { available: boolean; count: number; reason?: string }>;
+  model_folder_scan_available?: boolean;
   vace_node_found: boolean;
   wan_video_nodes_found: boolean;
   workflow_node_set_complete: boolean;
@@ -180,7 +182,20 @@ export default function MediaStudioPage() {
                 <p>检测状态：{localVideoRuntime.status} · Wan 节点：{localVideoRuntime.node_count}</p>
                 <p>VACE 节点：{localVideoRuntime.vace_node_found ? "已发现" : "未发现"} · Wan Video 节点：{localVideoRuntime.wan_video_nodes_found ? "已发现" : "未发现"}</p>
                 <p>完整工作流节点集：{localVideoRuntime.workflow_node_set_complete ? "齐全" : "不齐全"}</p>
-        <p>视频模型条目：{localVideoRuntime.model_inventory_count ?? localVideoRuntime.model_inventory?.length ?? 0} 个（来自本机节点模型选择器）</p>
+        <p>视频模型条目：{localVideoRuntime.model_inventory_count ?? localVideoRuntime.model_inventory?.length ?? 0} 个（包含节点选择器与本地模型目录扫描）</p>
+        {localVideoRuntime.model_folders && (
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="mb-2 text-cyan-100">本地视频模型目录检查</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {Object.entries(localVideoRuntime.model_folders).map(([folder, status]) => (
+                <div key={folder} className="rounded border border-white/10 p-2">
+                  <p className="break-all">{folder}</p>
+                  <p className="mt-1 text-xs text-white/55">{status.available ? `已扫描 · ${status.count} 个文件` : status.reason || "未扫描"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {localVideoRuntime.model_inventory && localVideoRuntime.model_inventory.length > 0 && (
           <div className="rounded-lg border border-white/10 bg-black/20 p-3">
             <p className="mb-2 font-medium text-cyan-100">已识别的视频模型清单</p>
@@ -188,7 +203,7 @@ export default function MediaStudioPage() {
               {localVideoRuntime.model_inventory.slice(0,100).map((item,index) => (
                 <div key={item.category + ":" + item.selector_node + ":" + item.name + ":" + index} className="rounded-lg border border-white/10 p-2">
                   <p className="break-all text-white/90">{item.name}</p>
-                  <p className="mt-1 text-xs text-white/50">{item.category} · {item.selector_node} · {item.load_tested ? "已实测加载" : "已发现，未实测加载"}</p>
+                  <p className="mt-1 text-xs text-white/50">{item.category} · {item.source} · {item.selector_node || item.model_folder || "本地目录"} · {item.load_tested ? "已实测加载" : item.status === "file_listed" ? "已发现文件，未实测加载" : "节点可见，未实测加载"}</p>
                 </div>
               ))}
             </div>
