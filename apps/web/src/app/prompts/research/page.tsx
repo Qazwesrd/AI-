@@ -49,7 +49,10 @@ export default function PromptResearchPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "加载研究数据失败"); }
   }
 
-  useEffect(() => {\n    setObservedAt(new Date().toISOString().slice(0, 10));\n    void load();\n  }, []);
+  useEffect(() => {
+    setObservedAt(new Date().toISOString().slice(0, 10));
+    void load();
+  }, []);
 
   const currentPrompt = prompts.find(p => String(p.id) === selectedPrompt) || null;
 
