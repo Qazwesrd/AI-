@@ -15,6 +15,7 @@ logger = logging.getLogger("ai_comic_studio")
 
 ROUTER_MODULES = [
     "app.routers.novels",
+    "app.routers.novel_publishing",
     "app.routers.studio",
     "app.routers.visual",
     "app.routers.story",
