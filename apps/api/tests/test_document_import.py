@@ -154,6 +154,19 @@ class DocumentImportTests(unittest.TestCase):
     def test_txt_document_import(self):
         self.assertEqual(extract_document_text("novel.txt", "正文内容".encode("utf-8")), "正文内容")
 
+    def test_rtf_document_import(self):
+        raw = br"{\\rtf1\\ansi 第一章\\par RTF 正文}"
+        self.assertIn("RTF 正文", extract_document_text("novel.rtf", raw))
+
+    def test_pdf_without_text_is_rejected_with_clear_message(self):
+        from pypdf import PdfWriter
+        buffer = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=300, height=400)
+        writer.write(buffer)
+        with self.assertRaisesRegex(ValueError, "没有可提取文字"):
+            extract_document_text("novel.pdf", buffer.getvalue())
+
     def test_reject_unsupported_format(self):
         with self.assertRaises(ValueError):
             extract_document_text("novel.doc", b"content")
