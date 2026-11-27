@@ -40,9 +40,6 @@ class AnalysisChunkSafetyTests(unittest.TestCase):
         self.assertEqual(unknown_chunk_keys(states), ["2", "3", "4"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 class FakeResponse:
     def __init__(self, payload):
         self.payload = payload
@@ -107,3 +104,5 @@ class LocalNovelAnalysisTests(unittest.TestCase):
         self.assertFalse(body["stream"])
         self.assertEqual(body["format"], "json")
 
+if __name__ == "__main__":
+    unittest.main()
