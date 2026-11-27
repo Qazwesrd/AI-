@@ -106,7 +106,7 @@ export default function RevenueCenterPage() {
       </section>
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
         <h2 className="text-xl font-semibold">其他平台官方收益 / 提现入口</h2>
-        <p className="mt-2 text-sm text-slate-400">这里仅跳转平台官方页面。当前版本尚未完成平台 OAuth 收入同步或提现执行 API，因此不会伪造“软件内提现”按钮，也不会保存银行卡号、密码或验证码。</p>
+        <p className="mt-2 text-sm text-slate-400">Google 已支持官方 OAuth 只读收入与付款记录同步；其他平台按官方接口能力逐步接入。当前没有经过官方确认、且账户具备执行权限的提现 API，因此不会显示虚假的“软件内提现”按钮。软件不会保存银行卡号、密码或验证码。</p>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           {platforms.map(item=><article key={item.platform} className="rounded-lg border border-slate-700 p-3">
             <div className="flex items-center justify-between gap-2"><strong>{item.platform}</strong><span className="text-xs text-amber-300">官方操作</span></div>
