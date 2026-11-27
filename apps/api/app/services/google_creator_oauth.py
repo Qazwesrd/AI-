@@ -13,9 +13,11 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
+from app.database import STORAGE_DIR
 
 
 GOOGLE_SCOPES = [
@@ -37,11 +39,75 @@ class OAuthProviderError(RuntimeError):
     pass
 
 
+SECRET_DIR = STORAGE_DIR / "secrets"
+SECRET_DIR.mkdir(parents=True, exist_ok=True)
+OAUTH_KEY_FILE = SECRET_DIR / "oauth-token.key"
+GOOGLE_CONFIG_FILE = SECRET_DIR / "google-oauth.json"
+
+
+def save_google_client_id(value: str):
+    value = (value or "").strip()
+    if not value or len(value) > 500 or not value.endswith(".apps.googleusercontent.com"):
+        raise OAuthConfigurationError("Google Client ID 格式无效。请填写 Google Cloud 中创建的 Desktop app OAuth Client ID。")
+    GOOGLE_CONFIG_FILE.write_text(json.dumps({"client_id": value}, ensure_ascii=False), encoding="utf-8")
+    os.environ["GOOGLE_OAUTH_CLIENT_ID"] = value
+    return value
+
+
 def _client_id() -> str:
     value = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+    if not value and GOOGLE_CONFIG_FILE.exists():
+        try:
+            value = str(json.loads(GOOGLE_CONFIG_FILE.read_text(encoding="utf-8")).get("client_id") or "").strip()
+        except (OSError, ValueError, AttributeError):
+            value = ""
     if not value:
-        raise OAuthConfigurationError("尚未配置 GOOGLE_OAUTH_CLIENT_ID；请先在本机设置 Google Desktop OAuth 客户端 ID。")
+        raise OAuthConfigurationError("尚未配置 Google Desktop OAuth Client ID；请先在收益中心填写你自己的 Google OAuth 客户端 ID。")
     return value
+
+
+def _dpapi_transform(data: bytes, protect: bool) -> bytes:
+    if os.name != "nt":
+        return data
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
+
+    source_buffer = ctypes.create_string_buffer(data)
+    source = DATA_BLOB(len(data), ctypes.cast(source_buffer, ctypes.POINTER(ctypes.c_byte)))
+    output = DATA_BLOB()
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    if protect:
+        ok = crypt32.CryptProtectData(ctypes.byref(source), "AI Comic Studio OAuth key", None, None, None, 0x1, ctypes.byref(output))
+    else:
+        ok = crypt32.CryptUnprotectData(ctypes.byref(source), None, None, None, None, 0x1, ctypes.byref(output))
+    if not ok:
+        raise OAuthConfigurationError("Windows DPAPI 无法保护或读取本机 OAuth 加密密钥。")
+    try:
+        return ctypes.string_at(output.pbData, output.cbData)
+    finally:
+        kernel32.LocalFree(output.pbData)
+
+
+def _load_or_create_key() -> bytes:
+    if OAUTH_KEY_FILE.exists():
+        stored = OAUTH_KEY_FILE.read_bytes()
+        if stored.startswith(b"DPAPI1:"):
+            return _dpapi_transform(stored[len(b"DPAPI1:"):], False)
+        return stored
+    key = Fernet.generate_key()
+    stored = b"DPAPI1:" + _dpapi_transform(key, True) if os.name == "nt" else key
+    temporary = OAUTH_KEY_FILE.with_suffix(".tmp")
+    temporary.write_bytes(stored)
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
+    temporary.replace(OAUTH_KEY_FILE)
+    return key
 
 
 def _client_secret() -> str:
@@ -50,12 +116,11 @@ def _client_secret() -> str:
 
 def token_cipher() -> Fernet:
     key = os.environ.get("AI_COMIC_TOKEN_ENCRYPTION_KEY", "").strip()
-    if not key:
-        raise OAuthConfigurationError("尚未配置 AI_COMIC_TOKEN_ENCRYPTION_KEY，出于安全原因不会以明文保存 OAuth 令牌。")
     try:
-        return Fernet(key.encode("ascii"))
-    except (ValueError, TypeError) as exc:
-        raise OAuthConfigurationError("AI_COMIC_TOKEN_ENCRYPTION_KEY 格式无效；需要 Fernet URL-safe Base64 密钥。") from exc
+        key_bytes = key.encode("ascii") if key else _load_or_create_key()
+        return Fernet(key_bytes)
+    except (ValueError, TypeError, OSError) as exc:
+        raise OAuthConfigurationError("无法初始化本机 OAuth 令牌加密密钥；请检查 storage/secrets 目录权限。") from exc
 
 
 def encrypt_token(value: str) -> str:
