@@ -17,12 +17,12 @@ from app.models.novel import Novel, AnalysisItem, NovelAnalysisJob
 from app.models.studio import AIProviderConfig, AIUsageLog
 from app.routers.studio import runtime, decrypt_key
 from app.services.task_runtime import acquire_task_lease, release_task_lease, heartbeat_task_lease
+from app.routers.local_ai_runtime import OLLAMA_BASE_URL as LOCAL_OLLAMA_BASE_URL
 
 router = APIRouter(prefix="/api", tags=["AI小说深度分析"])
 
 # Local-only Ollama endpoint shared with the desktop runtime. Never read a
 # user-supplied URL here and never fall back to a cloud provider.
-LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11435"
 _LOCAL_OLLAMA_OPENER = build_opener(ProxyHandler({}))
 
 CATEGORY_MAP = {
