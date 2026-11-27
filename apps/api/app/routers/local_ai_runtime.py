@@ -41,9 +41,17 @@ def _resource_bundle_status(data_directory: str | None = None):
             if manifest_path.stat().st_size > 2 * 1024 * 1024:
                 raise ValueError("资源清单超过 2 MiB")
             manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest_valid = isinstance(manifest_data, (dict, list))
+            manifest_valid = (
+                isinstance(manifest_data, dict)
+                and manifest_data.get("schema_version") == 1
+                and manifest_data.get("product") == "AI漫剧制作大师"
+                and isinstance(manifest_data.get("resource_bundle_version"), str)
+                and bool(manifest_data.get("resource_bundle_version").strip())
+                and isinstance(manifest_data.get("engines"), list)
+                and len(manifest_data.get("engines")) >= 3
+            )
             if not manifest_valid:
-                manifest_error = "资源清单顶层格式不是 JSON 对象或数组"
+                manifest_error = "资源清单版本、产品标识、资源包版本或引擎目录结构不符合要求"
         except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
             manifest_error = str(exc)[:300]
 
