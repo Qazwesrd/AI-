@@ -7,6 +7,7 @@ AI_COMIC_TOKEN_ENCRYPTION_KEY can optionally override the generated key.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import os
@@ -121,7 +122,7 @@ def token_cipher() -> Fernet:
     try:
         key_bytes = key.encode("ascii") if key else _load_or_create_key()
         return Fernet(key_bytes)
-    except (ValueError, TypeError, OSError) as exc:
+    except (ValueError, TypeError, OSError, binascii.Error, UnicodeError) as exc:
         raise OAuthConfigurationError("无法初始化本机 OAuth 令牌加密密钥；请检查 storage/secrets 目录权限。") from exc
 
 
