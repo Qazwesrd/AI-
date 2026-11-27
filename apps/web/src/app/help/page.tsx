@@ -82,7 +82,7 @@ export default function HelpPage() {
             <li>不要删除数据库或素材目录；先创建完整工作空间备份，再处理数据问题。</li>
           </ol>
         </section>
-        <footer className="pb-10 text-center text-xs text-purple-300/50">AI漫剧制作大师 · 使用说明会随正式测试版本同步更新</footer>
+        <footer className="pb-10 text-center text-xs text-purple-300/50">AI漫剧制作大师 · 使用说明会随正式桌面版本同步更新</footer>
       </div>
     </main>
   );
