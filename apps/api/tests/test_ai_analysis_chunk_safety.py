@@ -4,6 +4,7 @@ from unittest.mock import patch
 from fastapi import HTTPException
 
 from app.routers import ai_novel_analysis as analysis
+from app.routers import local_ai_runtime
 
 from app.routers.ai_novel_analysis import (
     merge_chunk_state,
@@ -61,6 +62,9 @@ class FakeOpener:
 
 
 class LocalNovelAnalysisTests(unittest.TestCase):
+    def test_novel_analysis_uses_the_shared_local_ollama_endpoint(self):
+        self.assertEqual(analysis.LOCAL_OLLAMA_BASE_URL, local_ai_runtime.OLLAMA_BASE_URL)
+
     def test_local_provider_uses_first_installed_ollama_model(self):
         opener = FakeOpener(b'{"models":[{"name":"qwen2.5:7b"},{"name":"llama3"}]}')
         with patch.object(analysis, "_LOCAL_OLLAMA_OPENER", opener):
