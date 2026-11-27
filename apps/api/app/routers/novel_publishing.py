@@ -76,7 +76,7 @@ def package_dict(row):
         "ai_assistance_disclosed":bool(row.ai_assistance_disclosed),
         "status":row.status,"created_at":row.created_at.isoformat() if row.created_at else None,
         "updated_at":row.updated_at.isoformat() if row.updated_at else None,
-        "word_count":len(re.sub(r"\\s+","",row.manuscript_markdown)),
+        "word_count":len(re.sub(r"\s+","",row.manuscript_markdown)),
     }
 
 
@@ -172,7 +172,7 @@ def export_distribution_package(package_id: int, format: str = Query(default="md
         },ensure_ascii=False,indent=2)
         media = "application/json; charset=utf-8"
     elif format == "txt":
-        body = re.sub(r"^#{1,6}\\s*","",row.manuscript_markdown,flags=re.MULTILINE)
+        body = re.sub(r"^#{1,6}\s*","",row.manuscript_markdown,flags=re.MULTILINE)
         body = body.replace("---","-"*40)
         media = "text/plain; charset=utf-8"
     else:
