@@ -194,8 +194,6 @@ export default function LocalModelsPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "模型安装状态读取失败"); }
   }, []);
 
-  useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
-
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
     if (!desktop) return;
@@ -241,6 +239,14 @@ export default function LocalModelsPage() {
       setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });
     }
   }, []);
+
+  useEffect(() => {
+    void refresh();
+    void refreshRuntime();
+    void refreshInstaller();
+    void refreshHardwareReadiness();
+    void refreshImageRuntime();
+  }, [refresh, refreshRuntime, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
 
   // Local engines may still be starting after the desktop window appears.
   // Refresh their read-only status briefly so the page does not stay stuck on
