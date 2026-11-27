@@ -856,7 +856,7 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
             "prompt": user_prompt,
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.1, "num_predict": 4096},
+            "options": {"temperature": 0.1, "num_predict": 4096, "num_ctx": 8192},
         }, timeout=600.0)
         specification = _extract_auto_workflow_json(response.get("response") if isinstance(response, dict) else "")
         if not specification["nodes"]:
