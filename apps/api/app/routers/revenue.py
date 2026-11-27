@@ -631,12 +631,24 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
         payment_count = 0
         skipped_currency_count = 0
         adsense_warning = ""
+        adsense_account_rows = []
+        page_token = ""
         try:
-            adsense_accounts = google_get_json("https://adsense.googleapis.com/v2/accounts?pageSize=100", access)
+            for _ in range(100):
+                page_query = {"pageSize": 100}
+                if page_token:
+                    page_query["pageToken"] = page_token
+                page_url = "https://adsense.googleapis.com/v2/accounts?" + urllib.parse.urlencode(page_query)
+                page = google_get_json(page_url, access)
+                adsense_account_rows.extend(page.get("accounts", []))
+                page_token = str(page.get("nextPageToken") or "")
+                if not page_token:
+                    break
+            else:
+                adsense_warning = "AdSense 账户分页超过 100 页，已停止继续读取以避免无限请求。"
         except OAuthProviderError as exc:
-            adsense_accounts = {"accounts": []}
             adsense_warning = str(exc)[:1000]
-        for account in adsense_accounts.get("accounts", []):
+        for account in adsense_account_rows:
             account_name = str(account.get("name") or "")
             account_id = account_name.rsplit("/", 1)[-1]
             if not account_id:
