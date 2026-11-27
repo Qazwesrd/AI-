@@ -216,6 +216,23 @@ export default function Home() {
           </section>
 
           {/* 新手与专业模式快速开始 */}
+          <div className="mb-4 grid gap-3 md:grid-cols-3">
+            <a href="/setup-wizard" className="glass rounded-2xl border border-cyan-300/30 p-4 transition hover:border-cyan-200/70">
+              <div className="text-2xl">🧭</div><h2 className="mt-2 font-bold text-cyan-100">AI资源包配置向导</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">一步一步检查图片模型、视频模型、目录与引擎状态。</p>
+              <span className="mt-3 inline-block text-xs text-cyan-200">开始配置 →</span>
+            </a>
+            <a href="/local-models" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
+              <div className="text-2xl">🧩</div><h2 className="mt-2 font-bold text-white">本地模型管理</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">查看模型清单、硬件建议和本地引擎识别结果。</p>
+              <span className="mt-3 inline-block text-xs text-purple-200">管理模型 →</span>
+            </a>
+            <a href="/help" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
+              <div className="text-2xl">📘</div><h2 className="mt-2 font-bold text-white">完整使用说明书</h2>
+              <p className="mt-1 text-xs leading-5 text-purple-100/70">查看每个功能的用途、入口、操作流程与常见问题。</p>
+              <span className="mt-3 inline-block text-xs text-purple-200">阅读说明 →</span>
+            </a>
+          </div>
           <BeginnerQuickStart />
 
           {/* 四大功能卡片 */}
