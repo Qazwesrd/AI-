@@ -66,4 +66,5 @@ class OAuthAuthorizationState(Base):
     provider = Column(String(60), nullable=False, index=True)
     state_hash = Column(String(128), nullable=False, unique=True, index=True)
     code_verifier = Column(Text, nullable=False)
+    redirect_uri = Column(String(500), nullable=False, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
