@@ -265,7 +265,16 @@ def parse_money(value: str, fallback_currency: str | None = None):
         return None, None
     amount = float(match.group(0).replace(",", ""))
     upper = raw.upper()
-    currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "KRW", "TWD") if code in upper), None)
-    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD","KRW","TWD"}:
+    currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "KRW", "TWD", "BRL", "MXN", "ARS", "CLP", "COP", "PEN", "PLN", "SEK", "NOK", "DKK", "CZK", "HUF", "RON", "TRY", "RUB", "UAH", "AED", "SAR", "QAR", "ILS", "ZAR", "EGP", "THB", "VND", "IDR", "MYR", "PHP", "PKR", "BDT") if code in upper), None)
+    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD","KRW","TWD","BRL","MXN","ARS","CLP","COP","PEN","PLN","SEK","NOK","DKK","CZK","HUF","RON","TRY","RUB","UAH","AED","SAR","QAR","ILS","ZAR","EGP","THB","VND","IDR","MYR","PHP","PKR","BDT"}:
         currency = fallback_currency
+    if currency is None:
+        # Infer only symbols that identify one currency unambiguously.
+        # Bare "$" and "¥" are intentionally not guessed.
+        for symbol, code in (("R$", "BRL"), ("C$", "CAD"), ("A$", "AUD"), ("HK$", "HKD"), ("NT$", "TWD"),
+                             ("€", "EUR"), ("£", "GBP"), ("₹", "INR"), ("₩", "KRW"),
+                             ("₽", "RUB"), ("₺", "TRY"), ("฿", "THB")):
+            if symbol in raw:
+                currency = code
+                break
     return amount, currency
