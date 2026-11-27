@@ -19,6 +19,14 @@ export default function HomeNavigation() {
         返回首页
       </Link>
       <Link
+        href="/local-chat"
+        aria-label="打开本地 AI 聊天"
+        className="inline-flex items-center gap-2 rounded-full border border-emerald-300/35 bg-slate-950/90 px-4 py-3 text-sm font-medium text-emerald-100 shadow-xl shadow-emerald-950/20 backdrop-blur transition hover:border-emerald-200/70 hover:bg-emerald-950"
+      >
+        <span aria-hidden="true">✦</span>
+        本地 AI 聊天
+      </Link>
+      <Link
         href="/help"
         aria-label="打开使用说明"
         className="inline-flex items-center gap-2 rounded-full border border-cyan-300/35 bg-slate-950/90 px-4 py-3 text-sm font-medium text-cyan-100 shadow-xl shadow-cyan-950/20 backdrop-blur transition hover:border-cyan-200/70 hover:bg-cyan-950"
