@@ -249,6 +249,17 @@ class PromptCenterTests(unittest.TestCase):
         self.assertFalse(result["items"][0]["contains_public_prompt"])
         self.assertIn("尚未接入各平台自动抓取", result["notice"])
 
+    def test_public_trend_ranking_ignores_samples_without_numeric_engagement(self):
+        for platform,day in [("平台甲","2026-11-20"),("平台乙","2026-11-26")]:
+            item=create_trend_evidence(EvidenceInput(
+                platform=platform,work_title="只有文字榜单位置",observed_at=day,
+                metric_summary={"榜单":"TOP20"},
+                evidence_type="作品趋势证据",
+            ),self.db)["item"]
+            verify_trend_evidence(item["id"],EvidenceVerifyInput(verification_note="核验公开页面"),self.db)
+        result=research_trend_ranking(self.db)
+        self.assertEqual(result["items"], [])
+
     def test_rss_parser_extracts_only_public_metadata(self):
         payload = """<?xml version="1.0"?><rss version="2.0"><channel>
         <item><title>公开漫剧更新</title><link>https://www.youtube.com/watch?v=abc</link>
