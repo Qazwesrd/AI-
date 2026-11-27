@@ -582,6 +582,17 @@ export default function LocalImageStudioPage() {
 
   useEffect(() => { void refreshModels(); }, [refreshModels]);
 
+  // Retry ComfyUI model discovery while the local service finishes starting.
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void refreshModels();
+      if (attempts >= 12) window.clearInterval(timer);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshModels]);
+
 
   useEffect(() => {
     if (!targetShotId) { setShotImages([]); return; }
