@@ -127,6 +127,8 @@ def create_distribution_package(novel_id: int, data: DistributionPackageInput, d
     platform = next((item for item in PLATFORMS if item["id"] == data.platform_id),None)
     if not platform:
         raise HTTPException(400,"不支持的发行平台")
+    if data.language not in platform["language"]:
+        raise HTTPException(400,"所选平台当前发行目录未列出该语言；请先选择平台支持的语言或改用其他平台。")
     if not data.rights_confirmed:
         raise HTTPException(400,"请先确认你拥有作品著作权或已取得完整授权")
     if not data.ai_assistance_disclosed:
@@ -223,6 +225,8 @@ def build_ai_assist_prompt(novel_id: int, data: AIAssistPromptInput, db: Session
     if not novel:
         raise HTTPException(404,"小说不存在")
     platform = next((item for item in PLATFORMS if item["id"] == data.platform_id),None) if data.platform_id else None
+    if platform and data.target_language not in platform["language"]:
+        raise HTTPException(400,"目标平台当前目录未列出该语言，请更换目标语言。")
     chapter = None
     if data.chapter_id is not None:
         chapter = db.query(Chapter).filter(Chapter.id == data.chapter_id, Chapter.novel_id == novel_id).first()
