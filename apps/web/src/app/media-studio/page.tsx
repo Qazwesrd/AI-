@@ -359,7 +359,7 @@ export default function MediaStudioPage() {
             <p className="font-semibold text-emerald-100">本地工作流结果</p>
             {workflowResult.prompt_id && <p className="mt-1 break-all text-xs">ComfyUI 任务编号：{workflowResult.prompt_id}</p>}
             {workflowResult.node_count !== undefined && <p className="mt-1 text-xs">节点数：{workflowResult.node_count} · 预检：{workflowResult.valid ? "通过" : "未通过"}</p>}
-            {workflowResult.videos?.length > 0 && <div className="mt-2 space-y-1">{workflowResult.videos.map((video: any, index: number) => <p key={index} className="break-all text-xs text-emerald-200">{video.filename} · {video.subfolder || "output"}</p>)}</div>}
+            {workflowResult.videos?.length > 0 && <div className="mt-2 space-y-3">{workflowResult.videos.map((video: any, index: number) => <div key={index} className="space-y-1"><p className="break-all text-xs text-emerald-200">{video.filename} · {video.subfolder || "output"}</p>{workflowResult.completed && workflowPromptId && <video controls preload="metadata" className="max-h-[480px] w-full rounded-lg bg-black" src={`${API}/api/local-ai/video-workflow/${workflowPromptId}/preview?output_index=${index}`} />}</div>)}</div>}
             {workflowResult.errors?.length > 0 && <ul className="mt-2 list-disc pl-5 text-xs text-amber-200">{workflowResult.errors.map((error: string, index: number) => <li key={index}>{error}</li>)}</ul>}
             <p className="mt-2 text-xs text-white/60">{workflowResult.message}</p>
           </div>}
