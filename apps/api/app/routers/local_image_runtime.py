@@ -206,10 +206,9 @@ def local_image_runtime():
         item["name"] for item in inventory["items"]
         if item["category"] == "checkpoint"
     ]
-    devices = []
-    system = stats.get("system")
-    if isinstance(system, dict):
-        devices = system.get("devices") if isinstance(system.get("devices"), list) else []
+    # ComfyUI /system_stats returns devices as a top-level sibling of system.
+    # Reading system.devices silently reported zero devices on real installations.
+    devices = stats.get("devices") if isinstance(stats.get("devices"), list) else []
     return {
         "engine": "comfyui",
         "status": "ready",
