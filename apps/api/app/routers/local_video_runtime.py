@@ -4,15 +4,18 @@ This endpoint never downloads models, installs nodes, submits workflows, or uses
 A positive capability scan is not a generation test; actual workflow execution is reported separately.
 """
 import json
+import re
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地视频生成"])
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 _OPENER = build_opener(ProxyHandler({}))
-MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_RESPONSE_BYTES = 8 * 1024 * 1024\nMAX_WORKFLOW_BYTES = 4 * 1024 * 1024\nMAX_WORKFLOW_NODES = 500\nPROMPT_ID_PATTERN = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 VIDEO_MODEL_FOLDERS = {
     "diffusion_models": "video_model",
     "checkpoints": "video_checkpoint",
@@ -269,6 +272,172 @@ def assess_wan_vace_nodes(object_info):
             "缺少工作流节点：" + "、".join(missing) if names else
             "未发现 Wan/VACE 节点；不会自动下载模型或安装自定义节点。"
         ),
+    }
+
+
+class LocalVideoWorkflowInput(BaseModel):
+    workflow: dict = Field(min_length=1)
+    prompt: str = Field(default="", max_length=12000)
+
+
+def validate_local_video_workflow(workflow, object_info):
+    """Validate an API-format ComfyUI graph against the live local node schema."""
+    errors = []
+    if not isinstance(workflow, dict) or not workflow:
+        return {"valid": False, "errors": ["工作流必须是非空的 API 格式 JSON 对象。"], "node_count": 0}
+    if len(workflow) > MAX_WORKFLOW_NODES:
+        return {"valid": False, "errors": [f"工作流节点超过安全上限 {MAX_WORKFLOW_NODES}。"], "node_count": len(workflow)}
+    try:
+        encoded = json.dumps(workflow, ensure_ascii=False).encode("utf-8")
+    except (TypeError, ValueError):
+        return {"valid": False, "errors": ["工作流包含无法序列化的数据。"], "node_count": len(workflow)}
+    if len(encoded) > MAX_WORKFLOW_BYTES:
+        return {"valid": False, "errors": ["工作流 JSON 超过 4 MB 安全上限。"], "node_count": len(workflow)}
+    if not isinstance(object_info, dict) or object_info.get("_error"):
+        return {"valid": False, "errors": ["无法读取本机 ComfyUI 节点信息，请先启动引擎。"], "node_count": len(workflow)}
+    node_ids = {str(key) for key in workflow}
+    has_wan = False
+    has_video_output = False
+    for node_id, node in workflow.items():
+        if not isinstance(node, dict):
+            errors.append(f"节点 {node_id} 格式无效。")
+            continue
+        class_type = node.get("class_type")
+        inputs = node.get("inputs")
+        if not isinstance(class_type, str) or not isinstance(inputs, dict):
+            errors.append(f"节点 {node_id} 缺少 class_type 或 inputs。")
+            continue
+        if "wanvideo" in class_type.lower() or "wan_video" in class_type.lower() or "vace" in class_type.lower():
+            has_wan = True
+        if "videocombine" in class_type.lower() or "savevideo" in class_type.lower():
+            has_video_output = True
+        schema_info = object_info.get(class_type)
+        if not isinstance(schema_info, dict):
+            errors.append(f"节点 {node_id}：本机未安装节点 {class_type}。")
+            continue
+        schema = _node_input_schema(schema_info)
+        known_inputs = {**schema["required"], **schema["optional"]}
+        for required_name in schema["required"]:
+            if required_name not in inputs:
+                errors.append(f"节点 {node_id}（{class_type}）缺少必填参数 {required_name}。")
+        for input_name, value in inputs.items():
+            if input_name not in known_inputs:
+                errors.append(f"节点 {node_id}（{class_type}）存在未知参数 {input_name}。")
+                continue
+            if isinstance(value, list) and len(value) == 2 and isinstance(value[0], (str, int)):
+                if str(value[0]) not in node_ids:
+                    errors.append(f"节点 {node_id} 的参数 {input_name} 引用了不存在的节点 {value[0]}。")
+                continue
+            choices = known_inputs[input_name].get("choices", [])
+            if choices and value not in choices:
+                errors.append(f"节点 {node_id} 的参数 {input_name} 值 {value!r} 不在本机可用选项中。")
+    if not has_wan:
+        errors.append("工作流中没有发现 Wan/VACE 视频模型节点。")
+    if not has_video_output:
+        errors.append("工作流中没有发现视频输出节点（VHS_VideoCombine 或 SaveVideo）。")
+    return {
+        "valid": not errors, "errors": errors[:100], "node_count": len(workflow),
+        "has_wan_video_nodes": has_wan, "has_video_output_node": has_video_output,
+        "local_only": True, "cloud_fallback": False,
+    }
+
+
+def _comfy_request(path, payload=None, timeout=15.0):
+    if path != "/prompt" and not re.fullmatch(r"/history/[0-9a-fA-F-]{32,36}", path):
+        raise ValueError("Unsupported local ComfyUI workflow endpoint")
+    data = json.dumps(payload).encode("utf-8") if payload is not None else None
+    request = Request(
+        COMFYUI_BASE_URL + path, data=data,
+        headers={"Content-Type": "application/json"} if data is not None else {},
+        method="POST" if data is not None else "GET",
+    )
+    try:
+        with _OPENER.open(request, timeout=timeout) as response:
+            raw = response.read(MAX_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise HTTPException(502, "ComfyUI 返回数据超过安全读取上限。")
+        parsed = json.loads(raw.decode("utf-8"))
+        if not isinstance(parsed, dict):
+            raise HTTPException(502, "ComfyUI 返回格式无效。")
+        return parsed
+    except HTTPError as exc:
+        try:
+            detail = exc.read(4096).decode("utf-8", errors="replace")
+        except Exception:
+            detail = ""
+        raise HTTPException(502, f"本地 ComfyUI 请求失败（HTTP {exc.code}）：{detail[:500]}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, "本机 ComfyUI 未连接；未切换云端服务。") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, "ComfyUI 返回了无法识别的数据。") from exc
+
+
+@router.post("/video-workflow/validate")
+def validate_video_workflow_endpoint(data: LocalVideoWorkflowInput):
+    object_info = _local_object_info()
+    result = validate_local_video_workflow(data.workflow, object_info)
+    if not result["valid"]:
+        raise HTTPException(422, detail={"message": "本地视频工作流未通过预检。", **result})
+    return {**result, "message": "工作流结构、节点和模型选项通过本机预检；尚未执行生成。"}
+
+
+@router.post("/video-workflow/submit")
+def submit_video_workflow_endpoint(data: LocalVideoWorkflowInput):
+    object_info = _local_object_info()
+    result = validate_local_video_workflow(data.workflow, object_info)
+    if not result["valid"]:
+        raise HTTPException(422, detail={"message": "本地视频工作流未通过预检，未提交任务。", **result})
+    client_id = str(uuid.uuid4())
+    queued = _comfy_request("/prompt", {
+        "prompt": data.workflow,
+        "client_id": client_id,
+    }, timeout=30.0)
+    prompt_id = queued.get("prompt_id")
+    if not isinstance(prompt_id, str) or not PROMPT_ID_PATTERN.fullmatch(prompt_id):
+        raise HTTPException(502, "ComfyUI 未返回有效 prompt_id；请检查本机队列状态。")
+    return {
+        "prompt_id": prompt_id,
+        "number": queued.get("number"),
+        "status": "queued",
+        "node_errors": queued.get("node_errors", {}),
+        "local_only": True, "cloud_fallback": False,
+        "message": "任务已提交到本机 ComfyUI 队列。实际生成是否成功以任务状态和视频输出为准。",
+    }
+
+
+@router.get("/video-workflow/{prompt_id}")
+def get_video_workflow_status(prompt_id: str):
+    if not PROMPT_ID_PATTERN.fullmatch(prompt_id):
+        raise HTTPException(400, "任务编号格式无效。")
+    history = _comfy_request("/history/" + prompt_id, timeout=15.0)
+    item = history.get(prompt_id)
+    if not isinstance(item, dict):
+        return {"prompt_id": prompt_id, "status": "queued_or_running", "completed": False, "message": "本机队列尚未返回完成记录。"}
+    status_data = item.get("status") if isinstance(item.get("status"), dict) else {}
+    outputs = item.get("outputs") if isinstance(item.get("outputs"), dict) else {}
+    videos = []
+    for node_id, output in outputs.items():
+        if not isinstance(output, dict):
+            continue
+        for key in ("videos", "gifs"):
+            values = output.get(key)
+            if isinstance(values, list):
+                for value in values[:50]:
+                    if isinstance(value, dict):
+                        videos.append({
+                            "node_id": node_id, "filename": value.get("filename"),
+                            "subfolder": value.get("subfolder", ""),
+                            "type": value.get("type", "output"),
+                        })
+    completed = bool(status_data.get("completed"))
+    status_messages = status_data.get("messages") if isinstance(status_data.get("messages"), list) else []
+    return {
+        "prompt_id": prompt_id,
+        "status": "completed" if completed and videos else "completed_without_video" if completed else "running_or_failed",
+        "completed": completed, "videos": videos,
+        "status_messages": status_messages[-30:],
+        "local_only": True, "cloud_fallback": False,
+        "message": "已完成并发现视频输出。" if completed and videos else "任务已结束但未发现标准视频输出，请查看 ComfyUI 工作流输出。" if completed else "任务仍在运行或执行失败，请稍后刷新并查看本机 ComfyUI 队列。",
     }
 
 
