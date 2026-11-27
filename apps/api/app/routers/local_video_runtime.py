@@ -745,8 +745,8 @@ def build_video_workflow_endpoint(data: LocalVideoTemplateBuildInput):
 
 def _extract_auto_workflow_json(value):
     content = str(value or "").strip()
-    content = re.sub(r"^\x60\x60\x60(?:json)?\\s*", "", content)
-    content = re.sub(r"\\s*\x60\x60\x60$", "", content)
+    content = re.sub(r"^\x60\x60\x60(?:json)?\s*", "", content)
+    content = re.sub(r"\s*\x60\x60\x60$", "", content)
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
