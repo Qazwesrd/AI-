@@ -430,6 +430,9 @@ class TranslationCreateInput(BaseModel):
     model_name: str = Field(min_length=1, max_length=160)
     glossary: dict = Field(default_factory=dict)
 
+class TranslationChunkEditInput(BaseModel):
+    translation: str = Field(max_length=100000)
+
 
 def _novel_source_signature(novel, chapters):
     source = "\n".join(
@@ -546,6 +549,7 @@ def get_translation(translation_id: int, db: Session = Depends(get_db)):
          "completed_chunks":sum(1 for chunk in chapter["chunks"] if chunk["status"]=="completed"),
          "total_chunks":len(chapter["chunks"]),
          "translated_text":"\n\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),
+         "chunks":[{"index":index,"source":chunk["source"],"translation":chunk["translation"],"status":chunk["status"]} for index,chunk in enumerate(chapter["chunks"])],
          "status":"completed" if all(chunk["status"]=="completed" for chunk in chapter["chunks"]) else "pending"}
         for chapter in (row.chapters_data or [])
     ]
@@ -625,6 +629,52 @@ def translate_next_chunk(translation_id: int, db: Session = Depends(get_db)):
         row.last_error = str(exc)[:2000]
         db.commit()
         raise HTTPException(502,"本地翻译失败："+row.last_error)
+
+
+@router.patch("/translations/{translation_id}/chapters/{chapter_number}/chunks/{chunk_index}")
+def edit_translation_chunk(
+    translation_id: int,
+    chapter_number: int,
+    chunk_index: int,
+    data: TranslationChunkEditInput,
+    db: Session = Depends(get_db),
+):
+    row = db.query(NovelTranslation).filter(NovelTranslation.id == translation_id).first()
+    if not row:
+        raise HTTPException(404, "译本任务不存在")
+    novel = db.query(Novel).filter(Novel.id == row.novel_id).first()
+    if not novel:
+        raise HTTPException(404, "原小说不存在")
+    source_chapters = db.query(Chapter).filter(
+        Chapter.novel_id == row.novel_id
+    ).order_by(Chapter.chapter_number).all()
+    if _novel_source_signature(novel, source_chapters) != row.source_signature:
+        raise HTTPException(409, "原文已变化，不能继续修改旧译本；请基于最新原文新建译本。")
+    chapter = next(
+        (item for item in (row.chapters_data or []) if item.get("chapter_number") == chapter_number),
+        None,
+    )
+    if chapter is None or chunk_index < 0 or chunk_index >= len(chapter.get("chunks", [])):
+        raise HTTPException(404, "译文章节或分段不存在")
+    chunk = chapter["chunks"][chunk_index]
+    chunk["translation"] = data.translation.strip()
+    chunk["status"] = "completed" if chunk["translation"] else "pending"
+    row.chapters_data = row.chapters_data
+    row.completed_chunks = sum(
+        1 for item in (row.chapters_data or [])
+        for part in item.get("chunks", [])
+        if part.get("status") == "completed"
+    )
+    row.status = "completed" if row.completed_chunks >= row.total_chunks else "pending"
+    row.last_error = ""
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return {
+        "success": True,
+        "item": translation_dict(row),
+        "message": "译文校对已保存；原文保持不变。",
+    }
 
 
 @router.get("/translations/{translation_id}/export")
