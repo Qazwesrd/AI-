@@ -16,7 +16,7 @@
 - yt-analytics-monetary.readonly
 - adsense.readonly
 
-本机回调固定为 `http://127.0.0.1:8000/api/revenue/oauth/google/callback`。Google Desktop OAuth 使用 loopback IP 回调和 PKCE。
+授权时软件会临时监听一个随机本机端口，并使用无路径的 `http://127.0.0.1:<随机端口>` 作为 Google Desktop OAuth loopback redirect；收到授权码后再转交给本机 API 回调。每次授权均使用 PKCE 和一次性 state，监听器只接收一次回调后关闭。
 
 ## 2. 在软件里配置
 
