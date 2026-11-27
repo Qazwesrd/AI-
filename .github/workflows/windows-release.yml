@@ -203,7 +203,7 @@ jobs:
           $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
           if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
           $assets = @($assetResponse | ConvertFrom-Json)
-          $expectedAssetNames = @($files | ForEach-Object { $_.Name -replace '[^\\x00-\\x7F]+', '.' })
+          $expectedAssetNames = @($files | ForEach-Object { $_.Name -replace '[^\x00-\x7F]+', '.' })
           foreach ($asset in $assets) {
             if ($expectedAssetNames -notcontains $asset.name) {
               gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
