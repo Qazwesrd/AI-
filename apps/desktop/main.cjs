@@ -5,6 +5,7 @@ const fs = require("fs");
 const http = require("http");
 const net = require("net");
 const { registerOllamaRuntimeInstaller } = require("./ollama-runtime-installer.cjs");
+const { registerUpdateCenter, resolveUpdatePort } = require("./update-center.cjs");
 
  
 // Discover existing user data and AI runtimes without moving, copying,
@@ -174,6 +175,7 @@ let ollamaProcess = null;
 let comfyProcess = null;
 let quitting = false;
 let startupFailed = false;
+let updateCenter = null;
 let aiBrowserSession = null;
 const aiBrowserTasks = new Map();
 const aiBrowserWindows = new Map();
@@ -550,6 +552,10 @@ async function startProductionServices({ startApi = true, startWeb = true } = {}
 }
 
 async function createWindow() {
+  if (!updateCenter) {
+    updateCenter = registerUpdateCenter({ app, ipcMain, BrowserWindow, port: resolveUpdatePort() });
+    console.log(`[UPDATE CENTER] Local update interface: http://127.0.0.1:${updateCenter.port}`);
+  }
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -628,6 +634,7 @@ if (gotLock) {
   app.on("before-quit", () => {
     quitting = true;
     stopServices();
+    if (updateCenter) { void updateCenter.close(); updateCenter = null; }
   });
 
   app.on("window-all-closed", () => {
