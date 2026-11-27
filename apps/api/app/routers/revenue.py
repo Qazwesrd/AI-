@@ -194,3 +194,23 @@ def update_withdrawal(withdrawal_id: int, data: WithdrawalStatusInput, db: Sessi
     db.commit()
     db.refresh(row)
     return {"success": True, "item": withdrawal_dict(row)}
+
+
+# 官方平台入口与接口能力边界。只有经官方文档确认并完成 OAuth 授权的执行适配器才允许提供软件内提现操作。
+PLATFORM_CAPABILITIES = [
+    {"platform": "YouTube", "official_portal": "https://studio.youtube.com/", "revenue_api": "官方只读收入分析 API（OAuth 授权；需频道/内容所有者权限）", "payout_api": False, "payout_label": "前往官方收益/AdSense 页面", "note": "Analytics monetary scope 可读取预估收入，不代表拥有提现执行 API。"},
+    {"platform": "Facebook", "official_portal": "https://www.facebook.com/monetization/", "revenue_api": "部分页面/内容变现 Insights 指标需相应权限；金额可能为估算", "payout_api": False, "payout_label": "前往 Meta 官方变现页面", "note": "Insights 估算收入不等于最终付款金额。"},
+    {"platform": "TikTok", "official_portal": "https://www.tiktok.com/creator-center", "revenue_api": "普通创作者账户通用收入 API 未确认；开发者组织小程序变现接口不等同创作者 API", "payout_api": False, "payout_label": "前往 TikTok 创作者中心", "note": "通过官方账户查看余额、结算与收款设置。"},
+    {"platform": "抖音", "official_portal": "https://creator.douyin.com/", "revenue_api": "未确认通用个人创作者收入 API", "payout_api": False, "payout_label": "前往抖音创作者服务平台", "note": "软件不模拟登录或抓取私密账户页面。"},
+    {"platform": "快手", "official_portal": "https://cp.kuaishou.com/", "revenue_api": "未接入官方个人创作者收入 API", "payout_api": False, "payout_label": "前往快手创作者服务平台", "note": "在官方账户内确认可提现余额和收款方式。"},
+    {"platform": "哔哩哔哩", "official_portal": "https://member.bilibili.com/", "revenue_api": "未接入官方个人创作者收入 API", "payout_api": False, "payout_label": "前往哔哩哔哩创作中心", "note": "在官方账户内查看收益与提现。"},
+    {"platform": "红果短剧", "official_portal": "https://www.hongguo.com/", "revenue_api": "未找到可确认的通用公开个人收益 API", "payout_api": False, "payout_label": "前往红果官方入口", "note": "请以账号内官方结算规则为准。"},
+]
+
+
+@router.get("/platforms")
+def list_platform_capabilities():
+    return {
+        "items": PLATFORM_CAPABILITIES,
+        "global_notice": "当前没有已完成 OAuth 接入并经官方确认的提现执行适配器，因此不会显示软件内直接提现按钮；官方入口只负责跳转，资金操作仍在平台完成。",
+    }
