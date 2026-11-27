@@ -20,6 +20,7 @@ type EffectiveState = {
   condition: string; holder: string; confirmed: boolean; is_evolved: boolean;
 };
 type HistoryResponse = { history: Evolution[]; effective_state: EffectiveState };
+type LocalProposal = { id: number; asset_name: string; change_type: string; event: string; evidence: string; confidence: number; appearance_after?: string; clothing_after?: string; age_after?: string; hairstyle_after?: string; injury_after?: string; equipment_after?: string; condition_after?: string; holder?: string };
 
 const categories = [
   ["all", "全部类别"], ["characters", "人物"], ["scenes", "场景"], ["props", "道具"],
@@ -48,6 +49,7 @@ export default function AssetTimelinePage() {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [localProposals, setLocalProposals] = useState<LocalProposal[]>([]);
   const [form, setForm] = useState({
     chapter_number: "", change_type: "状态变化", event: "", appearance_after: "",
     clothing_after: "", age_after: "", hairstyle_after: "", injury_after: "",
@@ -131,6 +133,31 @@ export default function AssetTimelinePage() {
     catch { setMessage("浏览器不允许自动复制，请手动选中提示词复制。"); }
   }
 
+  async function analyzeLocalEvolution() {
+    const novelId = selected?.data?.source_novel_id;
+    const chapterNumber = Number(chapter);
+    if (!novelId) { setMessage("该素材没有关联小说，请先从小说分析结果导入素材。"); return; }
+    if (!Number.isInteger(chapterNumber) || chapterNumber < 1) { setMessage("请先填写要分析的章节编号。"); return; }
+    setBusy(true); setLocalProposals([]);
+    try {
+      const result = await api<{ items: LocalProposal[]; message: string }>(`/api/ai-collaboration/novels/${novelId}/chapters/${chapterNumber}/local-analyze-evolution`, { method: "POST", body: JSON.stringify({}) });
+      setLocalProposals(result.items || []);
+      setMessage(result.message || "本机 AI 分析完成。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "本机 AI 分析失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function reviewLocalProposal(id: number, action: "approve" | "reject") {
+    setBusy(true);
+    try {
+      const result = await api<{ message?: string }>(`/api/ai-collaboration/proposals/${id}/review`, { method: "POST", body: JSON.stringify({ action, note: "" }) });
+      setLocalProposals(current => current.filter(item => item.id !== id));
+      if (selectedId) await loadHistory(selectedId);
+      setMessage(result.message || (action === "approve" ? "已确认并写入素材状态。" : "已拒绝该变化提议。"));
+    } catch (error) { setMessage(error instanceof Error ? error.message : "审核失败"); }
+    finally { setBusy(false); }
+  }
+
   return (
     <main className="cosmic min-h-screen space-y-6 p-5 text-white md:p-8">
       <header className="mx-auto max-w-7xl">
@@ -181,6 +208,7 @@ export default function AssetTimelinePage() {
                   <input value={chapter} onChange={(event) => setChapter(event.target.value)} type="number" min="1" placeholder="例如 25" className={styles + " mt-1"} />
                 </label>
                 <button onClick={() => void generatePrompt()} disabled={busy} className="rounded-lg bg-violet-700 px-4 py-2.5 text-sm disabled:opacity-50">生成该章节提示词</button>
+                <button onClick={() => void analyzeLocalEvolution()} disabled={busy || !selected.data?.source_novel_id || !chapter.trim()} className="rounded-lg bg-emerald-700 px-4 py-2.5 text-sm disabled:opacity-50">本机 AI 自动识别本章素材变化</button>
                 {prompt && <button onClick={() => void copyPrompt()} className="rounded-lg border border-cyan-300/30 px-4 py-2.5 text-sm text-cyan-100">复制提示词</button>}
               </div>
               {history?.effective_state && <div className="mt-4 rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-4">
@@ -198,6 +226,17 @@ export default function AssetTimelinePage() {
               </div>}
               {prompt && <textarea readOnly value={prompt} rows={8} className={styles + " mt-4 font-mono text-xs leading-5"} />}
             </section>
+
+            {localProposals.length > 0 && <section className={panel}>
+              <h2 className="text-lg font-semibold">本机 AI 发现的素材变化（待确认）</h2>
+              <p className="mt-1 text-xs text-slate-400">AI 只提出候选，不会直接修改正式素材。每条都必须包含能在本章正文中逐字找到的证据。</p>
+              <div className="mt-3 space-y-3">{localProposals.map(item => <article key={item.id} className="rounded-xl border border-emerald-300/20 bg-emerald-950/20 p-3">
+                <div className="flex flex-wrap justify-between gap-2"><b>{item.asset_name} · {item.change_type}</b><span className="text-xs text-emerald-200">置信度 {Math.round(item.confidence * 100)}%</span></div>
+                <p className="mt-2 text-sm">{item.event}</p>
+                <p className="mt-2 border-l-2 border-cyan-400 pl-3 text-xs text-cyan-100">原文证据：{item.evidence}</p>
+                <div className="mt-3 flex gap-2"><button disabled={busy} onClick={() => void reviewLocalProposal(item.id, "approve")} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs">确认并写入状态</button><button disabled={busy} onClick={() => void reviewLocalProposal(item.id, "reject")} className="rounded-lg border border-red-300/30 px-3 py-2 text-xs">拒绝</button></div>
+              </article>)}</div>
+            </section>}
 
             <section className={panel}>
               <h2 className="text-lg font-semibold">剧情状态历史</h2>
