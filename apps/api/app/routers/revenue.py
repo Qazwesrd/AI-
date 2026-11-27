@@ -18,7 +18,7 @@ from app.models.revenue import (
 from app.services.google_creator_oauth import (
     OAuthConfigurationError, OAuthProviderError, decrypt_token, encrypt_token,
     exchange_code, get_email, google_get_json, new_authorization,
-    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE, GOOGLE_CONFIG_FILE,
+    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE, GOOGLE_CONFIG_FILE, start_loopback_listener,
 )
 
 router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
@@ -289,7 +289,8 @@ def _google_access_token(connection, db):
 @router.get("/oauth/google/start")
 def google_oauth_start(db: Session = Depends(get_db)):
     try:
-        url, state, verifier = new_authorization()
+        redirect_uri = start_loopback_listener()
+        url, state, verifier = new_authorization(redirect_uri)
     except OAuthConfigurationError as exc:
         raise HTTPException(503, str(exc))
     db.query(OAuthAuthorizationState).filter(
@@ -299,6 +300,7 @@ def google_oauth_start(db: Session = Depends(get_db)):
         provider=GOOGLE_PROVIDER,
         state_hash=hashlib.sha256(state.encode("utf-8")).hexdigest(),
         code_verifier=verifier,
+        redirect_uri=redirect_uri,
     ))
     db.commit()
     return RedirectResponse(url, status_code=302)
@@ -327,7 +329,7 @@ def google_oauth_callback(
     db.delete(saved)
     db.commit()
     try:
-        token_data = exchange_code(code, verifier)
+        token_data = exchange_code(code, verifier, saved.redirect_uri)
         access_token = token_data.get("access_token", "")
         if not access_token:
             raise OAuthProviderError("Google 未返回 access_token")
