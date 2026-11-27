@@ -451,7 +451,12 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
             "sort": "day",
             "currency": "USD",
         })
-        analytics = google_get_json("https://youtubeanalytics.googleapis.com/v2/reports?" + query, access)
+        analytics_warning = ""
+        try:
+            analytics = google_get_json("https://youtubeanalytics.googleapis.com/v2/reports?" + query, access)
+        except OAuthProviderError as exc:
+            analytics = {"rows": []}
+            analytics_warning = str(exc)[:1000]
         inserted = 0
         updated = 0
         for values in analytics.get("rows", []):
@@ -520,17 +525,18 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
                 updated += int(bool(existed))
                 payment_count += 1
         connection.last_sync_at = datetime.utcnow()
-        connection.last_sync_status = "success"
-        connection.last_sync_error = ""
+        warnings = [item for item in (analytics_warning, adsense_warning) if item]
+        connection.last_sync_status = "partial" if warnings else "success"
+        connection.last_sync_error = " | ".join(warnings)[:2000]
         connection.status = "connected"
         db.commit()
         return {
             "success": True, "account": connection.account_label,
             "analytics_days": len(analytics.get("rows", [])),
             "payment_records": payment_count, "skipped_currency_count": skipped_currency_count, "inserted": inserted, "updated": updated,
-            "adsense_warning": adsense_warning,
+            "analytics_warning": analytics_warning, "adsense_warning": adsense_warning,
             "period": {"start": start_day.isoformat(), "end": end_day.isoformat()},
-            "message": "已同步 YouTube 预估收入；" + ("AdSense 付款记录同步遇到权限或账户限制：" + adsense_warning if adsense_warning else "已读取 Google AdSense 付款记录。") + "预估收入、应付款与已付款分开保存；无法可靠识别币种的付款金额会跳过并计数，避免猜测；此同步不提供提现执行。",
+            "message": ("YouTube Analytics 未能读取：" + analytics_warning + "；" if analytics_warning else "已读取 YouTube 预估收入；") + ("AdSense 付款记录同步遇到权限或账户限制：" + adsense_warning if adsense_warning else "已读取 Google AdSense 付款记录。") + "预估收入、应付款与已付款分开保存；无法可靠识别币种的付款金额会跳过并计数，避免猜测；此同步不提供提现执行。",
         }
     except HTTPException:
         raise
