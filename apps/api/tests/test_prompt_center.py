@@ -7,11 +7,15 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models.prompts import (
     PromptCategory, PromptTemplate, PromptVersion, PromptTestRun, PromptRankingSnapshot,
+    TrendEvidence, PromptUpgradeCandidate,
 )
 from app.routers.prompts import (
     CategoryInput, PromptInput, PromptUpdate, TestInput,
     create_category, create_prompt, update_prompt, prompt_versions,
     add_test_run, refresh_ranking, ranking_history, archive_prompt, ensure_default_prompts,
+    EvidenceInput, EvidenceVerifyInput, UpgradeCandidateInput, CandidateDecisionInput,
+    create_trend_evidence, verify_trend_evidence, create_upgrade_candidate,
+    approve_upgrade_candidate, reject_upgrade_candidate,
 )
 
 
@@ -94,6 +98,84 @@ class PromptCenterTests(unittest.TestCase):
         current = self.db.query(PromptTemplate).filter(PromptTemplate.id == item["id"]).one()
         self.assertEqual(current.current_version, 1)
         self.assertEqual(current.content, "你是一名专业漫剧编剧。")
+
+
+    def create_verified_evidence_pair(self):
+        first = create_trend_evidence(EvidenceInput(
+            platform="红果", work_title="样本漫剧甲", observed_at="2026-11-01",
+            metric_summary={"榜单": "TOP20", "互动": "公开页面记录"},
+        ), self.db)["item"]
+        second = create_trend_evidence(EvidenceInput(
+            platform="抖音", work_title="样本漫剧甲", observed_at="2026-11-08",
+            metric_summary={"榜单": "持续出现", "互动": "公开页面记录"},
+        ), self.db)["item"]
+        verify_trend_evidence(first["id"], EvidenceVerifyInput(
+            verification_note="已人工核对公开页面与日期。"
+        ), self.db)
+        verify_trend_evidence(second["id"], EvidenceVerifyInput(
+            verification_note="已人工核对另一平台及不同日期。"
+        ), self.db)
+        return [first["id"], second["id"]]
+
+    def test_upgrade_candidate_requires_verified_multi_platform_multi_date_evidence(self):
+        item = self.create_prompt_row()
+        first = create_trend_evidence(EvidenceInput(
+            platform="红果", work_title="样本", observed_at="2026-11-01"
+        ), self.db)["item"]
+        second = create_trend_evidence(EvidenceInput(
+            platform="红果", work_title="样本", observed_at="2026-11-08"
+        ), self.db)["item"]
+        verify_trend_evidence(first["id"], EvidenceVerifyInput(
+            verification_note="人工核验通过"
+        ), self.db)
+        verify_trend_evidence(second["id"], EvidenceVerifyInput(
+            verification_note="人工核验通过"
+        ), self.db)
+        with self.assertRaises(Exception):
+            create_upgrade_candidate(UpgradeCandidateInput(
+                prompt_id=item["id"], base_version=1,
+                proposed_name="升级候选", proposed_content="新提示词内容",
+                change_reason="根据持续热度样本改进", evidence_ids=[first["id"], second["id"]],
+            ), self.db)
+
+    def test_only_explicit_candidate_approval_changes_formal_prompt(self):
+        item = self.create_prompt_row()
+        evidence_ids = self.create_verified_evidence_pair()
+        candidate = create_upgrade_candidate(UpgradeCandidateInput(
+            prompt_id=item["id"], base_version=1,
+            proposed_name="强悬念剧本提示词",
+            proposed_content="新版本：先建立危机，再逐步揭示人物动机。",
+            change_reason="多平台、多日期核验后调整开篇冲突结构",
+            expected_impact="改善开篇冲突密度与信息递进",
+            evidence_ids=evidence_ids,
+        ), self.db)["item"]
+        unchanged = self.db.query(PromptTemplate).filter_by(id=item["id"]).one()
+        self.assertEqual(unchanged.current_version, 1)
+        self.assertEqual(unchanged.content, "你是一名专业漫剧编剧。")
+        approved = approve_upgrade_candidate(candidate["id"], CandidateDecisionInput(
+            decision_note="确认采用该升级"
+        ), self.db)
+        self.assertEqual(approved["candidate"]["status"], "approved")
+        updated = self.db.query(PromptTemplate).filter_by(id=item["id"]).one()
+        self.assertEqual(updated.current_version, 2)
+        self.assertEqual(updated.content, "新版本：先建立危机，再逐步揭示人物动机。")
+        self.assertEqual(self.db.query(PromptVersion).filter_by(prompt_id=item["id"]).count(), 2)
+
+    def test_rejected_candidate_never_changes_formal_prompt(self):
+        item = self.create_prompt_row()
+        evidence_ids = self.create_verified_evidence_pair()
+        candidate = create_upgrade_candidate(UpgradeCandidateInput(
+            prompt_id=item["id"], base_version=1,
+            proposed_name="暂不采用", proposed_content="不采用的内容",
+            change_reason="待更多样本验证", evidence_ids=evidence_ids,
+        ), self.db)["item"]
+        rejected = reject_upgrade_candidate(candidate["id"], CandidateDecisionInput(
+            decision_note="证据仍不足"
+        ), self.db)
+        self.assertEqual(rejected["item"]["status"], "rejected")
+        unchanged = self.db.query(PromptTemplate).filter_by(id=item["id"]).one()
+        self.assertEqual(unchanged.current_version, 1)
+        self.assertEqual(unchanged.content, "你是一名专业漫剧编剧。")
 
     def test_archive_keeps_version_and_test_history(self):
         item = self.create_prompt_row()
