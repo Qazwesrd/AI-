@@ -304,6 +304,10 @@ def validate_local_video_workflow(workflow, object_info):
     has_wan_processing_node = False
     has_video_output = False
     has_video_output_connection = False
+    graph_edges = []
+    model_loader_ids = set()
+    processing_ids = set()
+    video_output_ids = set()
     for node_id, node in workflow.items():
         if not isinstance(node, dict):
             errors.append(f"节点 {node_id} 格式无效。")
@@ -314,15 +318,27 @@ def validate_local_video_workflow(workflow, object_info):
             errors.append(f"节点 {node_id} 缺少 class_type 或 inputs。")
             continue
         class_name_lower = class_type.lower()
-        if "wanvideo" in class_name_lower or "wan_video" in class_name_lower or "vace" in class_name_lower:
+        is_wan_node = (
+            "wanvideo" in class_name_lower or "wan_video" in class_name_lower or
+            "vace" in class_name_lower
+        )
+        if is_wan_node:
             has_wan = True
-        if ("wan" in class_name_lower or "vace" in class_name_lower) and (
+        is_model_loader = is_wan_node and (
+            "model" in class_name_lower and ("load" in class_name_lower or "loader" in class_name_lower)
+        )
+        is_processing_node = is_wan_node and (
             "sampler" in class_name_lower or "vace" in class_name_lower
-        ):
+        )
+        if is_model_loader:
+            model_loader_ids.add(str(node_id))
+        if is_processing_node:
             has_wan_processing_node = True
+            processing_ids.add(str(node_id))
         is_video_output_node = "videocombine" in class_name_lower or "savevideo" in class_name_lower
         if is_video_output_node:
             has_video_output = True
+            video_output_ids.add(str(node_id))
         schema_info = object_info.get(class_type)
         if not isinstance(schema_info, dict):
             errors.append(f"节点 {node_id}：本机未安装节点 {class_type}。")
@@ -383,6 +399,7 @@ def validate_local_video_workflow(workflow, object_info):
                         f"节点 {node_id} 的参数 {input_name} 类型 {input_type} "
                         f"与来源节点 {source_id} 输出类型 {output_type} 不匹配。"
                     )
+                graph_edges.append((source_id, str(node_id)))
                 continue
             choices = known_inputs[input_name].get("choices", [])
             if choices and value not in choices:
@@ -395,11 +412,39 @@ def validate_local_video_workflow(workflow, object_info):
         errors.append("工作流中没有发现视频输出节点（VHS_VideoCombine 或 SaveVideo）。")
     elif not has_video_output_connection:
         errors.append("视频输出节点没有连接图像帧/视频输入，无法确认存在可导出的视频内容。")
+
+    # Presence checks alone are insufficient: prove that at least one local
+    # Wan model loader reaches a Wan sampler/VACE processor and then a video
+    # output through the submitted graph's actual links.
+    adjacency = {}
+    for source_id, target_id in graph_edges:
+        adjacency.setdefault(source_id, set()).add(target_id)
+
+    def _reachable(start_ids, target_ids):
+        pending = list(start_ids)
+        visited = set()
+        while pending:
+            current = pending.pop()
+            if current in target_ids:
+                return True
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(adjacency.get(current, ()))
+        return False
+
+    model_to_processing = _reachable(model_loader_ids, processing_ids)
+    processing_to_output = _reachable(processing_ids, video_output_ids)
+    has_connected_generation_chain = model_to_processing and processing_to_output
+    if has_wan and has_wan_processing_node and has_video_output and not has_connected_generation_chain:
+        errors.append("Wan 模型加载、采样/VACE 处理和视频输出未形成连续连通链路。")
+
     return {
         "valid": not errors, "errors": errors[:100], "node_count": len(workflow),
         "has_wan_video_nodes": has_wan, "has_wan_processing_node": has_wan_processing_node,
         "has_video_output_node": has_video_output,
         "has_video_output_connection": has_video_output_connection,
+        "has_connected_generation_chain": has_connected_generation_chain,
         "local_only": True, "cloud_fallback": False,
     }
 
