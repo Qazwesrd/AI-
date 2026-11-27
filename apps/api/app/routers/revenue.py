@@ -167,16 +167,39 @@ def import_platform_report(platform_id: str, filename: str, content: bytes, db: 
             currency = _report_header(row, ["Earnings Currency", "Payment Currency", "Currency"])
             title = _report_header(row, ["Title", "Book Title"])
             day = _report_header(row, ["Earnings Date", "Transaction Date", "Date"])
-            row_status = "paid" if amount_header else "estimated"
+            # Google explicitly says the monthly Earnings Report matches the payment amount,
+            # but it is not proof that the receiving bank has credited the account.
+            row_status = "settled" if amount_header else "estimated"
         else:
-            amount_header = next((key for key in row if "estimatedroyalt" in re.sub(r"[^a-z0-9]+", "", key.lower())), "")
-            if not amount_header:
-                amount_header = next((key for key in row if re.sub(r"[^a-z0-9]+", "", key.lower()) in {"paymentamount","royaltyamount","royalties"}), "")
-            amount_value = row.get(amount_header, "") if amount_header else ""
-            currency = _report_header(row, ["Royalty Currency", "Currency", "Marketplace Currency"])
+            normalized_headers = {re.sub(r"[^a-z0-9]+", "", key.lower()): key for key in row}
+            payment_header = next((normalized_headers[key] for key in ("paymentamount", "payoutamount") if key in normalized_headers), "")
+            net_earnings_header = next((normalized_headers[key] for key in ("netearnings", "accruedroyalty") if key in normalized_headers), "")
+            estimated_header = next((key for key in row if "estimatedroyalt" in re.sub(r"[^a-z0-9]+", "", key.lower())), "")
+            finalized_header = next((normalized_headers[key] for key in ("totalearnings", "royaltyamount", "royalties") if key in normalized_headers), "")
+            payment_status = _report_header(row, ["Payment Status", "Status"]).lower()
+            if payment_header and _report_amount(row.get(payment_header, "")) is not None:
+                amount_header = payment_header
+                amount_value = row.get(payment_header, "")
+                row_status = "paid" if payment_status == "paid" else "payable" if payment_status in {"pending", "processing"} else "settled"
+            elif net_earnings_header and _report_amount(row.get(net_earnings_header, "")) is not None:
+                amount_header = net_earnings_header
+                amount_value = row.get(net_earnings_header, "")
+                row_status = "payable" if payment_status in {"pending", "processing"} else "settled"
+            elif estimated_header:
+                amount_header = estimated_header
+                amount_value = row.get(estimated_header, "")
+                row_status = "estimated"
+            elif finalized_header:
+                amount_header = finalized_header
+                amount_value = row.get(finalized_header, "")
+                row_status = "settled"
+            else:
+                amount_header = ""
+                amount_value = ""
+                row_status = "estimated"
+            currency = _report_header(row, ["Royalty Currency", "Payment Currency", "Currency", "Marketplace Currency"])
             title = _report_header(row, ["Title", "Book Title"])
-            day = _report_header(row, ["Payment Date", "Royalty Month", "Month", "Date"])
-            row_status = "paid" if "paymentamount" in re.sub(r"[^a-z0-9]+", "", amount_header.lower()) else "estimated"
+            day = _report_header(row, ["Payment Date", "Sales Period", "Royalty Month", "Month", "Date"])
         amount = _report_amount(amount_value)
         currency = currency.upper().strip()
         if amount is None or currency not in CURRENCIES:
@@ -185,15 +208,15 @@ def import_platform_report(platform_id: str, filename: str, content: bytes, db: 
                 warnings.append(f"第 {line_number} 行金额或币种无法识别，已跳过")
             continue
         row_fingerprint = hashlib.sha256(
-            (platform_id + "|" + filename + "|" + json.dumps(row, sort_keys=True, ensure_ascii=False)).encode("utf-8")
+            (platform_id + "|" + json.dumps(row, sort_keys=True, ensure_ascii=False)).encode("utf-8")
         ).hexdigest()
         source_ref = f"report-import:{platform_id}:{row_fingerprint}"
         existing = db.query(RevenueEntry).filter(RevenueEntry.source_ref == source_ref).first()
         notes = f"官方报表文件导入：{filename}；标题：{title or '未提供'}；第 {line_number} 行。"
         if amount < 0:
             notes += "负数按退款/冲正原样保留。"
-        if platform_id == "google_play_books" and row_status == "paid":
-            notes += "Google Play Earnings Report 的平台付款周期记录；不是银行入账凭证。"
+        if platform_id == "google_play_books" and row_status == "settled":
+            notes += "Google 月度 Earnings Report 与当月付款金额匹配，但不是银行到账凭证；到账状态须以银行记录或用户核实为准。"
         if existing:
             existing.gross_amount = amount
             existing.currency = currency
@@ -219,7 +242,7 @@ def import_platform_report(platform_id: str, filename: str, content: bytes, db: 
         "success": True, "platform": "Amazon KDP" if platform_id == "kdp" else "Google Play Books",
         "imported": imported, "updated": updated, "skipped": skipped,
         "warnings": warnings,
-        "message": "报表已导入；Google Earnings Amount 归为平台付款报告，销售汇总归为预估数据。KDP 未明确标记付款的版税数据一律保守归为预估；报表记录不等于银行到账证明。",
+        "message": "报表已导入；Google 月度 Earnings Report 归为已结算，不自动标记银行到账；KDP 按 Payment Status 区分已付款/待付款，估算版税与已结算版税分开记录。",
     }
 
 
