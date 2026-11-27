@@ -88,6 +88,7 @@ MODEL_MODULES = [
     "app.models.web_ai_tool",
     "app.models.ai_story_collaboration",
     "app.models.prompts",
+    "app.models.revenue",
 ]
 
 
