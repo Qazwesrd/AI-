@@ -250,6 +250,26 @@ class PromptCenterTests(unittest.TestCase):
         self.assertFalse(result["items"][0]["contains_public_prompt"])
         self.assertIn("部分公开 RSS/Atom 来源可自动发现候选", result["notice"])
 
+    def test_verification_can_add_public_engagement_metrics_to_feed_evidence(self):
+        created = create_trend_evidence(EvidenceInput(
+            platform="Reddit", work_title="自动发现的漫剧讨论", observed_at="2026-11-25",
+            metric_summary={"source_name":"public feed","summary_excerpt":"public excerpt"},
+            evidence_type="公开订阅源发现（作品/创作内容，待人工核验）",
+        ), self.db)["item"]
+        verified = verify_trend_evidence(
+            created["id"],
+            EvidenceVerifyInput(
+                verification_note="已核对公开页面互动数字",
+                evidence_type="漫剧作品趋势证据",
+                metric_summary={"views":"15000","likes":"1200","private_token":"must-not-store"},
+            ),
+            self.db,
+        )["item"]
+        self.assertEqual(verified["metric_summary"]["views"], 15000)
+        self.assertEqual(verified["metric_summary"]["likes"], 1200)
+        self.assertNotIn("private_token", verified["metric_summary"])
+        self.assertEqual(verified["metric_summary"]["source_name"], "public feed")
+
     def test_public_trend_ranking_ignores_samples_without_numeric_engagement(self):
         for platform,day in [("平台甲","2026-11-20"),("平台乙","2026-11-26")]:
             item=create_trend_evidence(EvidenceInput(
