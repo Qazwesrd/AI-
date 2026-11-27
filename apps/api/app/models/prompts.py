@@ -67,3 +67,36 @@ class PromptRankingSnapshot(Base):
     dimension = Column(String(50), nullable=False, default="overall")
     ranking_data = Column(JSON, nullable=False, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TrendEvidence(Base):
+    __tablename__ = "trend_evidence"
+
+    id = Column(Integer, primary_key=True, index=True)
+    platform = Column(String(100), nullable=False, index=True)
+    work_title = Column(String(300), nullable=False)
+    work_url = Column(String(2000), default="")
+    observed_at = Column(String(40), nullable=False, index=True)
+    metric_summary = Column(JSON, nullable=False, default=dict)
+    evidence_type = Column(String(100), default="公开榜单/公开页面")
+    reliability = Column(String(30), default="待核验")
+    verification_note = Column(Text, default="")
+    is_verified = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PromptUpgradeCandidate(Base):
+    __tablename__ = "prompt_upgrade_candidates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prompt_id = Column(Integer, ForeignKey("prompt_templates.id"), nullable=False, index=True)
+    base_version = Column(Integer, nullable=False)
+    proposed_name = Column(String(200), nullable=False)
+    proposed_content = Column(Text, nullable=False)
+    change_reason = Column(Text, nullable=False, default="")
+    expected_impact = Column(Text, default="")
+    evidence_ids = Column(JSON, nullable=False, default=list)
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    decision_note = Column(Text, default="")
+    decided_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
