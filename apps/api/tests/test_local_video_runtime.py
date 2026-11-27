@@ -135,7 +135,11 @@ class LocalVideoRuntimeTests(unittest.TestCase):
     def test_api_workflow_preflight_accepts_installed_wan_video_graph(self):
         from app.routers.local_video_runtime import validate_local_video_workflow
         info = {
-            "WanVideoModelLoader": {"input": {"required": {"model": [["wan-vace.safetensors"]]}}},
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["wan-vace.safetensors"]]}},
+                "output": ["IMAGE"],
+                "output_name": ["frames"],
+            },
             "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"], "frame_rate": ["FLOAT"]}}},
         }
         workflow = {
@@ -146,6 +150,38 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertTrue(result["has_wan_video_nodes"])
         self.assertTrue(result["has_video_output_node"])
+
+    def test_api_workflow_preflight_rejects_invalid_output_port(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["installed.safetensors"]]}},
+                "output": ["IMAGE"],
+            },
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        result = validate_local_video_workflow({
+            "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "installed.safetensors"}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 4]}},
+        }, info)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("不存在的输出端口" in error for error in result["errors"]))
+
+    def test_api_workflow_preflight_rejects_mismatched_socket_types(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["installed.safetensors"]]}},
+                "output": ["WANVIDEOMODEL"],
+            },
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        result = validate_local_video_workflow({
+            "1": {"class_type": "WanVideoModelLoader", "inputs": {"model": "installed.safetensors"}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 0]}},
+        }, info)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("类型 IMAGE" in error and "WANVIDEOMODEL" in error for error in result["errors"]))
 
     def test_api_workflow_preflight_rejects_missing_model_and_link(self):
         from app.routers.local_video_runtime import validate_local_video_workflow
