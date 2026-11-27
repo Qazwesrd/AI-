@@ -542,8 +542,18 @@ def preview_video_workflow_output(prompt_id: str, output_index: int = 0):
     filename = selected["filename"]
     subfolder = selected.get("subfolder", "")
     media_type = selected.get("type", "output")
-    if len(filename) > 500 or len(subfolder) > 500 or media_type not in ("output", "temp"):
-        raise HTTPException(422, "ComfyUI 视频输出元数据无效。")
+    if (
+        not filename or len(filename) > 500 or
+        "/" in filename or "\\\\" in filename or
+        any(ord(char) < 32 for char in filename) or
+        len(subfolder) > 500 or
+        any(ord(char) < 32 for char in subfolder) or
+        ":" in subfolder or
+        any(part in (".", "..") for part in re.split(r"[\\\\/]", subfolder) if part) or
+        subfolder.startswith(("/", "\\\\")) or
+        media_type not in ("output", "temp")
+    ):
+        raise HTTPException(422, "ComfyUI 视频输出路径或元数据无效。")
     query = urlencode({"filename": filename, "subfolder": subfolder, "type": media_type})
     request = Request(COMFYUI_BASE_URL + "/view?" + query, headers={"Accept": "video/*"})
     try:
@@ -557,6 +567,16 @@ def preview_video_workflow_output(prompt_id: str, output_index: int = 0):
     if not (content_type.startswith("video/") or content_type == "image/gif"):
         response.close()
         raise HTTPException(415, "ComfyUI 返回的文件不是受支持的视频格式。")
+    content_length = response.headers.get("Content-Length")
+    if content_length:
+        try:
+            declared_size = int(content_length)
+        except ValueError:
+            response.close()
+            raise HTTPException(502, "ComfyUI 视频输出长度信息无效。")
+        if declared_size < 0 or declared_size > 512 * 1024 * 1024:
+            response.close()
+            raise HTTPException(413, "视频预览超过 512 MB 安全上限，请在本地输出目录直接处理。")
 
     def stream():
         total = 0
@@ -567,7 +587,8 @@ def preview_video_workflow_output(prompt_id: str, output_index: int = 0):
                     break
                 total += len(chunk)
                 if total > 512 * 1024 * 1024:
-                    break
+                    # Never silently return a truncated video as if it were complete.
+                    raise RuntimeError("ComfyUI 视频预览超过 512 MB 安全上限。")
                 yield chunk
         finally:
             response.close()
