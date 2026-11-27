@@ -8,6 +8,8 @@ type LocalVideoRuntime = {
   status: string;
   node_count: number;
   nodes: { node_type: string; model_choices: string[]; input_schema?: { required?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }>; optional?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }> } }[];
+  model_inventory?: Array<{ name: string; category: string; source: string; selector_node: string; status: string; load_tested: boolean }>;
+  model_inventory_count?: number;
   vace_node_found: boolean;
   wan_video_nodes_found: boolean;
   workflow_node_set_complete: boolean;
@@ -178,6 +180,20 @@ export default function MediaStudioPage() {
                 <p>检测状态：{localVideoRuntime.status} · Wan 节点：{localVideoRuntime.node_count}</p>
                 <p>VACE 节点：{localVideoRuntime.vace_node_found ? "已发现" : "未发现"} · Wan Video 节点：{localVideoRuntime.wan_video_nodes_found ? "已发现" : "未发现"}</p>
                 <p>完整工作流节点集：{localVideoRuntime.workflow_node_set_complete ? "齐全" : "不齐全"}</p>
+        <p>视频模型条目：{localVideoRuntime.model_inventory_count ?? localVideoRuntime.model_inventory?.length ?? 0} 个（来自本机节点模型选择器）</p>
+        {localVideoRuntime.model_inventory && localVideoRuntime.model_inventory.length > 0 && (
+          <div className="rounded-lg border border-white/10 bg-black/20 p-3">
+            <p className="mb-2 font-medium text-cyan-100">已识别的视频模型清单</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {localVideoRuntime.model_inventory.slice(0,100).map((item,index) => (
+                <div key={item.category + ":" + item.selector_node + ":" + item.name + ":" + index} className="rounded-lg border border-white/10 p-2">
+                  <p className="break-all text-white/90">{item.name}</p>
+                  <p className="mt-1 text-xs text-white/50">{item.category} · {item.selector_node} · {item.load_tested ? "已实测加载" : "已发现，未实测加载"}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
                 <p className="text-amber-200">{localVideoRuntime.reason}</p>
                 {localVideoRuntime.missing_required_nodes.length > 0 && (
                   <p className="break-words text-white/60">缺少节点：{localVideoRuntime.missing_required_nodes.join("、")}</p>
