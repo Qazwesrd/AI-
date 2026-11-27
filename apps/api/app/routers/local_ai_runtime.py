@@ -372,16 +372,19 @@ def create_local_specialized_model(payload: LocalSpecializedModelInput):
         f"\n默认视觉风格：{payload.style}。"
         + (f"\n用户补充规则：{payload.instructions.strip()}" if payload.instructions.strip() else "")
     )
-    safe_system_prompt = system_prompt.replace('"""', '""')
-    modelfile = (
-        f"FROM {base_model}\n"
-        f'SYSTEM """{safe_system_prompt}"""\n'
-        "PARAMETER temperature 0.35\n"
-        "PARAMETER num_ctx 8192\n"
-    )
+    # Ollama's current /api/create contract accepts the base model via
+    # "from" and the system prompt/parameters as separate fields. Sending only
+    # a legacy Modelfile string can be rejected by newer Ollama versions with
+    # "neither from or files was specified".
     result = _ollama_request(
         "/api/create",
-        {"model": payload.name, "modelfile": modelfile, "stream": False},
+        {
+            "model": payload.name,
+            "from": base_model,
+            "system": system_prompt,
+            "parameters": {"temperature": 0.35, "num_ctx": 8192},
+            "stream": False,
+        },
         timeout=600.0,
     )
     if not isinstance(result, dict) or result.get("status") != "success":
