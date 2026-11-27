@@ -91,6 +91,7 @@ class NovelDistributionPackage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), index=True)
+    translation_id: Mapped[int | None] = mapped_column(ForeignKey("novel_translations.id", ondelete="SET NULL"), nullable=True, index=True)
     platform_id: Mapped[str] = mapped_column(String(60), index=True)
     platform_name: Mapped[str] = mapped_column(String(120))
     pen_name: Mapped[str] = mapped_column(String(120), default="")
