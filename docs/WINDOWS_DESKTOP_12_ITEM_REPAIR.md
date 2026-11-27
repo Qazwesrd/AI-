@@ -31,6 +31,13 @@ Scope: the installed Windows desktop application on `offline-ai-engine-integrati
 - [x] Fixed specialized Ollama model creation to use the current `/api/create` request contract (`from`, `system`, and `parameters`) instead of relying only on a legacy Modelfile payload. This directly targets the reported `neither from or files was specified` rejection.
 - [x] Added a regression test asserting the new request shape and local-only behavior.
 
+## Additional local chat and cost-safety work
+
+- [x] Added a dedicated `/local-chat` page and homepage/navigation entry so the user can chat with an installed Ollama model using multi-turn context.
+- [x] Added `POST /api/local-ai/chat` using Ollama's local `/api/chat` endpoint; the API accepts only installed local models, bounds history to 20 messages / 24,000 characters, and never downloads or falls back to cloud.
+- [x] Filtered obvious Ollama Cloud aliases (for example `*-cloud` and `:cloud`) from the local model inventory so they cannot be selected in local workflows.
+- [ ] Verify the chat end-to-end on the user's Windows machine with their installed model; GitHub CI and hardware inference are still pending.
+
 ## Final acceptance gate
 
 Do not prepare the user's next installer until all 12 items are checked, backend and frontend tests pass, the Windows packaging workflow succeeds, the installer and SHA-256 are verified, and the PR remains Draft/unmerged. Hardware-dependent image/video inference must be explicitly reported as passed, failed, or blocked by missing model resources; never mark it passed without a generated output file.
