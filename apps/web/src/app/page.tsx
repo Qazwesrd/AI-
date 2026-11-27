@@ -84,7 +84,8 @@ const navigation = [
     title: "多媒体与发布",
     items: [
       ["🚀", "多平台发布中心", "/publishing"],
-      ["👤", "发布账号管理", "/publishing/accounts"]
+      ["👤", "发布账号管理", "/publishing/accounts"],
+      ["💰", "收益与提现管理", "/revenue"]
     ]
   },
   {
