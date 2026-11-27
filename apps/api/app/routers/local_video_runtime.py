@@ -801,20 +801,19 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
     system_prompt = (
         "你是 ComfyUI Wan/VACE 工作流工程师。只能使用用户提供的本机节点清单和接口信息，"
         "不得虚构节点名、输入名、输出端口或模型文件。必须生成可被 ComfyUI API 接受的节点配置。"
-        "输出纯 JSON，结构为 {\\\"nodes\\\":[{\\\"node_id\\\":\\\"1\\\",\\\"class_type\\\":\\\"精确节点类名\\\","
-        "\\\"values\\\":{\\\"输入名\\\":\\\"常量\\\"},\\\"connections\\\":{\\\"输入名\\\":{\\\"node_id\\\":\\\"来源节点ID\\\","
-        "\\\"output_index\\\":0}}}]}。每个节点必填输入必须通过 values 或 connections 提供。"
+        "输出纯 JSON，根对象必须包含 nodes 数组。每个 nodes 元素必须包含 node_id、class_type、values、connections 字段；"
+        "connections 的每个输入映射必须包含 node_id 和 output_index。每个节点必填输入必须通过 values 或 connections 提供。"
         "连接必须按输出类型与输入类型匹配。模型加载节点必须连到 Wan sampler/VACE 处理节点，"
         "处理节点必须连到 VHS_VideoCombine/SaveVideo 视频输出节点。"
         "COMBO 输入只能使用清单中的 choices；有 default 时优先使用 default。"
         "文本提示词必须写入实际文本输入，不要把用户提示词写到文件路径字段。"
-        "没有可用模型选择、必需图像输入或关键节点时，不要猜测，返回 {\\\"nodes\\\":[]}。"
+        "没有可用模型选择、必需图像输入或关键节点时，不要猜测，返回 nodes 为空数组。"
     )
     user_prompt = (
-        "任务模式：" + data.mode + "\\n"
-        "视频提示词：" + data.prompt.strip() + "\\n"
-        f"目标参数：宽度 {data.width}，高度 {data.height}，帧数 {data.frames}，FPS {data.fps}，采样步数 {data.steps}。\\n"
-        "本机节点目录（只能使用这些节点）：\\n"
+        "任务模式：" + data.mode + "\n"
+        "视频提示词：" + data.prompt.strip() + "\n"
+        f"目标参数：宽度 {data.width}，高度 {data.height}，帧数 {data.frames}，FPS {data.fps}，采样步数 {data.steps}。\n"
+        "本机节点目录（只能使用这些节点）：\n"
         + json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
     )
     try:
