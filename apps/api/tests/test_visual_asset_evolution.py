@@ -128,3 +128,20 @@ class VisualAssetEvolutionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class LocalEvolutionResponseTests(unittest.TestCase):
+    def test_parser_accepts_local_ollama_json_response(self):
+        from app.routers.ai_collaboration import _parse_local_evolution_response
+        result = _parse_local_evolution_response('{"proposals":[{"asset_id":7,"evidence":"原文连续证据片段"}]}')
+        self.assertEqual(result[0]["asset_id"], 7)
+
+    def test_parser_accepts_json_code_fence(self):
+        from app.routers.ai_collaboration import _parse_local_evolution_response
+        result = _parse_local_evolution_response('\\x60\\x60\\x60json\\n{"proposals":[]}\\n\\x60\\x60\\x60')
+        self.assertEqual(result, [])
+
+    def test_parser_rejects_unstructured_local_model_output(self):
+        from app.routers.ai_collaboration import _parse_local_evolution_response
+        with self.assertRaises(ValueError):
+            _parse_local_evolution_response("我认为人物没有变化。")
+
