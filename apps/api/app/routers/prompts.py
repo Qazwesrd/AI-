@@ -521,7 +521,10 @@ def research_trend_ranking(db: Session = Depends(get_db)):
     from collections import defaultdict
     from datetime import date
 
-    rows = db.query(TrendEvidence).filter(TrendEvidence.is_verified.is_(True)).all()
+    rows = db.query(TrendEvidence).filter(
+        TrendEvidence.is_verified.is_(True),
+        TrendEvidence.evidence_type.in_({"作品趋势证据","漫剧作品趋势证据","work_trend"}),
+    ).all()
     groups = defaultdict(list)
     for row in rows:
         # A title is a conservative cross-platform key; URL is retained as evidence, not used to merge platforms.
@@ -567,7 +570,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
             "latest_observed_at": latest,
             "trend_score": round(score, 3),
             "evidence_types": sorted({x.evidence_type for x in evidence_rows}),
-            "contains_public_prompt": any("提示词" in (x.evidence_type or "") for x in evidence_rows),
+            "contains_public_prompt": False,
             "evidence_ids": [x.id for x in evidence_rows],
             "score_method": "公开互动指标对数加权 + 14天半衰期 + 跨平台/跨日期加权；不是平台官方热度分",
         })
@@ -577,7 +580,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
     return {
         "items": ranking,
         "verified_evidence_count": len(rows),
-        "notice": "只统计人工核验的公开证据；作品热度证据不等于作品实际使用的内部提示词。当前采集仍需人工录入，尚未接入各平台自动抓取。",
+        "notice": "只统计人工核验的漫剧/作品趋势证据；提示词分享证据与剧本证据分别进入独立榜单，不混入漫剧热度排名。",
     }
 
 
