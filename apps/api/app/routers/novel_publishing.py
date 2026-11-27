@@ -188,6 +188,10 @@ def create_submission_record(package_id: int, data: SubmissionInput, db: Session
         raise HTTPException(404,"发行稿件包不存在")
     if data.status not in SUBMISSION_STATUSES:
         raise HTTPException(400,"无效的投稿状态")
+    if data.status == "published" and not data.external_work_url.strip():
+        raise HTTPException(400,"标记为已发布必须填写平台实际作品链接")
+    if data.external_work_url.strip() and not (data.external_work_url.startswith("https://") or data.external_work_url.startswith("http://")):
+        raise HTTPException(400,"作品链接必须是有效 HTTP/HTTPS 地址")
     now = datetime.utcnow()
     submitted_at = now if data.status in {"submitted","reviewing","published"} else None
     row = NovelSubmissionRecord(
