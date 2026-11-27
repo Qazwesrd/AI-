@@ -11,7 +11,7 @@ from app.models.prompts import (
 from app.routers.prompts import (
     CategoryInput, PromptInput, PromptUpdate, TestInput,
     create_category, create_prompt, update_prompt, prompt_versions,
-    add_test_run, refresh_ranking, ranking_history, archive_prompt,
+    add_test_run, refresh_ranking, ranking_history, archive_prompt, ensure_default_prompts,
 )
 
 
