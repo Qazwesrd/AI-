@@ -24,6 +24,7 @@ export default function SetupWizardPage() {
 
   async function scan() {
     setBusy(true);
+    setBundleCheck(null);
     setImageCheck(null);
     setVideoCheck(null);
     const checkOne = async (path: string): Promise<Check> => {
