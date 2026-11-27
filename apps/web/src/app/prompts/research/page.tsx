@@ -330,7 +330,7 @@ export default function PromptResearchPage() {
         <section className="grid gap-5 lg:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
             <h2 className="text-lg font-bold">录入公开作品证据</h2>
-            <p className="mt-1 text-xs text-white/50">当前支持手工登记公开榜单、作品页面和公开互动数据；尚未接入平台自动采集。</p>
+            <p className="mt-1 text-xs text-white/50">支持手工登记，也支持已配置的公开 RSS/Atom 来源按采集间隔自动发现条目；新发现内容先进入待核验区，核验后才参与正式排名。平台没有公开接口或订阅源时，不会伪造自动采集结果。</p>
             <label className="mt-3 block text-sm">证据类型
               <select value={evidenceType} onChange={e=>setEvidenceType(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2">
                 <option value="漫剧作品趋势证据">漫剧作品热度/榜单数据</option>
