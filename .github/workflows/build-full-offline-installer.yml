@@ -65,7 +65,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $setupRoot = Join-Path $env:RUNNER_TEMP "setup-artifact"
-          $setupFiles = @(Get-ChildItem $setupRoot -File -Filter "*Setup*.exe")
+          $setupFiles = @(Get-ChildItem $setupRoot -Recurse -File -Filter "*Setup*.exe")
           if ($setupFiles.Count -ne 1) { throw "Expected exactly one Windows Setup executable; found $($setupFiles.Count)." }
           $setup = $setupFiles[0]
           $hashFile = Get-Item ($setup.FullName + ".sha256") -ErrorAction SilentlyContinue
