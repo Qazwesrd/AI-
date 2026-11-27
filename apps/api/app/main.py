@@ -75,6 +75,20 @@ async def _public_research_scheduler():
         await asyncio.sleep(900)
 
 
+async def _creator_revenue_scheduler():
+    """Sync only accounts that the user explicitly connected with OAuth."""
+    await asyncio.sleep(90)
+    while True:
+        try:
+            from app.routers.revenue import sync_due_creator_accounts_background
+            result = await asyncio.to_thread(sync_due_creator_accounts_background)
+            if result.get("due"):
+                logger.info("Creator revenue sync: %s due, %s processed", result["due"], len(result["results"]))
+        except Exception:
+            logger.exception("Creator revenue scheduler failed")
+        await asyncio.sleep(1800)
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     missing = sorted(set(ROUTER_MODULES) - set(_loaded_routers))
@@ -92,14 +106,17 @@ async def lifespan(application: FastAPI):
         logger.warning("Task runtime startup scan found %s active lease(s) from a previous process; none were auto-released.", lease_scan["active_count"])
     logger.info("AI Comic Studio API started. Registered routers: %s", len(_loaded_routers))
     research_task = asyncio.create_task(_public_research_scheduler())
+    revenue_task = asyncio.create_task(_creator_revenue_scheduler())
     try:
         yield
     finally:
-        research_task.cancel()
-        try:
-            await research_task
-        except asyncio.CancelledError:
-            pass
+        for task in (research_task, revenue_task):
+            task.cancel()
+        for task in (research_task, revenue_task):
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         logger.info("AI Comic Studio API stopped.")
 
 
