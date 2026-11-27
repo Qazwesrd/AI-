@@ -115,12 +115,20 @@ function hasManagedAiResources(directory) {
   ].some((models) =>
     fs.existsSync(path.join(models, "blobs")) || fs.existsSync(path.join(models, "manifests"))
   );
-  const localComfy = [
-    path.join(directory, "engines", "ComfyUI"),
-    path.join(directory, "ComfyUI")
-  ].some((root) => comfyLayouts(root).some((layout) =>
-    fs.existsSync(layout.python) && fs.existsSync(layout.main)
-  ));
+  const localComfyRoots = [
+    "ComfyUI",
+    "ComfyUI_windows_portable",
+    "ComfyUI_windows_portable_nvidia",
+    "ComfyUI_windows_portable_amd"
+  ].flatMap((name) => [
+    path.join(directory, "engines", name),
+    path.join(directory, name)
+  ]);
+  const localComfy = localComfyRoots.some((root) =>
+    comfyLayouts(root).some((layout) =>
+      fs.existsSync(layout.python) && fs.existsSync(layout.main)
+    )
+  );
   return localModels || localComfy;
 }
 
@@ -412,6 +420,18 @@ function localServiceResponds(port, route) {
   });
 }
 
+async function waitForLocalService(port, route, child, timeout = 45000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (child && (child.exitCode !== null || child.signalCode !== null || !child.pid)) {
+      return false;
+    }
+    if (await localServiceResponds(port, route)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  return false;
+}
+
 async function startManagedAiEngines(dataDir) {
   if (process.platform !== "win32") return;
   const resources = resolveAiResourcePaths(dataDir);
@@ -457,6 +477,12 @@ async function startManagedAiEngines(dataDir) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     logChild("COMFYUI", comfyProcess);
+    const ready = await waitForLocalService(8188, "/system_stats", comfyProcess, 45000);
+    if (ready) {
+      console.log("[COMFYUI] Local service is ready on 127.0.0.1:8188.");
+    } else {
+      console.warn("[COMFYUI] Process was started but the service did not become ready within 45 seconds. Existing files were not changed; check the local engine status and logs.");
+    }
   } else {
     console.warn("[COMFYUI] Existing runtime was not detected; no runtime download, replacement, or migration will be attempted.");
   }
