@@ -7,7 +7,7 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Category = { id: number; name: string; description?: string; is_system: boolean };
 type Prompt = { id: number; name: string; category_id: number | null; category_name: string; content: string; notes: string; tags: string[]; current_version: number };
 type Ranking = { rank: number; prompt_id: number; prompt_name: string; version: number; test_count: number; average_score: number; score_type: string };
-type Version = { id: number; version: number; name: string; content: string; change_reason: string; created_at: string };
+type Version = { id: number; version: number; name: string; content: string; notes?: string; change_reason: string; created_at: string };
 
 const dimensions = [
   { value: "overall", label: "综合榜" },
