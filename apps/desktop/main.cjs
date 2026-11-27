@@ -76,11 +76,23 @@ function resolveAiResourcePaths(dataDir) {
     process.env.COMFYUI_PATH,
     path.join(dataDir, "engines", "ComfyUI"),
     path.join(dataDir, "ComfyUI"),
+    // Common official Windows portable bundle directory names.
+    path.join(dataDir, "engines", "ComfyUI_windows_portable"),
+    path.join(dataDir, "ComfyUI_windows_portable"),
+    path.join(dataDir, "engines", "ComfyUI_windows_portable_nvidia"),
+    path.join(dataDir, "ComfyUI_windows_portable_nvidia"),
+    path.join(dataDir, "engines", "ComfyUI_windows_portable_amd"),
+    path.join(dataDir, "ComfyUI_windows_portable_amd"),
     "E:\\AI\\数据\\engines\\ComfyUI",
     "E:\\AI\\数据\\ComfyUI",
+    "E:\\AI\\数据\\engines\\ComfyUI_windows_portable",
+    "E:\\AI\\数据\\ComfyUI_windows_portable",
     "E:\\123\\ai-comic-studio-desktop-Data\\engines\\ComfyUI",
+    "E:\\123\\ai-comic-studio-desktop-Data\\engines\\ComfyUI_windows_portable",
     path.join(path.dirname(dataDir), "ComfyUI"),
-    path.join(userProfile, "ComfyUI")
+    path.join(path.dirname(dataDir), "ComfyUI_windows_portable"),
+    path.join(userProfile, "ComfyUI"),
+    path.join(userProfile, "ComfyUI_windows_portable")
   ]);
   let comfy = null;
   for (const root of comfyRoots) {
