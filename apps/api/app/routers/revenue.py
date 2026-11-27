@@ -18,7 +18,7 @@ from app.models.revenue import (
 from app.services.google_creator_oauth import (
     OAuthConfigurationError, OAuthProviderError, decrypt_token, encrypt_token,
     exchange_code, get_email, google_get_json, new_authorization,
-    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE, GOOGLE_CONFIG_FILE, start_loopback_listener,
+    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE, GOOGLE_CONFIG_FILE, start_loopback_listener, _client_id,
 )
 
 router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
@@ -289,6 +289,7 @@ def _google_access_token(connection, db):
 @router.get("/oauth/google/start")
 def google_oauth_start(db: Session = Depends(get_db)):
     try:
+        _client_id()
         redirect_uri = start_loopback_listener()
         url, state, verifier = new_authorization(redirect_uri)
     except OAuthConfigurationError as exc:
