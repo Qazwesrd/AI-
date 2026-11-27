@@ -134,7 +134,7 @@ export default function NovelPublishingPage(){
     finally{setBusy(false);}
   }
 
-  async function exportTranslation(id:number,format:"md"|"txt"|"json"="md"){
+  async function exportTranslation(id:number,format:"md"|"txt"|"json"|"epub"="md"){
     try{
       const response=await fetch(`${API}/api/novel-publishing/translations/${id}/export?format=${format}`);
       if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"导出译本失败");}
