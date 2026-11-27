@@ -16,7 +16,7 @@ export default function PromptResearchPage() {
   const [platform, setPlatform] = useState("红果");
   const [workTitle, setWorkTitle] = useState("");
   const [workUrl, setWorkUrl] = useState("");
-  const [observedAt, setObservedAt] = useState(new Date().toISOString().slice(0, 10));
+  const [observedAt, setObservedAt] = useState("");
   const [metrics, setMetrics] = useState("");
   const [verifyNote, setVerifyNote] = useState("已人工核对公开页面、榜单位置及采样日期。");
   const [candidateName, setCandidateName] = useState("");
@@ -49,7 +49,7 @@ export default function PromptResearchPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "加载研究数据失败"); }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {\n    setObservedAt(new Date().toISOString().slice(0, 10));\n    void load();\n  }, []);
 
   const currentPrompt = prompts.find(p => String(p.id) === selectedPrompt) || null;
 
