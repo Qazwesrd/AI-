@@ -364,6 +364,26 @@ export default function MediaStudioPage() {
                 ))}
               </div>
             )}
+            {templateCapabilities?.available && templateCapabilities?.template_assessment && (
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {([
+                  ["wan_t2v_role_coverage", "Wan 文生视频节点角色检查"],
+                  ["vace_role_coverage", "VACE 视频编辑节点角色检查"],
+                ] as const).map(([key, label]) => {
+                  const assessment = templateCapabilities.template_assessment[key];
+                  return (
+                    <div key={key} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                      <p className="text-sm font-medium text-indigo-100">{label}</p>
+                      <p className="mt-1 text-xs text-white/60">
+                        {assessment?.all_role_groups_found
+                          ? "候选角色已齐全，仍需验证接口语义和实际工作流。"
+                          : `缺少：${(assessment?.missing_roles || []).join("、") || "尚未识别"}`}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {templateCapabilities?.available && (
               <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
                 <p className="text-sm font-medium text-indigo-100">
