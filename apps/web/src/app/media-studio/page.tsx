@@ -672,6 +672,8 @@ export default function MediaStudioPage() {
               <p className="mt-1 text-white/50">预检只读，不会修改工作流；有风险时需再次确认才会提交本机任务。</p>
             </div>}
             {workflowResult.prompt_id && <p className="mt-1 break-all text-xs">ComfyUI 任务编号：{workflowResult.prompt_id}</p>}
+            {workflowResult.status && <p className={`mt-2 text-xs font-semibold ${workflowResult.status === "completed" ? "text-emerald-300" : workflowResult.status === "failed" || workflowResult.status === "completed_without_video" ? "text-amber-300" : "text-cyan-200"}`}>任务状态：{workflowResult.status === "completed" ? "生成成功，已发现视频文件" : workflowResult.status === "failed" ? "生成失败，请检查本机节点/模型/显存错误" : workflowResult.status === "completed_without_video" ? "任务结束，但没有视频输出" : workflowResult.status === "running" || workflowResult.status === "queued" ? "本机队列执行中" : workflowResult.status}</p>}
+            {workflowResult.failed && <p className="mt-1 text-xs text-amber-200">ComfyUI 已报告执行失败。请查看下方任务消息或本机 ComfyUI 控制台；不会自动切换云端。</p>}
             {workflowResult.node_count !== undefined && <p className="mt-1 text-xs">节点数：{workflowResult.node_count} · 预检：{workflowResult.valid ? "通过" : "未通过"}</p>}
             {workflowResult.has_connected_generation_chain !== undefined && (
               <p className="mt-1 text-xs">
