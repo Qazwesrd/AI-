@@ -4,6 +4,10 @@ name: Prepare desktop installer (AI resources already local)
   push:
     branches: [master, offline-ai-engine-integration]
     paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'scripts/build-windows.ps1'
+      - 'docs/manual/**'
       - '.github/workflows/build-full-offline-installer.yml'
       - '.github/workflows/windows-release.yml'
   workflow_dispatch:
