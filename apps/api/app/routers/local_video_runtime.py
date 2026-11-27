@@ -301,7 +301,9 @@ def validate_local_video_workflow(workflow, object_info):
         return {"valid": False, "errors": ["无法读取本机 ComfyUI 节点信息，请先启动引擎。"], "node_count": len(workflow)}
     node_ids = {str(key) for key in workflow}
     has_wan = False
+    has_wan_processing_node = False
     has_video_output = False
+    has_video_output_connection = False
     for node_id, node in workflow.items():
         if not isinstance(node, dict):
             errors.append(f"节点 {node_id} 格式无效。")
@@ -311,9 +313,15 @@ def validate_local_video_workflow(workflow, object_info):
         if not isinstance(class_type, str) or not isinstance(inputs, dict):
             errors.append(f"节点 {node_id} 缺少 class_type 或 inputs。")
             continue
-        if "wanvideo" in class_type.lower() or "wan_video" in class_type.lower() or "vace" in class_type.lower():
+        class_name_lower = class_type.lower()
+        if "wanvideo" in class_name_lower or "wan_video" in class_name_lower or "vace" in class_name_lower:
             has_wan = True
-        if "videocombine" in class_type.lower() or "savevideo" in class_type.lower():
+        if ("wan" in class_name_lower or "vace" in class_name_lower) and (
+            "sampler" in class_name_lower or "vace" in class_name_lower
+        ):
+            has_wan_processing_node = True
+        is_video_output_node = "videocombine" in class_name_lower or "savevideo" in class_name_lower
+        if is_video_output_node:
             has_video_output = True
         schema_info = object_info.get(class_type)
         if not isinstance(schema_info, dict):
@@ -321,6 +329,14 @@ def validate_local_video_workflow(workflow, object_info):
             continue
         schema = _node_input_schema(schema_info)
         known_inputs = {**schema["required"], **schema["optional"]}
+        if is_video_output_node:
+            for output_input_name, output_input_value in inputs.items():
+                output_input_type = known_inputs.get(output_input_name, {}).get("type")
+                if (
+                    output_input_type in {"IMAGE", "VIDEO", "FRAMES", "VHS_FILENAMES"} and
+                    isinstance(output_input_value, list) and len(output_input_value) == 2
+                ):
+                    has_video_output_connection = True
         for required_name in schema["required"]:
             if required_name not in inputs:
                 errors.append(f"节点 {node_id}（{class_type}）缺少必填参数 {required_name}。")
@@ -373,11 +389,17 @@ def validate_local_video_workflow(workflow, object_info):
                 errors.append(f"节点 {node_id} 的参数 {input_name} 值 {value!r} 不在本机可用选项中。")
     if not has_wan:
         errors.append("工作流中没有发现 Wan/VACE 视频模型节点。")
+    if not has_wan_processing_node:
+        errors.append("工作流中没有发现 Wan 视频采样或 VACE 处理节点。")
     if not has_video_output:
         errors.append("工作流中没有发现视频输出节点（VHS_VideoCombine 或 SaveVideo）。")
+    elif not has_video_output_connection:
+        errors.append("视频输出节点没有连接图像帧/视频输入，无法确认存在可导出的视频内容。")
     return {
         "valid": not errors, "errors": errors[:100], "node_count": len(workflow),
-        "has_wan_video_nodes": has_wan, "has_video_output_node": has_video_output,
+        "has_wan_video_nodes": has_wan, "has_wan_processing_node": has_wan_processing_node,
+        "has_video_output_node": has_video_output,
+        "has_video_output_connection": has_video_output_connection,
         "local_only": True, "cloud_fallback": False,
     }
 
