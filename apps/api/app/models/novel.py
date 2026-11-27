@@ -119,3 +119,22 @@ class NovelSubmissionRecord(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class NovelTranslation(Base):
+    """A separate translated edition; the source novel and its chapters remain untouched."""
+    __tablename__ = "novel_translations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    novel_id: Mapped[int] = mapped_column(ForeignKey("novels.id", ondelete="CASCADE"), index=True)
+    source_signature: Mapped[str] = mapped_column(String(64), index=True)
+    target_language: Mapped[str] = mapped_column(String(40), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    total_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    completed_chunks: Mapped[int] = mapped_column(Integer, default=0)
+    chapters_data: Mapped[list] = mapped_column(JSON, default=list)
+    glossary: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
