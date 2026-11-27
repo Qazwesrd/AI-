@@ -213,6 +213,10 @@ try {
         throw "The illustrated PDF user manual was not generated correctly."
     }
     Write-Host "Captured $($CapturedScreenshots.Count) application screenshots and generated $ManualPdf"
+    $ManualPublicDir = Join-Path $Web "public\manual"
+    New-Item -ItemType Directory -Path $ManualPublicDir -Force | Out-Null
+    Copy-Item -LiteralPath $ManualPdf -Destination (Join-Path $ManualPublicDir "AI漫剧制作大师-使用说明书.pdf") -Force
+    Write-Host "Copied Chinese PDF manual into the packaged web public directory."
     $ManualCaptureSuccess = $true
 } finally {
     if ($WebProcess -and !$WebProcess.HasExited) { Stop-Process -Id $WebProcess.Id -Force -ErrorAction SilentlyContinue }
