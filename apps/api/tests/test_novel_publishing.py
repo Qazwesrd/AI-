@@ -13,8 +13,8 @@ from app.routers.novel_publishing import (
     DistributionPackageInput, SubmissionInput, SubmissionUpdate,
     create_distribution_package, create_submission_record, update_submission_record,
     export_distribution_package, list_novel_distribution_platforms, build_ai_assist_prompt,
-    TranslationCreateInput, create_translation, translate_next_chunk, get_translation,
-    export_translation, _translation_chunks,
+    TranslationCreateInput, TranslationChunkEditInput, create_translation, translate_next_chunk, get_translation,
+    edit_translation_chunk, export_translation, _translation_chunks,
 )
 
 
@@ -140,6 +140,31 @@ class NovelPublishingTests(unittest.TestCase):
             self.assertIn("Translated original text.",archive.read("OEBPS/chapter.xhtml").decode("utf-8"))
         self.assertEqual(self.db.query(Chapter).filter_by(novel_id=self.novel.id).one().content,original)
         mock_generate.assert_called_once()
+
+    @patch("app.routers.novel_publishing._installed_models", return_value=[{"name":"local-translate-model"}])
+    @patch("app.routers.novel_publishing._ollama_request", return_value={"response":"First translation."})
+    def test_translation_chunk_can_be_manually_reviewed_and_saved(self, mock_generate, mock_models):
+        created = create_translation(
+            self.novel.id,
+            TranslationCreateInput(target_language="en", model_name="local-translate-model"),
+            self.db,
+        )
+        translation_id = created["item"]["id"]
+        translate_next_chunk(translation_id, self.db)
+        edited = edit_translation_chunk(
+            translation_id, 1, 0,
+            TranslationChunkEditInput(translation="Human-reviewed translation."),
+            self.db,
+        )
+        self.assertEqual(edited["item"]["completed_chunks"], 1)
+        detail = get_translation(translation_id, self.db)
+        self.assertEqual(detail["chapters"][0]["chunks"][0]["translation"], "Human-reviewed translation.")
+        self.assertEqual(self.db.query(Chapter).filter_by(novel_id=self.novel.id).one().content, "这是原创小说正文。")
+        cleared = edit_translation_chunk(
+            translation_id, 1, 0, TranslationChunkEditInput(translation=""), self.db
+        )
+        self.assertEqual(cleared["item"]["completed_chunks"], 0)
+        self.assertEqual(cleared["item"]["status"], "pending")
 
     def test_translation_rejects_uninstalled_local_model(self):
         with patch("app.routers.novel_publishing._installed_models",return_value=[]):
