@@ -327,10 +327,11 @@ def google_oauth_callback(
     if not saved:
         raise HTTPException(400, "OAuth state 无效或已过期，请重新开始授权。")
     verifier = saved.code_verifier
+    redirect_uri = saved.redirect_uri
     db.delete(saved)
     db.commit()
     try:
-        token_data = exchange_code(code, verifier, saved.redirect_uri)
+        token_data = exchange_code(code, verifier, redirect_uri)
         access_token = token_data.get("access_token", "")
         if not access_token:
             raise OAuthProviderError("Google 未返回 access_token")
