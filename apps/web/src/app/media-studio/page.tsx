@@ -50,6 +50,7 @@ export default function MediaStudioPage() {
   const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
   const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
   const [workflowJson, setWorkflowJson] = useState("");
+  const [workflowTemplateSpec, setWorkflowTemplateSpec] = useState("");
   const [workflowPromptId, setWorkflowPromptId] = useState("");
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowResult, setWorkflowResult] = useState<any>(null);
@@ -127,6 +128,38 @@ export default function MediaStudioPage() {
     } catch {
       setMessage("工作流文件不是有效 JSON。");
     }
+  }
+
+  async function buildLocalVideoWorkflowTemplate() {
+    let specification: { nodes: unknown[] };
+    try {
+      specification = JSON.parse(workflowTemplateSpec);
+      if (!specification || !Array.isArray(specification.nodes) || specification.nodes.length === 0) {
+        throw new Error("节点配置必须包含非空 nodes 数组");
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "模板配置 JSON 格式错误");
+      return;
+    }
+    setWorkflowBusy(true);
+    setWorkflowResult(null);
+    setMessage("正在根据你明确指定的本机节点、参数和连线构建模板……");
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-workflow/build`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(specification),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = typeof data.detail === "object" ? [data.detail.message, ...(data.detail.errors || [])].filter(Boolean).join("；") : data.detail;
+        throw new Error(detail || "本地模板构建失败");
+      }
+      setWorkflowJson(JSON.stringify(data.workflow, null, 2));
+      setWorkflowResult(data.validation || data);
+      setMessage("模板已构建并通过本机结构预检。请检查生成的 API JSON，再决定是否提交队列。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "本地模板构建失败");
+    } finally { setWorkflowBusy(false); }
   }
 
   async function runLocalVideoWorkflow(validateOnly = false) {
@@ -429,6 +462,23 @@ export default function MediaStudioPage() {
             </div>
             <span className="rounded-full border border-emerald-300/30 px-3 py-1 text-xs text-emerald-200">本地执行</span>
           </div>
+          <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
+            <summary className="cursor-pointer text-sm font-medium text-cyan-100">高级：按本机节点结构构建工作流草稿</summary>
+            <p className="mt-2 text-xs leading-5 text-white/60">填写节点 class_type、必填参数，以及明确的输入连线。系统只按你指定的连接构建，不会根据相同接口类型擅自猜连线。可先扫描上方节点能力，再使用此功能。</p>
+            <textarea value={workflowTemplateSpec} onChange={event => setWorkflowTemplateSpec(event.target.value)}
+              rows={8} className="mt-3 w-full rounded-lg border border-white/15 bg-black/40 p-3 font-mono text-xs"
+              placeholder={`{
+  "nodes": [
+    {"node_id":"1","class_type":"本机模型加载节点","values":{"模型输入":"从本机选项中选择"}},
+    {"node_id":"2","class_type":"本机采样节点","values":{"步数":4},"connections":{"模型输入":{"node_id":"1","output_index":0}}},
+    {"node_id":"3","class_type":"本机视频输出节点","values":{"帧率":24},"connections":{"图像帧输入":{"node_id":"2","output_index":0}}}
+  ]
+}`} />
+            <button onClick={buildLocalVideoWorkflowTemplate} disabled={workflowBusy}
+              className="mt-3 rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-50">
+              按明确配置构建模板草稿
+            </button>
+          </details>
           <label className="mt-4 block text-sm">导入 ComfyUI API 工作流 JSON（最大 4 MB）</label>
           <input type="file" accept=".json,application/json" onChange={event => void importWorkflowFile(event.target.files?.[0])} className="mt-2 block w-full text-sm text-white/70" />
           <label className="mt-4 block text-sm">工作流 JSON 内容</label>
