@@ -624,17 +624,19 @@ def _verified_evidence_ranking(db, accepted_types):
         for item in samples:
             metrics = item.metric_summary if isinstance(item.metric_summary,dict) else {}
             signal = 0.0
+            raw_engagement = 0.0
             for metric,weight in weights.items():
                 try:
                     value=max(0.0,float(metrics.get(metric,0) or 0))
                     signal += weight * math.log1p(value)
+                    raw_engagement += weight * value
                     has_metrics = has_metrics or value > 0
                 except (TypeError,ValueError): pass
             try:
                 observed_day=date.fromisoformat(item.observed_at[:10])
                 age=max(0,(today-observed_day).days)
                 decay=math.pow(0.5,age/14.0)
-                daily_signal[observed_day.isoformat()] += signal
+                daily_signal[observed_day.isoformat()] += raw_engagement
             except (ValueError,TypeError):
                 decay=0.25
             signals.append(signal*decay)
