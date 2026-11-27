@@ -29,6 +29,16 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertEqual(result["currency_totals"]["USD"]["settled_balance_estimate"], 85)
         self.assertIn("不是平台实时余额", result["disclaimer"])
 
+    def test_payable_settled_and_paid_revenue_are_separated(self):
+        create_revenue(RevenueInput(platform="NovelPlatform", gross_amount=10, currency="CNY", status="estimated"), self.db)
+        create_revenue(RevenueInput(platform="NovelPlatform", gross_amount=20, currency="CNY", status="settled"), self.db)
+        create_revenue(RevenueInput(platform="NovelPlatform", gross_amount=30, currency="CNY", status="payable"), self.db)
+        create_revenue(RevenueInput(platform="NovelPlatform", gross_amount=40, currency="CNY", status="paid"), self.db)
+        result = summary(self.db)["currency_totals"]["CNY"]
+        self.assertEqual(result["settled_net"], 20)
+        self.assertEqual(result["payable_net"], 30)
+        self.assertEqual(result["paid_net"], 40)
+
     def test_withdrawal_is_manual_record_and_arrival_requires_date(self):
         created = create_withdrawal(WithdrawalInput(platform="YouTube", amount=50, currency="USD", fee_amount=2), self.db)
         item = created["item"]
