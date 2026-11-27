@@ -578,7 +578,6 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
         ):
             payload = runtime.auto_build_local_video_workflow(data)
         self.assertTrue(payload["valid"])
-        self.assertTrue(payload["valid"])
         self.assertFalse(payload["generation_ready"])
         self.assertFalse(payload["cloud_fallback"])
         self.assertEqual(payload["model"], "qwen2.5:7b")
