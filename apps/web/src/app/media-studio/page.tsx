@@ -364,9 +364,29 @@ export default function MediaStudioPage() {
                 ))}
               </div>
             )}
+            {templateCapabilities?.available && (
+              <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="text-sm font-medium text-indigo-100">
+                  已发现 {templateCapabilities.connection_candidate_count || 0} 组同类型接口候选连接
+                </p>
+                <p className="mt-1 text-xs text-white/55">
+                  以下只表示输入/输出类型相同，不代表语义上一定可连接；系统不会擅自写入未经验证的连线。
+                </p>
+                <div className="mt-2 max-h-48 space-y-2 overflow-auto">
+                  {(templateCapabilities.connection_candidates || []).slice(0, 16).map((candidate: any, index: number) => (
+                    <div key={index} className="text-xs text-white/70">
+                      <span className="text-cyan-200">{candidate.target_class}.{candidate.input}</span>
+                      <span> ← </span>
+                      <span>{candidate.sources.map((source: any) => `${source.class_type}[${source.output_index}]`).join("、")}</span>
+                      <span className="ml-1 text-white/40">({candidate.input_type})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <p className="mt-3 text-xs text-amber-100/70">
               {templateCapabilities?.available
-                ? "已识别本机节点及其输入参数，可用于后续自动建图；当前尚未生成工作流，也未验证模型加载或实际视频生成。"
+                ? "已读取节点输入/输出类型并列出候选连接；这仍不是完整可执行模板。下一阶段将按经过验证的 Wan 节点组合生成工作流，再进行严格预检。"
                 : "未发现可确认的 Wan/VACE 专用节点时，不会用普通图片节点伪造视频工作流。"}
             </p>
           </section>
