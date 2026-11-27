@@ -27,7 +27,8 @@
       "main.cjs",
       "preload.cjs",
       "ollama-runtime-installer.cjs",
-      "package.json"
+      "package.json",
+      "update-center.cjs"
     ],
     "extraResources": [
       {
