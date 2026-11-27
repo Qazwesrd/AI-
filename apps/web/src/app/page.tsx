@@ -56,7 +56,6 @@ const navigation = [
     title: "创作空间",
     items: [
       ["✍️", "小说创作", "/novels"],
-      ["🌍", "小说国内外发行", "/novel-publishing"],
       ["📁", "项目管理", "/novels"],
       ["👤", "人物角色", "/visual-studio"],
       ["🧬", "人物与素材状态追踪", "/asset-timeline"],
