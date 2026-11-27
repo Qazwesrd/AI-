@@ -63,7 +63,8 @@ def validate_public_feed_url(url: str, platform: str | None = None) -> str:
     if parsed.username or parsed.password or parsed.fragment:
         raise FeedCollectionError("订阅地址不能包含用户名、密码或片段")
     host = parsed.hostname.encode("idna").decode("ascii").lower().rstrip(".")
-    if any(part in urllib.parse.parse_qs(parsed.query) for part in ("token", "access_token", "api_key", "key", "secret")):
+    query_keys = {key.lower() for key in urllib.parse.parse_qs(parsed.query)}
+    if any(part in query_keys for part in ("token", "access_token", "api_key", "key", "secret")):
         raise FeedCollectionError("订阅地址疑似包含密钥参数，请移除后再添加")
     try:
         ipaddress.ip_address(host)
