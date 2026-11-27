@@ -2,7 +2,7 @@ name: Project quality checks
 
 on:
   push:
-    branches: [master]
+    branches: [master, offline-ai-engine-integration]
   # Run quality checks for stacked feature PRs as well as PRs targeting master.
   pull_request:
   workflow_dispatch:
