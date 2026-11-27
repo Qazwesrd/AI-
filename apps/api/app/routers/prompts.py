@@ -315,3 +315,197 @@ def import_prompts(payload: dict, db: Session = Depends(get_db)):
         added += 1
     db.commit()
     return {"success": True, "imported_count": added, "message": "已导入为新记录，未覆盖现有提示词。"}
+
+
+# 爆款研究证据与提示词升级审批：研究记录可以离线手工维护；只有人工核验的多来源证据
+# 才能进入升级候选。候选审批与正式提示词版本更新分离，刷新排行榜不会触碰正式库。
+from app.models.prompts import TrendEvidence, PromptUpgradeCandidate
+
+
+class EvidenceInput(BaseModel):
+    platform: str = Field(min_length=1, max_length=100)
+    work_title: str = Field(min_length=1, max_length=300)
+    work_url: str = Field(default="", max_length=2000)
+    observed_at: str = Field(min_length=8, max_length=40)
+    metric_summary: dict = Field(default_factory=dict)
+    evidence_type: str = Field(default="公开榜单/公开页面", max_length=100)
+    reliability: str = Field(default="待核验", max_length=30)
+
+
+class EvidenceVerifyInput(BaseModel):
+    verification_note: str = Field(min_length=3, max_length=5000)
+
+
+class UpgradeCandidateInput(BaseModel):
+    prompt_id: int
+    base_version: int
+    proposed_name: str = Field(min_length=1, max_length=200)
+    proposed_content: str = Field(min_length=1, max_length=50000)
+    change_reason: str = Field(min_length=3, max_length=5000)
+    expected_impact: str = Field(default="", max_length=5000)
+    evidence_ids: list[int] = Field(min_length=2, max_length=50)
+
+
+class CandidateDecisionInput(BaseModel):
+    decision_note: str = Field(default="", max_length=5000)
+
+
+def evidence_dict(row):
+    return {
+        "id": row.id, "platform": row.platform, "work_title": row.work_title,
+        "work_url": row.work_url, "observed_at": row.observed_at,
+        "metric_summary": row.metric_summary or {}, "evidence_type": row.evidence_type,
+        "reliability": row.reliability, "is_verified": bool(row.is_verified),
+        "verification_note": row.verification_note,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def candidate_dict(row):
+    return {
+        "id": row.id, "prompt_id": row.prompt_id, "base_version": row.base_version,
+        "proposed_name": row.proposed_name, "proposed_content": row.proposed_content,
+        "change_reason": row.change_reason, "expected_impact": row.expected_impact,
+        "evidence_ids": row.evidence_ids or [], "status": row.status,
+        "decision_note": row.decision_note,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+    }
+
+
+@router.get("/research/evidence")
+def list_trend_evidence(verified: Optional[bool] = None, db: Session = Depends(get_db)):
+    query = db.query(TrendEvidence)
+    if verified is not None:
+        query = query.filter(TrendEvidence.is_verified.is_(verified))
+    rows = query.order_by(TrendEvidence.observed_at.desc(), TrendEvidence.id.desc()).limit(500).all()
+    return {"items": [evidence_dict(x) for x in rows],
+            "notice": "证据来自公开来源或人工录入；未核验记录不会用于创建升级候选。"}
+
+
+@router.post("/research/evidence")
+def create_trend_evidence(data: EvidenceInput, db: Session = Depends(get_db)):
+    row = TrendEvidence(
+        platform=data.platform.strip(), work_title=data.work_title.strip(),
+        work_url=data.work_url.strip(), observed_at=data.observed_at.strip(),
+        metric_summary=data.metric_summary, evidence_type=data.evidence_type.strip(),
+        reliability=data.reliability.strip(), is_verified=False,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "item": evidence_dict(row),
+            "message": "证据已保存为待核验状态，不会自动认定为爆款。"}
+
+
+@router.post("/research/evidence/{evidence_id}/verify")
+def verify_trend_evidence(evidence_id: int, data: EvidenceVerifyInput, db: Session = Depends(get_db)):
+    row = db.query(TrendEvidence).filter(TrendEvidence.id == evidence_id).first()
+    if not row:
+        raise HTTPException(404, "研究证据不存在")
+    row.is_verified = True
+    row.verification_note = data.verification_note.strip()
+    row.reliability = "人工已核验"
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "item": evidence_dict(row)}
+
+
+@router.post("/research/candidates")
+def create_upgrade_candidate(data: UpgradeCandidateInput, db: Session = Depends(get_db)):
+    prompt = db.query(PromptTemplate).filter(
+        PromptTemplate.id == data.prompt_id, PromptTemplate.is_active.is_(True)
+    ).first()
+    if not prompt:
+        raise HTTPException(404, "正式提示词不存在")
+    if prompt.current_version != data.base_version:
+        raise HTTPException(409, "候选基准版本已过期，请基于当前正式版本重新生成候选")
+    evidence_rows = db.query(TrendEvidence).filter(
+        TrendEvidence.id.in_(set(data.evidence_ids)),
+        TrendEvidence.is_verified.is_(True),
+    ).all()
+    if len(evidence_rows) != len(set(data.evidence_ids)):
+        raise HTTPException(400, "候选只能引用已人工核验的研究证据")
+    platforms = {x.platform.strip().lower() for x in evidence_rows}
+    dates = {x.observed_at[:10] for x in evidence_rows}
+    if len(platforms) < 2 or len(dates) < 2:
+        raise HTTPException(400, "爆款证据至少需要两个不同平台、两个不同日期的已核验样本")
+    candidate = PromptUpgradeCandidate(
+        prompt_id=prompt.id, base_version=data.base_version,
+        proposed_name=data.proposed_name.strip(),
+        proposed_content=data.proposed_content,
+        change_reason=data.change_reason.strip(),
+        expected_impact=data.expected_impact.strip(),
+        evidence_ids=sorted(set(data.evidence_ids)), status="pending",
+    )
+    db.add(candidate)
+    db.commit()
+    db.refresh(candidate)
+    return {"success": True, "item": candidate_dict(candidate),
+            "message": "升级候选已建立，正式提示词未改变；等待用户明确批准。"}
+
+
+@router.get("/research/candidates")
+def list_upgrade_candidates(status: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(PromptUpgradeCandidate)
+    if status:
+        if status not in {"pending", "approved", "rejected"}:
+            raise HTTPException(400, "候选状态无效")
+        query = query.filter(PromptUpgradeCandidate.status == status)
+    rows = query.order_by(PromptUpgradeCandidate.created_at.desc()).limit(200).all()
+    return {"items": [candidate_dict(x) for x in rows]}
+
+
+@router.post("/research/candidates/{candidate_id}/approve")
+def approve_upgrade_candidate(candidate_id: int, data: CandidateDecisionInput, db: Session = Depends(get_db)):
+    candidate = db.query(PromptUpgradeCandidate).filter(
+        PromptUpgradeCandidate.id == candidate_id
+    ).with_for_update().first()
+    if not candidate:
+        raise HTTPException(404, "升级候选不存在")
+    if candidate.status != "pending":
+        raise HTTPException(409, "该候选已处理，不能重复审批")
+    prompt = db.query(PromptTemplate).filter(
+        PromptTemplate.id == candidate.prompt_id,
+        PromptTemplate.is_active.is_(True),
+    ).with_for_update().first()
+    if not prompt:
+        raise HTTPException(404, "正式提示词不存在或已归档")
+    if prompt.current_version != candidate.base_version:
+        raise HTTPException(409, "正式提示词已更新；该候选基准过期，不能覆盖新版本")
+    next_version = prompt.current_version + 1
+    prompt.name = candidate.proposed_name
+    prompt.content = candidate.proposed_content
+    prompt.current_version = next_version
+    prompt.updated_at = datetime.utcnow()
+    db.add(PromptVersion(
+        prompt_id=prompt.id, version=next_version, name=prompt.name,
+        content=prompt.content, notes=prompt.notes,
+        change_reason="用户批准爆款研究升级候选：" + candidate.change_reason,
+    ))
+    candidate.status = "approved"
+    candidate.decision_note = data.decision_note.strip()
+    candidate.decided_at = datetime.utcnow()
+    db.commit()
+    db.refresh(prompt)
+    return {"success": True, "candidate": candidate_dict(candidate),
+            "prompt": prompt_dict(prompt),
+            "message": f"已按用户明确批准创建正式提示词 V{next_version}；旧版本保留。"}
+
+
+@router.post("/research/candidates/{candidate_id}/reject")
+def reject_upgrade_candidate(candidate_id: int, data: CandidateDecisionInput, db: Session = Depends(get_db)):
+    candidate = db.query(PromptUpgradeCandidate).filter(
+        PromptUpgradeCandidate.id == candidate_id
+    ).first()
+    if not candidate:
+        raise HTTPException(404, "升级候选不存在")
+    if candidate.status != "pending":
+        raise HTTPException(409, "该候选已处理，不能重复审批")
+    candidate.status = "rejected"
+    candidate.decision_note = data.decision_note.strip()
+    candidate.decided_at = datetime.utcnow()
+    db.commit()
+    db.refresh(candidate)
+    return {"success": True, "item": candidate_dict(candidate),
+            "message": "候选已拒绝，正式提示词保持不变。"}
