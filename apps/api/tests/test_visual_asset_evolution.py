@@ -137,7 +137,7 @@ class LocalEvolutionResponseTests(unittest.TestCase):
 
     def test_parser_accepts_json_code_fence(self):
         from app.routers.ai_collaboration import _parse_local_evolution_response
-        result = _parse_local_evolution_response('\\x60\\x60\\x60json\\n{"proposals":[]}\\n\\x60\\x60\\x60')
+        result = _parse_local_evolution_response("```json\n{\"proposals\":[]}\n```")
         self.assertEqual(result, [])
 
     def test_parser_rejects_unstructured_local_model_output(self):
