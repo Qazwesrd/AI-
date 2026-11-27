@@ -72,6 +72,7 @@ export default function PromptCenterPage() {
     setNotes("");
     setChangeReason("创建提示词");
     setVersions([]);
+    setMessage("已进入新建提示词模式，请填写名称和正文后点击“保存提示词”。");
   }
 
   async function editPrompt(item: Prompt) {
