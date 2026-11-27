@@ -17,6 +17,7 @@ export default function RevenueCenterPage() {
   const [platforms,setPlatforms]=useState<PlatformCapability[]>([]);
   const [connections,setConnections]=useState<OAuthConnection[]>([]);
   const [oauthStatus,setOauthStatus]=useState<OAuthStatus|null>(null);
+  const [googleClientId,setGoogleClientId]=useState("");
   const [message,setMessage]=useState("");
   const [busy,setBusy]=useState(false);
   const [rev,setRev]=useState({platform:"",gross_amount:"",currency:"CNY",fee_amount:"0",tax_amount:"0",status:"estimated",period_start:"",period_end:"",notes:""});
@@ -43,6 +44,16 @@ export default function RevenueCenterPage() {
   }
   useEffect(()=>{void load();},[]);
 
+
+  async function saveGoogleOAuthConfig(){
+    setBusy(true);
+    try{
+      await api("/api/revenue/oauth/config",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({client_id:googleClientId})});
+      setMessage("Google OAuth Client ID 已保存在本机。现在可以连接 Google 账户。");
+      await load();
+    }catch(e){setMessage(e instanceof Error?e.message:"保存 Google OAuth 配置失败");}
+    finally{setBusy(false);}
+  }
   async function syncConnection(id:number){
     setBusy(true);
     try{
@@ -87,7 +98,8 @@ export default function RevenueCenterPage() {
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(totals).map(([currency,t])=><article key={currency} className="rounded-xl border border-slate-800 bg-slate-900 p-4"><div className="text-sm text-slate-400">{currency} 汇总</div><div className="mt-2 text-xl font-bold">{t.net.toFixed(2)}</div><div className="mt-1 text-xs text-slate-400">登记净收入</div><div className="mt-3 text-sm">待付款：{(t.payable_net||0).toFixed(2)} {currency}</div><div className="mt-1 text-sm">已结算：{t.settled_net.toFixed(2)} · 已付款：{(t.paid_net||0).toFixed(2)}</div><div className="mt-1 text-xs text-slate-500">估算可结算余额：{t.settled_balance_estimate.toFixed(2)} · 费用 {t.fees.toFixed(2)} · 税费 {t.taxes.toFixed(2)}</div></article>)}</section>
       <section className="rounded-xl border border-cyan-900 bg-slate-900 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">真实平台账户 OAuth 授权</h2><p className="mt-1 text-sm text-slate-400">首批接入 Google：YouTube Analytics 预估收入 + AdSense 真实付款记录，只读同步。</p></div><button disabled={busy||!oauthStatus?.google_oauth_configured||!oauthStatus?.token_encryption_configured} onClick={()=>{window.location.href=API+"/api/revenue/oauth/google/start";}} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">连接 Google / YouTube</button></div>
-        {oauthStatus&&(!oauthStatus.google_oauth_configured||!oauthStatus.token_encryption_configured)&&<div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-sm text-amber-200">尚未完成本机 OAuth 配置。需要设置 GOOGLE_OAUTH_CLIENT_ID 和 AI_COMIC_TOKEN_ENCRYPTION_KEY。具体步骤见项目 docs/GOOGLE_CREATOR_REVENUE_OAUTH.md。令牌不会明文保存。</div>}
+        {oauthStatus&&!oauthStatus.google_oauth_configured&&<div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 p-3"><p className="text-sm text-amber-200">首次连接需要你在 Google Cloud 创建自己的 Desktop app OAuth Client ID。只需填写 Client ID，不要填写密码或银行卡信息。详细步骤见 docs/GOOGLE_CREATOR_REVENUE_OAUTH.md。</p><div className="mt-3 flex flex-wrap gap-2"><input value={googleClientId} onChange={e=>setGoogleClientId(e.target.value)} placeholder="xxxx.apps.googleusercontent.com" className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white"/><button disabled={busy||!googleClientId.trim()} onClick={()=>void saveGoogleOAuthConfig()} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-40">保存本机配置</button></div></div>}
+        {oauthStatus?.google_oauth_configured&&<p className="mt-3 text-xs text-emerald-300">Google OAuth Client ID 已配置；本机加密密钥由软件生成并保护。</p>}
         <div className="mt-4 space-y-2">{connections.map(item=><div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 p-3"><div><div className="font-medium">{item.account_label}</div><div className="text-xs text-slate-400">Google 授权 · {item.status} · 最近同步 {item.last_sync_at||"尚未同步"} · {item.last_sync_status}</div>{item.last_sync_error&&<p className="mt-1 text-xs text-amber-300">{item.last_sync_error}</p>}</div><div className="flex gap-2"><button disabled={busy||item.status!=="connected"} onClick={()=>void syncConnection(item.id)} className="rounded-lg bg-emerald-700 px-3 py-2 text-xs disabled:opacity-40">同步真实收入</button><button disabled={busy} onClick={()=>void disconnectConnection(item.id)} className="rounded-lg border border-rose-800 px-3 py-2 text-xs">断开授权</button></div></div>)}
           {!connections.length&&<p className="text-sm text-slate-500">尚未连接 Google 账户。其他平台会按官方 API 能力逐个接入，不会使用模拟登录。</p>}</div>
         <p className="mt-3 text-xs text-slate-500">OAuth 配置、授权范围、数据分类和本机密钥生成方法：docs/GOOGLE_CREATOR_REVENUE_OAUTH.md。Google Analytics 是预估收入；AdSense Payments 是平台付款记录，二者分开存储。</p>
