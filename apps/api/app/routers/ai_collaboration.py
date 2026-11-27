@@ -18,6 +18,7 @@ from app.models.story import StoryProject, EpisodePlan, StoryboardShot, StoryAss
 from app.models.ai_story_collaboration import AIStoryProposal, AIResultAttachment
 from app.models.media import MediaFile
 from app.services.media_service import STORAGE, safe_storage_file
+from app.routers.local_ai_runtime import _installed_models, _ollama_request
 
 router = APIRouter(prefix="/api/ai-collaboration", tags=["网页版AI协同创作"])
 
@@ -45,6 +46,10 @@ class ImportPayload(BaseModel):
     source_text: str = Field(min_length=1, max_length=150000)
     source_task_key: str = Field(default="", max_length=120)
     proposals: list[ProposalInput] = Field(min_length=1, max_length=500)
+
+
+class LocalEvolutionAnalyzeInput(BaseModel):
+    max_assets: int = Field(default=80, ge=1, le=120)
 
 
 class ReviewPayload(BaseModel):
@@ -689,6 +694,166 @@ def import_proposals(novel_id: int, payload: ImportPayload, db: Session = Depend
         created.append(proposal_dict(item))
     db.commit()
     return {"success": True, "created": created, "created_count": len(created), "duplicates_skipped": duplicates, "message": "AI提议已进入待审核列表，尚未写入正式素材设定。"}
+
+
+def _parse_local_evolution_response(raw):
+    content = str(raw or "").strip()
+    content = re.sub(r"^```(?:json)?\\s*", "", content)
+    content = re.sub(r"\\s*```$", "", content)
+    try:
+        parsed = json.loads(content)
+    except json.JSONDecodeError:
+        start, end = content.find("{"), content.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("本地模型没有返回有效 JSON。")
+        parsed = json.loads(content[start:end + 1])
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("proposals"), list):
+        raise ValueError("本地模型返回格式错误：缺少 proposals 数组。")
+    return parsed["proposals"]
+
+
+@router.post("/novels/{novel_id}/chapters/{chapter_number}/local-analyze-evolution")
+def analyze_chapter_asset_evolution_locally(
+    novel_id: int,
+    chapter_number: int,
+    payload: LocalEvolutionAnalyzeInput = LocalEvolutionAnalyzeInput(),
+    db: Session = Depends(get_db),
+):
+    """Use local Ollama to detect chapter-specific asset changes; save only pending-review proposals."""
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if novel is None:
+        raise HTTPException(404, "小说不存在")
+    chapter = get_novel_chapter(db, novel_id, chapter_number)
+    if chapter is None:
+        raise HTTPException(404, "指定章节不存在")
+    chapter_text = (chapter.content or "").strip()
+    if not chapter_text:
+        raise HTTPException(422, "章节正文为空，无法分析素材变化")
+
+    assets = db.query(VisualAsset).filter(VisualAsset.confirmed.is_(True)).all()
+    scoped_assets = []
+    for asset in assets:
+        data = asset.data if isinstance(asset.data, dict) else {}
+        if data.get("source_novel_id") == novel_id:
+            scoped_assets.append(asset)
+    scoped_assets = scoped_assets[:payload.max_assets]
+    if not scoped_assets:
+        raise HTTPException(409, "该小说还没有已确认并关联的视觉素材；请先在视觉素材中心导入并确认人物、场景和道具。")
+
+    try:
+        installed = _installed_models()
+    except HTTPException as exc:
+        raise HTTPException(503, "本机 Ollama 未连接；素材状态分析不会切换到云端。") from exc
+    if not installed:
+        raise HTTPException(404, "本机 Ollama 没有已安装的文本模型；不会自动下载模型。")
+    model = installed[0]["name"]
+    asset_context = [{
+        "asset_id": item.id,
+        "name": item.name,
+        "category": item.category,
+        "description": (item.description or "")[:800],
+        "appearance": (item.appearance or "")[:500],
+        "clothing": (item.clothing or "")[:300],
+        "consistency_prompt": (item.consistency_prompt or "")[:300],
+    } for item in scoped_assets]
+    system_prompt = (
+        "你是小说影视化素材连续性分析师。只根据本章正文，识别清单中已有素材在本章发生的真实状态变化。"
+        "不得推测未发生的变化，不要为没有变化的素材输出提议。"
+        "每条提议必须包含 asset_id、change_type、event、appearance_after、clothing_after、age_after、"
+        "hairstyle_after、injury_after、equipment_after、condition_after、holder、evidence、confidence。"
+        "evidence 必须是本章正文中连续、逐字一致的原文片段，长度至少 8 个字符。"
+        "asset_id 只能来自给定素材清单。confidence 为 0 到 1 的数字。"
+        "只返回 JSON 对象，格式为 {\"proposals\":[...]}；没有变化时返回空数组。"
+    )
+    user_prompt = (
+        f"小说：{novel.title}\\n章节：第{chapter_number}章\\n"
+        "已有素材清单：\\n" + json.dumps(asset_context, ensure_ascii=False) +
+        "\\n本章正文：\\n" + chapter_text[:24000]
+    )
+    try:
+        result = _ollama_request("/api/generate", {
+            "model": model,
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.1, "num_predict": 4096},
+        }, timeout=600.0)
+        suggestions = _parse_local_evolution_response(result.get("response") if isinstance(result, dict) else "")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(422, "本机素材状态分析失败：" + str(exc)[:1000]) from exc
+
+    asset_by_id = {item.id: item for item in scoped_assets}
+    created = []
+    skipped = 0
+    for suggestion in suggestions[:200]:
+        if not isinstance(suggestion, dict):
+            skipped += 1
+            continue
+        try:
+            asset_id = int(suggestion.get("asset_id"))
+        except (TypeError, ValueError):
+            skipped += 1
+            continue
+        asset = asset_by_id.get(asset_id)
+        evidence = str(suggestion.get("evidence") or "").strip()
+        event = str(suggestion.get("event") or "").strip()
+        if asset is None or len(evidence) < 8 or evidence not in chapter_text or len(event) < 2:
+            skipped += 1
+            continue
+        duplicate = db.query(AIStoryProposal.id).filter(
+            AIStoryProposal.novel_id == novel_id,
+            AIStoryProposal.chapter_number == chapter_number,
+            AIStoryProposal.asset_name == asset.name,
+            AIStoryProposal.evidence == evidence,
+            AIStoryProposal.status.in_(["pending_review", "approved"]),
+        ).first()
+        if duplicate:
+            skipped += 1
+            continue
+        confidence = suggestion.get("confidence", 0.5)
+        try:
+            confidence = max(0.0, min(1.0, float(confidence)))
+        except (TypeError, ValueError):
+            confidence = 0.5
+        item = AIStoryProposal(
+            novel_id=novel_id,
+            chapter_number=chapter_number,
+            proposal_type="asset_evolution",
+            asset_name=asset.name,
+            asset_category=asset.category,
+            change_type=str(suggestion.get("change_type") or "状态变化")[:80],
+            event=event[:2000],
+            appearance_after=str(suggestion.get("appearance_after") or "")[:4000],
+            clothing_after=str(suggestion.get("clothing_after") or "")[:4000],
+            age_after=str(suggestion.get("age_after") or "")[:80],
+            hairstyle_after=str(suggestion.get("hairstyle_after") or "")[:300],
+            injury_after=str(suggestion.get("injury_after") or "")[:1000],
+            equipment_after=str(suggestion.get("equipment_after") or "")[:2000],
+            condition_after=str(suggestion.get("condition_after") or "")[:1000],
+            holder=str(suggestion.get("holder") or "")[:300],
+            evidence=evidence[:2000],
+            confidence=confidence,
+            status="pending_review",
+            source_task_key="local_ollama:" + model[:80],
+        )
+        db.add(item)
+        created.append(item)
+    db.commit()
+    for item in created:
+        db.refresh(item)
+    return {
+        "success": True,
+        "model": model,
+        "created_count": len(created),
+        "skipped_count": skipped,
+        "items": [proposal_dict(item) for item in created],
+        "local_only": True,
+        "cloud_fallback": False,
+        "message": f"本机 AI 分析完成：发现 {len(created)} 条素材变化候选，均已进入待人工审核；未直接修改正式素材状态。",
+    }
 
 
 @router.get("/novels/{novel_id}/proposals")
