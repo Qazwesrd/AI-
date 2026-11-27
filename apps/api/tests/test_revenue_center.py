@@ -106,7 +106,7 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertIn("不会显示软件内直接提现按钮", result["global_notice"])
 
     def test_kdp_and_google_play_report_imports_are_idempotent_and_keep_revenue_stages(self):
-        google=b"Earnings Date\\tTitle\\tEarnings Currency\\tEarnings Amount\\n2026-10-31\\tNovel A\\tUSD\\t12.50\\n2026-10-31\\tNovel A refund\\tUSD\\t-1.25\\n"
+        google=b"Earnings Date\tTitle\tEarnings Currency\tEarnings Amount\n2026-10-31\tNovel A\tUSD\t12.50\n2026-10-31\tNovel A refund\tUSD\t-1.25\n"
         first=import_platform_report("google_play_books","earnings.tsv",google,self.db)
         second=import_platform_report("google_play_books","earnings.tsv",google,self.db)
         self.assertEqual(first["imported"],2)
@@ -116,7 +116,7 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertEqual(len(paid),2)
         self.assertAlmostEqual(sum(row.gross_amount for row in paid),11.25)
 
-        kdp=b"Month,Title,Currency,Estimated royalties\\n2026-11,Novel B,USD,$3.45\\n"
+        kdp=b"Month,Title,Currency,Estimated royalties\n2026-11,Novel B,USD,$3.45\n"
         imported=import_platform_report("kdp","kdp.csv",kdp,self.db)
         self.assertEqual(imported["imported"],1)
         kdp_row=self.db.query(RevenueEntry).filter_by(platform="Amazon KDP").one()
