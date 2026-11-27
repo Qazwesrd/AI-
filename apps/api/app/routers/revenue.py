@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
 
 REVENUE_STATUSES = {"estimated", "settled", "payable", "paid"}
 WITHDRAWAL_STATUSES = {"planned", "submitted", "processing", "paid", "rejected", "cancelled"}
-CURRENCIES = {"CNY", "USD", "EUR", "JPY", "GBP", "HKD", "KRW", "TWD"}
+CURRENCIES = {"CNY", "USD", "EUR", "JPY", "GBP", "HKD", "KRW", "TWD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD"}
 
 
 class RevenueInput(BaseModel):
@@ -473,6 +473,7 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
 
         # AdSense Payments is the authoritative API source for unpaid/paid payment records.
         payment_count = 0
+        skipped_currency_count = 0
         adsense_warning = ""
         try:
             adsense_accounts = google_get_json("https://adsense.googleapis.com/v2/accounts?pageSize=100", access)
@@ -496,6 +497,7 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
                 payment_name = str(payment.get("name") or "")
                 amount, currency = parse_money(payment.get("amount", ""), account.get("currencyCode"))
                 if amount is None or not currency:
+                    skipped_currency_count += 1
                     continue
                 is_unpaid = payment_name.endswith("/unpaid") or payment_name.endswith("/youtube-unpaid")
                 payment_date = str((payment.get("date") or {}).get("year", "")) + "-" + str((payment.get("date") or {}).get("month", "")).zfill(2) + "-" + str((payment.get("date") or {}).get("day", "")).zfill(2)
@@ -523,10 +525,10 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
         return {
             "success": True, "account": connection.account_label,
             "analytics_days": len(analytics.get("rows", [])),
-            "payment_records": payment_count, "inserted": inserted, "updated": updated,
+            "payment_records": payment_count, "skipped_currency_count": skipped_currency_count, "inserted": inserted, "updated": updated,
             "adsense_warning": adsense_warning,
             "period": {"start": start_day.isoformat(), "end": end_day.isoformat()},
-            "message": "已同步 YouTube 预估收入；" + ("AdSense 付款记录同步遇到权限或账户限制：" + adsense_warning if adsense_warning else "已读取 Google AdSense 付款记录。") + "预估收入、应付款与已付款分开保存；此同步不提供提现执行。",
+            "message": "已同步 YouTube 预估收入；" + ("AdSense 付款记录同步遇到权限或账户限制：" + adsense_warning if adsense_warning else "已读取 Google AdSense 付款记录。") + "预估收入、应付款与已付款分开保存；无法可靠识别币种的付款金额会跳过并计数，避免猜测；此同步不提供提现执行。",
         }
     except HTTPException:
         raise
