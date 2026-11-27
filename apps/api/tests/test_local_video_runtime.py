@@ -292,6 +292,21 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertFalse(result["template_generated"])
         self.assertFalse(result["generation_ready"])
 
+    def test_template_assessment_reports_missing_wan_and_vace_roles(self):
+        from app.routers.local_video_runtime import build_video_template_capabilities
+        info = {
+            "WanVideoModelLoader": {"input": {"required": {"model": [["wan-t2v.safetensors"]]}}},
+            "WanVideoSampler": {"input": {"required": {"steps": ["INT"]}}},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        result = build_video_template_capabilities(info)
+        self.assertTrue(result["available"])
+        self.assertIn("text_conditioning", result["template_assessment"]["wan_t2v_role_coverage"]["missing_roles"])
+        self.assertIn("vace_processing", result["template_assessment"]["vace_role_coverage"]["missing_roles"])
+        self.assertFalse(result["template_assessment"]["wan_t2v_role_coverage"]["all_role_groups_found"])
+        self.assertFalse(result["template_generated"])
+        self.assertFalse(result["generation_ready"])
+
     def test_template_capabilities_does_not_guess_when_nodes_are_missing(self):
         from app.routers.local_video_runtime import build_video_template_capabilities
         result = build_video_template_capabilities({"KSampler": {}, "SaveImage": {}})
