@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
 
 REVENUE_STATUSES = {"estimated", "settled", "payable", "paid"}
 WITHDRAWAL_STATUSES = {"planned", "submitted", "processing", "paid", "rejected", "cancelled"}
-CURRENCIES = {"CNY", "USD", "EUR", "JPY", "GBP", "HKD", "KRW", "TWD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD"}
+CURRENCIES = {"CNY", "USD", "EUR", "JPY", "GBP", "HKD", "KRW", "TWD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "BRL", "MXN", "ARS", "CLP", "COP", "PEN", "PLN", "SEK", "NOK", "DKK", "CZK", "HUF", "RON", "TRY", "RUB", "UAH", "AED", "SAR", "QAR", "ILS", "ZAR", "EGP", "THB", "VND", "IDR", "MYR", "PHP", "PKR", "BDT"}
 
 
 class RevenueInput(BaseModel):
