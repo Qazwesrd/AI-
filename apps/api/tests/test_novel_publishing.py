@@ -80,8 +80,8 @@ class NovelPublishingTests(unittest.TestCase):
         self.assertFalse(result["automatic_paid_api_call"])
 
     def test_translation_chunks_keep_real_paragraph_breaks(self):
-        chunks = _translation_chunks("第一段。\\n\\n第二段。")
-        self.assertEqual(chunks, ["第一段。\\n\\n第二段。"])
+        chunks = _translation_chunks("第一段。\n\n第二段。")
+        self.assertEqual(chunks, ["第一段。\n\n第二段。"])
 
     @patch("app.routers.novel_publishing._installed_models", return_value=[{"name":"local-translate-model"}])
     @patch("app.routers.novel_publishing._ollama_request", return_value={"response":"Translated original text."})
