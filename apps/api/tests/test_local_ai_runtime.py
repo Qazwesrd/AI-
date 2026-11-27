@@ -8,6 +8,9 @@ from fastapi import HTTPException
 
 from app.routers.local_ai_runtime import (
     LocalModelTestInput,
+    LocalChatInput,
+    LocalChatMessage,
+    chat_with_local_model,
     LocalCreativeInput,
     LocalSpecializedModelInput,
     create_local_specialized_model,
@@ -36,6 +39,72 @@ class LocalAIRuntimeTests(unittest.TestCase):
         ):
             models = _installed_models()
         self.assertEqual([item["name"] for item in models], ["qwen2.5:3b", "llama3.2:latest"])
+
+    def test_cloud_aliases_are_excluded_from_local_model_list(self):
+        with patch(
+            "app.routers.local_ai_runtime._ollama_request",
+            return_value={"models": [
+                {"name": "qwen2.5:3b"},
+                {"name": "gpt-oss:120b-cloud"},
+                {"name": "gemma4:cloud"},
+            ]},
+        ):
+            models = _installed_models()
+        self.assertEqual([item["name"] for item in models], ["qwen2.5:3b"])
+
+    def test_chat_uses_only_local_api_and_preserves_turn_history(self):
+        payload = LocalChatInput(model="qwen2.5:3b", messages=[
+            LocalChatMessage(role="user", content="你好"),
+            LocalChatMessage(role="assistant", content="你好！"),
+            LocalChatMessage(role="user", content="帮我写一句人物介绍"),
+        ])
+        with patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name": "qwen2.5:3b"}]), patch(
+            "app.routers.local_ai_runtime._ollama_request",
+            return_value={"message": {"content": "人物介绍示例"}},
+        ) as request:
+            result = chat_with_local_model(payload)
+        self.assertEqual(result["response"], "人物介绍示例")
+        self.assertTrue(result["local_only"])
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["cloud_fallback"])
+        body = request.call_args.args[1]
+        self.assertEqual(body["model"], "qwen2.5:3b")
+        self.assertEqual([m["role"] for m in body["messages"][-3:]], ["user", "assistant", "user"])
+        self.assertEqual(request.call_args.args[0], "/api/chat")
+
+    def test_chat_rejects_cloud_model_alias(self):
+        payload = LocalChatInput(model="gpt-oss:120b-cloud", messages=[
+            LocalChatMessage(role="user", content="你好"),
+        ])
+        with patch("app.routers.local_ai_runtime._installed_models", return_value=[]), patch(
+            "app.routers.local_ai_runtime._ollama_request"
+        ) as request:
+            with self.assertRaises(HTTPException) as caught:
+                chat_with_local_model(payload)
+        self.assertEqual(caught.exception.status_code, 400)
+        request.assert_not_called()
+
+    def test_chat_rejects_missing_local_model_without_fallback(self):
+        payload = LocalChatInput(model="missing", messages=[
+            LocalChatMessage(role="user", content="你好"),
+        ])
+        with patch("app.routers.local_ai_runtime._installed_models", return_value=[]), patch(
+            "app.routers.local_ai_runtime._ollama_request"
+        ) as request:
+            with self.assertRaises(HTTPException) as caught:
+                chat_with_local_model(payload)
+        self.assertEqual(caught.exception.status_code, 404)
+        request.assert_not_called()
+
+    def test_chat_rejects_context_over_budget(self):
+        payload = LocalChatInput(model="qwen2.5:3b", messages=[
+            LocalChatMessage(role="user", content="字" * 12000),
+            LocalChatMessage(role="assistant", content="字" * 12000),
+            LocalChatMessage(role="user", content="继续"),
+        ])
+        with self.assertRaises(HTTPException) as caught:
+            chat_with_local_model(payload)
+        self.assertEqual(caught.exception.status_code, 413)
 
     def test_runtime_reports_not_running_without_cloud_fallback(self):
         with patch(
