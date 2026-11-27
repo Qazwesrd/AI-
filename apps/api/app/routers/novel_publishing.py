@@ -673,8 +673,9 @@ def edit_translation_chunk(
     ).order_by(Chapter.chapter_number).all()
     if _novel_source_signature(novel, source_chapters) != row.source_signature:
         raise HTTPException(409, "原文已变化，不能继续修改旧译本；请基于最新原文新建译本。")
+    chapters_data = copy.deepcopy(row.chapters_data or [])
     chapter = next(
-        (item for item in (row.chapters_data or []) if item.get("chapter_number") == chapter_number),
+        (item for item in chapters_data if item.get("chapter_number") == chapter_number),
         None,
     )
     if chapter is None or chunk_index < 0 or chunk_index >= len(chapter.get("chunks", [])):
@@ -682,7 +683,7 @@ def edit_translation_chunk(
     chunk = chapter["chunks"][chunk_index]
     chunk["translation"] = data.translation.strip()
     chunk["status"] = "completed" if chunk["translation"] else "pending"
-    row.chapters_data = copy.deepcopy(row.chapters_data)
+    row.chapters_data = chapters_data
     row.completed_chunks = sum(
         1 for item in (row.chapters_data or [])
         for part in item.get("chunks", [])
