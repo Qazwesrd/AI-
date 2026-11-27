@@ -799,7 +799,7 @@ def _auto_video_node_catalog(object_info):
         if not isinstance(class_name, str) or not isinstance(info, dict):
             continue
         compact = re.sub(r"[^a-z0-9]", "", class_name.lower())
-        if not any(token in compact for token in ("wanvideo", "wan_video", "vace", "videocombine", "savevideo", "loadimage", "loadvideo")):
+        if not any(token in compact for token in ("wanvideo", "wan_video", "vace", "videocombine", "savevideo", "loadimage", "loadvideo", "cliptextencode", "textencode", "encodeprompt")):
             continue
         catalog.append({
             "class_type": class_name,
