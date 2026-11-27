@@ -6,6 +6,7 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Novel = {id:number;title:string;genre:string;chapter_count:number;word_count:number};
 type Platform = {id:string;name:string;region:string;language:string[];portal:string;mode:string;api_publish:boolean;revenue_sync:boolean;payout:string};
 type Package = {id:number;novel_id:number;platform_id:string;platform_name:string;pen_name:string;language:string;status:string;word_count:number;content_hash:string;created_at:string};
+type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
 
 export default function NovelPublishingPage(){
@@ -13,6 +14,11 @@ export default function NovelPublishingPage(){
   const [platforms,setPlatforms]=useState<Platform[]>([]);
   const [packages,setPackages]=useState<Package[]>([]);
   const [submissions,setSubmissions]=useState<Submission[]>([]);
+  const [chapters,setChapters]=useState<Chapter[]>([]);
+  const [aiTask,setAiTask]=useState("outline");
+  const [aiChapterId,setAiChapterId]=useState("");
+  const [aiExtra,setAiExtra]=useState("");
+  const [aiPrompt,setAiPrompt]=useState("");
   const [novelId,setNovelId]=useState("");
   const [platformId,setPlatformId]=useState("fanqie");
   const [penName,setPenName]=useState("");
@@ -43,6 +49,23 @@ export default function NovelPublishingPage(){
     }catch(e){setMessage(e instanceof Error?e.message:"读取小说发行数据失败");}
   }
   useEffect(()=>{void load();},[]);
+  useEffect(()=>{
+    if(!novelId){setChapters([]);return;}
+    void api<{items:Chapter[]}>(`/api/novels/${novelId}/chapters`).then(x=>setChapters(x.items||[])).catch(()=>setChapters([]));
+  },[novelId]);
+
+  async function generateAIPrompt(){
+    if(!novelId)return setMessage("请先选择小说。");
+    setBusy(true);
+    try{
+      const result=await api<{prompt:string;message:string}>(
+        `/api/novel-publishing/novels/${novelId}/ai-assist-prompt`,
+        {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:aiTask,chapter_id:aiChapterId?Number(aiChapterId):null,target_language:language,platform_id:platformId,extra_requirements:aiExtra})}
+      );
+      setAiPrompt(result.prompt);setMessage(result.message);
+    }catch(e){setMessage(e instanceof Error?e.message:"生成 AI 创作提示词失败");}
+    finally{setBusy(false);}
+  }
   async function createPackage(){
     if(!novelId)return setMessage("请先在小说创作工作室创建或导入小说。");
     setBusy(true);
@@ -88,6 +111,19 @@ export default function NovelPublishingPage(){
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3"><div><a href="/" className="text-sm text-purple-300">← 返回首页</a><h1 className="mt-3 text-3xl font-black">🌍 AI小说创作与国内外发行</h1><p className="mt-2 text-sm text-purple-200">从本地小说项目生成平台适配稿件，准备国内外投稿并跟踪审核、发布和收益。</p></div><a href="/novels" className="rounded-lg border border-purple-400/30 px-4 py-2 text-sm">进入小说创作工作室</a></header>
       {message&&<div role="status" className="rounded-xl border border-cyan-400/20 bg-cyan-950/30 p-3 text-sm">{message}</div>}
+
+      <section className="rounded-2xl border border-cyan-400/20 bg-[#101c2acc] p-5">
+        <h2 className="text-xl font-bold">AI辅助小说创作与翻译</h2>
+        <p className="mt-1 text-xs text-cyan-100/70">可生成构思、大纲、人物、续写、润色、翻译、简介和市场本地化任务。默认只生成提示词，不会自动调用付费 API；你可以交给本地模型或你选定的免费 AI 工具，审阅后再写回小说。</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="text-sm">创作任务<select className={field+" mt-1"} value={aiTask} onChange={e=>setAiTask(e.target.value)}>{[["concept","原创创意构思"],["outline","长篇大纲与分卷"],["characters","人物档案与关系网"],["chapter","续写下一章"],["polish","章节润色与逻辑校对"],["translate","多语言翻译"],["synopsis","平台简介与标签"],["localize","海外市场本地化"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+          <label className="text-sm">参考章节（可选）<select className={field+" mt-1"} value={aiChapterId} onChange={e=>setAiChapterId(e.target.value)}><option value="">不指定章节</option>{chapters.map(ch=><option key={ch.id} value={ch.id}>第{ch.chapter_number}章 · {ch.title}</option>)}</select></label>
+          <label className="text-sm">目标语言<select className={field+" mt-1"} value={language} onChange={e=>setLanguage(e.target.value)}>{[["zh-CN","简体中文"],["en","英语"],["ja","日语"],["es","西班牙语"],["fr","法语"],["de","德语"],["it","意大利语"],["pt","葡萄牙语"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+        </div>
+        <label className="mt-3 block text-sm">额外创作要求<textarea className={field+" mt-1 min-h-20"} value={aiExtra} onChange={e=>setAiExtra(e.target.value)} placeholder="例如：加强主角成长线、每章结尾增加悬念、保留原有世界观设定"/></label>
+        <button disabled={busy||!novelId} onClick={()=>void generateAIPrompt()} className="mt-3 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">生成 AI 创作任务</button>
+        {aiPrompt&&<div className="mt-4"><div className="mb-2 flex items-center justify-between gap-2"><strong className="text-sm">AI创作任务提示词</strong><button onClick={()=>void navigator.clipboard.writeText(aiPrompt).then(()=>setMessage("提示词已复制。"))} className="rounded-lg border border-cyan-300/30 px-3 py-1.5 text-xs">复制提示词</button></div><textarea readOnly value={aiPrompt} className={field+" min-h-64 font-mono text-xs leading-5"}/></div>}
+      </section>
       <section className="rounded-2xl border border-amber-300/20 bg-amber-950/20 p-4 text-sm text-amber-100/90">
         当前先提供本地稿件生成、格式导出、官方作者入口和投稿记录。目录中的平台尚无经确认可供本软件使用的个人作者发布 API 或收益 API，因此不会自动登录、自动上传或假报发布成功。实际签约、收益、结算和提现以你在平台官方作者账户看到的结果为准。
       </section>
