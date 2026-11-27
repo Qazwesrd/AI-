@@ -48,7 +48,7 @@ class NovelPublishingTests(unittest.TestCase):
         result = create_distribution_package(
             self.novel.id,
             DistributionPackageInput(
-                platform_id="royalroad", pen_name="Writer", language="en",
+                platform_id="royalroad", pen_name="Writer", localized_title="A Test Novel", language="en",
                 synopsis="A fantasy adventure.", tags=["fantasy"],
                 rights_confirmed=True, ai_assistance_disclosed=True,
             ),
@@ -59,7 +59,7 @@ class NovelPublishingTests(unittest.TestCase):
         self.assertEqual(package["status"], "prepared")
         row = self.db.query(NovelDistributionPackage).filter_by(id=package["id"]).one()
         exported = export_distribution_package(row.id, "md", self.db)
-        self.assertIn("测试原创小说", exported.body.decode("utf-8"))
+        self.assertIn("# A Test Novel", exported.body.decode("utf-8"))
         self.assertIn("第一章", exported.body.decode("utf-8"))
         epub=export_distribution_package(row.id,"epub",self.db)
         with zipfile.ZipFile(io.BytesIO(epub.body)) as archive:
