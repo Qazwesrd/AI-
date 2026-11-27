@@ -695,7 +695,7 @@ def list_public_research_sources(db: Session = Depends(get_db)):
 @router.post("/research/sources")
 def create_public_research_source(data: PublicSourceInput, db: Session = Depends(get_db)):
     try:
-        safe_url = validate_public_feed_url(data.feed_url)
+        safe_url = validate_public_feed_url(data.feed_url, data.platform.strip())
     except FeedCollectionError as exc:
         raise HTTPException(400, str(exc))
     duplicate = db.query(PublicResearchSource).filter(PublicResearchSource.feed_url == safe_url).first()
