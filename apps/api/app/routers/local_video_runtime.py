@@ -789,14 +789,34 @@ def get_video_workflow_status(prompt_id: str):
                             "type": value.get("type", "output"),
                         })
     completed = bool(status_data.get("completed"))
+    status_text = str(status_data.get("status_str", "")).lower()
     status_messages = status_data.get("messages") if isinstance(status_data.get("messages"), list) else []
+    execution_failed = status_text in ("error", "failed", "interrupted") or any(
+        isinstance(message, (list, tuple)) and len(message) > 1 and
+        isinstance(message[1], dict) and message[1].get("exception_type")
+        for message in status_messages[-30:]
+    )
+    if execution_failed:
+        task_status = "failed"
+        message = "本地 ComfyUI 报告任务执行失败；请查看错误详情并检查模型、节点依赖和显存。"
+    elif completed and videos:
+        task_status = "completed"
+        message = "已完成并发现视频输出。"
+    elif completed:
+        task_status = "completed_without_video"
+        message = "任务已结束但未发现标准视频输出，请检查工作流是否连接视频保存节点。"
+    else:
+        task_status = "running"
+        message = "本地任务仍在队列中或执行中；可稍后刷新状态。"
     return {
         "prompt_id": prompt_id,
-        "status": "completed" if completed and videos else "completed_without_video" if completed else "running_or_failed",
-        "completed": completed, "videos": videos,
+        "status": task_status,
+        "completed": completed,
+        "failed": execution_failed,
+        "videos": videos,
         "status_messages": status_messages[-30:],
         "local_only": True, "cloud_fallback": False,
-        "message": "已完成并发现视频输出。" if completed and videos else "任务已结束但未发现标准视频输出，请查看 ComfyUI 工作流输出。" if completed else "任务仍在运行或执行失败，请稍后刷新并查看本机 ComfyUI 队列。",
+        "message": message,
     }
 
 
