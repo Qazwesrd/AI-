@@ -324,8 +324,8 @@ class TranslationCreateInput(BaseModel):
 
 
 def _novel_source_signature(novel, chapters):
-    source = "\\n".join(
-        f"{chapter.chapter_number}:{chapter.title}\\n{chapter.content}"
+    source = "\n".join(
+        f"{chapter.chapter_number}:{chapter.title}\n{chapter.content}"
         for chapter in chapters
     ) if chapters else (novel.source_text or "")
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
@@ -341,7 +341,7 @@ def _translation_chunks(text, limit=4200):
                 current = ""
             chunks.append(paragraph[:limit])
             paragraph = paragraph[limit:]
-        candidate = paragraph if not current else current + "\\n\\n" + paragraph
+        candidate = paragraph if not current else current + "\n\n" + paragraph
         if len(candidate) > limit and current:
             chunks.append(current)
             current = paragraph
@@ -437,7 +437,7 @@ def get_translation(translation_id: int, db: Session = Depends(get_db)):
         {"chapter_number":chapter["chapter_number"],"title":chapter["title"],
          "completed_chunks":sum(1 for chunk in chapter["chunks"] if chunk["status"]=="completed"),
          "total_chunks":len(chapter["chunks"]),
-         "translated_text":"\\n\\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),
+         "translated_text":"\n\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),
          "status":"completed" if all(chunk["status"]=="completed" for chunk in chapter["chunks"]) else "pending"}
         for chapter in (row.chapters_data or [])
     ]
@@ -481,7 +481,7 @@ def translate_next_chunk(translation_id: int, db: Session = Depends(get_db)):
         "不得摘要、删节、续写或解释；保留段落、对话、情绪、人物关系、时态与叙事视角。"
         "专有名词按术语表固定翻译；没有列出的名字保持前后一致。只输出译文，不要输出说明或标题。"
     )
-    prompt = "【术语表】\\n" + ("\\n".join(glossary_lines) if glossary_lines else "无") + "\\n\\n【原文】\\n" + chunk["source"]
+    prompt = "【术语表】\n" + ("\n".join(glossary_lines) if glossary_lines else "无") + "\n\n【原文】\n" + chunk["source"]
     row.status = "running"
     row.last_error = ""
     db.commit()
@@ -528,13 +528,13 @@ def export_translation(translation_id: int, format: str = Query(default="md",pat
     lines = [f"# {novel.title if novel else 'Novel'}",f"\n**Language:** {TRANSLATION_LANGUAGES.get(row.target_language,row.target_language)}",""]
     for chapter in (row.chapters_data or []):
         lines.extend([f"## {chapter['title']}",""])
-        lines.extend(["\\n\\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),""])
-    manuscript = "\\n".join(lines).strip()+"\\n"
+        lines.extend(["\n\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),""])
+    manuscript = "\n".join(lines).strip()+"\n"
     if format == "json":
         body = json.dumps({"translation":translation_dict(row),"manuscript":manuscript},ensure_ascii=False,indent=2)
         media = "application/json; charset=utf-8"
     elif format == "txt":
-        body = re.sub(r"^#{1,6}\\s*","",manuscript,flags=re.MULTILINE)
+        body = re.sub(r"^#{1,6}\s*","",manuscript,flags=re.MULTILINE)
         media = "text/plain; charset=utf-8"
     else:
         body = manuscript
