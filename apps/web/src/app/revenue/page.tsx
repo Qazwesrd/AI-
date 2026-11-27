@@ -6,11 +6,13 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Revenue = { id:number; platform:string; gross_amount:number; currency:string; fee_amount:number; tax_amount:number; net_amount:number; status:string; period_start:string; period_end:string };
 type Withdrawal = { id:number; platform:string; amount:number; currency:string; fee_amount:number; tax_amount:number; net_amount:number; status:string; requested_at:string; arrived_at:string; receipt_reference:string };
 type Totals = Record<string,{gross:number;fees:number;taxes:number;net:number;settled_net:number;withdrawn:number;settled_balance_estimate:number}>;
+type PlatformCapability = { platform:string; official_portal:string; revenue_api:string; payout_api:boolean; payout_label:string; note:string };
 
 export default function RevenueCenterPage() {
   const [totals,setTotals]=useState<Totals>({});
   const [revenues,setRevenues]=useState<Revenue[]>([]);
   const [withdrawals,setWithdrawals]=useState<Withdrawal[]>([]);
+  const [platforms,setPlatforms]=useState<PlatformCapability[]>([]);
   const [message,setMessage]=useState("");
   const [busy,setBusy]=useState(false);
   const [rev,setRev]=useState({platform:"",gross_amount:"",currency:"CNY",fee_amount:"0",tax_amount:"0",status:"estimated",period_start:"",period_end:"",notes:""});
@@ -24,12 +26,13 @@ export default function RevenueCenterPage() {
   }
   async function load(){
     try{
-      const [s,r,w]=await Promise.all([
+      const [s,r,w,p]=await Promise.all([
         api<{currency_totals:Totals}>("/api/revenue/summary"),
         api<{items:Revenue[]}>("/api/revenue/entries"),
-        api<{items:Withdrawal[]}>("/api/revenue/withdrawals")
+        api<{items:Withdrawal[]}>("/api/revenue/withdrawals"),
+        api<{items:PlatformCapability[]}>("/api/revenue/platforms")
       ]);
-      setTotals(s.currency_totals||{});setRevenues(r.items||[]);setWithdrawals(w.items||[]);
+      setTotals(s.currency_totals||{});setRevenues(r.items||[]);setWithdrawals(w.items||[]);setPlatforms(p.items||[]);
     }catch(e){setMessage(e instanceof Error?e.message:"读取收益数据失败");}
   }
   useEffect(()=>{void load();},[]);
@@ -59,6 +62,18 @@ export default function RevenueCenterPage() {
       <header className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-cyan-300">CREATOR FINANCE</p><h1 className="text-3xl font-bold">收益与提现管理</h1><p className="mt-2 text-sm text-slate-400">手动登记各平台收入、结算、费用与到账情况。</p></div><a href="/" className="rounded-lg border border-slate-700 px-4 py-2 text-sm">返回首页</a></header>
       {message&&<div role="status" className="rounded-lg border border-cyan-800 bg-cyan-950/40 p-3 text-sm">{message}</div>}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(totals).map(([currency,t])=><article key={currency} className="rounded-xl border border-slate-800 bg-slate-900 p-4"><div className="text-sm text-slate-400">{currency} 汇总</div><div className="mt-2 text-xl font-bold">{t.net.toFixed(2)}</div><div className="mt-1 text-xs text-slate-400">登记净收入</div><div className="mt-3 text-sm">已结算估算余额：{t.settled_balance_estimate.toFixed(2)}</div><div className="mt-1 text-xs text-slate-500">费用 {t.fees.toFixed(2)} · 税费 {t.taxes.toFixed(2)}</div></article>)}</section>
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-5">
+        <h2 className="text-xl font-semibold">平台官方收益 / 提现入口</h2>
+        <p className="mt-2 text-sm text-slate-400">这里仅跳转平台官方页面。当前版本尚未完成平台 OAuth 收入同步或提现执行 API，因此不会伪造“软件内提现”按钮，也不会保存银行卡号、密码或验证码。</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          {platforms.map(item=><article key={item.platform} className="rounded-lg border border-slate-700 p-3">
+            <div className="flex items-center justify-between gap-2"><strong>{item.platform}</strong><span className="text-xs text-amber-300">官方操作</span></div>
+            <p className="mt-2 text-xs text-slate-400">{item.revenue_api}</p>
+            <p className="mt-1 text-xs text-slate-500">{item.note}</p>
+            <a href={item.official_portal} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200">{item.payout_label} ↗</a>
+          </article>)}
+        </div>
+      </section>
       <div className="grid gap-5 lg:grid-cols-2">
         <form onSubmit={saveRevenue} className="space-y-3 rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="text-xl font-semibold">登记平台收入</h2>
           <input required className={field} placeholder="平台名称，如 YouTube / 红果" value={rev.platform} onChange={e=>setRev({...rev,platform:e.target.value})}/>
@@ -76,7 +91,7 @@ export default function RevenueCenterPage() {
           <input className={field} placeholder="计划提交日期" value={wd.requested_at} onChange={e=>setWd({...wd,requested_at:e.target.value})}/>
           <textarea className={field} placeholder="备注" value={wd.notes} onChange={e=>setWd({...wd,notes:e.target.value})}/>
           <button disabled={busy} className="rounded-lg bg-fuchsia-700 px-4 py-2 font-medium disabled:opacity-50">保存提现计划</button>
-          <p className="text-xs leading-5 text-amber-300">此处只登记计划，不会连接支付账户或替你发起提现。</p>
+          <p className="text-xs leading-5 text-amber-300">此处只登记计划；是否可提现、最低金额与手续费请以对应平台官方账户为准。</p>
         </form>
       </div>
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-3 text-xl font-semibold">收入明细</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-slate-400"><tr><th className="p-2">平台</th><th className="p-2">金额</th><th className="p-2">净额</th><th className="p-2">状态</th><th className="p-2">账期</th></tr></thead><tbody>{revenues.map(x=><tr key={x.id} className="border-t border-slate-800"><td className="p-2">{x.platform}</td><td className="p-2">{x.gross_amount.toFixed(2)} {x.currency}</td><td className="p-2">{x.net_amount.toFixed(2)}</td><td className="p-2">{({estimated:"预估",settled:"已结算",paid:"已支付"} as Record<string,string>)[x.status]||x.status}</td><td className="p-2">{x.period_start} - {x.period_end}</td></tr>)}</tbody></table>{revenues.length===0&&<p className="p-3 text-sm text-slate-500">暂无收入记录。</p>}</div></section>
