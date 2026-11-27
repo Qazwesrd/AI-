@@ -481,5 +481,58 @@ if __name__ == "__main__":
         self.assertFalse(result["cloud_fallback"])
 
 
+    def test_video_task_status_distinguishes_execution_failure_from_running(self):
+        from app.routers import local_video_runtime as runtime
+        from fastapi import HTTPException
+        prompt_id = "c" * 32
+        history = {
+            prompt_id: {
+                "status": {
+                    "completed": True,
+                    "status_str": "error",
+                    "messages": [["execution_error", {"exception_type": "RuntimeError", "exception_message": "out of memory"}]],
+                },
+                "outputs": {},
+            }
+        }
+        with patch.object(runtime, "_comfy_request", return_value=history):
+            result = runtime.get_video_workflow_status(prompt_id)
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["failed"])
+        self.assertFalse(result["videos"])
+        self.assertTrue(result["local_only"])
+        self.assertFalse(result["cloud_fallback"])
+
+    def test_video_task_status_requires_actual_video_output_for_success(self):
+        from app.routers import local_video_runtime as runtime
+        prompt_id = "d" * 32
+        history = {
+            prompt_id: {
+                "status": {"completed": True, "status_str": "success", "messages": []},
+                "outputs": {"7": {"images": [{"filename": "still.png"}]}},
+            }
+        }
+        with patch.object(runtime, "_comfy_request", return_value=history):
+            result = runtime.get_video_workflow_status(prompt_id)
+        self.assertEqual(result["status"], "completed_without_video")
+        self.assertTrue(result["completed"])
+        self.assertFalse(result["failed"])
+        self.assertEqual(result["videos"], [])
+
+    def test_video_task_status_reports_video_only_after_successful_completion(self):
+        from app.routers import local_video_runtime as runtime
+        prompt_id = "e" * 32
+        history = {
+            prompt_id: {
+                "status": {"completed": True, "status_str": "success", "messages": []},
+                "outputs": {"9": {"videos": [{"filename": "sample.mp4", "subfolder": "", "type": "output"}]}},
+            }
+        }
+        with patch.object(runtime, "_comfy_request", return_value=history):
+            result = runtime.get_video_workflow_status(prompt_id)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["videos"][0]["filename"], "sample.mp4")
+        self.assertFalse(result["failed"])
+
 if __name__ == "__main__":
     unittest.main()
