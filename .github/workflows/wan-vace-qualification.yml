@@ -1,0 +1,151 @@
+name: Qualify Wan 2.1 VACE 1.3B CPU inference
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [video-model-deployment]
+    paths:
+      - ".github/workflows/wan-vace-qualification.yml"
+      - "apps/desktop/build-resources/ai-resources/resource-manifest.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wan-vace-qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  vace-cpu-inference:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download pinned Windows CPU runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $archive = Join-Path $env:RUNNER_TEMP "sd-cpu.zip"
+          Invoke-WebRequest -Uri "https://github.com/leejet/stable-diffusion.cpp/releases/download/master-1133-52491bd/sd-master-52491bd-bin-win-cpu-x64.zip" -OutFile $archive
+          $expected = "7d1c819708f7b922bebda2e1454b6224fa524480cb98bb7b0aea111f3c15678b"
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Runtime SHA-256 mismatch" }
+          $root = Join-Path $PWD "vace-test"
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          Expand-Archive -LiteralPath $archive -DestinationPath (Join-Path $root "runtime") -Force
+          $cli = Get-ChildItem (Join-Path $root "runtime") -Filter sd-cli.exe -File -Recurse | Select-Object -First 1
+          if (!$cli) { throw "sd-cli.exe missing" }
+          "VACE_ROOT=$root" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "VACE_CLI=$($cli.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Download VACE diffusion, UMT5 encoder and VAE with SHA-256 verification
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $models = Join-Path $env:VACE_ROOT "models"
+          New-Item -ItemType Directory -Path $models -Force | Out-Null
+          $companionRevision = "7dfc285018411b85ce414d0db85d7c7b4d8bb97f"
+          $vaceRevision = "5c6903353adb75f32eed988471bd3c73f30db7f5"
+          $items = @(
+            @{ name = "wan2.1-v3-vace-1.3b-q4_0.gguf"; sha = "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74"; revision = $vaceRevision },
+            @{ name = "umt5-xxl-encoder-q4_k_m.gguf"; sha = "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40"; revision = $companionRevision },
+            @{ name = "pig_wan_vae_fp32-f16.gguf"; sha = "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd"; revision = $companionRevision }
+          )
+          foreach ($item in $items) {
+            $dest = Join-Path $models $item.name
+            $url = "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/$($item.revision)/$($item.name)"
+            Invoke-WebRequest -Uri $url -OutFile $dest
+            $actual = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $item.sha) { throw "SHA-256 mismatch for $($item.name): $actual" }
+            Write-Host "Verified $($item.name) ($((Get-Item $dest).Length) bytes)"
+          }
+
+      - name: Create reference image for R2V test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          Add-Type -AssemblyName System.Drawing
+          $bitmap = New-Object System.Drawing.Bitmap 512,512
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          try {
+            $graphics.Clear([System.Drawing.Color]::FromArgb(30,45,75))
+            $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(240,170,70))
+            try { $graphics.FillEllipse($brush,140,90,230,330) } finally { $brush.Dispose() }
+            $path = Join-Path $env:VACE_ROOT "reference.png"
+            $bitmap.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
+          } finally { $graphics.Dispose(); $bitmap.Dispose() }
+
+      - name: Run VACE text-to-video CPU inference
+        shell: pwsh
+        timeout-minutes: 165
+        run: |
+          $ErrorActionPreference = "Stop"
+          $models = Join-Path $env:VACE_ROOT "models"
+          $out = Join-Path $env:VACE_ROOT "vace-t2v.avi"
+          $args = @(
+            "-M","vid_gen",
+            "--diffusion-model",(Join-Path $models "wan2.1-v3-vace-1.3b-q4_0.gguf"),
+            "--vae",(Join-Path $models "pig_wan_vae_fp32-f16.gguf"),
+            "--t5xxl",(Join-Path $models "umt5-xxl-encoder-q4_k_m.gguf"),
+            "-p","A small golden-orange bird flying slowly above a calm lake at sunrise, cinematic anime style",
+            "-n","blurry, low quality, watermark, text",
+            "--cfg-scale","4.0","--sampling-method","euler","--steps","4",
+            "-W","256","-H","256","--video-frames","5","--offload-to-cpu",
+            "-o",$out
+          )
+          $log = Join-Path $env:VACE_ROOT "t2v.log"
+          & $env:VACE_CLI @args 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "VACE T2V inference failed with exit code $LASTEXITCODE" }
+          if (!(Test-Path $out) -or (Get-Item $out).Length -lt 4096) { throw "VACE T2V output missing or too small" }
+          $probe = Join-Path $env:VACE_ROOT "runtime\ffprobe.exe"
+          if (!(Test-Path $probe)) {
+            $ff = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+            $release = Invoke-RestMethod -Headers @{ "User-Agent"="AI-Comic-CI" } -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+            $asset = $release.assets | Where-Object { $_.name -match "win64-gpl.*\.zip$" -and $_.name -notmatch "shared" } | Select-Object -First 1
+            Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $ff
+            Expand-Archive $ff (Join-Path $env:VACE_ROOT "ffmpeg") -Force
+            $probe = Get-ChildItem (Join-Path $env:VACE_ROOT "ffmpeg") -Filter ffprobe.exe -File -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          }
+          & $probe -v error -show_entries stream=codec_type,width,height,nb_frames -of json $out
+          if ($LASTEXITCODE -ne 0) { throw "T2V output failed FFprobe validation" }
+
+      - name: Run VACE reference-to-video CPU inference
+        shell: pwsh
+        timeout-minutes: 165
+        run: |
+          $ErrorActionPreference = "Stop"
+          $models = Join-Path $env:VACE_ROOT "models"
+          $out = Join-Path $env:VACE_ROOT "vace-r2v.avi"
+          $args = @(
+            "-M","vid_gen",
+            "--diffusion-model",(Join-Path $models "wan2.1-v3-vace-1.3b-q4_0.gguf"),
+            "--vae",(Join-Path $models "pig_wan_vae_fp32-f16.gguf"),
+            "--t5xxl",(Join-Path $models "umt5-xxl-encoder-q4_k_m.gguf"),
+            "-p","The subject from the reference image gently moves and turns toward the camera, cinematic anime style",
+            "-n","blurry, low quality, watermark, text",
+            "-i",(Join-Path $env:VACE_ROOT "reference.png"),
+            "--cfg-scale","4.0","--sampling-method","euler","--steps","4",
+            "-W","256","-H","256","--video-frames","5","--offload-to-cpu",
+            "-o",$out
+          )
+          $log = Join-Path $env:VACE_ROOT "r2v.log"
+          & $env:VACE_CLI @args 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { throw "VACE R2V inference failed with exit code $LASTEXITCODE" }
+          if (!(Test-Path $out) -or (Get-Item $out).Length -lt 4096) { throw "VACE R2V output missing or too small" }
+          $probe = Get-ChildItem (Join-Path $env:VACE_ROOT "ffmpeg") -Filter ffprobe.exe -File -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          & $probe -v error -show_entries stream=codec_type,width,height,nb_frames -of json $out
+          if ($LASTEXITCODE -ne 0) { throw "R2V output failed FFprobe validation" }
+
+      - name: Upload VACE inference logs and generated videos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wan-vace-1.3b-cpu-qualification
+          path: |
+            vace-test/vace-t2v.avi
+            vace-test/vace-r2v.avi
+            vace-test/t2v.log
+            vace-test/r2v.log
+          if-no-files-found: warn
+          retention-days: 14

@@ -173,6 +173,54 @@
       "notes": "Corrected from the earlier GGUF assumption: upstream stable-diffusion.cpp documentation lists Wan 2.1 T2V 1.3B as safetensors, while its listed Wan GGUF examples concern 14B variants. Do not use an unverified third-party 1.3B GGUF file. The model card reports Apache-2.0. Qualify a real CPU-mode MP4 generation with the required UMT5 encoder and Wan VAE, recording peak RAM, elapsed time, output validity and hashes before bundling."
     },
     {
+      "id": "wan2.1-v3-vace-1.3b-q4_0-gguf",
+      "engine": "stable-diffusion-cpp",
+      "repository": "calcuis/wan-1.3b-gguf",
+      "file": "wan2.1-v3-vace-1.3b-q4_0.gguf",
+      "file_size_gb": 1.35,
+      "official_model_family": "Wan-AI/Wan2.1 VACE 1.3B",
+      "companion_repository": "calcuis/wan-1.3b-gguf",
+      "companion_files": [
+        {
+          "file": "umt5-xxl-encoder-q4_k_m.gguf",
+          "size_gb": 3.66,
+          "purpose": "UMT5-XXL quantized text encoder",
+          "sha256": "17cf97a5bbbc60a646d6105b832b6f657ce904a8a1ad970e4b59df0c67584a40",
+          "file_size_bytes": 3655145312,
+          "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f",
+          "file_url": "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/7dfc285018411b85ce414d0db85d7c7b4d8bb97f/umt5-xxl-encoder-q4_k_m.gguf"
+        },
+        {
+          "file": "pig_wan_vae_fp32-f16.gguf",
+          "size_mb": 254,
+          "purpose": "Wan VAE companion; confirm compatibility against the pinned stable-diffusion.cpp build",
+          "sha256": "290e463b9d6680146cfd06e5740adb918b239ac8aef1f64f9d4d35fa11747bcd",
+          "revision": "7dfc285018411b85ce414d0db85d7c7b4d8bb97f",
+          "file_url": "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/7dfc285018411b85ce414d0db85d7c7b4d8bb97f/pig_wan_vae_fp32-f16.gguf"
+        }
+      ],
+      "workflow": "stable-diffusion.cpp Wan 2.1 VACE 1.3B; qualify reference-to-video and text-to-video recipes before enabling",
+      "license": "Apache-2.0-declared-by-quantized-repository; base Wan model redistribution terms must still be reviewed separately",
+      "recommended": false,
+      "status": "v3-quantized-candidate-awaiting-real-video-inference-and-hardware-qualification",
+      "hardware": {
+        "windows_x64": "candidate runtime available; full inference still to be tested",
+        "cpu_backend": "experimental candidate; no successful CPU video generation claim",
+        "ryzen_7_4800u": "experimental-only; likely slow and memory constrained",
+        "ram_16_gib": "unverified; model plus 3.66 GB encoder and runtime overhead may exceed practical memory",
+        "vega_integrated_gpu": "do-not-assume-ROCm-or-GPU-acceleration"
+      },
+      "purpose": [
+        "reference-image-to-video",
+        "text-to-video",
+        "video-to-video"
+      ],
+      "notes": "Replaced the earlier Q4_0 file after the pinned CPU test showed that it lacked the required vace_patch_embedding.weight tensor. This v3 Q4_0 GGUF is a separate file with SHA-256 c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74; its published tensor metadata includes vace_patch_embedding.weight. This is only a corrected candidate: the exact v3 + Q4_K_M UMT5 + PIG VAE combination must still pass the pinned Windows CPU T2V and R2V runs, output validation, peak RAM/time measurement and base-model redistribution review before being enabled or bundled. Third-party quantization, not an official Wan-AI binary.",
+      "revision": "5c6903353adb75f32eed988471bd3c73f30db7f5",
+      "file_url": "https://huggingface.co/calcuis/wan-1.3b-gguf/resolve/5c6903353adb75f32eed988471bd3c73f30db7f5/wan2.1-v3-vace-1.3b-q4_0.gguf",
+      "file_sha256": "c9d2ad33427cef0e485c0c32b105c3cca8a33f6bfd8249b41b9685756aed4a74"
+    },
+    {
       "id": "wan2.2-ti2v-5b",
       "engine": "comfyui",
       "repository": "Wan-AI/Wan2.2-TI2V-5B",
