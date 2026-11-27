@@ -417,3 +417,35 @@ class LocalVideoRuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_runtime_diagnostics_normalizes_local_device_vram(self):
+        from app.routers import local_video_runtime as runtime
+        stats = {
+            "version": "test-comfy",
+            "pytorch_version": "2.x",
+            "system": {"os": "Windows"},
+            "devices": [{
+                "name": "AMD Radeon Graphics",
+                "type": "privateuseone",
+                "vram_total": 8 * 1024 * 1024 * 1024,
+                "vram_free": 3 * 1024 * 1024 * 1024,
+            }],
+        }
+        with patch.object(runtime, "_local_json", return_value=stats) as local_json:
+            result = runtime.local_video_runtime_diagnostics()
+        local_json.assert_called_once_with("/system_stats")
+        self.assertTrue(result["available"])
+        self.assertEqual(result["devices"][0]["vram_total_mb"], 8192)
+        self.assertEqual(result["devices"][0]["vram_free_mb"], 3072)
+        self.assertTrue(result["local_only"])
+        self.assertFalse(result["generation_submitted"])
+        self.assertFalse(result["cloud_fallback"])
+
+    def test_runtime_diagnostics_reports_unavailable_without_cloud_fallback(self):
+        from app.routers import local_video_runtime as runtime
+        with patch.object(runtime, "_local_json", return_value=None):
+            result = runtime.local_video_runtime_diagnostics()
+        self.assertFalse(result["available"])
+        self.assertEqual(result["devices"], [])
+        self.assertFalse(result["downloaded"])
+        self.assertFalse(result["cloud_fallback"])
