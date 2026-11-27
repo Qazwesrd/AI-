@@ -284,6 +284,8 @@ class PromptCenterTests(unittest.TestCase):
         with self.assertRaises(FeedCollectionError):
             validate_public_feed_url("http://www.youtube.com/feeds/videos.xml")
         with self.assertRaises(FeedCollectionError):
+            validate_public_feed_url("https://www.youtube.com:444/feeds/videos.xml", "YouTube")
+        with self.assertRaises(FeedCollectionError):
             validate_public_feed_url("https://127.0.0.1/private.xml")
         with self.assertRaises(FeedCollectionError):
             validate_public_feed_url("https://www.youtube.com/feeds/videos.xml?API_KEY=secret", "YouTube")
