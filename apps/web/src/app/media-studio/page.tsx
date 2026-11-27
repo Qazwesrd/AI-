@@ -55,6 +55,9 @@ export default function MediaStudioPage() {
   const [workflowBusy, setWorkflowBusy] = useState(false);
   const [workflowResult, setWorkflowResult] = useState<any>(null);
   const [templateCapabilities, setTemplateCapabilities] = useState<any>(null);
+  const [wizardClassType, setWizardClassType] = useState("");
+  const [wizardNodes, setWizardNodes] = useState<any[]>([]);
+
 
   async function loadLocalVideoRuntime() {
     setVideoRuntimeLoading(true);
@@ -112,6 +115,56 @@ export default function MediaStudioPage() {
   }, []);
 
 
+
+
+  function addWizardNode() {
+    const discovered = templateCapabilities?.nodes?.find((node: any) => node.class_type === wizardClassType);
+    if (!discovered) return;
+    const defaults: Record<string, unknown> = {};
+    for (const section of ["required", "optional"]) {
+      for (const [name, schema] of Object.entries(discovered.input_schema?.[section] || {}) as [string, any][]) {
+        if (schema.default !== undefined && schema.default !== null) defaults[name] = schema.default;
+      }
+    }
+    setWizardNodes(current => [...current, { node_id: String(Date.now()) + String(current.length), class_type: wizardClassType, values: defaults, connections: {} }]);
+    setWizardClassType("");
+  }
+  function updateWizardNode(nodeId: string, updater: (node: any) => any) {
+    setWizardNodes(current => current.map(node => node.node_id === nodeId ? updater(node) : node));
+  }
+  function setWizardInputValue(nodeId: string, inputName: string, value: unknown) {
+    updateWizardNode(nodeId, node => {
+      const values = { ...node.values, [inputName]: value };
+      const connections = { ...node.connections }; delete connections[inputName];
+      return { ...node, values, connections };
+    });
+  }
+  function setWizardInputConnection(nodeId: string, inputName: string, selection: string) {
+    updateWizardNode(nodeId, node => {
+      const values = { ...node.values }; delete values[inputName];
+      const connections = { ...node.connections };
+      if (selection) { const [sourceId, outputIndex] = selection.split(":"); connections[inputName] = { node_id: sourceId, output_index: Number(outputIndex) }; }
+      else delete connections[inputName];
+      return { ...node, values, connections };
+    });
+  }
+  async function buildWizardWorkflow() {
+    if (!wizardNodes.length) { setMessage("请先添加本机节点。"); return; }
+    setWorkflowBusy(true); setWorkflowResult(null); setMessage("正在构建并预检本机工作流草稿……");
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-workflow/build`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nodes: wizardNodes }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = typeof data.detail === "object" ? [data.detail.message, ...(data.detail.errors || [])].filter(Boolean).join("；") : data.detail;
+        throw new Error(detail || "向导构建失败");
+      }
+      setWorkflowJson(JSON.stringify(data.workflow, null, 2)); setWorkflowResult(data.validation || data);
+      setMessage("向导已生成工作流草稿并通过本机结构预检；尚未提交生成。");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "向导构建失败"); }
+    finally { setWorkflowBusy(false); }
+  }
 
   async function importWorkflowFile(file?: File) {
     if (!file) return;
@@ -462,6 +515,59 @@ export default function MediaStudioPage() {
             </div>
             <span className="rounded-full border border-emerald-300/30 px-3 py-1 text-xs text-emerald-200">本地执行</span>
           </div>
+
+          <section className="mt-4 rounded-xl border border-cyan-300/20 bg-black/20 p-4">
+            <h3 className="font-semibold text-cyan-100">新手节点向导（自动读取本机节点）</h3>
+            <p className="mt-1 text-xs leading-5 text-white/60">从已安装节点中逐个添加。参数、下拉选项和输出端口均来自本机 ComfyUI；连线必须由你明确选择，不会自动猜测。</p>
+            {templateCapabilities?.available ? <>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <select value={wizardClassType} onChange={event => setWizardClassType(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 p-2 text-sm">
+                  <option value="">选择本机节点类型</option>
+                  {(templateCapabilities.nodes || []).map((node: any) => <option key={node.class_type} value={node.class_type}>{node.class_type} · {(node.roles || []).join("/")}</option>)}
+                </select>
+                <button onClick={addWizardNode} disabled={!wizardClassType || workflowBusy} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-sm disabled:opacity-40">添加节点</button>
+              </div>
+              {wizardNodes.map((node: any, nodeIndex: number) => {
+                const discovered = templateCapabilities.nodes.find((item: any) => item.class_type === node.class_type);
+                const schema = discovered?.input_schema || { required: {}, optional: {} };
+                const inputs = { ...schema.required, ...schema.optional };
+                return <div key={node.node_id} className="mt-3 rounded-lg border border-white/10 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0"><p className="text-xs text-white/50">节点 {nodeIndex + 1} · ID {node.node_id}</p><p className="break-all text-sm font-medium text-cyan-100">{node.class_type}</p></div>
+                    <button onClick={() => setWizardNodes(current => current.filter(item => item.node_id !== node.node_id))} className="shrink-0 rounded border border-red-300/20 px-2 py-1 text-xs text-red-200">移除</button>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {Object.entries(inputs).map(([inputName, field]: [string, any]) => {
+                      const required = Object.prototype.hasOwnProperty.call(schema.required || {}, inputName);
+                      const socket = field.type && !["COMBO", "STRING", "INT", "FLOAT", "BOOLEAN"].includes(field.type);
+                      const choices = field.choices || [];
+                      const outputOptions = wizardNodes.filter((source: any) => source.node_id !== node.node_id).flatMap((source: any) => {
+                        const sourceNode = templateCapabilities.nodes.find((item: any) => item.class_type === source.class_type);
+                        return (sourceNode?.output_schema || []).filter((output: any) => !socket || !field.type || ["*", "ANY", "ANY_TYPE"].includes(field.type) || output.type === field.type).map((output: any) => ({ value: source.node_id + ":" + output.index, label: source.class_type + " · " + output.name + " [" + output.type + "]" }));
+                      });
+                      const selectedConnection = node.connections?.[inputName];
+                      const selectedValue = node.values?.[inputName];
+                      return <div key={inputName} className="min-w-0 rounded border border-white/10 p-2">
+                        <label className="block break-all text-xs text-white/80">{inputName} · {required ? "必填" : "可选"} · {field.type || "未知类型"}</label>
+                        {socket ? <select value={selectedConnection ? selectedConnection.node_id + ":" + selectedConnection.output_index : ""} onChange={event => setWizardInputConnection(node.node_id, inputName, event.target.value)} className="mt-2 w-full rounded bg-slate-900 p-2 text-xs">
+                          <option value="">选择来源节点输出（未连接）</option>{outputOptions.map((option: any) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                        </select> : choices.length ? <select value={selectedValue === undefined ? "" : String(selectedValue)} onChange={event => setWizardInputValue(node.node_id, inputName, event.target.value)} className="mt-2 w-full rounded bg-slate-900 p-2 text-xs">
+                          <option value="">选择本机可用选项</option>{choices.map((choice: any) => <option key={String(choice)} value={String(choice)}>{String(choice)}</option>)}
+                        </select> : field.type === "BOOLEAN" ? <select value={selectedValue === undefined ? "" : String(selectedValue)} onChange={event => setWizardInputValue(node.node_id, inputName, event.target.value === "true")} className="mt-2 w-full rounded bg-slate-900 p-2 text-xs"><option value="">请选择</option><option value="true">开启</option><option value="false">关闭</option></select> : <input type={["INT", "FLOAT"].includes(field.type) ? "number" : "text"} value={selectedValue === undefined ? "" : String(selectedValue)} min={field.min} max={field.max} step={field.type === "INT" ? 1 : "any"} onChange={event => setWizardInputValue(node.node_id, inputName, event.target.value === "" ? "" : (["INT", "FLOAT"].includes(field.type) ? Number(event.target.value) : event.target.value))} placeholder={field.default !== undefined ? "默认：" + field.default : "填写参数值"} className="mt-2 w-full rounded bg-slate-900 p-2 text-xs" />}
+                        {field.default !== undefined && <p className="mt-1 text-[11px] text-white/40">本机默认值：{String(field.default)}</p>}
+                        {socket && outputOptions.length === 0 && <p className="mt-1 text-[11px] text-amber-200/70">尚无类型匹配的来源输出。</p>}
+                      </div>;
+                    })}
+                  </div>
+                </div>;
+              })}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button onClick={buildWizardWorkflow} disabled={workflowBusy || !wizardNodes.length} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm disabled:opacity-40">生成工作流草稿并预检</button>
+                <button onClick={() => setWizardNodes([])} disabled={workflowBusy || !wizardNodes.length} className="rounded-lg border border-white/15 px-3 py-2 text-sm disabled:opacity-40">清空节点</button>
+                <span className="text-xs text-white/50">已添加 {wizardNodes.length} 个节点；尚未提交生成</span>
+              </div>
+            </> : <p className="mt-3 text-sm text-amber-200/80">尚未发现 Wan/VACE 专用节点。向导不会自动下载或安装节点。</p>}
+          </section>
           <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
             <summary className="cursor-pointer text-sm font-medium text-cyan-100">高级：按本机节点结构构建工作流草稿</summary>
             <p className="mt-2 text-xs leading-5 text-white/60">填写节点 class_type、必填参数，以及明确的输入连线。系统只按你指定的连接构建，不会根据相同接口类型擅自猜连线。可先扫描上方节点能力，再使用此功能。</p>
