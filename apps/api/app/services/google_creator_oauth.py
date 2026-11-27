@@ -288,8 +288,10 @@ def parse_money(value: str, fallback_currency: str | None = None):
     amount = parse_numeric_amount(raw)
     if amount is None:
         return None, None
+    import re
     upper = raw.upper()
-    currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "KRW", "TWD", "BRL", "MXN", "ARS", "CLP", "COP", "PEN", "PLN", "SEK", "NOK", "DKK", "CZK", "HUF", "RON", "TRY", "RUB", "UAH", "AED", "SAR", "QAR", "ILS", "ZAR", "EGP", "THB", "VND", "IDR", "MYR", "PHP", "PKR", "BDT") if code in upper), None)
+    currency_codes = ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "KRW", "TWD", "BRL", "MXN", "ARS", "CLP", "COP", "PEN", "PLN", "SEK", "NOK", "DKK", "CZK", "HUF", "RON", "TRY", "RUB", "UAH", "AED", "SAR", "QAR", "ILS", "ZAR", "EGP", "THB", "VND", "IDR", "MYR", "PHP", "PKR", "BDT")
+    currency = next((code for code in currency_codes if re.search(rf"(?<![A-Z]){code}(?![A-Z])", upper)), None)
     if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD","KRW","TWD","BRL","MXN","ARS","CLP","COP","PEN","PLN","SEK","NOK","DKK","CZK","HUF","RON","TRY","RUB","UAH","AED","SAR","QAR","ILS","ZAR","EGP","THB","VND","IDR","MYR","PHP","PKR","BDT"}:
         currency = fallback_currency
     if currency is None:
