@@ -40,6 +40,7 @@ export default function PromptResearchPage() {
   const [observedAt, setObservedAt] = useState("");
   const [metrics, setMetrics] = useState("");
   const [verifyNote, setVerifyNote] = useState("已人工核对公开页面、榜单位置及采样日期。");
+  const [verifyMetrics,setVerifyMetrics]=useState("{}");
   const [evidenceClassifications,setEvidenceClassifications]=useState<Record<number,string>>({});
   const [evidenceGenres,setEvidenceGenres]=useState<Record<number,string>>({});
   const [genre,setGenre]=useState("未分类");
@@ -197,9 +198,10 @@ export default function PromptResearchPage() {
   async function verifyEvidence(id: number) {
     setBusy(true);
     try {
+      const metric_summary:Record<string,unknown>=verifyMetrics.trim()?JSON.parse(verifyMetrics):{};
       await api(`/api/prompts/research/evidence/${id}/verify`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({verification_note:verifyNote,evidence_type:evidenceClassifications[id]||"漫剧作品趋势证据",genre:evidenceGenres[id]||evidence.find(item=>item.id===id)?.genre||"未分类"}),
+        body:JSON.stringify({verification_note:verifyNote,evidence_type:evidenceClassifications[id]||"漫剧作品趋势证据",genre:evidenceGenres[id]||evidence.find(item=>item.id===id)?.genre||"未分类",metric_summary}),
       });
       setMessage("证据已标记为人工核验。请确保来源、日期和指标真实可追溯。");
       await load();
@@ -371,6 +373,7 @@ export default function PromptResearchPage() {
             <h2 className="text-lg font-bold">研究证据清单</h2>
             <p className="mt-1 text-xs text-white/50">核验操作代表人工确认记录真实，不是平台官方认证。</p>
             <label className="mt-3 block text-xs">核验备注<input value={verifyNote} onChange={e=>setVerifyNote(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm" /></label>
+            <label className="mt-3 block text-xs">核验时补录公开互动指标（JSON，可选）<textarea value={verifyMetrics} onChange={e=>setVerifyMetrics(e.target.value)} rows={2} placeholder='{"views":12000,"likes":900,"comments":120,"shares":80}' className="mt-1 w-full rounded-lg bg-black/20 p-2 font-mono text-xs" /></label>
             <div className="mt-3 max-h-[390px] space-y-2 overflow-y-auto">
               {evidence.map(item=><div key={item.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{item.work_title}</strong><span className={item.is_verified?"text-xs text-emerald-300":"text-xs text-amber-200"}>{item.is_verified?"已人工核验":"待核验"}</span></div>
