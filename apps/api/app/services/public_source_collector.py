@@ -86,7 +86,7 @@ def _strip_markup(value: str) -> str:
     parser = _TextExtractor()
     try:
         parser.feed(value or "")
-        return re.sub(r"\\s+", " ", " ".join(parser.parts)).strip()[:300]
+        return re.sub(r"\s+", " ", " ".join(parser.parts)).strip()[:300]
     except Exception:
         return ""
 
