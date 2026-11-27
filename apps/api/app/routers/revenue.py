@@ -18,7 +18,7 @@ from app.models.revenue import (
 from app.services.google_creator_oauth import (
     OAuthConfigurationError, OAuthProviderError, decrypt_token, encrypt_token,
     exchange_code, get_email, google_get_json, new_authorization,
-    parse_money, refresh_access_token, token_expiry,
+    parse_money, refresh_access_token, token_expiry, save_google_client_id, OAUTH_KEY_FILE,
 )
 
 router = APIRouter(prefix="/api/revenue", tags=["收益与提现管理"])
@@ -538,15 +538,27 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
         raise HTTPException(502, str(exc))
 
 
+class GoogleOAuthConfigInput(BaseModel):
+    client_id: str = Field(min_length=20, max_length=500)
+
+
+@router.put("/oauth/config")
+def save_google_oauth_config(data: GoogleOAuthConfigInput):
+    try:
+        client_id = save_google_client_id(data.client_id)
+    except OAuthConfigurationError as exc:
+        raise HTTPException(400, str(exc))
+    return {"success":True,"configured":True,"client_id_hint":client_id[:12] + "…","message":"Google Desktop OAuth Client ID 已保存在本机配置目录，不包含客户端密钥。"}
+
 @router.get("/oauth/status")
 def google_oauth_status():
     return {
         "google_oauth_configured": bool(os.environ.get("GOOGLE_OAUTH_CLIENT_ID")),
-        "token_encryption_configured": bool(os.environ.get("AI_COMIC_TOKEN_ENCRYPTION_KEY")),
+        "token_encryption_configured": bool(os.environ.get("AI_COMIC_TOKEN_ENCRYPTION_KEY")) or OAUTH_KEY_FILE.exists(),
         "provider": "Google / YouTube Analytics / AdSense",
         "read_only": True,
         "payout_execution_enabled": False,
-        "required_environment": ["GOOGLE_OAUTH_CLIENT_ID", "AI_COMIC_TOKEN_ENCRYPTION_KEY"],
-        "optional_environment": ["GOOGLE_OAUTH_CLIENT_SECRET"],
-        "note": "YouTube Analytics 提供预估收入；AdSense Payments 可读取未付款和已付款记录。API 不执行提现。",
+        "required_environment": [],
+        "optional_environment": ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "AI_COMIC_TOKEN_ENCRYPTION_KEY"],
+        "note": "可在收益中心保存 Google Desktop OAuth Client ID；Windows 使用 DPAPI 保护本机 Fernet 密钥，其他系统使用本机权限受限密钥文件。YouTube Analytics 提供预估收入；AdSense Payments 可读取未付款和已付款记录。API 不执行提现。",
     }
