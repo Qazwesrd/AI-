@@ -14,7 +14,7 @@ from app.models.revenue import RevenueEntry, WithdrawalRecord, CreatorOAuthConne
 from app.routers.revenue import (
     RevenueInput, WithdrawalInput, WithdrawalStatusInput,
     create_revenue, create_withdrawal, update_withdrawal, summary, list_platform_capabilities,
-    sync_google_creator_revenue, import_platform_report,
+    sync_google_creator_revenue, import_platform_report, _report_amount,
 )
 from app.services.google_creator_oauth import encrypt_token
 
@@ -141,6 +141,11 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertFalse(items["Google Play Books"]["payout_api"])
         self.assertIn("kdpreports.amazon.com",items["Amazon KDP"]["official_portal"])
         self.assertIn("Earnings Reports",items["Google Play Books"]["revenue_api"])
+
+    def test_report_amount_handles_decimal_comma_and_parenthesized_refunds(self):
+        self.assertAlmostEqual(_report_amount("1.234,56"), 1234.56)
+        self.assertAlmostEqual(_report_amount("(120,50)"), -120.50)
+        self.assertAlmostEqual(_report_amount("1,234.56"), 1234.56)
 
     def test_reject_invalid_currency_and_overlarge_fees(self):
         with self.assertRaises(Exception):
