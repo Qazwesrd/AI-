@@ -72,6 +72,35 @@ jobs:
           node --test apps/desktop/ollama-runtime-installer.test.cjs
 
 
+      - name: Download FFmpeg runtime for offline installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $target = Join-Path $PWD "apps/desktop/build-resources/ffmpeg"
+          $temp = Join-Path $env:RUNNER_TEMP "ffmpeg-runtime"
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          New-Item -ItemType Directory -Path $temp -Force | Out-Null
+          $release = Invoke-RestMethod -Headers @{ "User-Agent" = "AI-Comic-Studio-CI" } -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
+          $asset = $release.assets |
+            Where-Object { $_.name -match "win64-gpl.*\\.zip$" -and $_.name -notmatch "shared" } |
+            Select-Object -First 1
+          if (!$asset) { throw "No static Windows FFmpeg GPL build found in the latest release." }
+          $archive = Join-Path $temp "ffmpeg.zip"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archive -TimeoutSec 240
+          if ((Get-Item $archive).Length -lt 10MB) { throw "FFmpeg archive download is incomplete." }
+          $extract = Join-Path $temp "extract"
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract -Force
+          $ffmpeg = Get-ChildItem $extract -Filter ffmpeg.exe -File -Recurse | Select-Object -First 1
+          $ffprobe = Get-ChildItem $extract -Filter ffprobe.exe -File -Recurse | Select-Object -First 1
+          if (!$ffmpeg -or !$ffprobe) { throw "Downloaded FFmpeg archive lacks ffmpeg.exe or ffprobe.exe." }
+          Copy-Item $ffmpeg.FullName (Join-Path $target "ffmpeg.exe") -Force
+          Copy-Item $ffprobe.FullName (Join-Path $target "ffprobe.exe") -Force
+          foreach ($name in @("ffmpeg.exe", "ffprobe.exe")) {
+            $file = Get-Item (Join-Path $target $name)
+            if ($file.Length -lt 1MB) { throw "$name is unexpectedly small." }
+            Write-Host "$name : $($file.Length) bytes"
+          }
+
       - name: Verify desktop-only update safety
         shell: pwsh
         run: |
@@ -131,7 +160,7 @@ jobs:
           Windows 桌面安装包。
 
           - 包含桌面启动器、本地 API 和 Web 前端。
-          - FFmpeg / FFprobe 使用用户已安装的本地版本，不重复下载或打包。
+          - 安装器内置 FFmpeg / FFprobe，开箱即可使用。
           - 提供桌面专用升级脚本；升级只更新程序，不部署或覆盖本地 AI 引擎和模型。
           - 本地模型与本地图片引擎按已安装资源运行；任何外部 AI 服务均需用户主动配置和确认。
           '@
