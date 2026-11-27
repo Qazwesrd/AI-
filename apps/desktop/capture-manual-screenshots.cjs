@@ -23,6 +23,9 @@ const pages = [
   ["/ai-center", "14-ai-center.png"],
   ["/backup-center", "15-backup-center.png"],
   ["/system-diagnostics", "16-system-diagnostics.png"],
+  ["/novel-publishing", "18-novel-publishing.png"],
+  ["/revenue", "19-revenue.png"],
+  ["/prompts/research", "20-prompt-research.png"],
   ["/help", "17-help.png"]
 ];
 
