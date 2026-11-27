@@ -141,7 +141,7 @@ export default function AssetTimelinePage() {
     if (!Number.isInteger(chapterNumber) || chapterNumber < 1) { setMessage("请先填写要分析的章节编号。"); return; }
     setBusy(true); setLocalProposals([]);
     try {
-      const result = await api<{ items: LocalProposal[]; message: string }>(`/api/ai-collaboration/novels/${novelId}/chapters/${chapterNumber}/local-analyze-evolution`, { method: "POST", body: JSON.stringify({}) });
+      const result = await api<{ items: LocalProposal[]; message: string }>(`/api/ai-collaboration/novels/${novelId}/chapters/${chapterNumber}/local-analyze-evolution`, { method: "POST", body: JSON.stringify({ asset_id: selected.id }) });
       setLocalProposals(result.items || []);
       setMessage(result.message || "本机 AI 分析完成。");
     } catch (error) { setMessage(error instanceof Error ? error.message : "本机 AI 分析失败"); }
