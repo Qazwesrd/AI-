@@ -13,6 +13,13 @@ router = APIRouter(prefix="/api/local-ai", tags=["本地视频生成"])
 COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 _OPENER = build_opener(ProxyHandler({}))
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+VIDEO_MODEL_FOLDERS = {
+    "diffusion_models": "video_model",
+    "checkpoints": "video_checkpoint",
+    "vae": "video_vae",
+    "text_encoders": "video_text_encoder",
+    "clip": "video_text_encoder",
+}
 REQUIRED_VACE_WORKFLOW_NODES = {
     "model_loader": "WanVideoModelLoader",
     "vace_model_selector": "WanVideoVACEModelSelect",
@@ -26,22 +33,32 @@ REQUIRED_VACE_WORKFLOW_NODES = {
 }
 
 
-def _local_object_info(opener=None, timeout=4.0):
-    request = Request(COMFYUI_BASE_URL + "/object_info", headers={"Accept": "application/json"})
+def _local_json(path, opener=None, timeout=4.0):
+    # Fixed loopback URL and strict endpoint allow-list; no caller-supplied URL.
+    allowed = {"/object_info", "/models"} | {
+        "/models/" + folder for folder in VIDEO_MODEL_FOLDERS
+    }
+    if path not in allowed:
+        raise ValueError("Unsupported local ComfyUI endpoint")
+    request = Request(COMFYUI_BASE_URL + path, headers={"Accept": "application/json"})
     client = opener or _OPENER
     try:
         with client.open(request, timeout=timeout) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
         if len(raw) > MAX_RESPONSE_BYTES:
-            return {"_error": "ComfyUI 节点清单超过安全读取上限"}
+            return {"_error": "ComfyUI 响应超过安全读取上限"}
         payload = json.loads(raw.decode("utf-8"))
-        return payload if isinstance(payload, dict) else {"_error": "ComfyUI 节点清单格式无效"}
+        return payload if isinstance(payload, (dict, list)) else {"_error": "ComfyUI 返回格式无效"}
     except HTTPError as exc:
         return {"_error": f"ComfyUI HTTP {exc.code}"}
     except (URLError, TimeoutError, OSError):
         return None
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return {"_error": "ComfyUI 返回了无法识别的节点清单"}
+        return {"_error": "ComfyUI 返回了无法识别的数据"}
+
+
+def _local_object_info(opener=None, timeout=4.0):
+    return _local_json("/object_info", opener=opener, timeout=timeout)
 
 
 def _node_choices(node_info):
@@ -130,6 +147,33 @@ def validate_vace_node_input_requirements(object_info, requirements):
     }
 
 
+def _scan_video_model_folders(opener=None):
+    """Read actual filenames exposed by ComfyUI's local model-folder API."""
+    folders = _local_json("/models", opener=opener)
+    if not isinstance(folders, (dict, list)) or (isinstance(folders, dict) and folders.get("_error")):
+        return {"items": [], "folders": {}, "available": False}
+    folder_names = set(folders.keys()) if isinstance(folders, dict) else {
+        item for item in folders if isinstance(item, str)
+    }
+    items, folder_status = [], {}
+    for folder, category in VIDEO_MODEL_FOLDERS.items():
+        if folder not in folder_names:
+            folder_status[folder] = {"available": False, "count": 0, "reason": "ComfyUI 未公开此模型目录"}
+            continue
+        result = _local_json("/models/" + folder, opener=opener)
+        if not isinstance(result, list):
+            folder_status[folder] = {"available": False, "count": 0, "reason": "目录读取失败"}
+            continue
+        names = sorted({value[:500] for value in result if isinstance(value, str) and value.strip()})
+        folder_status[folder] = {"available": True, "count": len(names)}
+        items.extend({
+            "name": name, "category": category,
+            "source": "ComfyUI 本地模型目录", "model_folder": folder,
+            "status": "file_listed", "load_tested": False,
+        } for name in names)
+    return {"items": items, "folders": folder_status, "available": True}
+
+
 def assess_wan_vace_nodes(object_info):
     if not isinstance(object_info, dict) or object_info.get("_error"):
         return {
@@ -137,6 +181,10 @@ def assess_wan_vace_nodes(object_info):
             "node_count": 0,
             "nodes": [],
             "models": [],
+            "model_inventory": [],
+            "model_inventory_count": 0,
+            "model_folders": {},
+            "model_folder_scan_available": False,
             "vace_node_found": False,
             "wan_video_nodes_found": False,
             "workflow_node_set_complete": False,
@@ -180,6 +228,13 @@ def assess_wan_vace_nodes(object_info):
             "model_choices": choices,
             "input_schema": _node_input_schema(info),
         })
+    disk_inventory = _scan_video_model_folders()
+    seen = {(item["category"], item["name"]) for item in model_inventory}
+    for item in disk_inventory["items"]:
+        key = (item["category"], item["name"])
+        if key not in seen:
+            model_inventory.append(item)
+            seen.add(key)
     vace_found = any("vace" in name.lower() for name in names)
     wan_found = any("wanvideo" in name.lower() or "wan_video" in name.lower() for name in names)
     present = {
@@ -199,6 +254,8 @@ def assess_wan_vace_nodes(object_info):
         "models": sorted(models),
         "model_inventory": sorted(model_inventory, key=lambda item: (item["category"], item["name"].lower())),
         "model_inventory_count": len(model_inventory),
+        "model_folders": disk_inventory["folders"],
+        "model_folder_scan_available": disk_inventory["available"],
         "vace_node_found": vace_found,
         "wan_video_nodes_found": wan_found,
         "workflow_node_set_complete": not missing,
