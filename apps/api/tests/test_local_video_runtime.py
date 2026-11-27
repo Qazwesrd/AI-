@@ -415,8 +415,38 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 422)
 
 
+    def test_resource_preflight_warns_on_low_available_vram_without_mutating_workflow(self):
+        from app.routers.local_video_runtime import assess_video_resource_preflight
+        workflow = {"1": {"class_type": "WanVideoSampler", "inputs": {"width": 832, "height": 480, "length": 48, "steps": 20}}}
+        diagnostics = {
+            "available": True,
+            "devices": [{"name": "AMD Radeon Graphics", "type": "privateuseone", "vram_free_mb": 1536, "vram_total_mb": 4096}],
+        }
+        result = assess_video_resource_preflight(workflow, diagnostics)
+        self.assertTrue(result["requires_user_confirmation"])
+        self.assertTrue(any("低于 2 GB" in warning for warning in result["warnings"]))
+        self.assertEqual(result["workflow_settings"]["width"], 832)
+        self.assertFalse(result["workflow_modified"])
+        self.assertFalse(result["generation_submitted"])
+        self.assertFalse(result["cloud_fallback"])
+
+    def test_resource_preflight_warns_when_runtime_is_unavailable(self):
+        from app.routers.local_video_runtime import assess_video_resource_preflight
+        result = assess_video_resource_preflight({}, {"available": False, "devices": []})
+        self.assertTrue(result["warnings"])
+        self.assertTrue(result["requires_user_confirmation"])
+        self.assertFalse(result["generation_submitted"])
+
+    def test_resource_preflight_reports_cpu_only_without_claiming_generation_ready(self):
+        from app.routers.local_video_runtime import assess_video_resource_preflight
+        result = assess_video_resource_preflight({}, {"available": True, "devices": []})
+        self.assertTrue(any("CPU" in warning for warning in result["warnings"]))
+        self.assertTrue(result["local_only"])
+        self.assertFalse(result["cloud_fallback"])
+
 if __name__ == "__main__":
     unittest.main()
+
 
     def test_runtime_diagnostics_normalizes_local_device_vram(self):
         from app.routers import local_video_runtime as runtime
@@ -449,3 +479,7 @@ if __name__ == "__main__":
         self.assertEqual(result["devices"], [])
         self.assertFalse(result["downloaded"])
         self.assertFalse(result["cloud_fallback"])
+
+
+if __name__ == "__main__":
+    unittest.main()
