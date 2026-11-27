@@ -76,7 +76,8 @@ const navigation = [
       ["🧭", "统一任务中心", "/tasks"],
       ["🌐", "AI网页工具协同中心", "/ai-tools"],
       ["🤝", "网页版 AI 协作执行中心", "/ai-collaboration"],
-      ["🧠", "小说深度分析与剧情审核", "/ai-analysis"]
+      ["🧠", "小说深度分析与剧情审核", "/ai-analysis"],
+      ["📝", "爆款研究与提示词中心", "/prompts"]
     ]
   },
   {
