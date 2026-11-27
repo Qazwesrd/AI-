@@ -10,12 +10,16 @@ type Candidate = { id: number; prompt_id: number; base_version: number; proposed
 type TrendRank = { rank:number; work_title:string; platforms:string[]; platform_count:number; observed_days:string[]; sample_count:number; latest_observed_at:string; trend_score:number; evidence_types:string[]; contains_public_prompt:boolean; evidence_ids:number[]; score_method:string };
 type ResearchSource = { id:number; platform:string; name:string; feed_url:string; enabled:boolean; refresh_interval_minutes:number; last_collected_at:string|null; last_status:string; last_error:string };
 type CollectionRun = { id:number; source_id:number; status:string; discovered_count:number; inserted_count:number; duplicate_count:number; error_message:string; started_at:string|null };
+type CategoryRankItem = {rank:number;title:string;platforms?:string[];observed_days?:string[];sample_count?:number;score:number;test_count?:number;version?:number;score_basis?:string};
+type CategoryRankings = {drama:{title:string;items:CategoryRankItem[];verified_evidence_count:number};prompt:{title:string;items:CategoryRankItem[];public_share_items:CategoryRankItem[];verified_evidence_count:number};screenplay:{title:string;items:CategoryRankItem[];verified_evidence_count:number}};
 
 export default function PromptResearchPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [trendRanking, setTrendRanking] = useState<TrendRank[]>([]);
+  const [categoryRankings,setCategoryRankings]=useState<CategoryRankings|null>(null);
+  const [rankTab,setRankTab]=useState<"drama"|"prompt"|"screenplay">("drama");
   const [sources, setSources] = useState<ResearchSource[]>([]);
   const [collectionRuns, setCollectionRuns] = useState<CollectionRun[]>([]);
   const [sourcePlatform, setSourcePlatform] = useState("YouTube");
@@ -48,18 +52,20 @@ export default function PromptResearchPage() {
 
   async function load() {
     try {
-      const [p, e, c, t, s, r] = await Promise.all([
+      const [p, e, c, t, s, r, k] = await Promise.all([
         api<{items: Prompt[]}>("/api/prompts"),
         api<{items: Evidence[]}>("/api/prompts/research/evidence"),
         api<{items: Candidate[]}>("/api/prompts/research/candidates"),
         api<{items: TrendRank[]}>("/api/prompts/research/trends/ranking"),
         api<{items: ResearchSource[]}>("/api/prompts/research/sources"),
         api<{items: CollectionRun[]}>("/api/prompts/research/sources/runs"),
+        api<{categories:CategoryRankings}>("/api/prompts/research/rankings"),
       ]);
       setPrompts(p.items || []);
       setEvidence(e.items || []);
       setCandidates(c.items || []);
       setTrendRanking(t.items || []);
+      setCategoryRankings(k.categories || null);
       setSources(s.items || []);
       setCollectionRuns(r.items || []);
       if (!selectedPrompt && p.items?.length) setSelectedPrompt(String(p.items[0].id));
@@ -86,6 +92,16 @@ export default function PromptResearchPage() {
       await load();
     } catch(error) { setMessage(error instanceof Error ? error.message : "添加来源失败"); }
     finally { setBusy(false); }
+  }
+
+  async function refreshAllRankings(){
+    setBusy(true);
+    try{
+      const result=await api<{categories:CategoryRankings}>("/api/prompts/research/rankings/refresh",{method:"POST"});
+      setCategoryRankings(result.categories);
+      setMessage("漫剧、提示词、剧本三类排名已刷新并保存历史快照。");
+    }catch(error){setMessage(error instanceof Error?error.message:"刷新分类排名失败");}
+    finally{setBusy(false);}
   }
 
   async function collectDueSources() {
@@ -239,6 +255,30 @@ export default function PromptResearchPage() {
           </details>
         </section>
 
+
+        <section className="rounded-2xl border border-fuchsia-300/20 bg-fuchsia-950/10 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-xl font-bold">爆款分类排行榜</h2><p className="mt-1 text-xs text-white/50">漫剧作品、提示词、剧本分别统计，采用各自独立的证据和评分口径；没有数据就不生成虚假排名。</p></div>
+            <button disabled={busy} onClick={()=>void refreshAllRankings()} className="rounded-xl bg-fuchsia-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">刷新并保存三类榜单</button>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {(["drama","prompt","screenplay"] as const).map(key=><button key={key} onClick={()=>setRankTab(key)} className={rankTab===key?"rounded-lg bg-cyan-700 px-4 py-2 text-sm":"rounded-lg border border-white/15 px-4 py-2 text-sm text-white/70"}>{key==="drama"?"漫剧作品排名":key==="prompt"?"提示词排名":"剧本排名"}</button>)}
+          </div>
+          {categoryRankings&&(()=>{
+            const current=categoryRankings[rankTab];
+            return <div className="mt-4 overflow-x-auto">
+              <div className="mb-2 text-xs text-white/50">{current.title} · 已核验证据 {current.verified_evidence_count||0} 条</div>
+              <table className="w-full min-w-[620px] text-left text-sm">
+                <thead className="text-xs text-white/50"><tr><th className="p-2">排名</th><th className="p-2">名称</th><th className="p-2">平台/版本</th><th className="p-2">样本</th><th className="p-2">评分</th><th className="p-2">评分口径</th></tr></thead>
+                <tbody>{current.items.map(item=><tr key={item.title+"-"+(item.version||0)} className="border-t border-white/10">
+                  <td className="p-2 font-bold">{item.rank}</td><td className="p-2">{item.title}</td><td className="p-2 text-xs">{item.platforms?.join("、")||("V"+(item.version||1))}</td><td className="p-2">{item.sample_count||item.test_count||0}</td><td className="p-2 text-cyan-200">{item.score}</td><td className="p-2 text-xs text-white/50">{item.score_basis||"实测评分"}</td>
+                </tr>)}</tbody>
+              </table>
+              {!current.items.length&&<p className="py-6 text-center text-sm text-white/40">该类别暂时没有满足条件的已核验证据或实测评分。可在下方录入公开数据或到提示词中心记录实测结果。</p>}
+              {rankTab==="prompt"&&<div className="mt-4 rounded-xl border border-white/10 p-3"><strong className="text-sm">公开分享提示词热度（独立参考）</strong><p className="mt-1 text-xs text-white/50">此处反映公开分享内容的互动表现，不代表提示词实际生成质量。</p>{categoryRankings.prompt.public_share_items.slice(0,10).map(item=><div key={item.title} className="mt-2 flex justify-between gap-3 text-xs"><span>{item.rank}. {item.title}</span><span className="text-cyan-200">{item.score}</span></div>)}</div>}
+            </div>;
+          })()}
+        </section>
         <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-lg font-bold">跨平台公开趋势榜</h2><p className="mt-1 text-xs text-white/50">只统计已人工核验、至少两个平台且跨两个日期的证据；这是研究排序，不是平台官方榜单。</p></div>
@@ -262,7 +302,9 @@ export default function PromptResearchPage() {
             <p className="mt-1 text-xs text-white/50">当前支持手工登记公开榜单、作品页面和公开互动数据；尚未接入平台自动采集。</p>
             <label className="mt-3 block text-sm">证据类型
               <select value={evidenceType} onChange={e=>setEvidenceType(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2">
-                <option value="作品趋势证据">公开作品热度/榜单数据</option>
+                <option value="漫剧作品趋势证据">漫剧作品热度/榜单数据</option>
+                <option value="作品趋势证据">其他作品趋势证据</option>
+                <option value="剧本作品证据">公开剧本/剧本案例排名证据</option>
                 <option value="公开提示词分享">公开分享的提示词原文/教程</option>
                 <option value="创作案例证据">公开创作教程/案例</option>
               </select>
