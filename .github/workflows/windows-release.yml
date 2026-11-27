@@ -66,6 +66,7 @@ jobs:
       - name: Test local Ollama runtime detection
         shell: pwsh
         run: |
+          node --check apps/desktop/main.cjs
           node --check apps/desktop/ollama-runtime-installer.cjs
           node --test apps/desktop/ollama-runtime-installer.test.cjs
 
