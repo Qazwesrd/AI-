@@ -43,7 +43,7 @@ REQUIRED_VACE_WORKFLOW_NODES = {
 
 def _local_json(path, opener=None, timeout=4.0):
     # Fixed loopback URL and strict endpoint allow-list; no caller-supplied URL.
-    allowed = {"/object_info", "/models"} | {
+    allowed = {"/object_info", "/models", "/system_stats"} | {
         "/models/" + folder for folder in VIDEO_MODEL_FOLDERS
     }
     if path not in allowed:
@@ -881,6 +881,64 @@ def preview_video_workflow_output(prompt_id: str, output_index: int = 0):
 
     headers = {"Content-Disposition": "inline", "Cache-Control": "no-store"}
     return StreamingResponse(stream(), media_type=content_type, headers=headers)
+
+
+
+@router.get("/video-runtime/diagnostics")
+def local_video_runtime_diagnostics():
+    """Read-only local ComfyUI runtime and accelerator diagnostics; never downloads or queues work."""
+    stats = _local_json("/system_stats")
+    if not isinstance(stats, dict) or stats.get("_error"):
+        return {
+            "available": False,
+            "engine": "ComfyUI",
+            "reason": "无法读取本机 ComfyUI system_stats；请确认本地引擎已启动。",
+            "devices": [],
+            "local_only": True,
+            "downloaded": False,
+            "generation_submitted": False,
+            "cloud_fallback": False,
+        }
+    devices = stats.get("devices") if isinstance(stats.get("devices"), list) else []
+    normalized = []
+    for device in devices[:16]:
+        if not isinstance(device, dict):
+            continue
+        total = device.get("vram_total")
+        free = device.get("vram_free")
+        total_mb = round(total / (1024 * 1024)) if isinstance(total, (int, float)) and total >= 0 else None
+        free_mb = round(free / (1024 * 1024)) if isinstance(free, (int, float)) and free >= 0 else None
+        normalized.append({
+            "name": str(device.get("name", "未知设备"))[:240],
+            "type": str(device.get("type", "未知类型"))[:80],
+            "vram_total_mb": total_mb,
+            "vram_free_mb": free_mb,
+            "torch_vram_total_mb": round(device.get("torch_vram_total", 0) / (1024 * 1024))
+                if isinstance(device.get("torch_vram_total"), (int, float)) and device.get("torch_vram_total") >= 0 else None,
+            "torch_vram_free_mb": round(device.get("torch_vram_free", 0) / (1024 * 1024))
+                if isinstance(device.get("torch_vram_free"), (int, float)) and device.get("torch_vram_free") >= 0 else None,
+        })
+    return {
+        "available": True,
+        "engine": "ComfyUI",
+        "system": {
+            "os": str((stats.get("system") or {}).get("os", ""))[:120] if isinstance(stats.get("system"), dict) else "",
+            "comfyui_version": str(stats.get("version", ""))[:120],
+            "pytorch_version": str(stats.get("pytorch_version", ""))[:120],
+            "embedded_python": bool(stats.get("embedded_python")),
+        },
+        "devices": normalized,
+        "device_count": len(normalized),
+        "assessment": (
+            "ComfyUI 未报告可用加速设备；可能使用 CPU，实际性能需以任务运行测试为准。"
+            if not normalized else
+            "已读取设备和显存信息；这不代表 Wan/VACE 模型兼容或能够成功加载，仍需实际小尺寸测试。"
+        ),
+        "local_only": True,
+        "downloaded": False,
+        "generation_submitted": False,
+        "cloud_fallback": False,
+    }
 
 
 @router.get("/video-runtime")
