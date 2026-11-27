@@ -465,20 +465,29 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
             updated += int(bool(existed))
 
         # AdSense Payments is the authoritative API source for unpaid/paid payment records.
-        adsense_accounts = google_get_json("https://adsense.googleapis.com/v2/accounts?pageSize=100", access)
         payment_count = 0
+        adsense_warning = ""
+        try:
+            adsense_accounts = google_get_json("https://adsense.googleapis.com/v2/accounts?pageSize=100", access)
+        except OAuthProviderError as exc:
+            adsense_accounts = {"accounts": []}
+            adsense_warning = str(exc)[:1000]
         for account in adsense_accounts.get("accounts", []):
             account_name = str(account.get("name") or "")
             account_id = account_name.rsplit("/", 1)[-1]
             if not account_id:
                 continue
-            payments = google_get_json(
-                f"https://adsense.googleapis.com/v2/accounts/{urllib.parse.quote(account_id, safe='')}/payments",
-                access,
-            )
+            try:
+                payments = google_get_json(
+                    f"https://adsense.googleapis.com/v2/accounts/{urllib.parse.quote(account_id, safe='')}/payments",
+                    access,
+                )
+            except OAuthProviderError as exc:
+                adsense_warning = str(exc)[:1000]
+                continue
             for payment in payments.get("payments", []):
                 payment_name = str(payment.get("name") or "")
-                amount, currency = parse_money(payment.get("amount", ""))
+                amount, currency = parse_money(payment.get("amount", ""), account.get("currencyCode"))
                 if amount is None or not currency:
                     continue
                 is_unpaid = payment_name.endswith("/unpaid") or payment_name.endswith("/youtube-unpaid")
@@ -508,8 +517,9 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
             "success": True, "account": connection.account_label,
             "analytics_days": len(analytics.get("rows", [])),
             "payment_records": payment_count, "inserted": inserted, "updated": updated,
+            "adsense_warning": adsense_warning,
             "period": {"start": start_day.isoformat(), "end": end_day.isoformat()},
-            "message": "已同步 YouTube 预估收入和 Google AdSense 实际付款/未付款记录。预估收入、应付款与已付款分开保存；此同步不提供提现执行。",
+            "message": "已同步 YouTube 预估收入；" + ("AdSense 付款记录同步遇到权限或账户限制：" + adsense_warning if adsense_warning else "已读取 Google AdSense 付款记录。") + "预估收入、应付款与已付款分开保存；此同步不提供提现执行。",
         }
     except HTTPException:
         raise
