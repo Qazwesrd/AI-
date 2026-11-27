@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from app.routers.local_video_runtime import assess_wan_vace_nodes
 
@@ -61,6 +62,29 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(loader["input_schema"]["required"]["model_name"]["type"], "COMBO")
         self.assertFalse(result["generation_ready"])
+
+    def test_scans_actual_local_video_model_directories(self):
+        from app.routers import local_video_runtime as runtime
+        def fake_local_json(path, opener=None, timeout=4.0):
+            return {
+                "/models": ["diffusion_models", "vae", "text_encoders"],
+                "/models/diffusion_models": ["wan2.1-vace.safetensors"],
+                "/models/vae": ["wan_vae.safetensors"],
+                "/models/text_encoders": ["umt5_xxl_fp8.safetensors"],
+            }.get(path)
+        with patch.object(runtime, "_local_json", side_effect=fake_local_json):
+            result = runtime._scan_video_model_folders()
+        self.assertTrue(result["available"])
+        self.assertEqual(result["folders"]["diffusion_models"]["count"], 1)
+        self.assertEqual(
+            {(item["name"], item["category"]) for item in result["items"]},
+            {
+                ("wan2.1-vace.safetensors", "video_model"),
+                ("wan_vae.safetensors", "video_vae"),
+                ("umt5_xxl_fp8.safetensors", "video_text_encoder"),
+            },
+        )
+        self.assertTrue(all(item["load_tested"] is False for item in result["items"]))
 
     def test_unrelated_nodes_are_not_misclassified(self):
         result = assess_wan_vace_nodes({"KSampler": {}, "SaveImage": {}})
