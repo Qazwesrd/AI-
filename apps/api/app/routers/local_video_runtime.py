@@ -532,11 +532,45 @@ def build_video_template_capabilities(object_info):
             if len(connection_candidates) >= 500:
                 break
 
+    # Report role coverage separately from executable-template readiness.
+    # These are discovery hints, not a claim that the sockets can be wired.
+    t2v_role_groups = {
+        "model_loader": ["model_loader"],
+        "text_conditioning": ["text_encoder", "text_encode"],
+        "sampler": ["sampler"],
+        "decode": ["decode"],
+        "video_output": ["video_output"],
+    }
+    t2v_missing_roles = [
+        group for group, alternatives in t2v_role_groups.items()
+        if not any(roles.get(role) for role in alternatives)
+    ]
+    vace_role_groups = {
+        **t2v_role_groups,
+        "vace_processing": ["vace"],
+        "source_media_input": ["image_input", "video_input"],
+    }
+    vace_missing_roles = [
+        group for group, alternatives in vace_role_groups.items()
+        if not any(roles.get(role) for role in alternatives)
+    ]
+
     # Generic KSampler/SaveImage nodes alone must not imply video capability.
     available = bool(video_specific_nodes and discovered)
     return {
         "available": available,
         "roles": roles if available else {},
+        "template_assessment": {
+            "wan_t2v_role_coverage": {
+                "missing_roles": t2v_missing_roles if available else list(t2v_role_groups),
+                "all_role_groups_found": available and not t2v_missing_roles,
+            },
+            "vace_role_coverage": {
+                "missing_roles": vace_missing_roles if available else list(vace_role_groups),
+                "all_role_groups_found": available and not vace_missing_roles,
+            },
+            "note": "角色齐全仅表示发现了候选节点，不代表连线语义、模型兼容性或执行成功。",
+        },
         "nodes": discovered[:120] if available else [],
         "connection_candidates": connection_candidates if available else [],
         "connection_candidate_count": len(connection_candidates) if available else 0,
