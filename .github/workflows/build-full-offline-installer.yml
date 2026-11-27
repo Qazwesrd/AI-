@@ -42,7 +42,9 @@ jobs:
             $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
             $matching = @($response.workflow_runs | Where-Object { $_.head_sha -eq $sha })
             $successful = $matching | Where-Object { $_.status -eq "completed" -and $_.conclusion -eq "success" } | Select-Object -First 1
-            $failed = $matching | Where-Object { $_.status -eq "completed" -and $_.conclusion -ne "success" } | Select-Object -First 1
+            $failed = $matching | Where-Object { $_.status -eq "completed" -and $_.conclusion -in @("failure", "timed_out", "action_required", "startup_failure") } | Select-Object -First 1
+            $cancelled = $matching | Where-Object { $_.status -eq "completed" -and $_.conclusion -eq "cancelled" } | Select-Object -First 1
+            if ($cancelled) { Write-Host "A matching installer run was cancelled; waiting for a successful run for this exact commit." }
             if ($successful) { $selected = $successful; break }
             if ($failed) { throw "Windows desktop installer workflow failed for commit $sha (run $($failed.id), conclusion $($failed.conclusion))." }
             Write-Host "Waiting for Windows desktop installer CI for $sha ($attempt/60)..."
