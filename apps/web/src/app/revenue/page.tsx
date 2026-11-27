@@ -70,7 +70,7 @@ export default function RevenueCenterPage() {
             <div className="flex items-center justify-between gap-2"><strong>{item.platform}</strong><span className="text-xs text-amber-300">官方操作</span></div>
             <p className="mt-2 text-xs text-slate-400">{item.revenue_api}</p>
             <p className="mt-1 text-xs text-slate-500">{item.note}</p>
-            <a href={item.official_portal} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200">{item.payout_label} ↗</a>
+            {item.official_portal ? <a href={item.official_portal} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block rounded-lg border border-cyan-700 px-3 py-2 text-sm text-cyan-200">{item.payout_label} ↗</a> : <p className="mt-3 text-sm text-amber-200">{item.payout_label}</p>}
           </article>)}
         </div>
       </section>
