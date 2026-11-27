@@ -793,6 +793,27 @@ def _apply_video_request_values(nodes, object_info, data):
     return prompt_inputs
 
 
+def _auto_video_missing_prerequisites(catalog, mode):
+    """Reject mode-specific auto-builds when their live ComfyUI node prerequisites are absent."""
+    names = [
+        item.get("class_type", "").lower()
+        for item in catalog if isinstance(item, dict)
+    ]
+    missing = []
+    if not any("wanvideo" in name or "wan_video" in name or "vace" in name for name in names):
+        missing.append("Wan/VACE 模型与处理节点")
+    if not any("videocombine" in name or "savevideo" in name for name in names):
+        missing.append("视频输出节点")
+    if mode in {"image_to_video", "vace"} and not any(
+        any(token in name for token in ("loadimage", "imageloader", "loadvideo", "videoloader"))
+        for name in names
+    ):
+        missing.append("参考图/视频输入节点")
+    if mode == "vace" and not any("vace" in name for name in names):
+        missing.append("VACE 专用处理节点")
+    return missing
+
+
 def _auto_video_node_catalog(object_info):
     catalog = []
     for class_name, info in object_info.items():
@@ -816,12 +837,11 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
     if not isinstance(object_info, dict) or object_info.get("_error"):
         raise HTTPException(503, "本机 ComfyUI 节点信息不可用；未生成工作流。")
     catalog = _auto_video_node_catalog(object_info)
-    wan_nodes = [item for item in catalog if any(token in item["class_type"].lower() for token in ("wanvideo", "wan_video", "vace"))]
-    output_nodes = [item for item in catalog if any(token in item["class_type"].lower() for token in ("videocombine", "savevideo"))]
-    if not wan_nodes or not output_nodes:
+    missing = _auto_video_missing_prerequisites(catalog, data.mode)
+    if missing:
         raise HTTPException(409, detail={
-            "message": "本机尚未具备完整的 Wan/VACE 节点基础，无法自动配置。",
-            "missing": (["Wan/VACE 模型与处理节点"] if not wan_nodes else []) + (["视频输出节点"] if not output_nodes else []),
+            "message": "本机缺少当前视频模式所需的节点基础，无法可靠自动配置。",
+            "missing": missing,
             "cloud_fallback": False,
         })
     try:
