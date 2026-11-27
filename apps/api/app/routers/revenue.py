@@ -238,7 +238,7 @@ PLATFORM_CAPABILITIES = [
 def list_platform_capabilities():
     return {
         "items": PLATFORM_CAPABILITIES,
-        "global_notice": "当前没有已完成 OAuth 接入并经官方确认的提现执行适配器，因此不会显示软件内直接提现按钮；官方入口只负责跳转，资金操作仍在平台完成。",
+        "global_notice": "Google 已支持官方只读 OAuth 收入与付款记录同步；其他平台按官方接口能力逐步接入。当前没有经官方确认且账户权限可用的资金发起/提现执行适配器，因此不会显示软件内直接提现按钮；实际资金操作仍在平台官方账户完成。",
     }
 
 
