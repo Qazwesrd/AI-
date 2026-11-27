@@ -628,7 +628,7 @@ def translate_next_chunk(translation_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/translations/{translation_id}/export")
-def export_translation(translation_id: int, format: str = Query(default="md",pattern="^(md|txt|json)$"), db: Session = Depends(get_db)):
+def export_translation(translation_id: int, format: str = Query(default="md",pattern="^(md|txt|json|epub)$"), db: Session = Depends(get_db)):
     row = db.query(NovelTranslation).filter(NovelTranslation.id == translation_id).first()
     if not row:
         raise HTTPException(404,"译本任务不存在")
@@ -638,7 +638,12 @@ def export_translation(translation_id: int, format: str = Query(default="md",pat
         lines.extend([f"## {chapter['title']}",""])
         lines.extend(["\n\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),""])
     manuscript = "\n".join(lines).strip()+"\n"
-    if format == "json":
+    if format == "epub":
+        if row.status != "completed":
+            raise HTTPException(409,"译本尚未全部翻译完成，不能导出正式 EPUB。")
+        body = _epub_document(manuscript, novel.title if novel else "Novel", row.target_language)
+        media = "application/epub+zip"
+    elif format == "json":
         body = json.dumps({"translation":translation_dict(row),"manuscript":manuscript},ensure_ascii=False,indent=2)
         media = "application/json; charset=utf-8"
     elif format == "txt":
