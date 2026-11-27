@@ -97,7 +97,7 @@ class LocalNovelAnalysisTests(unittest.TestCase):
             "provider": "ollama", "model": "qwen2.5:7b",
             "base_url": "http://127.0.0.1:11435",
         })()
-        with patch.object(analysis.urllib.request, "urlopen", opener.open):
+        with patch.object(analysis, "_LOCAL_OLLAMA_OPENER", opener):
             result = analysis.analyze_chunk(config, "", "正文片段", "第1/1段")
         self.assertEqual(result, [])
         self.assertEqual(opener.request.full_url, "http://127.0.0.1:11435/api/chat")
