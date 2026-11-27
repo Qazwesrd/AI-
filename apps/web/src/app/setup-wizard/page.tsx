@@ -8,8 +8,8 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Check = { status: string; message: string; detail?: string };
 
 const guide = [
-  { title: "准备 AI 资源包", body: "先确认资源包已完整解压到本机磁盘。不要把压缩包内部文件直接当成已安装模型；保留原始目录结构，不要随意改名或覆盖已有模型。" },
-  { title: "确认 ComfyUI 引擎", body: "图片与视频模型均通过本机 ComfyUI 工作流识别。先启动软件内置的本地引擎，再执行下面的检测。引擎未启动时，扫描结果为空不代表资源包损坏。" },
+  { title: "单独安装 AI 资源包", body: "电脑版安装器与 AI 离线资源包是两个独立文件，资源包不会被塞进桌面安装器。先运行独立资源包安装脚本，选择空间充足的数据盘；安装脚本会校验 SHA-256，并只补充缺失引擎，不覆盖已有模型和用户数据。" },
+  { title: "确认两部分已正确衔接", body: "先检测独立资源包清单和必要文件是否安装，再检测 Ollama、ComfyUI 图片/视频引擎是否运行。资源包安装完成不等于模型已经加载；桌面软件只读取独立资源目录，不会重新打包或自动下载模型。" },
   { title: "按类别放置模型", body: "图片模型通常放在 ComfyUI/models/checkpoints、loras、vae、upscale_models、controlnet、clip_vision、ipadapter 等对应目录；视频模型按当前节点要求放入 diffusion_models、checkpoints、vae、text_encoders 或 clip。请以资源包目录说明和节点要求为准，不要把所有文件混放。" },
   { title: "重新扫描并核对", body: "扫描后核对文件名、类别和目录。显示“已发现文件”只代表文件出现在目录中；显示“节点可见”只代表 ComfyUI 下拉列表能列出它们，都不等于模型已成功加载。" },
   { title: "小规模实际测试", body: "进入图片工作台或视频中心，先用低分辨率、短时长和单个镜头做小测试。只有实际工作流执行成功并生成可打开的文件，才算该模型配置完成。不要一开始就跑长视频或批量任务。" },
@@ -18,7 +18,7 @@ const guide = [
 
 export default function SetupWizardPage() {
   const [step, setStep] = useState(0);
-  const [imageCheck, setImageCheck] = useState<Check | null>(null);
+  const [bundleCheck, setBundleCheck] = useState<Check | null>(null);\n  const [imageCheck, setImageCheck] = useState<Check | null>(null);
   const [videoCheck, setVideoCheck] = useState<Check | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -42,10 +42,25 @@ export default function SetupWizardPage() {
         return { status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" };
       }
     };
-    const [image, video] = await Promise.all([
+    const checkBundle = async (): Promise<Check> => {
+      try {
+        const response = await fetch(`${API}/api/local-ai/resource-bundle/status`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) return { status: "error", message: data.detail || `检测失败（HTTP ${response.status}）` };
+        const missing = (data.missing_components || []).join("、");
+        const root = data.data_directory ? `数据目录：${data.data_directory}` : "尚未配置数据目录";
+        const detail = [root, missing ? `缺失组件：${missing}` : "必要组件目录齐全", data.manifest_error ? `清单错误：${data.manifest_error}` : ""].filter(Boolean).join("；");
+        return { status: data.status || "unknown", message: data.message || "AI 资源包检测完成", detail };
+      } catch (error) {
+        return { status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" };
+      }
+    };
+    const [bundle, image, video] = await Promise.all([
+      checkBundle(),
       checkOne("/api/local-ai/image-runtime"),
       checkOne("/api/local-ai/video-runtime"),
     ]);
+    setBundleCheck(bundle);
     setImageCheck(image);
     setVideoCheck(video);
     setBusy(false);
@@ -82,8 +97,8 @@ export default function SetupWizardPage() {
             <p className="mt-3 text-sm leading-7 text-slate-200">{guide[step].body}</p>
             {step === 1 && <div className="mt-4 space-y-3">
               <button onClick={scan} disabled={busy} className="rounded-xl bg-cyan-700 px-5 py-3 text-sm font-semibold disabled:opacity-50">{busy ? "正在检测本地引擎…" : "检测图片与视频引擎"}</button>
-              <div className="grid gap-3 md:grid-cols-2">
-                {[["图片引擎", imageCheck], ["视频引擎", videoCheck]].map(([name, check]) => <div key={name as string} className="rounded-lg border border-white/10 bg-black/20 p-3"><p className="font-semibold">{name as string}：{statusLabel(check as Check | null)}</p><p className="mt-1 text-xs leading-5 text-slate-300">{(check as Check | null)?.message || "点击上方按钮检测"}</p>{(check as Check | null)?.detail && <p className="mt-2 text-xs leading-5 text-cyan-100/70">{(check as Check).detail}</p>}</div>)}
+              <div className="grid gap-3 md:grid-cols-3">
+                {[["独立 AI 资源包", bundleCheck], ["图片引擎", imageCheck], ["视频引擎", videoCheck]].map(([name, check]) => <div key={name as string} className="rounded-lg border border-white/10 bg-black/20 p-3"><p className="font-semibold">{name as string}：{statusLabel(check as Check | null)}</p><p className="mt-1 text-xs leading-5 text-slate-300">{(check as Check | null)?.message || "点击上方按钮检测"}</p>{(check as Check | null)?.detail && <p className="mt-2 break-all text-xs leading-5 text-cyan-100/70">{(check as Check).detail}</p>}</div>)}
               </div>
             </div>}
             {step === 2 && <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-6 text-amber-100">重要：先备份现有模型目录。不同模型架构要求不同节点和子目录，不能只凭文件扩展名判断兼容。资源包里的模型说明优先于通用目录建议。</div>}
