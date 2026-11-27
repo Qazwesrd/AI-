@@ -1,7 +1,7 @@
-"""Read-only ComfyUI local image runtime discovery.
+"""Read-only ComfyUI image-model discovery.
 
-This module probes only the fixed loopback ComfyUI endpoint. It never downloads
-weights, submits prompts, starts processes, or contacts a cloud provider.
+Only talks to the fixed loopback ComfyUI API. It does not download, install,
+modify, or execute models/workflows.
 """
 import json
 from urllib.error import HTTPError, URLError
@@ -17,9 +17,24 @@ _OPENER = build_opener(ProxyHandler({}))
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 GIB = 1024 ** 3
 
+# ComfyUI built-in/custom-node model selectors. Each endpoint is fixed and
+# allow-listed; the API never accepts an arbitrary URL or node name from users.
+MODEL_SELECTORS = {
+    "checkpoint": ("CheckpointLoaderSimple", "ckpt_name"),
+    "vae": ("VAELoader", "vae_name"),
+    "lora": ("LoraLoader", "lora_name"),
+    "upscaler": ("UpscaleModelLoader", "model_name"),
+    "controlnet": ("ControlNetLoader", "control_net_name"),
+    "clip_vision": ("CLIPVisionLoader", "clip_name"),
+    "ip_adapter": ("IPAdapterModelLoader", "ipadapter_file"),
+}
+
 
 def _local_json(path: str, opener=None, timeout: float = 2.5):
-    if path not in {"/system_stats", "/object_info/CheckpointLoaderSimple"}:
+    allowed = {"/system_stats"} | {
+        f"/object_info/{node_type}" for node_type, _ in MODEL_SELECTORS.values()
+    }
+    if path not in allowed:
         raise ValueError("Unsupported ComfyUI endpoint")
     request = Request(COMFYUI_BASE_URL + path, headers={"Accept": "application/json"})
     client = opener or _OPENER
@@ -40,18 +55,81 @@ def _local_json(path: str, opener=None, timeout: float = 2.5):
         return {"_error": "本地 ComfyUI 返回了无法识别的数据"}
 
 
-def _checkpoint_names(object_info):
+def _selector_choices(object_info, input_name):
     if not isinstance(object_info, dict) or object_info.get("_error"):
         return []
-    node = object_info.get("CheckpointLoaderSimple")
-    if not isinstance(node, dict):
+    # A single-node /object_info response is keyed by the node class.
+    node_info = next(
+        (value for value in object_info.values() if isinstance(value, dict) and "input" in value),
+        None,
+    )
+    inputs = node_info.get("input") if isinstance(node_info, dict) else None
+    if not isinstance(inputs, dict):
         return []
-    inputs = node.get("input")
-    required = inputs.get("required") if isinstance(inputs, dict) else None
-    checkpoint = required.get("ckpt_name") if isinstance(required, dict) else None
-    if isinstance(checkpoint, list) and checkpoint and isinstance(checkpoint[0], list):
-        return [str(name)[:240] for name in checkpoint[0][:200] if isinstance(name, str)]
+    for section in ("required", "optional"):
+        fields = inputs.get(section)
+        spec = fields.get(input_name) if isinstance(fields, dict) else None
+        if isinstance(spec, list) and spec and isinstance(spec[0], list):
+            return sorted({
+                str(value)[:240] for value in spec[0]
+                if isinstance(value, str) and value.strip()
+            })[:500]
     return []
+
+
+def _scan_comfy_models(opener=None):
+    inventory = []
+    node_status = {}
+    for category, (node_type, input_name) in MODEL_SELECTORS.items():
+        result = _local_json(f"/object_info/{node_type}", opener=opener)
+        if result is None:
+            node_status[node_type] = {"available": False, "reason": "ComfyUI 未响应"}
+            continue
+        if result.get("_error"):
+            node_status[node_type] = {"available": False, "reason": result["_error"]}
+            continue
+        node_info = result.get(node_type)
+        if not isinstance(node_info, dict):
+            node_status[node_type] = {"available": False, "reason": "节点未安装或未注册"}
+            continue
+        choices = _selector_choices(result, input_name)
+        node_status[node_type] = {
+            "available": True,
+            "model_count": len(choices),
+            "models": choices,
+        }
+        inventory.extend({
+            "name": name,
+            "category": category,
+            "source": "ComfyUI",
+            "selector_node": node_type,
+            "status": "listed",
+            "load_tested": False,
+        } for name in choices)
+    # A file may be exposed by multiple nodes; keep each category association
+    # but avoid duplicate records for the same selector and filename.
+    unique = {}
+    for item in inventory:
+        unique[(item["category"], item["name"])] = item
+    items = sorted(unique.values(), key=lambda item: (item["category"], item["name"].lower()))
+    counts = {}
+    for item in items:
+        counts[item["category"]] = counts.get(item["category"], 0) + 1
+    return {
+        "items": items,
+        "total": len(items),
+        "counts_by_category": counts,
+        "selectors": node_status,
+        "scan_scope": "ComfyUI 已注册节点向本机 API 暴露的模型下拉列表",
+        "note": "列出表示 ComfyUI 节点能看到该模型，不代表权重已成功加载或推理通过；load_tested=false。",
+    }
+
+
+def _checkpoint_names(object_info):
+    # Kept for existing callers and tests.
+    if not isinstance(object_info, dict) or object_info.get("_error"):
+        return []
+    return _selector_choices(object_info, "ckpt_name")
 
 
 def assess_image_hardware(hardware: dict):
@@ -94,8 +172,9 @@ def assess_image_hardware(hardware: dict):
 
 @router.get("/image-runtime")
 def local_image_runtime():
-    """Discover a locally running ComfyUI instance and already-installed checkpoints."""
+    """Discover ComfyUI and enumerate its visible image-related model selectors."""
     stats = _local_json("/system_stats")
+    hardware = assess_image_hardware(_get_hardware_profile())
     if stats is None:
         return {
             "engine": "comfyui",
@@ -103,7 +182,8 @@ def local_image_runtime():
             "base_url": COMFYUI_BASE_URL,
             "checkpoint_count": 0,
             "checkpoints": [],
-            "hardware": assess_image_hardware(_get_hardware_profile()),
+            "model_inventory": {"items": [], "total": 0, "counts_by_category": {}, "selectors": {}},
+            "hardware": hardware,
             "network_used": False,
             "downloaded": False,
             "generation_submitted": False,
@@ -114,14 +194,18 @@ def local_image_runtime():
         return {
             "engine": "comfyui", "status": "error", "base_url": COMFYUI_BASE_URL,
             "checkpoint_count": 0, "checkpoints": [],
-            "hardware": assess_image_hardware(_get_hardware_profile()),
+            "model_inventory": {"items": [], "total": 0, "counts_by_category": {}, "selectors": {}},
+            "hardware": hardware,
             "network_used": False, "downloaded": False,
             "generation_submitted": False, "cloud_fallback": False,
             "message": "本机 ComfyUI 返回异常：" + str(stats["_error"]),
         }
 
-    object_info = _local_json("/object_info/CheckpointLoaderSimple")
-    checkpoints = _checkpoint_names(object_info)
+    inventory = _scan_comfy_models()
+    checkpoints = [
+        item["name"] for item in inventory["items"]
+        if item["category"] == "checkpoint"
+    ]
     devices = []
     system = stats.get("system")
     if isinstance(system, dict):
@@ -132,12 +216,13 @@ def local_image_runtime():
         "base_url": COMFYUI_BASE_URL,
         "checkpoint_count": len(checkpoints),
         "checkpoints": checkpoints,
+        "model_inventory": inventory,
         "device_count": len(devices),
-        "hardware": assess_image_hardware(_get_hardware_profile()),
+        "hardware": hardware,
         "network_used": False,
         "downloaded": False,
         "generation_submitted": False,
         "cloud_fallback": False,
-        "message": "已连接本机 ComfyUI；仅列出已安装 checkpoint，不会提交生成任务或下载模型。",
-        "limitations": "尚未导入生成工作流；检测成功不代表已安装可用模型或已完成图片生成。",
+        "message": "已连接本机 ComfyUI，并扫描其已注册节点可见的图片相关模型。",
+        "limitations": "节点下拉列表可见不代表权重已成功加载；需在对应工作流中完成实际推理才能标记为可用。",
     }
