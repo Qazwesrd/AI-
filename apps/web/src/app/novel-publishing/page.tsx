@@ -8,6 +8,8 @@ type Platform = {id:string;name:string;region:string;language:string[];portal:st
 type Package = {id:number;novel_id:number;platform_id:string;platform_name:string;pen_name:string;language:string;status:string;word_count:number;content_hash:string;created_at:string};
 type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
+type LocalModel = {name:string};
+type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;chapters?:{chapter_number:number;title:string;translated_text:string;status:string}[]};
 
 export default function NovelPublishingPage(){
   const [novels,setNovels]=useState<Novel[]>([]);
@@ -15,6 +17,13 @@ export default function NovelPublishingPage(){
   const [packages,setPackages]=useState<Package[]>([]);
   const [submissions,setSubmissions]=useState<Submission[]>([]);
   const [chapters,setChapters]=useState<Chapter[]>([]);
+  const [localModels,setLocalModels]=useState<LocalModel[]>([]);
+  const [translationLanguage,setTranslationLanguage]=useState("en");
+  const [translationModel,setTranslationModel]=useState("");
+  const [translationGlossary,setTranslationGlossary]=useState("{}");
+  const [translations,setTranslations]=useState<Translation[]>([]);
+  const [activeTranslation,setActiveTranslation]=useState<Translation|null>(null);
+  const [uploading,setUploading]=useState(false);
   const [aiTask,setAiTask]=useState("outline");
   const [aiChapterId,setAiChapterId]=useState("");
   const [aiExtra,setAiExtra]=useState("");
@@ -38,13 +47,16 @@ export default function NovelPublishingPage(){
   }
   async function load(){
     try{
-      const [n,p,k,s]=await Promise.all([
+      const [n,p,k,s,models]=await Promise.all([
         api<{items:Novel[]}>("/api/novel-publishing/novels"),
         api<{items:Platform[]}>("/api/novel-publishing/platforms"),
         api<{items:Package[]}>("/api/novel-publishing/packages"),
         api<{items:Submission[]}>("/api/novel-publishing/submissions"),
+        api<{models:LocalModel[]}>("/api/local-ai/runtime").catch(()=>({models:[]})),
       ]);
       setNovels(n.items||[]);setPlatforms(p.items||[]);setPackages(k.items||[]);setSubmissions(s.items||[]);
+      setLocalModels(models.models||[]);
+      if(!translationModel&&models.models?.length)setTranslationModel(models.models[0].name);
       if(!novelId&&n.items?.length)setNovelId(String(n.items[0].id));
     }catch(e){setMessage(e instanceof Error?e.message:"读取小说发行数据失败");}
   }
@@ -53,6 +65,79 @@ export default function NovelPublishingPage(){
     if(!novelId){setChapters([]);return;}
     void api<{items:Chapter[]}>(`/api/novels/${novelId}/chapters`).then(x=>setChapters(x.items||[])).catch(()=>setChapters([]));
   },[novelId]);
+
+  useEffect(()=>{
+    if(!novelId){setTranslations([]);setActiveTranslation(null);return;}
+    void api<{items:Translation[]}>(`/api/novel-publishing/translations?novel_id=${novelId}`).then(x=>setTranslations(x.items||[])).catch(()=>setTranslations([]));
+  },[novelId]);
+
+  async function uploadNovel(file:File){
+    setUploading(true);setBusy(true);
+    try{
+      const created=await api<{id:number}>("/api/novels",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:file.name.replace(/\\.[^.]+$/,""),genre:"待分类",description:"从小说发行中心上传导入"})});
+      const form=new FormData();form.append("file",file);
+      const response=await fetch(`${API}/api/novels/${created.id}/import-txt`,{method:"POST",body:form});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok)throw new Error(result.detail||"小说导入失败");
+      await load();setNovelId(String(created.id));
+      setMessage(`已导入 ${file.name}，识别 ${result.chapter_count} 章、${result.word_count} 字。原有小说项目未被覆盖。`);
+    }catch(e){setMessage(e instanceof Error?e.message:"上传小说失败");}
+    finally{setUploading(false);setBusy(false);}
+  }
+
+  async function createTranslation(){
+    if(!novelId)return setMessage("请先选择或上传小说。");
+    if(!translationModel)return setMessage("没有检测到本机已安装的 Ollama 模型，请先完成本地模型配置。");
+    let glossary:Record<string,string>={};
+    try{glossary=JSON.parse(translationGlossary||"{}");if(!glossary||Array.isArray(glossary)||typeof glossary!=="object")throw new Error("术语表必须是 JSON 对象");}
+    catch{return setMessage("术语表 JSON 格式不正确，例如：{\"主角\":\"Hero\"}");}
+    setBusy(true);
+    try{
+      const result=await api<{item:Translation;message:string}>(`/api/novel-publishing/novels/${novelId}/translations`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({target_language:translationLanguage,model_name:translationModel,glossary})});
+      setActiveTranslation(result.item);setMessage(result.message);
+      const list=await api<{items:Translation[]}>(`/api/novel-publishing/translations?novel_id=${novelId}`);setTranslations(list.items||[]);
+    }catch(e){setMessage(e instanceof Error?e.message:"创建译本失败");}
+    finally{setBusy(false);}
+  }
+
+  async function refreshTranslation(id:number){
+    const result=await api<Translation>(`/api/novel-publishing/translations/${id}`);
+    setActiveTranslation(result);
+    const list=await api<{items:Translation[]}>(`/api/novel-publishing/translations?novel_id=${novelId}`);
+    setTranslations(list.items||[]);
+    return result;
+  }
+
+  async function translateOne(id:number){
+    setBusy(true);
+    try{
+      const result=await api<{item:Translation;message:string}>(`/api/novel-publishing/translations/${id}/translate-next`,{method:"POST"});
+      await refreshTranslation(id);setMessage(result.message);
+    }catch(e){setMessage(e instanceof Error?e.message:"本段翻译失败");}
+    finally{setBusy(false);}
+  }
+
+  async function translateAll(id:number){
+    setBusy(true);
+    try{
+      let current=await refreshTranslation(id);
+      while(current.status!=="completed"&&current.status!=="source_changed"){
+        const result=await api<{item:Translation;message:string}>(`/api/novel-publishing/translations/${id}/translate-next`,{method:"POST"});
+        current=await refreshTranslation(id);
+        setMessage(`翻译进度：${current.completed_chunks}/${current.total_chunks} 段。`);
+      }
+      setMessage(current.status==="completed"?"全文翻译完成。可下载译本并制作目标平台发行稿件。":"原文已变化，翻译已暂停，请重新创建译本。");
+    }catch(e){setMessage(e instanceof Error?e.message:"全文翻译中断；已完成部分会保留，可稍后继续。");}
+    finally{setBusy(false);}
+  }
+
+  async function exportTranslation(id:number,format:"md"|"txt"|"json"="md"){
+    try{
+      const response=await fetch(`${API}/api/novel-publishing/translations/${id}/export?format=${format}`);
+      if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"导出译本失败");}
+      const blob=await response.blob();const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`novel-translation-${id}.${format}`;a.click();URL.revokeObjectURL(url);
+    }catch(e){setMessage(e instanceof Error?e.message:"导出译本失败");}
+  }
 
   async function generateAIPrompt(){
     if(!novelId)return setMessage("请先选择小说。");
@@ -112,6 +197,28 @@ export default function NovelPublishingPage(){
       <header className="flex flex-wrap items-center justify-between gap-3"><div><a href="/" className="text-sm text-purple-300">← 返回首页</a><h1 className="mt-3 text-3xl font-black">🌍 AI小说创作与国内外发行</h1><p className="mt-2 text-sm text-purple-200">从本地小说项目生成平台适配稿件，准备国内外投稿并跟踪审核、发布和收益。</p></div><a href="/novels" className="rounded-lg border border-purple-400/30 px-4 py-2 text-sm">进入小说创作工作室</a></header>
       {message&&<div role="status" className="rounded-xl border border-cyan-400/20 bg-cyan-950/30 p-3 text-sm">{message}</div>}
 
+
+      <section className="rounded-2xl border border-emerald-400/20 bg-[#0d201dcc] p-5">
+        <h2 className="text-xl font-bold">小说上传与多语言全文翻译</h2>
+        <p className="mt-1 text-xs text-emerald-100/70">支持 TXT、MD、DOCX、EPUB、PDF、RTF。上传会新建独立小说项目，不覆盖现有作品。翻译使用本机已安装模型，逐段保存，可中断续做；原文和章节永不被翻译结果覆盖。</p>
+        <label className="mt-3 block text-sm">上传小说文件<input type="file" accept=".txt,.md,.markdown,.docx,.epub,.pdf,.rtf" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file)void uploadNovel(file);e.currentTarget.value="";}} className="mt-2 block w-full rounded-lg border border-emerald-300/20 bg-black/20 p-3 text-sm"/></label>
+        {uploading&&<p className="mt-2 text-xs text-cyan-200">正在导入文件并识别章节…</p>}
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="text-sm">要翻译的小说<select className={field+" mt-1"} value={novelId} onChange={e=>setNovelId(e.target.value)}><option value="">请选择小说</option>{novels.map(n=><option key={n.id} value={n.id}>{n.title} · {n.chapter_count}章</option>)}</select></label>
+          <label className="text-sm">目标语言<select className={field+" mt-1"} value={translationLanguage} onChange={e=>setTranslationLanguage(e.target.value)}>{[["en","英语"],["ja","日语"],["ko","韩语"],["es","西班牙语"],["fr","法语"],["de","德语"],["it","意大利语"],["pt","葡萄牙语"],["ru","俄语"],["ar","阿拉伯语"],["th","泰语"],["vi","越南语"],["id","印尼语"],["tr","土耳其语"],["zh-TW","繁体中文"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+          <label className="text-sm">本机翻译模型<select className={field+" mt-1"} value={translationModel} onChange={e=>setTranslationModel(e.target.value)}><option value="">请选择已安装模型</option>{localModels.map(m=><option key={m.name} value={m.name}>{m.name}</option>)}</select></label>
+        </div>
+        <label className="mt-3 block text-sm">术语表（JSON，可选）<textarea className={field+" mt-1 min-h-20 font-mono text-xs"} value={translationGlossary} onChange={e=>setTranslationGlossary(e.target.value)} placeholder='{"人物名":"Character Name","圣衣":"Cloth"}'/></label>
+        <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy||!novelId||!translationModel} onClick={()=>void createTranslation()} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">创建独立译本</button></div>
+        <div className="mt-4 space-y-2">{translations.map(item=><div key={item.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{item.target_language_name}译本 · #{item.id}</strong><span className="text-xs text-cyan-200">{item.completed_chunks}/{item.total_chunks} 段 · {item.progress_percent}%</span></div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-emerald-500" style={{width:item.progress_percent+"%"}}/></div>
+          <p className="mt-2 text-xs text-white/50">模型：{item.model_name} · 状态：{item.status}{item.last_error&&" · "+item.last_error}</p>
+          <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy||item.status==="completed"} onClick={()=>void translateOne(item.id)} className="rounded-lg border border-emerald-300/30 px-3 py-2 text-xs">翻译下一段</button><button disabled={busy||item.status==="completed"} onClick={()=>void translateAll(item.id)} className="rounded-lg bg-emerald-800 px-3 py-2 text-xs">连续翻译全文</button><button onClick={()=>void refreshTranslation(item.id)} className="rounded-lg border border-white/15 px-3 py-2 text-xs">查看进度</button><button onClick={()=>void exportTranslation(item.id,"md")} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs">导出译本</button><button onClick={()=>void exportTranslation(item.id,"txt")} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs">导出 TXT</button></div>
+        </div>)}
+        {!translations.length&&<p className="py-4 text-center text-xs text-white/40">上传小说或选择已有小说，创建第一个独立译本。</p>}</div>
+        {activeTranslation?.chapters&&<details className="mt-4 rounded-xl border border-white/10 p-3"><summary className="cursor-pointer text-sm">预览已翻译章节（{activeTranslation.chapters.length}章）</summary><div className="mt-3 max-h-96 space-y-3 overflow-y-auto">{activeTranslation.chapters.map(ch=><article key={ch.chapter_number} className="rounded-lg bg-black/20 p-3"><strong className="text-sm">{ch.title}</strong><pre className="mt-2 whitespace-pre-wrap text-xs text-white/70">{ch.translated_text||"尚未翻译"}</pre></article>)}</div></details>}
+      </section>
       <section className="rounded-2xl border border-cyan-400/20 bg-[#101c2acc] p-5">
         <h2 className="text-xl font-bold">AI辅助小说创作与翻译</h2>
         <p className="mt-1 text-xs text-cyan-100/70">可生成构思、大纲、人物、续写、润色、翻译、简介和市场本地化任务。默认只生成提示词，不会自动调用付费 API；你可以交给本地模型或你选定的免费 AI 工具，审阅后再写回小说。</p>
