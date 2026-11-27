@@ -460,12 +460,10 @@ async function startManagedAiEngines(dataDir) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     logChild("OLLAMA", ollamaProcess);
-    const ready = await waitForLocalService(11435, "/api/tags", ollamaProcess, 30000);
-    if (ready) {
-      console.log("[OLLAMA] Local service is ready on 127.0.0.1:11435.");
-    } else {
-      console.warn("[OLLAMA] Process was started but the service did not become ready within 30 seconds. Existing model files were not changed; check the local engine status and logs.");
-    }
+    void waitForLocalService(11435, "/api/tags", ollamaProcess, 30000).then((ready) => {
+      if (ready) console.log("[OLLAMA] Local service is ready on 127.0.0.1:11435.");
+      else console.warn("[OLLAMA] Process was started but the service did not become ready within 30 seconds. Existing model files were not changed; check the local engine status and logs.");
+    });
   } else {
     console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download, replacement, or migration will be attempted.");
   }
@@ -483,12 +481,10 @@ async function startManagedAiEngines(dataDir) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     logChild("COMFYUI", comfyProcess);
-    const ready = await waitForLocalService(8188, "/system_stats", comfyProcess, 45000);
-    if (ready) {
-      console.log("[COMFYUI] Local service is ready on 127.0.0.1:8188.");
-    } else {
-      console.warn("[COMFYUI] Process was started but the service did not become ready within 45 seconds. Existing files were not changed; check the local engine status and logs.");
-    }
+    void waitForLocalService(8188, "/system_stats", comfyProcess, 45000).then((ready) => {
+      if (ready) console.log("[COMFYUI] Local service is ready on 127.0.0.1:8188.");
+      else console.warn("[COMFYUI] Process was started but the service did not become ready within 45 seconds. Existing files were not changed; check the local engine status and logs.");
+    });
   } else {
     console.warn("[COMFYUI] Existing runtime was not detected; no runtime download, replacement, or migration will be attempted.");
   }
