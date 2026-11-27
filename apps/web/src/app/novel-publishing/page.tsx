@@ -70,7 +70,9 @@ export default function NovelPublishingPage(){
   },[novelId]);
 
   useEffect(()=>{
-    if(!novelId){setTranslations([]);setActiveTranslation(null);return;}
+    setActiveTranslation(null);
+    setTranslationGlossary("{}");
+    if(!novelId){setTranslations([]);return;}
     void api<{items:Translation[]}>(`/api/novel-publishing/translations?novel_id=${novelId}`).then(x=>setTranslations(x.items||[])).catch(()=>setTranslations([]));
   },[novelId]);
 
