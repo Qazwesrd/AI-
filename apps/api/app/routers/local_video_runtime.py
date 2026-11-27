@@ -151,10 +151,30 @@ def assess_wan_vace_nodes(object_info):
     )
     details = []
     models = set()
+    model_inventory = []
     for name in names:
         info = object_info.get(name)
         choices = _node_choices(info)
         models.update(choices)
+        lower_name = name.lower()
+        if "vace" in lower_name:
+            category = "vace_model"
+        elif "vae" in lower_name:
+            category = "video_vae"
+        elif "textencoder" in lower_name or "text_encoder" in lower_name:
+            category = "video_text_encoder"
+        elif "model" in lower_name or "wanvideo" in lower_name or "wan_video" in lower_name:
+            category = "video_model"
+        else:
+            category = "video_auxiliary"
+        model_inventory.extend({
+            "name": choice,
+            "category": category,
+            "source": "ComfyUI",
+            "selector_node": name,
+            "status": "listed",
+            "load_tested": False,
+        } for choice in choices)
         details.append({
             "node_type": name,
             "model_choices": choices,
@@ -177,6 +197,8 @@ def assess_wan_vace_nodes(object_info):
         "node_count": len(names),
         "nodes": details,
         "models": sorted(models),
+        "model_inventory": sorted(model_inventory, key=lambda item: (item["category"], item["name"].lower())),
+        "model_inventory_count": len(model_inventory),
         "vace_node_found": vace_found,
         "wan_video_nodes_found": wan_found,
         "workflow_node_set_complete": not missing,
