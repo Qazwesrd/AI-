@@ -241,8 +241,41 @@ export default function MediaStudioPage() {
     }
     setWorkflowBusy(true);
     setWorkflowResult(null);
-    setMessage(validateOnly ? "正在核对本机节点、模型选项和视频输出节点……" : "正在向本机 ComfyUI 提交视频生成任务……");
+    setMessage(validateOnly ? "正在核对本机节点、模型选项和视频输出节点……" : "正在检查本机显存、运行设备和工作流参数……");
     try {
+      let resourceAssessment: any = null;
+      if (!validateOnly) {
+        const preflightResponse = await fetch(`${API}/api/local-ai/video-workflow/preflight`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workflow }),
+        });
+        const preflightData = await preflightResponse.json();
+        if (!preflightResponse.ok) {
+          const detail = typeof preflightData.detail === "object"
+            ? [preflightData.detail.message, ...(preflightData.detail.errors || [])].filter(Boolean).join("；")
+            : preflightData.detail;
+          throw new Error(detail || "本地资源预检未通过");
+        }
+        resourceAssessment = preflightData.resource_assessment;
+        setWorkflowResult(preflightData);
+        const warnings = resourceAssessment?.warnings || [];
+        const recommendations = resourceAssessment?.recommendations || [];
+        if (warnings.length) {
+          const promptText = [
+            "本机资源预检发现以下风险：",
+            ...warnings.map((item: string) => "• " + item),
+            "",
+            "建议：",
+            ...recommendations.map((item: string) => "• " + item),
+            "",
+            "继续将只向本机 ComfyUI 提交任务，不会调用云端。仍要继续吗？",
+          ].join("\n");
+          if (!window.confirm(promptText)) {
+            setMessage("已取消提交；预检结果已保留，未启动生成。");
+            return;
+          }
+        }
+      }
       const response = await fetch(`${API}/api/local-ai/video-workflow/${validateOnly ? "validate" : "submit"}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workflow }),
@@ -252,7 +285,7 @@ export default function MediaStudioPage() {
         const detail = typeof data.detail === "object" ? [data.detail.message, ...(data.detail.errors || [])].filter(Boolean).join("；") : data.detail;
         throw new Error(detail || "本地工作流请求失败");
       }
-      setWorkflowResult(data);
+      setWorkflowResult({ ...data, ...(resourceAssessment ? { resource_assessment: resourceAssessment } : {}) });
       if (!validateOnly && data.prompt_id) setWorkflowPromptId(data.prompt_id);
       setMessage(data.message || (validateOnly ? "本地工作流预检通过。" : "已提交本地生成任务。"));
     } catch (error) {
