@@ -15,7 +15,7 @@ from app.routers.prompts import (
     add_test_run, refresh_ranking, ranking_history, archive_prompt, ensure_default_prompts,
     EvidenceInput, EvidenceVerifyInput, UpgradeCandidateInput, CandidateDecisionInput,
     create_trend_evidence, verify_trend_evidence, create_upgrade_candidate,
-    approve_upgrade_candidate, reject_upgrade_candidate,
+    approve_upgrade_candidate, reject_upgrade_candidate, research_trend_ranking,
 )
 
 
@@ -176,6 +176,26 @@ class PromptCenterTests(unittest.TestCase):
         unchanged = self.db.query(PromptTemplate).filter_by(id=item["id"]).one()
         self.assertEqual(unchanged.current_version, 1)
         self.assertEqual(unchanged.content, "你是一名专业漫剧编剧。")
+
+    def test_public_trend_ranking_requires_verified_cross_platform_cross_day_evidence(self):
+        first = create_trend_evidence(EvidenceInput(
+            platform="红果", work_title="跨平台样本", observed_at="2026-11-20",
+            metric_summary={"views": 12000, "likes": 800, "shares": 90},
+            evidence_type="作品趋势证据",
+        ), self.db)["item"]
+        second = create_trend_evidence(EvidenceInput(
+            platform="抖音", work_title="跨平台样本", observed_at="2026-11-26",
+            metric_summary={"views": 22000, "likes": 1600, "comments": 120},
+            evidence_type="作品趋势证据",
+        ), self.db)["item"]
+        verify_trend_evidence(first["id"], EvidenceVerifyInput(verification_note="核验公开页面"), self.db)
+        verify_trend_evidence(second["id"], EvidenceVerifyInput(verification_note="核验另一平台公开页面"), self.db)
+        result = research_trend_ranking(self.db)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["work_title"], "跨平台样本")
+        self.assertEqual(result["items"][0]["platform_count"], 2)
+        self.assertFalse(result["items"][0]["contains_public_prompt"])
+        self.assertIn("尚未接入各平台自动抓取", result["notice"])
 
     def test_archive_keeps_version_and_test_history(self):
         item = self.create_prompt_row()
