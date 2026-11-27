@@ -49,7 +49,7 @@
       {
         "to": "web/public",
         "from": "../web/public"
-      },
+      }
     ],
     "win": {
       "artifactName": "${productName}-Setup-${version}.${ext}",
