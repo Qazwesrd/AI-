@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models.prompts import (
     PromptCategory, PromptTemplate, PromptVersion, PromptTestRun, PromptRankingSnapshot,
-    TrendEvidence, PromptUpgradeCandidate,
+    TrendEvidence, PromptUpgradeCandidate, PublicResearchSource, PublicResearchCollectionRun,
 )
 from app.routers.prompts import (
     CategoryInput, PromptInput, PromptUpdate, TestInput,
@@ -16,6 +17,10 @@ from app.routers.prompts import (
     EvidenceInput, EvidenceVerifyInput, UpgradeCandidateInput, CandidateDecisionInput,
     create_trend_evidence, verify_trend_evidence, create_upgrade_candidate,
     approve_upgrade_candidate, reject_upgrade_candidate, research_trend_ranking,
+    collect_public_source,
+)
+from app.services.public_source_collector import (
+    FeedCollectionError, parse_feed, validate_public_feed_url,
 )
 
 
@@ -196,6 +201,51 @@ class PromptCenterTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["platform_count"], 2)
         self.assertFalse(result["items"][0]["contains_public_prompt"])
         self.assertIn("尚未接入各平台自动抓取", result["notice"])
+
+    def test_rss_parser_extracts_only_public_metadata(self):
+        payload = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+        <item><title>公开漫剧更新</title><link>https://www.youtube.com/watch?v=abc</link>
+        <pubDate>Fri, 27 Nov 2026 10:00:00 GMT</pubDate><description>公开摘要内容</description></item>
+        </channel></rss>"""
+        items = parse_feed(payload)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "公开漫剧更新")
+        self.assertEqual(items[0]["url"], "https://www.youtube.com/watch?v=abc")
+        self.assertLessEqual(len(items[0]["summary_excerpt"]), 300)
+
+    def test_feed_parser_rejects_xml_entities_and_bad_urls(self):
+        with self.assertRaises(FeedCollectionError):
+            parse_feed(b'<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><rss/>')
+        with self.assertRaises(FeedCollectionError):
+            validate_public_feed_url("http://www.youtube.com/feeds/videos.xml")
+        with self.assertRaises(FeedCollectionError):
+            validate_public_feed_url("https://127.0.0.1/private.xml")
+        with self.assertRaises(FeedCollectionError):
+            validate_public_feed_url("https://example.com/feed.xml")
+
+    def test_public_source_collection_creates_unverified_evidence_and_deduplicates(self):
+        source = PublicResearchSource(
+            platform="YouTube", name="测试频道订阅",
+            feed_url="https://www.youtube.com/feeds/videos.xml?channel_id=UCtest",
+            source_type="rss_atom", enabled=True, refresh_interval_minutes=60,
+        )
+        self.db.add(source)
+        self.db.commit()
+        self.db.refresh(source)
+        sample = [{
+            "title": "自动发现作品", "url": "https://www.youtube.com/watch?v=unique123",
+            "published": "Fri, 27 Nov 2026 10:00:00 GMT", "summary_excerpt": "公开摘要",
+        }]
+        with patch("app.routers.prompts.fetch_public_feed", return_value=sample):
+            first = collect_public_source(source.id, self.db)
+            second = collect_public_source(source.id, self.db)
+        self.assertEqual(first["run"]["inserted_count"], 1)
+        self.assertEqual(second["run"]["inserted_count"], 0)
+        self.assertEqual(second["run"]["duplicate_count"], 1)
+        evidence = self.db.query(TrendEvidence).filter_by(work_title="自动发现作品").one()
+        self.assertFalse(evidence.is_verified)
+        self.assertEqual(evidence.evidence_type, "公开订阅源发现（作品/创作内容，待人工核验）")
+        self.assertEqual(self.db.query(PublicResearchCollectionRun).count(), 2)
 
     def test_archive_keeps_version_and_test_history(self):
         item = self.create_prompt_row()
