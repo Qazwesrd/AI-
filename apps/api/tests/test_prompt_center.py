@@ -260,6 +260,12 @@ class PromptCenterTests(unittest.TestCase):
         result=research_trend_ranking(self.db)
         self.assertEqual(result["items"], [])
 
+    def test_research_evidence_requires_valid_iso_timestamp(self):
+        with self.assertRaises(Exception):
+            EvidenceInput(platform="平台甲", work_title="无效日期样本", observed_at="11/27/26")
+        valid = EvidenceInput(platform="平台甲", work_title="有效日期样本", observed_at="2026-11-27")
+        self.assertEqual(valid.observed_at, "2026-11-27")
+
     def test_rss_parser_extracts_only_public_metadata(self):
         payload = """<?xml version="1.0"?><rss version="2.0"><channel>
         <item><title>公开漫剧更新</title><link>https://www.youtube.com/watch?v=abc</link>
