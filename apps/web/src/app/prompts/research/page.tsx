@@ -261,7 +261,7 @@ export default function PromptResearchPage() {
             <label className="text-xs">来源名称<input value={sourceName} onChange={e=>setSourceName(e.target.value)} placeholder="例如：频道公开更新订阅" className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/></label>
             <label className="text-xs">刷新间隔
               <select value={sourceInterval} onChange={e=>setSourceInterval(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2 text-sm">
-                <option value="60">每 1 小时</option><option value="180">每 3 小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option>
+                <option value="15">每 15 分钟</option><option value="30">每 30 分钟</option><option value="60">每 1 小时</option><option value="180">每 3 小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option>
               </select>
             </label>
             <div className="flex items-end"><button disabled={busy} onClick={()=>void addPublicSource()} className="w-full rounded-lg bg-fuchsia-600 px-3 py-2 text-sm font-semibold disabled:opacity-50">添加公开来源</button></div>
