@@ -331,7 +331,7 @@ class EvidenceInput(BaseModel):
     work_url: str = Field(default="", max_length=2000)
     observed_at: str = Field(min_length=8, max_length=40)
     metric_summary: dict = Field(default_factory=dict)
-    evidence_type: str = Field(default="公开榜单/公开页面", max_length=100)
+    evidence_type: str = Field(default="作品趋势证据", max_length=100)
     reliability: str = Field(default="待核验", max_length=30)
 
 
@@ -579,6 +579,108 @@ def research_trend_ranking(db: Session = Depends(get_db)):
         "verified_evidence_count": len(rows),
         "notice": "只统计人工核验的公开证据；作品热度证据不等于作品实际使用的内部提示词。当前采集仍需人工录入，尚未接入各平台自动抓取。",
     }
+
+
+def _verified_evidence_ranking(db, accepted_types):
+    import math
+    from collections import defaultdict
+    from datetime import date
+    rows = db.query(TrendEvidence).filter(
+        TrendEvidence.is_verified.is_(True),
+        TrendEvidence.evidence_type.in_(accepted_types),
+    ).all()
+    groups = defaultdict(list)
+    for row in rows:
+        key = " ".join((row.work_title or "").casefold().split())
+        if key:
+            groups[key].append(row)
+    today = date.today()
+    weights = {"views":1.0,"plays":1.0,"likes":1.4,"comments":2.2,"shares":2.6,"saves":2.0}
+    ranking = []
+    for key, samples in groups.items():
+        platforms = sorted({item.platform.strip() for item in samples if item.platform.strip()})
+        dates = sorted({(item.observed_at or "")[:10] for item in samples if len(item.observed_at or "") >= 10})
+        if len(platforms) < 2 or len(dates) < 2:
+            continue
+        signals = []
+        for item in samples:
+            metrics = item.metric_summary if isinstance(item.metric_summary,dict) else {}
+            signal = 0.0
+            for metric,weight in weights.items():
+                try: signal += weight * math.log1p(max(0.0,float(metrics.get(metric,0) or 0)))
+                except (TypeError,ValueError): pass
+            try: age=max(0,(today-date.fromisoformat(item.observed_at[:10])).days); decay=math.pow(0.5,age/14.0)
+            except (ValueError,TypeError): decay=0.25
+            signals.append(signal*decay)
+        score=sum(signals)/max(1,len(signals))+min(len(platforms),5)*2+min(len(dates),7)*1.25
+        ranking.append({
+            "title":samples[0].work_title,"platforms":platforms,"platform_count":len(platforms),
+            "observed_days":dates,"sample_count":len(samples),"latest_observed_at":max(dates),
+            "score":round(score,3),"evidence_ids":[item.id for item in samples],
+            "evidence_types":sorted({item.evidence_type for item in samples}),
+            "score_basis":"已核验公开互动数据；对数加权、14天半衰期、跨平台与跨日期加权",
+        })
+    ranking.sort(key=lambda item:(item["score"],item["latest_observed_at"]),reverse=True)
+    for index,item in enumerate(ranking,1): item["rank"]=index
+    return ranking, len(rows)
+
+
+def _prompt_test_ranking(db, score_field="score_overall"):
+    rows = db.query(PromptTestRun).all()
+    grouped = {}
+    for run in rows:
+        grouped.setdefault((run.prompt_id,run.prompt_version),[]).append(run)
+    prompts = {item.id:item for item in db.query(PromptTemplate).filter(PromptTemplate.is_active.is_(True)).all()}
+    result=[]
+    for (prompt_id,version),runs in grouped.items():
+        prompt=prompts.get(prompt_id)
+        if not prompt: continue
+        values=[float(getattr(run,score_field) or 0) for run in runs]
+        result.append({"title":prompt.name,"prompt_id":prompt_id,"version":version,
+                       "test_count":len(runs),"score":round(sum(values)/len(values),2),
+                       "last_test_at":max((run.created_at for run in runs if run.created_at),default=None).isoformat() if any(run.created_at for run in runs) else None,
+                       "score_basis":"用户录入的提示词版本实测评分，不是作品播放热度"})
+    result.sort(key=lambda item:(item["score"],item["test_count"]),reverse=True)
+    for index,item in enumerate(result,1): item["rank"]=index
+    return result
+
+
+@router.get("/research/rankings")
+def category_rankings(db: Session = Depends(get_db)):
+    drama,drama_count = _verified_evidence_ranking(db,{"作品趋势证据","漫剧作品趋势证据","work_trend"})
+    screenplay,screenplay_count = _verified_evidence_ranking(db,{"剧本作品证据","screenplay"})
+    prompts = _prompt_test_ranking(db)
+    public_prompts,prompt_evidence_count = _verified_evidence_ranking(db,{"公开提示词分享","public_prompt"})
+    return {
+        "categories":{
+            "drama":{"title":"漫剧作品排名","items":drama,"verified_evidence_count":drama_count,"basis":"公开作品互动热度，跨平台与跨日期交叉核验"},
+            "prompt":{"title":"提示词排名","items":prompts,"verified_evidence_count":prompt_evidence_count,"public_share_items":public_prompts,"basis":"正式提示词版本的人工实测评分；公开分享提示词热度单独列出，不混算质量分"},
+            "screenplay":{"title":"剧本排名","items":screenplay,"verified_evidence_count":screenplay_count,"basis":"已核验的公开剧本/剧本案例互动数据，跨平台与跨日期交叉核验"},
+        },
+        "notice":"漫剧、剧本榜以公开作品证据为基础；提示词质量榜以版本实测评分为基础。没有样本时显示空榜，不虚构排名或数据。",
+    }
+
+
+@router.post("/research/rankings/refresh")
+def refresh_category_rankings(db: Session = Depends(get_db)):
+    data = category_rankings(db)
+    created=[]
+    for key in ("drama","prompt","screenplay"):
+        payload=data["categories"][key]
+        snapshot=PromptRankingSnapshot(dimension=key,ranking_data=payload["items"])
+        db.add(snapshot)
+        db.flush()
+        created.append({"category":key,"snapshot_id":snapshot.id,"count":len(payload["items"])})
+    db.commit()
+    return {"success":True,"snapshots":created,"categories":data["categories"],"message":"三类排名快照已保存；无证据或无实测数据的类别保持空榜。"}
+
+
+@router.get("/research/rankings/history")
+def category_ranking_history(category: str = "drama", db: Session = Depends(get_db)):
+    if category not in {"drama","prompt","screenplay"}:
+        raise HTTPException(400,"排名类别无效")
+    rows=db.query(PromptRankingSnapshot).filter(PromptRankingSnapshot.dimension==category).order_by(PromptRankingSnapshot.created_at.desc()).limit(50).all()
+    return {"items":[{"id:item.id,"category":item.dimension,"created_at":item.created_at.isoformat() if item.created_at else None,"ranking":item.ranking_data or []} for item in rows]}
 
 
 # User-configured public RSS/Atom sources. No platform login, private API, or hidden-content scraping.
