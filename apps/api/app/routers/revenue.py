@@ -118,14 +118,18 @@ def summary(db: Session = Depends(get_db)):
     withdrawals = db.query(WithdrawalRecord).all()
     totals = {}
     for row in revenues:
-        item = totals.setdefault(row.currency, {"gross": 0.0, "fees": 0.0, "taxes": 0.0, "net": 0.0, "settled_net": 0.0})
+        item = totals.setdefault(row.currency, {"gross": 0.0, "fees": 0.0, "taxes": 0.0, "net": 0.0, "settled_net": 0.0, "payable_net": 0.0, "paid_net": 0.0})
         net = row.gross_amount - row.fee_amount - row.tax_amount
         item["gross"] += row.gross_amount
         item["fees"] += row.fee_amount
         item["taxes"] += row.tax_amount
         item["net"] += net
-        if row.status in {"settled", "payable", "paid"}:
+        if row.status == "settled":
             item["settled_net"] += net
+        elif row.status == "payable":
+            item["payable_net"] += net
+        elif row.status == "paid":
+            item["paid_net"] += net
     withdrawn = {}
     for row in withdrawals:
         if row.status == "paid":
@@ -136,8 +140,10 @@ def summary(db: Session = Depends(get_db)):
         item["taxes"] = round(item["taxes"], 2)
         item["net"] = round(item["net"], 2)
         item["settled_net"] = round(item["settled_net"], 2)
+        item["payable_net"] = round(item["payable_net"], 2)
+        item["paid_net"] = round(item["paid_net"], 2)
         item["withdrawn"] = round(withdrawn.get(currency, 0.0), 2)
-        item["settled_balance_estimate"] = round(max(0, item["settled_net"]-item["withdrawn"]), 2)
+        item["settled_balance_estimate"] = round(max(0, item["settled_net"] + item["payable_net"]-item["withdrawn"]), 2)
     return {"currency_totals": totals, "revenue_count": len(revenues), "withdrawal_count": len(withdrawals),
             "disclaimer": "余额为根据手动登记数据计算的估算值，不是平台实时余额或官方可提现金额。"}
 
