@@ -9,7 +9,7 @@ from app.models.novel import Novel, Chapter, NovelDistributionPackage, NovelSubm
 from app.routers.novel_publishing import (
     DistributionPackageInput, SubmissionInput, SubmissionUpdate,
     create_distribution_package, create_submission_record, update_submission_record,
-    export_distribution_package, list_novel_distribution_platforms,
+    export_distribution_package, list_novel_distribution_platforms, build_ai_assist_prompt,
 )
 
 
@@ -63,6 +63,36 @@ class NovelPublishingTests(unittest.TestCase):
         )
         self.assertEqual(updated["item"]["status"], "published")
         self.assertTrue(updated["item"]["external_work_url"].startswith("https://"))
+
+    def test_ai_assist_prompt_is_prepared_without_automatic_paid_api_call(self):
+        result = build_ai_assist_prompt(
+            self.novel.id,
+            __import__("app.routers.novel_publishing", fromlist=["AIAssistPromptInput"]).AIAssistPromptInput(
+                task="outline", target_language="en", platform_id="kdp",
+                extra_requirements="Keep the magic system consistent.",
+            ),
+            self.db,
+        )
+        self.assertIn("长篇大纲", result["prompt"])
+        self.assertIn("Amazon Kindle", result["prompt"])
+        self.assertFalse(result["automatic_paid_api_call"])
+
+    def test_published_submission_requires_real_platform_url(self):
+        package = create_distribution_package(
+            self.novel.id,
+            DistributionPackageInput(
+                platform_id="fanqie", rights_confirmed=True,
+                ai_assistance_disclosed=True,
+            ),
+            self.db,
+        )["item"]
+        submission = create_submission_record(
+            package["id"], SubmissionInput(status="submitted"), self.db
+        )["item"]
+        with self.assertRaises(Exception):
+            update_submission_record(
+                submission["id"], SubmissionUpdate(status="published"), self.db
+            )
 
     def test_package_requires_rights_and_ai_disclosure_acknowledgement(self):
         with self.assertRaises(Exception):
