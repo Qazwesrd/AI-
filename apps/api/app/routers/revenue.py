@@ -276,6 +276,8 @@ def _google_access_token(connection, db):
             raise HTTPException(502, str(exc))
         access = token_data.get("access_token", "")
         connection.access_token_encrypted = encrypt_token(access)
+        if token_data.get("refresh_token"):
+            connection.refresh_token_encrypted = encrypt_token(token_data["refresh_token"])
         connection.token_expires_at = token_expiry(token_data)
         connection.status = "connected"
         db.commit()
