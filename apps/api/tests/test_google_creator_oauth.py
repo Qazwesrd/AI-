@@ -34,9 +34,12 @@ class GoogleCreatorOAuthTests(unittest.TestCase):
         self.assertEqual(decrypt_token(encrypted), token)
 
     def test_authorization_uses_state_pkce_and_readonly_scopes(self):
-        url, state, verifier = new_authorization()
+        redirect_uri = "http://127.0.0.1:49152"
+        url, state, verifier = new_authorization(redirect_uri)
         query = parse_qs(urlparse(url).query)
         self.assertEqual(query["state"][0], state)
+        self.assertEqual(query["redirect_uri"][0], redirect_uri)
+        self.assertEqual(urlparse(query["redirect_uri"][0]).path, "")
         self.assertEqual(query["code_challenge_method"][0], "S256")
         self.assertNotEqual(query["code_challenge"][0], verifier)
         scopes = query["scope"][0].split()
