@@ -5,6 +5,7 @@ No model pulls, cloud fallback, arbitrary endpoints, or automatic process startu
 import json
 import os
 import re
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
