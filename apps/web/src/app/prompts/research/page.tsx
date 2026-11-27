@@ -7,11 +7,14 @@ const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Prompt = { id: number; name: string; current_version: number; content: string };
 type Evidence = { id: number; platform: string; work_title: string; work_url: string; observed_at: string; metric_summary: Record<string, unknown>; reliability: string; is_verified: boolean; verification_note: string };
 type Candidate = { id: number; prompt_id: number; base_version: number; proposed_name: string; proposed_content: string; change_reason: string; expected_impact: string; evidence_ids: number[]; status: string; decision_note: string };
+type TrendRank = { rank:number; work_title:string; platforms:string[]; platform_count:number; observed_days:string[]; sample_count:number; latest_observed_at:string; trend_score:number; evidence_types:string[]; contains_public_prompt:boolean; evidence_ids:number[]; score_method:string };
 
 export default function PromptResearchPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [trendRanking, setTrendRanking] = useState<TrendRank[]>([]);
+  const [evidenceType, setEvidenceType] = useState("作品趋势证据");
   const [selectedPrompt, setSelectedPrompt] = useState("");
   const [platform, setPlatform] = useState("红果");
   const [workTitle, setWorkTitle] = useState("");
@@ -37,14 +40,16 @@ export default function PromptResearchPage() {
 
   async function load() {
     try {
-      const [p, e, c] = await Promise.all([
+      const [p, e, c, t] = await Promise.all([
         api<{items: Prompt[]}>("/api/prompts"),
         api<{items: Evidence[]}>("/api/prompts/research/evidence"),
         api<{items: Candidate[]}>("/api/prompts/research/candidates"),
+        api<{items: TrendRank[]}>("/api/prompts/research/trends/ranking"),
       ]);
       setPrompts(p.items || []);
       setEvidence(e.items || []);
       setCandidates(c.items || []);
+      setTrendRanking(t.items || []);
       if (!selectedPrompt && p.items?.length) setSelectedPrompt(String(p.items[0].id));
     } catch (error) { setMessage(error instanceof Error ? error.message : "加载研究数据失败"); }
   }
@@ -64,7 +69,7 @@ export default function PromptResearchPage() {
       if (metrics.trim()) metric_summary = JSON.parse(metrics);
       await api("/api/prompts/research/evidence", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({platform, work_title:workTitle, work_url:workUrl, observed_at:observedAt, metric_summary}),
+        body: JSON.stringify({platform, work_title:workTitle, work_url:workUrl, observed_at:observedAt, metric_summary, evidence_type:evidenceType}),
       });
       setWorkTitle(""); setWorkUrl(""); setMetrics("");
       setMessage("证据已保存为待核验；系统不会仅凭一次榜单记录认定爆款。");
@@ -135,10 +140,34 @@ export default function PromptResearchPage() {
         </header>
         {message && <div role="status" className="rounded-xl border border-cyan-300/20 bg-cyan-950/30 p-3 text-sm text-cyan-100">{message}</div>}
 
+        <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-lg font-bold">跨平台公开趋势榜</h2><p className="mt-1 text-xs text-white/50">只统计已人工核验、至少两个平台且跨两个日期的证据；这是研究排序，不是平台官方榜单。</p></div>
+            <button disabled={busy} onClick={()=>void load()} className="rounded-xl border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100 disabled:opacity-50">↻ 刷新趋势排名</button>
+          </div>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full min-w-[680px] text-left text-sm">
+              <thead className="text-xs text-white/50"><tr><th className="p-2">排名</th><th className="p-2">作品</th><th className="p-2">平台</th><th className="p-2">采样日</th><th className="p-2">证据数</th><th className="p-2">趋势分</th><th className="p-2">证据类型</th></tr></thead>
+              <tbody>{trendRanking.map(item=><tr key={item.work_title} className="border-t border-white/10">
+                <td className="p-2 font-bold">{item.rank}</td><td className="p-2">{item.work_title}</td><td className="p-2">{item.platforms.join("、")}</td><td className="p-2">{item.observed_days.join("、")}</td><td className="p-2">{item.sample_count}</td><td className="p-2 text-cyan-200">{item.trend_score}</td><td className="p-2 text-xs text-white/50">{item.contains_public_prompt?"含公开提示词证据":"作品/案例趋势证据"}</td>
+              </tr>)}</tbody>
+            </table>
+            {!trendRanking.length&&<p className="py-5 text-center text-sm text-white/40">暂无满足跨平台、跨日期且已核验条件的作品。</p>}
+          </div>
+          <p className="mt-2 text-[11px] text-white/40">评分采用公开互动指标对数加权、14天热度衰减和跨平台/跨日期加权。当前数据仍需人工录入；不能从作品热度推断其内部提示词。</p>
+        </section>
+
         <section className="grid gap-5 lg:grid-cols-2">
           <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
             <h2 className="text-lg font-bold">录入公开作品证据</h2>
             <p className="mt-1 text-xs text-white/50">当前支持手工登记公开榜单、作品页面和公开互动数据；尚未接入平台自动采集。</p>
+            <label className="mt-3 block text-sm">证据类型
+              <select value={evidenceType} onChange={e=>setEvidenceType(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2">
+                <option value="作品趋势证据">公开作品热度/榜单数据</option>
+                <option value="公开提示词分享">公开分享的提示词原文/教程</option>
+                <option value="创作案例证据">公开创作教程/案例</option>
+              </select>
+            </label>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="text-sm">平台 / 来源<input value={platform} onChange={e=>setPlatform(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
               <label className="text-sm">作品名称<input value={workTitle} onChange={e=>setWorkTitle(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
@@ -146,7 +175,7 @@ export default function PromptResearchPage() {
               <label className="text-sm">公开页面链接<input value={workUrl} onChange={e=>setWorkUrl(e.target.value)} placeholder="https://" className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
             </div>
             <label className="mt-3 block text-sm">榜单、播放、互动等指标（JSON，可选）
-              <textarea value={metrics} onChange={e=>setMetrics(e.target.value)} rows={3} placeholder='例如：{"榜单":"TOP20","点赞":"公开页面显示值"}' className="mt-1 w-full rounded-lg bg-black/20 p-3 font-mono text-xs" />
+              <textarea value={metrics} onChange={e=>setMetrics(e.target.value)} rows={3} placeholder='例如：{"views":12000,"plays":8000,"likes":900,"comments":120,"shares":80,"saves":40}' className="mt-1 w-full rounded-lg bg-black/20 p-3 font-mono text-xs" />
             </label>
             <button disabled={busy} onClick={()=>void addEvidence()} className="mt-3 rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">保存待核验证据</button>
           </div>
