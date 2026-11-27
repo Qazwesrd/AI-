@@ -110,6 +110,57 @@ export default function PromptResearchPage() {
 
   const currentPrompt = prompts.find(p => String(p.id) === selectedPrompt) || null;
 
+  function suggestPublicFeedAdapter() {
+    const raw = sourceUrl.trim();
+    if (!raw) { setMessage("请先粘贴公开频道、社区或 RSS 页面地址。"); return; }
+    try {
+      const url = new URL(raw);
+      if (url.protocol !== "https:") { setMessage("只接受 HTTPS 公开来源。"); return; }
+      let feedUrl = url.toString();
+      let suggestedName = sourceName.trim();
+      const host = url.hostname.toLowerCase().replace(/^www\\./, "");
+      if (host === "reddit.com") {
+        const subreddit = url.pathname.match(/^\\/r\\/([A-Za-z0-9_]+)\\/?$/);
+        const user = url.pathname.match(/^\\/user\\/([A-Za-z0-9_-]+)\\/?$/);
+        if (subreddit) {
+          feedUrl = `https://www.reddit.com/r/${subreddit[1]}/new/.rss`;
+          suggestedName ||= `Reddit · r/${subreddit[1]} 最新公开内容`;
+        } else if (user) {
+          feedUrl = `https://www.reddit.com/user/${user[1]}/submitted/.rss`;
+          suggestedName ||= `Reddit · ${user[1]} 公开投稿`;
+        } else if (/\\.(rss|xml)$/i.test(url.pathname)) {
+          suggestedName ||= `Reddit · ${url.pathname.split("/").filter(Boolean).slice(-1)[0] || "公开订阅"}`;
+        } else {
+          setMessage("已识别 Reddit，但请粘贴具体 subreddit 或用户主页地址，才能生成对应 RSS。");
+          return;
+        }
+      } else if (host === "youtube.com" || host === "m.youtube.com") {
+        const channel = url.pathname.match(/^\\/channel\\/(UC[A-Za-z0-9_-]{20,})\\/?$/);
+        if (channel) {
+          feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channel[1]}`;
+          suggestedName ||= `YouTube · ${channel[1]}`;
+        } else if (url.pathname === "/feeds/videos.xml" && url.searchParams.get("channel_id")) {
+          suggestedName ||= `YouTube · ${url.searchParams.get("channel_id")}`;
+        } else {
+          setMessage("YouTube 自动适配需要频道 ID（/channel/UC…）；@用户名链接暂不能可靠反查频道 ID，请粘贴频道 RSS 地址。");
+          return;
+        }
+      } else {
+        suggestedName ||= `${sourcePlatform} · ${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
+        if (!/\\.(rss|xml)$/i.test(url.pathname) && !/feed|atom/i.test(url.pathname + url.search)) {
+          setSourceName(suggestedName);
+          setMessage("已自动生成来源名称。该平台地址未发现可安全推导的官方 RSS/Atom 规则，请粘贴平台实际公开订阅地址后再添加；不会猜造地址。");
+          return;
+        }
+      }
+      setSourceName(suggestedName);
+      setSourceUrl(feedUrl);
+      setMessage("已生成来源名称和 RSS/Atom 地址。点击“添加公开来源”时还会进行 HTTPS、域名和订阅地址校验；首次采集成功后才能确认内容可用。");
+    } catch {
+      setMessage("地址格式无效，请粘贴完整的 HTTPS 公开页面或 RSS/Atom 地址。");
+    }
+  }
+
   async function addPublicSource() {
     if (!sourceName.trim() || !sourceUrl.trim()) return setMessage("请填写来源名称和公开 RSS/Atom HTTPS 地址。");
     setBusy(true);
@@ -280,9 +331,10 @@ export default function PromptResearchPage() {
             </label>
             <div className="flex items-end"><button disabled={busy} onClick={()=>void addPublicSource()} className="w-full rounded-lg bg-fuchsia-600 px-3 py-2 text-sm font-semibold disabled:opacity-50">添加公开来源</button></div>
           </div>
-          <label className="mt-3 block text-xs">公开 RSS / Atom HTTPS 地址
-            <input value={sourceUrl} onChange={e=>setSourceUrl(e.target.value)} placeholder="https://www.youtube.com/feeds/videos.xml?channel_id=..." className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/>
+          <label className="mt-3 block text-xs">公开频道 / 社区 / RSS 页面地址
+            <input value={sourceUrl} onChange={e=>setSourceUrl(e.target.value)} placeholder="粘贴 YouTube 频道 ID 页面、Reddit 社区页或实际 RSS/Atom 地址" className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/>
           </label>
+          <button disabled={busy} onClick={suggestPublicFeedAdapter} className="mt-2 rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">自动识别来源名称并生成 RSS/Atom 地址</button>
           <div className="mt-4 space-y-2">
             {sources.map(source=><div key={source.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
               <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">{source.name}</strong><span className="text-xs text-cyan-200">{source.platform}</span><span className={source.enabled?"text-xs text-emerald-300":"text-xs text-white/40"}>{source.enabled?"自动采集已启用":"已暂停"}</span></div>
