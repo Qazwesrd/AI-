@@ -509,3 +509,70 @@ def reject_upgrade_candidate(candidate_id: int, data: CandidateDecisionInput, db
     db.refresh(candidate)
     return {"success": True, "item": candidate_dict(candidate),
             "message": "候选已拒绝，正式提示词保持不变。"}
+
+
+@router.get("/research/trends/ranking")
+def research_trend_ranking(db: Session = Depends(get_db)):
+    """Rank manually captured, human-verified public trend evidence without treating it as hidden prompts."""
+    import math
+    from collections import defaultdict
+    from datetime import date
+
+    rows = db.query(TrendEvidence).filter(TrendEvidence.is_verified.is_(True)).all()
+    groups = defaultdict(list)
+    for row in rows:
+        # A title is a conservative cross-platform key; URL is retained as evidence, not used to merge platforms.
+        key = " ".join((row.work_title or "").casefold().split())
+        if key:
+            groups[key].append(row)
+
+    today = date.today()
+    ranking = []
+    metric_weights = {"views": 1.0, "plays": 1.0, "likes": 1.4, "comments": 2.2, "shares": 2.6, "saves": 2.0}
+    for key, evidence_rows in groups.items():
+        platforms = sorted({x.platform.strip() for x in evidence_rows if x.platform.strip()})
+        dates = sorted({(x.observed_at or "")[:10] for x in evidence_rows if len(x.observed_at or "") >= 10})
+        # Cross-platform and repeated-day evidence reduces single-source noise.
+        if len(platforms) < 2 or len(dates) < 2:
+            continue
+        weighted_samples = []
+        for row in evidence_rows:
+            metrics = row.metric_summary if isinstance(row.metric_summary, dict) else {}
+            engagement = 0.0
+            for metric, weight in metric_weights.items():
+                try:
+                    value = max(0.0, float(metrics.get(metric, 0) or 0))
+                except (TypeError, ValueError):
+                    value = 0.0
+                engagement += weight * math.log1p(value)
+            try:
+                observed = date.fromisoformat((row.observed_at or "")[:10])
+                age_days = max(0, (today - observed).days)
+                recency = math.pow(0.5, age_days / 14.0)
+            except ValueError:
+                recency = 0.25
+            weighted_samples.append(engagement * recency)
+        average_signal = sum(weighted_samples) / max(1, len(weighted_samples))
+        score = average_signal + min(len(platforms), 5) * 2.0 + min(len(dates), 7) * 1.25
+        latest = max(dates) if dates else ""
+        ranking.append({
+            "work_title": evidence_rows[0].work_title,
+            "platforms": platforms,
+            "platform_count": len(platforms),
+            "observed_days": dates,
+            "sample_count": len(evidence_rows),
+            "latest_observed_at": latest,
+            "trend_score": round(score, 3),
+            "evidence_types": sorted({x.evidence_type for x in evidence_rows}),
+            "contains_public_prompt": any("提示词" in (x.evidence_type or "") for x in evidence_rows),
+            "evidence_ids": [x.id for x in evidence_rows],
+            "score_method": "公开互动指标对数加权 + 14天半衰期 + 跨平台/跨日期加权；不是平台官方热度分",
+        })
+    ranking.sort(key=lambda x: (x["trend_score"], x["latest_observed_at"]), reverse=True)
+    for index, item in enumerate(ranking, start=1):
+        item["rank"] = index
+    return {
+        "items": ranking,
+        "verified_evidence_count": len(rows),
+        "notice": "只统计人工核验的公开证据；作品热度证据不等于作品实际使用的内部提示词。当前采集仍需人工录入，尚未接入各平台自动抓取。",
+    }
