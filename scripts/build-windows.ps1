@@ -204,7 +204,7 @@ try {
     & $ElectronCommand $CaptureScript $ManualDir
     Check-ExitCode "Capturing screenshots and rendering the PDF manual failed"
 
-    $ExpectedScreenshots = 17
+    $ExpectedScreenshots = 20
     $CapturedScreenshots = @(Get-ChildItem $ManualImageDir -File -Filter "*.png")
     if ($CapturedScreenshots.Count -ne $ExpectedScreenshots) {
         throw "Expected $ExpectedScreenshots real application screenshots; captured $($CapturedScreenshots.Count)."
