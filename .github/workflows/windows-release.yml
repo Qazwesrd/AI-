@@ -12,6 +12,7 @@ on:
       - "scripts/test-desktop-only-update.ps1"
       - "docs/manual/**"
       - ".github/workflows/windows-release.yml"
+      - ".github/workflows/build-full-offline-installer.yml"
   pull_request:
     paths:
       - "apps/**"
