@@ -58,10 +58,6 @@
       {
         "to": "media/ffprobe.exe",
         "from": "build-resources/ffmpeg/ffprobe.exe"
-      },
-      {
-        "to": "manual/AI漫剧制作大师-使用说明书.pdf",
-        "from": "../../docs/manual/AI漫剧制作大师-使用说明书.pdf"
       }
     ],
     "win": {
