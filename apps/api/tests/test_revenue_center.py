@@ -30,9 +30,10 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertIn("不是平台实时余额", result["disclaimer"])
 
     def test_withdrawal_is_manual_record_and_arrival_requires_date(self):
-        item = create_withdrawal(WithdrawalInput(platform="YouTube", amount=50, currency="USD", fee_amount=2), self.db)["item"]
+        created = create_withdrawal(WithdrawalInput(platform="YouTube", amount=50, currency="USD", fee_amount=2), self.db)
+        item = created["item"]
         self.assertEqual(item["status"], "planned")
-        self.assertIn("不会发起资金操作", create_withdrawal(item_input := WithdrawalInput(platform="Douyin", amount=1), self.db)["message"])
+        self.assertIn("不会发起资金操作", created["message"])
         with self.assertRaises(Exception):
             update_withdrawal(item["id"], WithdrawalStatusInput(status="paid"), self.db)
         updated = update_withdrawal(item["id"], WithdrawalStatusInput(status="paid", arrived_at="2026-11-27"), self.db)
