@@ -31,7 +31,7 @@ const features = [
     title: "三维视觉素材",
     description: "生成人物三视图、场景与道具视觉素材，保持角色形象一致。",
     action: "开始生成",
-    href: "/visual-studio"
+    href: "/visual-studio?category=characters&mode=3d"
   },
   {
     number: "05",
@@ -57,10 +57,10 @@ const navigation = [
     items: [
       ["✍️", "小说创作", "/novels"],
       ["📁", "项目管理", "/novels"],
-      ["👤", "人物角色", "/visual-studio"],
+      ["👤", "人物角色", "/visual-studio?category=characters"],
       ["🧬", "人物与素材状态追踪", "/asset-timeline"],
-      ["🏞️", "场景设定", "/visual-studio"],
-      ["💎", "道具素材", "/visual-studio"],
+      ["🏞️", "场景设定", "/visual-studio?category=scenes"],
+      ["💎", "道具素材", "/visual-studio?category=props"],
       ["🌌", "世界观设定", "/novels"]
     ]
   },
@@ -72,7 +72,7 @@ const navigation = [
       ["✂️", "AI视频剪辑", "/video-editor"],
       ["🎞️", "本地视频工作台", "/media-studio"],
       ["📜", "剧本与分镜", "/storyboard"],
-      ["🧊", "三维素材生成", "/visual-studio"],
+      ["🧊", "三维素材生成", "/visual-studio?category=characters&mode=3d"],
       ["🧭", "统一任务中心", "/tasks"],
       ["🌐", "AI网页工具协同中心", "/ai-tools"],
       ["🤝", "网页版 AI 协作执行中心", "/ai-collaboration"],
