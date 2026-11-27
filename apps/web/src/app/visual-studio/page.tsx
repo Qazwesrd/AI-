@@ -275,6 +275,7 @@ export default function VisualStudioPage() {
       if (!response.ok) throw new Error(result.detail || "本地图片生成任务提交失败");
       setLocalPromptId(result.prompt_id || "");
       setLocalTaskStatus(result.status || "queued");
+      setLocalTaskImages([]);
       setMessage(`已提交本机 ComfyUI 图片任务：${result.prompt_id}。未调用云端 API，也未产生付费调用。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "本地图片生成任务提交失败");
