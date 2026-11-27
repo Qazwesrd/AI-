@@ -351,6 +351,7 @@ class EvidenceVerifyInput(BaseModel):
     verification_note: str = Field(min_length=3, max_length=5000)
     evidence_type: Optional[str] = Field(default=None, max_length=100)
     genre: Optional[str] = Field(default=None, max_length=100)
+    metric_summary: Optional[dict] = None
 
 
 class UpgradeCandidateInput(BaseModel):
@@ -427,6 +428,19 @@ def verify_trend_evidence(evidence_id: int, data: EvidenceVerifyInput, db: Sessi
         row.evidence_type = data.evidence_type
     if data.genre is not None:
         row.genre = data.genre.strip() or "未分类"
+    if data.metric_summary is not None:
+        metrics = dict(row.metric_summary) if isinstance(row.metric_summary, dict) else {}
+        allowed_metrics = {"views", "plays", "reads", "likes", "comments", "shares", "saves", "favorites", "bookmarks", "interactions"}
+        for key, value in data.metric_summary.items():
+            if key not in allowed_metrics:
+                continue
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(numeric) and numeric >= 0:
+                metrics[key] = numeric
+        row.metric_summary = metrics
     row.is_verified = True
     row.verification_note = data.verification_note.strip()
     row.reliability = "人工已核验"
