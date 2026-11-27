@@ -108,6 +108,29 @@ class NovelPublishingTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 create_translation(self.novel.id,TranslationCreateInput(target_language="en",model_name="missing-model"),self.db)
 
+    @patch("app.routers.novel_publishing._installed_models", return_value=[{"name":"local-translate-model"}])
+    @patch("app.routers.novel_publishing._ollama_request", return_value={"response":"A translated chapter."})
+    def test_completed_translation_can_be_used_for_overseas_distribution(self, mock_generate, mock_models):
+        created=create_translation(
+            self.novel.id,
+            TranslationCreateInput(target_language="en",model_name="local-translate-model"),
+            self.db,
+        )
+        translation_id=created["item"]["id"]
+        translate_next_chunk(translation_id,self.db)
+        package=create_distribution_package(
+            self.novel.id,
+            DistributionPackageInput(
+                platform_id="royalroad",language="en",translation_id=translation_id,
+                rights_confirmed=True,ai_assistance_disclosed=True,
+            ),
+            self.db,
+        )["item"]
+        row=self.db.query(NovelDistributionPackage).filter_by(id=package["id"]).one()
+        self.assertEqual(row.translation_id,translation_id)
+        self.assertIn("A translated chapter.",row.manuscript_markdown)
+        self.assertNotIn("这是原创小说正文。",row.manuscript_markdown)
+
     def test_published_submission_requires_real_platform_url(self):
         package = create_distribution_package(
             self.novel.id,
