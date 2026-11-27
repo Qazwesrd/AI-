@@ -69,8 +69,9 @@ export default function RevenueCenterPage() {
   async function syncConnection(id:number){
     setBusy(true);
     try{
-      const result=await api<{message:string;inserted:number;updated:number;analytics_days:number;payment_records:number}>(`/api/revenue/oauth/connections/${id}/sync`,{method:"POST"});
-      setMessage(`${result.message} 新增 ${result.inserted} 条、更新 ${result.updated} 条；YouTube分析 ${result.analytics_days} 天，AdSense付款记录 ${result.payment_records} 条。`);
+      const result=await api<{message:string;inserted:number;updated:number;analytics_days:number;payment_records:number;skipped_currency_count:number;analytics_warning?:string;adsense_warning?:string}>(`/api/revenue/oauth/connections/${id}/sync`,{method:"POST"});
+      const warnings=[result.analytics_warning,result.adsense_warning].filter(Boolean).join("；");
+      setMessage(`${result.message} 新增 ${result.inserted} 条、更新 ${result.updated} 条；YouTube分析 ${result.analytics_days} 天，AdSense付款记录 ${result.payment_records} 条；币种无法可靠识别而跳过 ${result.skipped_currency_count||0} 条。`+(warnings?` 同步警告：${warnings}`:""));
       await load();
     }catch(e){setMessage(e instanceof Error?e.message:"真实收入同步失败");}
     finally{setBusy(false);}
