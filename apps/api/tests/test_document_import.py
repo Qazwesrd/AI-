@@ -155,7 +155,7 @@ class DocumentImportTests(unittest.TestCase):
         self.assertEqual(extract_document_text("novel.txt", "正文内容".encode("utf-8")), "正文内容")
 
     def test_rtf_document_import(self):
-        raw = br"{\rtf1\ansi 第一章\par RTF 正文}"
+        raw = r"{\rtf1\ansi 第一章\par RTF 正文}".encode("utf-8")
         self.assertIn("RTF 正文", extract_document_text("novel.rtf", raw))
 
     def test_pdf_without_text_is_rejected_with_clear_message(self):
