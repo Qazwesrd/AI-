@@ -807,7 +807,7 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
         "处理节点必须连到 VHS_VideoCombine/SaveVideo 视频输出节点。"
         "COMBO 输入只能使用清单中的 choices；有 default 时优先使用 default。将目标宽度、高度、帧数、FPS 和步数写入名称对应的数值输入，不能只把它们留在说明文字里。"
         "文本提示词必须写入实际文本输入，不要把用户提示词写到文件路径字段。"
-        "没有可用模型选择、必需图像输入或关键节点时，不要猜测，返回 nodes 为空数组。"
+        "没有可用模型选择、所选模式必需的输入或关键节点时，不要猜测，返回 nodes 为空数组；纯文本生成模式不应强行要求参考图。"
     )
     user_prompt = (
         "任务模式：" + data.mode + "\n"
