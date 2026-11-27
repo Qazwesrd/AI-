@@ -5,13 +5,13 @@ import { useEffect, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 
 type Prompt = { id: number; name: string; current_version: number; content: string };
-type Evidence = { id: number; platform: string; work_title: string; work_url: string; observed_at: string; metric_summary: Record<string, unknown>; reliability: string; is_verified: boolean; verification_note: string };
+type Evidence = { id: number; platform: string; work_title: string; genre:string; work_url: string; observed_at: string; metric_summary: Record<string, unknown>; reliability: string; is_verified: boolean; verification_note: string };
 type Candidate = { id: number; prompt_id: number; base_version: number; proposed_name: string; proposed_content: string; change_reason: string; expected_impact: string; evidence_ids: number[]; status: string; decision_note: string };
 type TrendRank = { rank:number; work_title:string; platforms:string[]; platform_count:number; observed_days:string[]; sample_count:number; latest_observed_at:string; trend_score:number; evidence_types:string[]; contains_public_prompt:boolean; evidence_ids:number[]; score_method:string };
 type ResearchSource = { id:number; platform:string; name:string; feed_url:string; enabled:boolean; refresh_interval_minutes:number; last_collected_at:string|null; last_status:string; last_error:string };
 type CollectionRun = { id:number; source_id:number; status:string; discovered_count:number; inserted_count:number; duplicate_count:number; error_message:string; started_at:string|null };
 type CategoryRankItem = {rank:number;title:string;platforms?:string[];observed_days?:string[];sample_count?:number;score:number;test_count?:number;version?:number;score_basis?:string};
-type CategoryRankings = {drama:{title:string;items:CategoryRankItem[];verified_evidence_count:number};prompt:{title:string;items:CategoryRankItem[];public_share_items:CategoryRankItem[];verified_evidence_count:number};screenplay:{title:string;items:CategoryRankItem[];verified_evidence_count:number}};
+type CategoryRankings = {drama:{title:string;items:CategoryRankItem[];genre_items:{rank:number;title:string;work_count:number;sample_count:number;score:number;platforms:string[]}[];verified_evidence_count:number};prompt:{title:string;items:CategoryRankItem[];public_share_items:CategoryRankItem[];verified_evidence_count:number};screenplay:{title:string;items:CategoryRankItem[];verified_evidence_count:number}};
 
 export default function PromptResearchPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -35,6 +35,8 @@ export default function PromptResearchPage() {
   const [metrics, setMetrics] = useState("");
   const [verifyNote, setVerifyNote] = useState("已人工核对公开页面、榜单位置及采样日期。");
   const [evidenceClassifications,setEvidenceClassifications]=useState<Record<number,string>>({});
+  const [evidenceGenres,setEvidenceGenres]=useState<Record<number,string>>({});
+  const [genre,setGenre]=useState("未分类");
   const [candidateName, setCandidateName] = useState("");
   const [candidateContent, setCandidateContent] = useState("");
   const [reason, setReason] = useState("");
@@ -145,9 +147,9 @@ export default function PromptResearchPage() {
       if (metrics.trim()) metric_summary = JSON.parse(metrics);
       await api("/api/prompts/research/evidence", {
         method: "POST", headers: {"Content-Type":"application/json"},
-        body: JSON.stringify({platform, work_title:workTitle, work_url:workUrl, observed_at:observedAt, metric_summary, evidence_type:evidenceType}),
+        body: JSON.stringify({platform, work_title:workTitle, genre, work_url:workUrl, observed_at:observedAt, metric_summary, evidence_type:evidenceType}),
       });
-      setWorkTitle(""); setWorkUrl(""); setMetrics("");
+      setWorkTitle(""); setWorkUrl(""); setMetrics(""); setGenre("未分类");
       setMessage("证据已保存为待核验；系统不会仅凭一次榜单记录认定爆款。");
       await load();
     } catch (error) { setMessage(error instanceof Error ? error.message : "保存证据失败；指标请使用合法 JSON"); }
@@ -159,7 +161,7 @@ export default function PromptResearchPage() {
     try {
       await api(`/api/prompts/research/evidence/${id}/verify`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({verification_note:verifyNote,evidence_type:evidenceClassifications[id]||"漫剧作品趋势证据"}),
+        body:JSON.stringify({verification_note:verifyNote,evidence_type:evidenceClassifications[id]||"漫剧作品趋势证据",genre:evidenceGenres[id]||"未分类"}),
       });
       setMessage("证据已标记为人工核验。请确保来源、日期和指标真实可追溯。");
       await load();
@@ -269,6 +271,8 @@ export default function PromptResearchPage() {
             const current=categoryRankings[rankTab];
             return <div className="mt-4 overflow-x-auto">
               <div className="mb-2 text-xs text-white/50">{current.title} · 已核验证据 {current.verified_evidence_count||0} 条</div>
+              {rankTab==="drama"&&<div className="mb-4"><h3 className="mb-2 text-sm font-semibold">漫剧题材类别排名</h3><table className="w-full min-w-[520px] text-left text-sm"><thead className="text-xs text-white/50"><tr><th className="p-2">排名</th><th className="p-2">题材类别</th><th className="p-2">作品数</th><th className="p-2">样本数</th><th className="p-2">平均趋势分</th><th className="p-2">覆盖平台</th></tr></thead><tbody>{categoryRankings.drama.genre_items.map(item=><tr key={item.title} className="border-t border-white/10"><td className="p-2 font-bold">{item.rank}</td><td className="p-2">{item.title}</td><td className="p-2">{item.work_count}</td><td className="p-2">{item.sample_count}</td><td className="p-2 text-cyan-200">{item.score}</td><td className="p-2 text-xs">{item.platforms.join("、")}</td></tr>)}</tbody></table>{!categoryRankings.drama.genre_items.length&&<p className="py-3 text-xs text-white/40">尚无足够的已核验题材样本。</p>}</div>}
+              <h3 className="mb-2 text-sm font-semibold">{rankTab==="drama"?"漫剧作品热度排名":current.title}</h3>
               <table className="w-full min-w-[620px] text-left text-sm">
                 <thead className="text-xs text-white/50"><tr><th className="p-2">排名</th><th className="p-2">名称</th><th className="p-2">平台/版本</th><th className="p-2">样本</th><th className="p-2">评分</th><th className="p-2">评分口径</th></tr></thead>
                 <tbody>{current.items.map(item=><tr key={item.title+"-"+(item.version||0)} className="border-t border-white/10">
@@ -313,6 +317,7 @@ export default function PromptResearchPage() {
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <label className="text-sm">平台 / 来源<input value={platform} onChange={e=>setPlatform(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
               <label className="text-sm">作品名称<input value={workTitle} onChange={e=>setWorkTitle(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
+              <label className="text-sm">漫剧/剧本题材<select value={genre} onChange={e=>setGenre(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2">{["未分类","玄幻","仙侠","都市","言情","悬疑","科幻","历史","武侠","末日","校园","其他"].map(x=><option key={x}>{x}</option>)}</select></label>
               <label className="text-sm">采样日期<input type="date" value={observedAt} onChange={e=>setObservedAt(e.target.value)} className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
               <label className="text-sm">公开页面链接<input value={workUrl} onChange={e=>setWorkUrl(e.target.value)} placeholder="https://" className="mt-1 w-full rounded-lg bg-black/20 p-2" /></label>
             </div>
@@ -329,7 +334,7 @@ export default function PromptResearchPage() {
             <div className="mt-3 max-h-[390px] space-y-2 overflow-y-auto">
               {evidence.map(item=><div key={item.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{item.work_title}</strong><span className={item.is_verified?"text-xs text-emerald-300":"text-xs text-amber-200"}>{item.is_verified?"已人工核验":"待核验"}</span></div>
-                <p className="mt-1 text-xs text-white/60">{item.platform} · {item.observed_at} · {item.reliability}</p>
+                <p className="mt-1 text-xs text-white/60">{item.platform} · {item.genre||"未分类"} · {item.observed_at} · {item.reliability}</p>
                 {item.work_url && <a href={item.work_url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-cyan-200 underline">查看公开来源</a>}
                 <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] text-white/50">{JSON.stringify(item.metric_summary)}</pre>
                 {!item.is_verified && <div className="mt-2 flex flex-wrap items-center gap-2"><select value={evidenceClassifications[item.id]||"漫剧作品趋势证据"} onChange={event=>setEvidenceClassifications(old=>({...old,[item.id]:event.target.value}))} className="rounded-lg bg-slate-900 p-2 text-xs"><option value="漫剧作品趋势证据">归入漫剧作品榜</option><option value="剧本作品证据">归入剧本榜</option><option value="公开提示词分享">归入提示词公开分享热度</option><option value="创作案例证据">归入创作案例</option></select><button disabled={busy} onClick={()=>void verifyEvidence(item.id)} className="rounded-lg border border-amber-200/30 px-3 py-1 text-xs text-amber-100">核验并分类</button></div>}
