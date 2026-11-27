@@ -34,6 +34,7 @@ export default function PromptResearchPage() {
   const [observedAt, setObservedAt] = useState("");
   const [metrics, setMetrics] = useState("");
   const [verifyNote, setVerifyNote] = useState("已人工核对公开页面、榜单位置及采样日期。");
+  const [evidenceClassifications,setEvidenceClassifications]=useState<Record<number,string>>({});
   const [candidateName, setCandidateName] = useState("");
   const [candidateContent, setCandidateContent] = useState("");
   const [reason, setReason] = useState("");
@@ -158,7 +159,7 @@ export default function PromptResearchPage() {
     try {
       await api(`/api/prompts/research/evidence/${id}/verify`, {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({verification_note:verifyNote}),
+        body:JSON.stringify({verification_note:verifyNote,evidence_type:evidenceClassifications[id]||"漫剧作品趋势证据"}),
       });
       setMessage("证据已标记为人工核验。请确保来源、日期和指标真实可追溯。");
       await load();
@@ -331,7 +332,7 @@ export default function PromptResearchPage() {
                 <p className="mt-1 text-xs text-white/60">{item.platform} · {item.observed_at} · {item.reliability}</p>
                 {item.work_url && <a href={item.work_url} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-cyan-200 underline">查看公开来源</a>}
                 <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] text-white/50">{JSON.stringify(item.metric_summary)}</pre>
-                {!item.is_verified && <button disabled={busy} onClick={()=>void verifyEvidence(item.id)} className="mt-2 rounded-lg border border-amber-200/30 px-3 py-1 text-xs text-amber-100">人工核验此条</button>}
+                {!item.is_verified && <div className="mt-2 flex flex-wrap items-center gap-2"><select value={evidenceClassifications[item.id]||"漫剧作品趋势证据"} onChange={event=>setEvidenceClassifications(old=>({...old,[item.id]:event.target.value}))} className="rounded-lg bg-slate-900 p-2 text-xs"><option value="漫剧作品趋势证据">归入漫剧作品榜</option><option value="剧本作品证据">归入剧本榜</option><option value="公开提示词分享">归入提示词公开分享热度</option><option value="创作案例证据">归入创作案例</option></select><button disabled={busy} onClick={()=>void verifyEvidence(item.id)} className="rounded-lg border border-amber-200/30 px-3 py-1 text-xs text-amber-100">核验并分类</button></div>}
               </div>)}
               {!evidence.length && <p className="py-8 text-center text-sm text-white/40">还没有研究证据。</p>}
             </div>
