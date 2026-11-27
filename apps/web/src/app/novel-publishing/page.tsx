@@ -9,7 +9,7 @@ type Package = {id:number;novel_id:number;translation_id:number|null;platform_id
 type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
 type LocalModel = {name:string};
-type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;chapters?:{chapter_number:number;title:string;translated_text:string;status:string;chunks?:{index:number;source:string;translation:string;status:string}[]}[]};
+type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;glossary?:Record<string,string>;chapters?:{chapter_number:number;title:string;translated_text:string;status:string;chunks?:{index:number;source:string;translation:string;status:string}[]}[]};
 
 export default function NovelPublishingPage(){
   const [novels,setNovels]=useState<Novel[]>([]);
@@ -106,6 +106,7 @@ export default function NovelPublishingPage(){
   async function refreshTranslation(id:number){
     const result=await api<Translation>(`/api/novel-publishing/translations/${id}`);
     setActiveTranslation(result);
+    setTranslationGlossary(JSON.stringify(result.glossary||{},null,2));
     const list=await api<{items:Translation[]}>(`/api/novel-publishing/translations?novel_id=${novelId}`);
     setTranslations(list.items||[]);
     return result;
@@ -131,6 +132,21 @@ export default function NovelPublishingPage(){
       }
       setMessage(current.status==="completed"?"全文翻译完成。可下载译本并制作目标平台发行稿件。":"原文已变化，翻译已暂停，请重新创建译本。");
     }catch(e){setMessage(e instanceof Error?e.message:"全文翻译中断；已完成部分会保留，可稍后继续。");}
+    finally{setBusy(false);}
+  }
+
+  async function saveTranslationGlossary(translationId:number){
+    let glossary:Record<string,string>={};
+    try{glossary=JSON.parse(translationGlossary||"{}");if(!glossary||Array.isArray(glossary)||typeof glossary!=="object")throw new Error("术语表必须是 JSON 对象");}
+    catch{return setMessage("术语表 JSON 格式不正确，例如：{\"主角\":\"Hero\"}");}
+    setBusy(true);
+    try{
+      const result=await api<{message:string}>(`/api/novel-publishing/translations/${translationId}/glossary`,{
+        method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({glossary}),
+      });
+      await refreshTranslation(translationId);
+      setMessage(result.message);
+    }catch(e){setMessage(e instanceof Error?e.message:"保存术语表失败");}
     finally{setBusy(false);}
   }
 
@@ -224,7 +240,7 @@ export default function NovelPublishingPage(){
           <label className="text-sm">本机翻译模型<select className={field+" mt-1"} value={translationModel} onChange={e=>setTranslationModel(e.target.value)}><option value="">请选择已安装模型</option>{localModels.map(m=><option key={m.name} value={m.name}>{m.name}</option>)}</select></label>
         </div>
         <label className="mt-3 block text-sm">术语表（JSON，可选）<textarea className={field+" mt-1 min-h-20 font-mono text-xs"} value={translationGlossary} onChange={e=>setTranslationGlossary(e.target.value)} placeholder='{"人物名":"Character Name","圣衣":"Cloth"}'/></label>
-        <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy||!novelId||!translationModel} onClick={()=>void createTranslation()} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">创建独立译本</button></div>
+        <div className="mt-3 flex flex-wrap gap-2"><button disabled={busy||!novelId||!translationModel} onClick={()=>void createTranslation()} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">创建独立译本</button>{activeTranslation&&<button disabled={busy} onClick={()=>void saveTranslationGlossary(activeTranslation.id)} className="rounded-lg border border-cyan-300/30 px-4 py-2 text-sm disabled:opacity-40">保存当前译本术语表</button>}</div>
         <div className="mt-4 space-y-2">{translations.map(item=><div key={item.id} className="rounded-xl border border-white/10 bg-black/20 p-3">
           <div className="flex flex-wrap items-center justify-between gap-2"><strong className="text-sm">{item.target_language_name}译本 · #{item.id}</strong><span className="text-xs text-cyan-200">{item.completed_chunks}/{item.total_chunks} 段 · {item.progress_percent}%</span></div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-emerald-500" style={{width:item.progress_percent+"%"}}/></div>
