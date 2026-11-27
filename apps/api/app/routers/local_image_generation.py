@@ -642,9 +642,17 @@ def get_local_image_task(prompt_id: str):
                     "type": image.get("type", "output"),
                 })
     completed = status_info.get("completed") is True
+    status_text = str(status_info.get("status_str") or status_info.get("status") or "").lower()
+    failed = status_text in {"error", "failed", "failure"}
+    messages = item.get("messages") if isinstance(item.get("messages"), list) else []
+    error_text = ""
+    if failed:
+        # Return a concise diagnostic only; never expose arbitrary server paths or tracebacks.
+        error_text = "ComfyUI 报告任务执行失败，请检查本机 ComfyUI 控制台日志和模型/节点配置。"
     return {
         "prompt_id": prompt_id,
-        "status": "completed" if completed else "running",
+        "status": "completed" if completed else ("failed" if failed else "running"),
+        "error": error_text,
         "images": images[:20] if completed else [],
         "local_only": True,
         "network_used": False,
