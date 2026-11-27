@@ -777,7 +777,7 @@ def analyze_chapter_asset_evolution_locally(
             "prompt": user_prompt,
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.1, "num_predict": 4096},
+            "options": {"temperature": 0.1, "num_predict": 4096, "num_ctx": 8192},
         }, timeout=600.0)
         suggestions = _parse_local_evolution_response(result.get("response") if isinstance(result, dict) else "")
     except HTTPException:
