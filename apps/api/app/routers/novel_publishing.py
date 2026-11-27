@@ -152,8 +152,8 @@ def create_distribution_package(novel_id: int, data: DistributionPackageInput, d
         chapters = [
             type("TranslatedChapter",(),{
                 "title":chapter["title"],"chapter_number":chapter["chapter_number"],
-                "content":"\\n\\n".join(chunk["translation"] for chunk in chapter["chunks"]),
-                "word_count":len(re.sub(r"\\s+","", "\\n".join(chunk["translation"] for chunk in chapter["chunks"]))),
+                "content":"\n\n".join(chunk["translation"] for chunk in chapter["chunks"]),
+                "word_count":len(re.sub(r"\s+","", "\n".join(chunk["translation"] for chunk in chapter["chunks"]))),
             })()
             for chapter in (translation.chapters_data or [])
         ]
