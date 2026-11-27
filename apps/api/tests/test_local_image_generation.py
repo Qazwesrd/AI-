@@ -293,6 +293,32 @@ class LocalImageTaskTerminalStatusTests(unittest.TestCase):
         self.assertNotIn("private local path", result["error"])
         self.assertEqual(result["images"], [])
 
+    def test_execution_error_message_wins_over_inconsistent_completed_flag(self):
+        history = {
+            "c" * 32: {
+                "status": {"completed": True, "status_str": "running"},
+                "outputs": {"9": {"images": [{"filename": "partial.png", "subfolder": "", "type": "output"}]}},
+                "messages": [["execution_error", {"exception_message": "node failed"}]],
+            }
+        }
+        with patch("app.routers.local_image_generation._local_request", return_value=history):
+            result = get_local_image_task("c" * 32)
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["images"], [])
+
+    def test_success_status_string_is_recognized_as_completed(self):
+        history = {
+            "d" * 32: {
+                "status": {"completed": False, "status_str": "success"},
+                "outputs": {"9": {"images": [{"filename": "frame.png", "subfolder": "", "type": "output"}]}},
+                "messages": [],
+            }
+        }
+        with patch("app.routers.local_image_generation._local_request", return_value=history):
+            result = get_local_image_task("d" * 32)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["images"][0]["filename"], "frame.png")
+
 
 if __name__ == "__main__":
     unittest.main()
