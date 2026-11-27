@@ -1,4 +1,4 @@
-name: Build complete offline Windows installer
+name: Prepare desktop installer (AI resources already local)
 
 "on":
   push:
@@ -6,32 +6,18 @@ name: Build complete offline Windows installer
     paths:
       - '.github/workflows/build-full-offline-installer.yml'
       - '.github/workflows/windows-release.yml'
-      - 'scripts/install-offline-bundle.ps1'
-      - 'scripts/update-desktop-only.ps1'
-      - 'scripts/test-desktop-only-update.ps1'
   workflow_dispatch:
-    inputs:
-      resource_run_id:
-        description: "Verified full AI offline resource workflow run ID"
-        required: false
-        default: "45748921430"
-        type: string
 
 permissions:
   actions: read
   contents: read
 
 jobs:
-  assemble:
-    name: Assemble and verify complete offline package
+  desktop-installer:
+    name: Verify and publish desktop installer only
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
-      - name: Checkout installer scripts
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-
       - name: Find the successful desktop installer for this exact commit
         id: setup-run
         shell: pwsh
@@ -70,127 +56,32 @@ jobs:
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/setup-artifact
 
-      - name: Download AI offline resources
-        uses: actions/download-artifact@v4
-        with:
-          name: AI-Comic-Studio-AI-Offline-Resources-2026.11
-          run-id: ${{ inputs.resource_run_id || '45748921430' }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/resource-artifact
-
-      - name: Test installer scripts and verify offline resource contents
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          ./scripts/test-desktop-only-update.ps1
-          $parseErrors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD "scripts/install-offline-bundle.ps1"), [ref]$null, [ref]$parseErrors) | Out-Null
-          if ($parseErrors.Count -gt 0) { throw "Full offline installer script has PowerShell syntax errors: $($parseErrors -join '; ')" }
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $resourceRoot = Join-Path $env:RUNNER_TEMP "resource-artifact"
-          $resource = Get-ChildItem $resourceRoot -File -Filter "*AI离线资源包*.zip" | Select-Object -First 1
-          if (!$resource) { throw "AI offline resource ZIP is missing." }
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($resource.FullName)
-          try {
-            $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\','/') })
-            $required = @(
-              "resource-manifest.json",
-              "file-inventory.json",
-              "Ollama/runtime/ollama.exe",
-              "FFmpeg/ffmpeg.exe",
-              "FFmpeg/ffprobe.exe",
-              "VACE/models/wan2.1-v3-vace-1.3b-q4_0.gguf",
-              "VACE/models/umt5-xxl-encoder-q4_k_m.gguf",
-              "VACE/models/pig_wan_vae_fp32-f16.gguf"
-            )
-            foreach ($path in $required) {
-              if ($entries -notcontains $path) { throw "Offline resource archive is missing required entry: $path" }
-            }
-            if (!($entries | Where-Object { $_ -match '^Ollama/models/blobs/[^/]+$' })) { throw "Offline resource archive contains no Ollama model blobs." }
-            if (!($entries | Where-Object { $_ -match '^StableDiffusionCpp/.*/?sd-cli\.exe$' })) { throw "Offline resource archive lacks StableDiffusionCpp sd-cli.exe." }
-            $comfyPortable = ($entries -contains "ComfyUI/python_embeded/python.exe") -and ($entries -contains "ComfyUI/ComfyUI/main.py")
-            $comfyVenv = ($entries -contains "ComfyUI/venv/Scripts/python.exe") -and ($entries -contains "ComfyUI/main.py")
-            if (!$comfyPortable -and !$comfyVenv) { throw "Offline resource archive lacks a supported ComfyUI Python/main.py layout." }
-            Write-Host "Verified required Ollama, ComfyUI, FFmpeg, StableDiffusionCpp, VACE, manifest and inventory entries."
-          } finally { $archive.Dispose() }
-
-      - name: Prepare two separate delivery packages and verify source hashes
+      - name: Verify desktop installer and SHA-256
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $setupRoot = Join-Path $env:RUNNER_TEMP "setup-artifact"
-          $resourceRoot = Join-Path $env:RUNNER_TEMP "resource-artifact"
-          $output = Join-Path $PWD "offline-distribution"
-          $setupOut = Join-Path $output "desktop-installer"
-          $resourceOut = Join-Path $output "ai-resource-bundle"
-          New-Item -ItemType Directory -Path $setupOut,$resourceOut -Force | Out-Null
-
           $setupFiles = @(Get-ChildItem $setupRoot -File -Filter "*Setup*.exe")
           if ($setupFiles.Count -ne 1) { throw "Expected exactly one Windows Setup executable; found $($setupFiles.Count)." }
           $setup = $setupFiles[0]
-          $setupHashFile = Get-Item ($setup.FullName + ".sha256") -ErrorAction SilentlyContinue
-          if (!$setupHashFile) { throw "Windows Setup SHA-256 file is missing." }
-          $setupExpected = ((Get-Content $setupHashFile.FullName -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
-          $setupActual = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($setupExpected -ne $setupActual) { throw "Windows Setup SHA-256 verification failed." }
+          $hashFile = Get-Item ($setup.FullName + ".sha256") -ErrorAction SilentlyContinue
+          if (!$hashFile) { throw "Windows Setup SHA-256 file is missing." }
+          $expected = ((Get-Content $hashFile.FullName -Raw).Trim() -split '\\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($expected -ne $actual) { throw "Windows Setup SHA-256 verification failed." }
+          $output = Join-Path $PWD "desktop-installer"
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          Copy-Item $setup.FullName (Join-Path $output "AI漫剧制作大师-Setup.exe")
+          Copy-Item $hashFile.FullName (Join-Path $output "AI漫剧制作大师-Setup.exe.sha256")
+          Write-Host ("Verified desktop installer: {0:N2} MiB" -f ($setup.Length / 1MB))
+          Write-Host "AI resources are intentionally not downloaded or repackaged; the user already has them locally."
 
-          $resource = Get-ChildItem $resourceRoot -File -Filter "*AI离线资源包*.zip" | Select-Object -First 1
-          if (!$resource) { throw "AI offline resource ZIP is missing." }
-          $resourceHashFile = Get-Item ($resource.FullName + ".sha256") -ErrorAction SilentlyContinue
-          if (!$resourceHashFile) { throw "AI resource SHA-256 file is missing." }
-          $resourceExpected = ((Get-Content $resourceHashFile.FullName -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
-          $resourceActual = (Get-FileHash $resource.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($resourceExpected -ne $resourceActual) { throw "AI resource SHA-256 verification failed." }
-
-          Copy-Item $setup.FullName (Join-Path $setupOut "AI漫剧制作大师-Setup.exe")
-          Copy-Item $setupHashFile.FullName (Join-Path $setupOut "AI漫剧制作大师-Setup.exe.sha256")
-
-          Copy-Item $resource.FullName (Join-Path $resourceOut "AI漫剧大师-AI离线资源包-2026.11.zip")
-          Copy-Item $resourceHashFile.FullName (Join-Path $resourceOut "AI漫剧大师-AI离线资源包-2026.11.zip.sha256")
-          Copy-Item "scripts/install-offline-bundle.ps1" (Join-Path $resourceOut "一键离线安装.ps1")
-          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $resourceOut "仅更新桌面程序.ps1")
-
-          $readme = @(
-            "AI漫剧制作大师双文件离线交付",
-            "",
-            "交付物一：AI漫剧制作大师-Setup.exe（桌面软件本体安装器）",
-            "交付物二：AI漫剧大师-AI离线资源包-2026.11.zip（本地 AI 引擎和模型资源）",
-            "",
-            "两者分开下载、分开保存，不要把 AI 资源包重新打进桌面安装器。",
-            "首次安装：将两个主文件及其 SHA-256 校验文件放在同一目录；同时保留本目录内的一键离线安装.ps1，然后运行：",
-            "powershell -ExecutionPolicy Bypass -File .\一键离线安装.ps1",
-            "按提示分别选择程序安装目录和 AI 数据目录。两个目录必须独立。",
-            "安装脚本会校验资源包 SHA-256、ZIP 路径、磁盘空间和资源文件清单；只补充缺失的引擎目录，不覆盖现有引擎、模型或用户数据。",
-            "日后只更新桌面程序时运行：powershell -ExecutionPolicy Bypass -File .\仅更新桌面程序.ps1 -InstallerPath .\AI漫剧制作大师-Setup.exe",
-            "桌面更新脚本不会解压、替换或删除 AI 引擎、模型和项目数据。",
-            "",
-            "本地视频模型和集显性能须以目标电脑实测为准；CI CPU 测试不代表 Ryzen 7 4800U/Vega GPU 已获得性能认证。"
-          ) -join [Environment]::NewLine
-          Set-Content -LiteralPath (Join-Path $resourceOut "安装说明.txt") -Value $readme -Encoding utf8
-
-          Write-Host "Verified two independent deliverables."
-          Write-Host ("Desktop setup: {0:N2} MiB" -f ((Get-Item (Join-Path $setupOut "AI漫剧制作大师-Setup.exe")).Length / 1MB))
-          Write-Host ("AI resource bundle: {0:N2} GiB" -f ((Get-Item (Join-Path $resourceOut "AI漫剧大师-AI离线资源包-2026.11.zip")).Length / 1GB))
-
-      - name: Upload desktop application installer only
+      - name: Upload desktop installer only
         uses: actions/upload-artifact@v4
         with:
           name: AI-Comic-Studio-Desktop-Installer
           path: |
-            offline-distribution/desktop-installer/AI漫剧制作大师-Setup.exe
-            offline-distribution/desktop-installer/AI漫剧制作大师-Setup.exe.sha256
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload AI resource bundle separately
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI-Comic-Studio-AI-Resource-Bundle
-          path: |
-            offline-distribution/ai-resource-bundle/AI漫剧大师-AI离线资源包-2026.11.zip
-            offline-distribution/ai-resource-bundle/AI漫剧大师-AI离线资源包-2026.11.zip.sha256
-            offline-distribution/ai-resource-bundle/一键离线安装.ps1
-            offline-distribution/ai-resource-bundle/仅更新桌面程序.ps1
-            offline-distribution/ai-resource-bundle/安装说明.txt
+            desktop-installer/AI漫剧制作大师-Setup.exe
+            desktop-installer/AI漫剧制作大师-Setup.exe.sha256
           if-no-files-found: error
           retention-days: 30
