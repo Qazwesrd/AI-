@@ -8,7 +8,7 @@ type LocalVideoRuntime = {
   status: string;
   node_count: number;
   nodes: { node_type: string; model_choices: string[]; input_schema?: { required?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }>; optional?: Record<string, { type?: string; choices?: string[]; default?: unknown; min?: number; max?: number }> } }[];
-  model_inventory?: Array<{ name: string; category: string; source: string; selector_node: string; status: string; load_tested: boolean }>;
+  model_inventory?: Array<{ name: string; category: string; source: string; selector_node: string; model_folder?: string; status: string; load_tested: boolean }>;
   model_inventory_count?: number;
   model_folders?: Record<string, { available: boolean; count: number; reason?: string }>;
   model_folder_scan_available?: boolean;
