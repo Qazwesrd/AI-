@@ -88,6 +88,16 @@ export default function PromptResearchPage() {
     finally { setBusy(false); }
   }
 
+  async function collectDueSources() {
+    setBusy(true);
+    try {
+      const result = await api<{processed_count:number; due_count:number}>("/api/prompts/research/sources/collect-due", {method:"POST"});
+      setMessage(`到期来源处理完成：待采集 ${result.due_count} 个，本次处理 ${result.processed_count} 个。`);
+      await load();
+    } catch(error) { setMessage(error instanceof Error ? error.message : "批量采集失败"); }
+    finally { setBusy(false); }
+  }
+
   async function collectSource(id:number) {
     setBusy(true);
     try {
@@ -192,7 +202,7 @@ export default function PromptResearchPage() {
         <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-lg font-bold">公开来源自动采集适配器</h2><p className="mt-1 text-xs text-white/50">添加平台允许访问的公开 RSS/Atom 地址；后台每 15 分钟检查到期任务，按每个来源设置的间隔采集。</p></div>
-            <button disabled={busy} onClick={()=>void load()} className="rounded-xl border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100">刷新来源状态</button>
+            <div className="flex gap-2"><button disabled={busy} onClick={()=>void collectDueSources()} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm text-white">采集全部到期来源</button><button disabled={busy} onClick={()=>void load()} className="rounded-xl border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100">刷新来源状态</button></div>
           </div>
           <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs text-amber-100/80">
             安全边界：仅 HTTPS；仅允许 YouTube、B站、抖音、快手、TikTok、Facebook、红果等平台域名；只读取 RSS/Atom 标题、链接、日期和短摘要；不模拟登录、不绕过访问限制。当前不是这些平台全部都提供 RSS，必须填写真实可用的公开订阅地址。自动发现的数据一律待人工核验。
