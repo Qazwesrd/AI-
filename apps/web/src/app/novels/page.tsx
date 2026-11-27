@@ -204,12 +204,11 @@ export default function NovelsPage() {
     if (!selected) return;
 
     const approved = window.confirm(
-      "即将调用已配置的文本AI模型进行小说深度分析。\n\n" +
-      "本次可能按文本长度分多次请求，并产生API费用。\n" +
-      "请确认已在AI设置中开启网络调用和付费API授权。\n\n" +
-      "是否继续？"
+      "即将使用本机 Ollama 已安装的文本模型进行小说深度分析。\\n\\n" +
+      "分析仅在本机运行，不调用云端 API，不自动下载模型，也不会产生 API 调用费用。\\n" +
+      "如果本地引擎或模型不可用，软件会明确提示并停止，不会切换到云端。\\n\\n" +
+      "是否开始？"
     );
-
     if (!approved) return;
 
     setLoading(true);
@@ -219,7 +218,7 @@ export default function NovelsPage() {
       const data = await request(`/api/novels/${selected.id}/analyze-ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirm_paid: true }),
+        body: JSON.stringify({}),
       });
 
       const result = await request(`/api/novels/${selected.id}/analysis`);
