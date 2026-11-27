@@ -98,7 +98,7 @@ def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0
             detail = parsed_detail.get("error") or parsed_detail.get("message")
         else:
             detail = raw_detail
-        safe_detail = str(detail or "未提供具体原因").replace("\\r", " ").replace("\\n", " ")[:500]
+        safe_detail = str(detail or "未提供具体原因").replace("\r", " ").replace("\n", " ")[:500]
         raise HTTPException(502, f"本地 Ollama 拒绝了请求（HTTP {exc.code}）：{safe_detail}") from exc
     except (URLError, TimeoutError, OSError):
         raise HTTPException(503, "未连接到本机 Ollama。请先自行启动 Ollama，再刷新检测。")
