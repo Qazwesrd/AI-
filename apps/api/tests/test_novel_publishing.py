@@ -114,6 +114,12 @@ class NovelPublishingTests(unittest.TestCase):
         self.assertIn("Translated original text.",detail["chapters"][0]["translated_text"])
         exported = export_translation(translation_id,"md",self.db)
         self.assertIn("Translated original text.",exported.body.decode("utf-8"))
+        epub = export_translation(translation_id,"epub",self.db)
+        with zipfile.ZipFile(io.BytesIO(epub.body)) as archive:
+            self.assertEqual(archive.read("mimetype"),b"application/epub+zip")
+            self.assertTrue(any(name.endswith(".xhtml") for name in archive.namelist()))
+            xhtml=next(name for name in archive.namelist() if name.endswith(".xhtml"))
+            self.assertIn("Translated original text.",archive.read(xhtml).decode("utf-8"))
         self.assertEqual(self.db.query(Chapter).filter_by(novel_id=self.novel.id).one().content,original)
         mock_generate.assert_called_once()
 
