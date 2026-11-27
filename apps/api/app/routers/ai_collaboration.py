@@ -698,8 +698,8 @@ def import_proposals(novel_id: int, payload: ImportPayload, db: Session = Depend
 
 def _parse_local_evolution_response(raw):
     content = str(raw or "").strip()
-    content = re.sub(r"^```(?:json)?\\s*", "", content)
-    content = re.sub(r"\\s*```$", "", content)
+    content = re.sub(r"^```(?:json)?\s*", "", content)
+    content = re.sub(r"\s*```$", "", content)
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError:
@@ -766,9 +766,9 @@ def analyze_chapter_asset_evolution_locally(
         "只返回 JSON 对象，格式为 {\"proposals\":[...]}；没有变化时返回空数组。"
     )
     user_prompt = (
-        f"小说：{novel.title}\\n章节：第{chapter_number}章\\n"
-        "已有素材清单：\\n" + json.dumps(asset_context, ensure_ascii=False) +
-        "\\n本章正文：\\n" + chapter_text[:24000]
+        f"小说：{novel.title}\n章节：第{chapter_number}章\n"
+        "已有素材清单：\n" + json.dumps(asset_context, ensure_ascii=False) +
+        "\n本章正文：\n" + chapter_text[:24000]
     )
     try:
         result = _ollama_request("/api/generate", {
