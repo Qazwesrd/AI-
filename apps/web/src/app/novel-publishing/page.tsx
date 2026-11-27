@@ -74,7 +74,7 @@ export default function NovelPublishingPage(){
   async function uploadNovel(file:File){
     setUploading(true);setBusy(true);
     try{
-      const created=await api<{id:number}>("/api/novels",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:file.name.replace(/\\.[^.]+$/,""),genre:"待分类",description:"从小说发行中心上传导入"})});
+      const created=await api<{id:number}>("/api/novels",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:file.name.replace(/\.[^.]+$/,""),genre:"待分类",description:"从小说发行中心上传导入"})});
       const form=new FormData();form.append("file",file);
       const response=await fetch(`${API}/api/novels/${created.id}/import-txt`,{method:"POST",body:form});
       const result=await response.json().catch(()=>({}));
