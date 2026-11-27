@@ -118,6 +118,31 @@ class LocalAIRuntimeTests(unittest.TestCase):
         self.assertIn("保持服装连续性", body["prompt"])
 
 
+    def test_specialized_model_creation_uses_current_ollama_create_contract(self):
+        payload = LocalSpecializedModelInput(
+            base_model="qwen2.5:3b",
+            name="comic-writer",
+            role="screenwriter",
+            style="国漫",
+            instructions="忠于原著",
+        )
+        with patch(
+            "app.routers.local_ai_runtime._installed_models",
+            return_value=[{"name": "qwen2.5:3b"}],
+        ), patch(
+            "app.routers.local_ai_runtime._ollama_request",
+            return_value={"status": "success"},
+        ) as request:
+            result = create_local_specialized_model(payload)
+        self.assertEqual(result["status"], "success")
+        body = request.call_args.args[1]
+        self.assertEqual(body["from"], "qwen2.5:3b")
+        self.assertIn("system", body)
+        self.assertNotIn("modelfile", body)
+        self.assertEqual(body["parameters"]["temperature"], 0.35)
+        self.assertFalse(result["network_used"])
+        self.assertFalse(result["cloud_fallback"])
+
     def test_context_endpoint_rejects_chapter_from_another_novel(self):
         from app.models.novel import Novel
         class Query:
