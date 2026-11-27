@@ -12,6 +12,8 @@ from app.services.media_service import (
     STORAGE, VIDEO_DIR, safe_storage_file, run_ffmpeg, probe_media
 )
 
+from app.services.cost_safety import require_cloud_ai_api_disabled
+
 EDIT_DIR = STORAGE / "edit-jobs"
 EDIT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -60,6 +62,9 @@ def get_ai_config(db, provider_name):
 
 def call_ai_for_edit_plan(db, provider, model, instruction, source_files,
                           confirm_paid=False):
+    # This desktop build is strict zero-cost: cloud API editing is blocked.
+    # Local Ollama analysis and explicitly user-driven browser handoff remain separate.
+    require_cloud_ai_api_disabled()
     config, key, base = get_ai_config(db, provider)
 
     if bool(getattr(config, "paid", True)) and not confirm_paid:
