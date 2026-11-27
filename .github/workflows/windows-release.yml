@@ -504,7 +504,7 @@ jobs:
           Write-Host "The standalone Setup.exe requires the adjacent ComfyUI-Payload folder."
           Write-Host "Do not publish Setup.exe alone; publish only after the complete offline ZIP has a verified, size-compatible distribution host and all third-party license checks are complete."
   # Run the expensive real upstream archive inventory only when explicitly
-  # requested by a one-time PR-body marker; no ComfyUI payload is modified.
+  # requested by the one-time PR-body marker above; no ComfyUI payload is modified.
   audit-comfyui-portable-dependencies:
     if: github.event_name == 'pull_request' && contains(github.event.pull_request.body, '<!-- run-comfyui-portable-license-audit -->')
     uses: ./.github/workflows/comfyui-portable-license-audit.yml

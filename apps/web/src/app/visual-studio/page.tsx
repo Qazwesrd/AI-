@@ -160,6 +160,40 @@ export default function VisualStudioPage() {
     }
   }
 
+  function applySavedVisualStyle(promptText: string) {
+    try {
+      const raw = localStorage.getItem("ai-comic-prompt-style-library-v1");
+      if (!raw) return promptText;
+      const library = JSON.parse(raw) as {
+        activeId?: string;
+        templates?: Array<Record<string, unknown>>;
+      };
+      const template = library.templates?.find((item) => item.id === library.activeId);
+      if (!template) return promptText;
+      const fields = [
+        ["整体视觉风格", template.visual],
+        ["人物表现", template.character],
+        ["服装与材质", template.clothing],
+        ["场景环境", template.scene],
+        ["镜头与构图", template.camera],
+        ["光线与氛围", template.lighting],
+        ["色彩体系", template.color],
+        ["画质要求", template.quality],
+      ] as const;
+      const guidance = fields
+        .filter(([, value]) => typeof value === "string" && value.trim())
+        .map(([label, value]) => label + "：" + String(value).trim())
+        .join("。");
+      const negative = typeof template.negative === "string" ? template.negative.trim() : "";
+      const marker = "已应用本地视觉风格模板：" + String(template.name || "自定义风格");
+      if (promptText.includes(marker)) return promptText;
+      return promptText + "\\n\\n" + marker + "。\\n" + guidance
+        + (negative ? "\\n风格负面提示词：" + negative : "");
+    } catch {
+      return promptText;
+    }
+  }
+
   function buildPrompt() {
     const selected = assets.find((item) => item.id === selectedAsset);
     const base = selected
@@ -197,34 +231,26 @@ export default function VisualStudioPage() {
       : "专业影视资产设定稿，细节完整，材质可信，结构准确，画面清晰，视觉统一。";
     const positive = `${base}${subject}。${viewGuide}${continuity}视觉风格：${style}。${quality}保持项目内视觉一致性，不添加原设定中不存在的关键特征。`;
     const negative = "负面约束：身份或外观漂移、视角间结构不一致、比例错误、额外肢体或零件、重复主体、错误服装、错误颜色、透视畸变、主体裁切、模糊、低清晰度、文字、字幕、水印、Logo、边框、无关装饰。";
-    return `正向提示词：${positive}\n\n${negative}`;
+    return applySavedVisualStyle(`正向提示词：${positive}\n\n${negative}`);
   }
 
   async function createTask() {
     const effectivePrompt = generatedPrompt.trim() || buildPrompt();
     if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
-    setGeneratedPrompt(effectivePrompt);
-    setBusy(true);
     try {
-      const response = await fetch(`${API}/api/visual/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          asset_id: selectedAsset,
-          provider: "doubao",
-          task_type: category,
-          prompt: effectivePrompt,
-          size: "2K",
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "创建任务失败");
-      setMessage(`图片任务 #${result.task_id} 已加入队列`);
-      await loadTasks();
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建任务失败");
-    } finally {
-      setBusy(false);
+      const negativeMatch = effectivePrompt.match(/(?:负面提示词|风格负面提示词|负面约束)[：:]([\\s\\S]*)$/);
+      localStorage.setItem("ai-comic-local-image-draft-v1", JSON.stringify({
+        prompt: effectivePrompt,
+        negative_prompt: negativeMatch?.[1]?.trim() || "低质量、模糊、畸形肢体、多余手指、文字、水印",
+        style,
+        asset_id: selectedAsset,
+        created_at: new Date().toISOString(),
+      }));
+      setGeneratedPrompt(effectivePrompt);
+      setMessage("提示词已交接到本地图片工作台，正在打开本机 ComfyUI 生图页面。");
+      window.location.href = "/local-image-studio?from=visual-studio";
+    } catch {
+      setMessage("无法保存本地生图任务，请检查浏览器本地存储空间。");
     }
   }
 
@@ -255,7 +281,7 @@ export default function VisualStudioPage() {
       const response = await fetch(API + "/api/visual/assets/" + assetId + "/prompt");
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "提示词生成失败");
-      setGeneratedPrompt("正向提示词：" + result.positive_prompt + (prompt.trim() ? "\n\n用户补充要求：" + prompt.trim() : "") + "\n\n负面提示词：" + result.negative_prompt);
+      setGeneratedPrompt(applySavedVisualStyle("正向提示词：" + result.positive_prompt + (prompt.trim() ? "\n\n用户补充要求：" + prompt.trim() : "") + "\n\n负面提示词：" + result.negative_prompt));
       setSelectedAsset(assetId);
       setMessage("已生成专业正向/负面提示词，可检查后再创建图片任务。");
     } catch (error) {
