@@ -423,7 +423,7 @@ function localServiceResponds(port, route) {
 async function waitForLocalService(port, route, child, timeout = 45000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
-    if (child && (child.exitCode !== null || child.signalCode !== null || !child.pid)) {
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
       return false;
     }
     if (await localServiceResponds(port, route)) return true;
