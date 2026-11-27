@@ -89,7 +89,8 @@ const navigation = [
     title: "系统设置",
     items: [
       ["⚙️", "AI模型管理", "/ai-center"],
-      ["🧩", "本地模型与引擎", "/local-models"],\n      ["🧭", "AI资源包新手配置向导", "/setup-wizard"],
+      ["🧩", "本地模型与引擎", "/local-models"],
+      ["🧭", "AI资源包新手配置向导", "/setup-wizard"],
       ["🖼️", "本地图片生成工作台", "/local-image-studio"],
       ["🎞️", "视频生成与音频中心", "/media-studio"],
       ["📊", "AI调用记录", "/ai-center#usage-logs"],
