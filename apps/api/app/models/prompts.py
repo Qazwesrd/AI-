@@ -24,6 +24,7 @@ class PromptTemplate(Base):
     tags = Column(JSON, default=list)
     current_version = Column(Integer, default=1)
     is_active = Column(Boolean, default=True)
+    is_system = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
