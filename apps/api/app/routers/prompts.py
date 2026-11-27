@@ -706,7 +706,7 @@ def category_rankings(db: Session = Depends(get_db)):
             "mode": "recomputed_on_request",
             "ui_poll_seconds": 30,
             "collector_scheduler_seconds": 900,
-            "latest_verified_evidence_at": latest_verified.created_at.isoformat() + "Z" if latest_verified and latest_verified.created_at else None,
+            "latest_verified_evidence_created_at": latest_verified.created_at.isoformat() + "Z" if latest_verified and latest_verified.created_at else None,
             "latest_observed_at": latest_verified.observed_at if latest_verified else None,
             "latest_source_collection_at": latest_source.last_collected_at.isoformat() + "Z" if latest_source and latest_source.last_collected_at else None,
             "latest_snapshot_at": latest_snapshot.created_at.isoformat() + "Z" if latest_snapshot and latest_snapshot.created_at else None,
