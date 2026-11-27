@@ -104,6 +104,16 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertTrue(all(item["payout_api"] is False for item in result["items"]))
         self.assertIn("不会显示软件内直接提现按钮", result["global_notice"])
 
+    def test_kdp_and_google_play_books_are_official_report_only(self):
+        result=list_platform_capabilities()
+        items={item["platform"]:item for item in result["items"]}
+        self.assertIn("Amazon KDP",items)
+        self.assertIn("Google Play Books",items)
+        self.assertFalse(items["Amazon KDP"]["payout_api"])
+        self.assertFalse(items["Google Play Books"]["payout_api"])
+        self.assertIn("kdpreports.amazon.com",items["Amazon KDP"]["official_portal"])
+        self.assertIn("Earnings Reports",items["Google Play Books"]["revenue_api"])
+
     def test_reject_invalid_currency_and_overlarge_fees(self):
         with self.assertRaises(Exception):
             RevenueInput(platform="test", gross_amount=10, currency="XYZ")
