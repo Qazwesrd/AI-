@@ -723,7 +723,7 @@ def category_ranking_history(category: str = "drama", db: Session = Depends(get_
     if category not in {"drama","prompt","screenplay"}:
         raise HTTPException(400,"排名类别无效")
     rows=db.query(PromptRankingSnapshot).filter(PromptRankingSnapshot.dimension==category).order_by(PromptRankingSnapshot.created_at.desc()).limit(50).all()
-    return {"items":[{"id:item.id,"category":item.dimension,"created_at":item.created_at.isoformat() if item.created_at else None,"ranking":item.ranking_data or []} for item in rows]}
+    return {"items":[{"id":item.id,"category":item.dimension,"created_at":item.created_at.isoformat() if item.created_at else None,"ranking":item.ranking_data or []} for item in rows]}
 
 
 # User-configured public RSS/Atom sources. No platform login, private API, or hidden-content scraping.
