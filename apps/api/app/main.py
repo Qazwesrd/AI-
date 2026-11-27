@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import logging
 from contextlib import asynccontextmanager
@@ -61,6 +62,18 @@ def register_routers(application: FastAPI) -> None:
             logger.exception("Router loading failed: %s", module_name)
 
 
+async def _public_research_scheduler():
+    """Run due user-configured public feeds without blocking the API event loop."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            from app.routers.prompts import collect_due_public_sources_background
+            await asyncio.to_thread(collect_due_public_sources_background)
+        except Exception:
+            logger.exception("Public research source scheduler failed")
+        await asyncio.sleep(900)
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     missing = sorted(set(ROUTER_MODULES) - set(_loaded_routers))
@@ -77,8 +90,16 @@ async def lifespan(application: FastAPI):
     elif lease_scan["active_count"]:
         logger.warning("Task runtime startup scan found %s active lease(s) from a previous process; none were auto-released.", lease_scan["active_count"])
     logger.info("AI Comic Studio API started. Registered routers: %s", len(_loaded_routers))
-    yield
-    logger.info("AI Comic Studio API stopped.")
+    research_task = asyncio.create_task(_public_research_scheduler())
+    try:
+        yield
+    finally:
+        research_task.cancel()
+        try:
+            await research_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("AI Comic Studio API stopped.")
 
 
 app = FastAPI(
