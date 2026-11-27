@@ -541,8 +541,12 @@ architecture, special_item, event, world, timeline。
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        if is_local_ollama:
+            with _LOCAL_OLLAMA_OPENER.open(request, timeout=600) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        else:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                result = json.loads(response.read().decode("utf-8"))
 
         answer = (
             result.get("message", {}).get("content", "")
