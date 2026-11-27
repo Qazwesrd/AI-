@@ -82,6 +82,37 @@ function size(value?: number | null) {
   return `${(value / 1024 ** 3).toFixed(2)} GB`;
 }
 
+function describeApiError(detail: unknown, fallback: string) {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => {
+      if (typeof item === "string") return item;
+      if (item && typeof item === "object") {
+        const entry = item as { msg?: unknown; loc?: unknown };
+        const location = Array.isArray(entry.loc) ? entry.loc.join(" → ") : "";
+        return [location, typeof entry.msg === "string" ? entry.msg : ""].filter(Boolean).join("：");
+      }
+      return String(item);
+    }).filter(Boolean).join("；") || fallback;
+  }
+  if (detail && typeof detail === "object") {
+    const entry = detail as { message?: unknown; error?: unknown; detail?: unknown };
+    return describeApiError(entry.detail ?? entry.message ?? entry.error, fallback);
+  }
+  return fallback;
+}
+
+async function readApiResponse(response: Response, fallback: string) {
+  const raw = await response.text();
+  let result: any = {};
+  try { result = raw ? JSON.parse(raw) : {}; }
+  catch { result = { detail: raw }; }
+  if (!response.ok) {
+    throw new Error(describeApiError(result?.detail ?? result?.message ?? result?.error, `${fallback}（HTTP ${response.status}）`));
+  }
+  return result;
+}
+
 export default function LocalModelsPage() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [selected, setSelected] = useState("");
@@ -284,8 +315,7 @@ export default function LocalModelsPage() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ base_model: baseModel, name: newModelName, role: modelRole, style: modelStyle, instructions: modelInstructions }),
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "专用模型创建失败");
+      const result = await readApiResponse(response, "专用模型创建失败");
       setMessage(`专用模型 ${result.model} 已在本机创建。刷新模型列表即可选择使用。`);
       setNewModelName("");
       await refreshRuntime();
