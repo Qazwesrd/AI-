@@ -74,9 +74,43 @@ export default function VisualStudioPage() {
   const [promptMode, setPromptMode] = useState("professional");
   const [selectedAsset, setSelectedAsset] = useState<number | null>(null);
   const [confirmPaid, setConfirmPaid] = useState(false);
+  const [confirmLocalGeneration, setConfirmLocalGeneration] = useState(false);
+  const [localCheckpoints, setLocalCheckpoints] = useState<string[]>([]);
+  const [localImageRuntimeMessage, setLocalImageRuntimeMessage] = useState("正在检测本地 ComfyUI 图片模型…");
+  const [localPromptId, setLocalPromptId] = useState("");
+  const [localTaskStatus, setLocalTaskStatus] = useState("");
   const [confirm3dPaid, setConfirm3dPaid] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function loadLocalImageRuntime() {
+    try {
+      const response = await fetch(`${API}/api/local-ai/image-runtime`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "本地图片引擎检测失败");
+      const names = Array.isArray(result.checkpoints) ? result.checkpoints.filter((item: unknown): item is string => typeof item === "string") : [];
+      setLocalCheckpoints(names);
+      setLocalImageRuntimeMessage(result.message || "本地图片模型检测完成");
+    } catch (error) {
+      setLocalCheckpoints([]);
+      setLocalImageRuntimeMessage(error instanceof Error ? error.message : "本地图片引擎未连接");
+    }
+  }
+
+  async function refreshLocalImageTask() {
+    if (!localPromptId) return;
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/tasks/${localPromptId}`, { cache: "no-store" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "读取本地图片任务失败");
+      setLocalTaskStatus(result.status || "unknown");
+      if (result.status === "completed") setMessage(`本地图片已生成完成，任务编号：${localPromptId}`);
+      else if (result.status === "failed") setMessage(result.error || "本地图片生成失败");
+      else setMessage(`本地图片任务状态：${result.status || "排队中"}`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "读取本地图片任务失败");
+    }
+  }
 
   async function loadNovels() {
     try {
@@ -117,7 +151,7 @@ export default function VisualStudioPage() {
     loadAssets();
   }, [category]);
 
-  useEffect(() => { loadNovels(); }, []);
+  useEffect(() => { loadNovels(); void loadLocalImageRuntime(); }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -207,30 +241,29 @@ export default function VisualStudioPage() {
   async function createTask() {
     const effectivePrompt = generatedPrompt.trim() || buildPrompt();
     if (!effectivePrompt.trim()) { setMessage("无法准备图片生成提示词，请补充素材描述。"); return; }
+    if (!confirmLocalGeneration) { setMessage("请先确认本地生成会占用电脑 CPU/GPU 资源。"); return; }
+    if (!localCheckpoints.length) { setMessage("未发现本机 ComfyUI checkpoint。请先在本地模型管理中检查模型目录；不会调用云端或自动下载。"); return; }
     setGeneratedPrompt(effectivePrompt);
     setBusy(true);
     try {
-      const response = await fetch(`${API}/api/visual/tasks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const localStyle = style.includes("真人") ? "仿真人" : style.includes("3D") ? "3D漫" : style.includes("2D") ? "2D漫" : "国漫";
+      const response = await fetch(`${API}/api/local-ai/images/generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          asset_id: selectedAsset,
-          provider: "doubao",
-          task_type: category,
-          prompt: effectivePrompt,
-          size: "2K",
-          confirm_paid: confirmPaid,
+          checkpoint: localCheckpoints[0], prompt: effectivePrompt,
+          negative_prompt: "低质量、模糊、结构错误、额外肢体、错误服装、文字、水印",
+          style: localStyle, width: 512, height: 768, steps: 8, cfg: 7,
+          confirm_local_generation: true,
         }),
       });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.detail || "创建任务失败");
-      setMessage(`图片任务 #${result.task_id} 已加入队列`);
-      await loadTasks();
+      if (!response.ok) throw new Error(result.detail || "本地图片生成任务提交失败");
+      setLocalPromptId(result.prompt_id || "");
+      setLocalTaskStatus(result.status || "queued");
+      setMessage(`已提交本机 ComfyUI 图片任务：${result.prompt_id}。未调用云端 API，也未产生付费调用。`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "创建任务失败");
-    } finally {
-      setBusy(false);
-    }
+      setMessage(error instanceof Error ? error.message : "本地图片生成任务提交失败");
+    } finally { setBusy(false); }
   }
 
   async function runTask(id: number) {
@@ -508,9 +541,14 @@ export default function VisualStudioPage() {
               {generatedPrompt && <button type="button" className="mt-2 rounded-lg border border-purple-300/30 px-3 py-1.5 text-xs" onClick={() => navigator.clipboard?.writeText(generatedPrompt)}>复制实际提示词</button>}
             </div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" checked={confirmPaid} onChange={(e) => setConfirmPaid(e.target.checked)} />
-              我已了解本次图片生成可能产生费用，并确认执行
+              <input type="checkbox" checked={confirmLocalGeneration} onChange={(e) => setConfirmLocalGeneration(e.target.checked)} />
+              我已了解本地生成会占用电脑 CPU/GPU 资源，并确认执行
             </label>
+            <div className="rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs text-cyan-100">
+              <div className="font-semibold">本地图片引擎：{localCheckpoints.length ? `发现 ${localCheckpoints.length} 个模型` : "尚未发现可用 checkpoint"}</div>
+              <p className="mt-1 text-slate-300">{localImageRuntimeMessage}</p>
+              {localPromptId && <div className="mt-2 flex flex-wrap items-center gap-2"><span>任务：{localPromptId} · {localTaskStatus}</span><button type="button" className="rounded-lg border border-cyan-300/30 px-2 py-1" onClick={refreshLocalImageTask}>刷新本地任务</button></div>}
+            </div>
             <div className="flex flex-wrap gap-2">
               <button className={button} disabled={busy} onClick={createTask}>创建图片任务</button>
               <label className="cursor-pointer rounded-xl border border-purple-300/30 px-4 py-2 text-sm hover:bg-purple-950/50">
@@ -519,7 +557,7 @@ export default function VisualStudioPage() {
               </label>
             </div>
             <p className="text-xs leading-5 text-slate-400">
-              图片生成只在你主动点击执行后调用。付费服务还需要 AI 管理中心开启付费授权并在本页确认。
+              本入口只向本机 ComfyUI 提交任务；本地引擎或模型不可用时会停止，不会转用豆包等云端服务。
             </p>
           </div>
         </div>
