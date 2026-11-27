@@ -48,7 +48,8 @@ export default function MediaStudioPage() {
   const [forceRegenerate, setForceRegenerate] = useState(false);
   const [message, setMessage] = useState("");
   const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
-  const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);\n  const [workflowJson, setWorkflowJson] = useState("");\n  const [workflowPromptId, setWorkflowPromptId] = useState("");\n  const [workflowBusy, setWorkflowBusy] = useState(false);\n  const [workflowResult, setWorkflowResult] = useState<any>(null);
+  const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
+  const [workflowJson, setWorkflowJson] = useState("");\n  const [workflowPromptId, setWorkflowPromptId] = useState("");\n  const [workflowBusy, setWorkflowBusy] = useState(false);\n  const [workflowResult, setWorkflowResult] = useState<any>(null);
 
   async function loadLocalVideoRuntime() {
     setVideoRuntimeLoading(true);
