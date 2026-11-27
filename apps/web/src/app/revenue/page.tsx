@@ -18,6 +18,7 @@ export default function RevenueCenterPage() {
   const [connections,setConnections]=useState<OAuthConnection[]>([]);
   const [oauthStatus,setOauthStatus]=useState<OAuthStatus|null>(null);
   const [googleClientId,setGoogleClientId]=useState("");
+  const [reportImportBusy,setReportImportBusy]=useState(false);
   const [message,setMessage]=useState("");
   const [busy,setBusy]=useState(false);
   const [rev,setRev]=useState({platform:"",gross_amount:"",currency:"CNY",fee_amount:"0",tax_amount:"0",status:"estimated",period_start:"",period_end:"",notes:""});
@@ -44,6 +45,17 @@ export default function RevenueCenterPage() {
   }
   useEffect(()=>{void load();},[]);
 
+
+  async function importCreatorReport(platformId:"kdp"|"google_play_books",file:File){
+    setReportImportBusy(true);
+    try{
+      const form=new FormData();form.append("file",file);
+      const result=await api<{imported:number;updated:number;skipped:number;warnings:string[];message:string}>(`/api/revenue/reports/import/${platformId}`,{method:"POST",body:form});
+      setMessage(`${result.message} 新增 ${result.imported} 条、更新 ${result.updated} 条、跳过 ${result.skipped} 条。${result.warnings?.join("；")||""}`);
+      await load();
+    }catch(e){setMessage(e instanceof Error?e.message:"报表导入失败");}
+    finally{setReportImportBusy(false);}
+  }
 
   async function saveGoogleOAuthConfig(){
     setBusy(true);
@@ -137,6 +149,21 @@ export default function RevenueCenterPage() {
           <p className="text-xs leading-5 text-amber-300">此处只登记计划；是否可提现、最低金额与手续费请以对应平台官方账户为准。</p>
         </form>
       </div>
+      <section className="rounded-xl border border-emerald-900 bg-slate-900 p-5">
+        <h2 className="text-xl font-semibold">Amazon / Google Play 官方收益报表导入</h2>
+        <p className="mt-1 text-sm text-slate-400">从平台官方账户下载 CSV/TSV 报表后导入本机。系统按报表列名识别金额、币种和日期，重复文件会更新原记录，不会重复累加。不会读取账户密码或银行卡资料。</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="rounded-lg border border-slate-700 p-3 text-sm">Amazon KDP Reports（CSV）
+            <input type="file" accept=".csv,.tsv,.txt" disabled={reportImportBusy||busy} onChange={e=>{const file=e.target.files?.[0];if(file)void importCreatorReport("kdp",file);e.currentTarget.value="";}} className="mt-2 block w-full text-xs"/>
+            <a href="https://kdpreports.amazon.com/" target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-300 underline">打开 KDP Reports</a>
+          </label>
+          <label className="rounded-lg border border-slate-700 p-3 text-sm">Google Play Books Earnings / Sales Report（TSV）
+            <input type="file" accept=".csv,.tsv,.txt" disabled={reportImportBusy||busy} onChange={e=>{const file=e.target.files?.[0];if(file)void importCreatorReport("google_play_books",file);e.currentTarget.value="";}} className="mt-2 block w-full text-xs"/>
+            <a href="https://play.google.com/books/publish/" target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-300 underline">打开 Google Play Books Partner Center</a>
+          </label>
+        </div>
+        <p className="mt-3 text-xs text-amber-300">Google Earnings Report 按平台付款周期归为“已付款”（不是银行到账凭证）；销售报表归为“预估”。KDP 未明确标记付款的版税数据一律按“预估”处理。</p>
+      </section>
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-3 text-xl font-semibold">收入明细</h2><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead className="text-slate-400"><tr><th className="p-2">平台</th><th className="p-2">金额</th><th className="p-2">净额</th><th className="p-2">状态</th><th className="p-2">账期</th></tr></thead><tbody>{revenues.map(x=><tr key={x.id} className="border-t border-slate-800"><td className="p-2">{x.platform}</td><td className="p-2">{x.gross_amount.toFixed(2)} {x.currency}</td><td className="p-2">{x.net_amount.toFixed(2)}</td><td className="p-2">{({estimated:"预估",settled:"已结算",payable:"待付款",paid:"已支付"} as Record<string,string>)[x.status]||x.status}</td><td className="p-2">{x.period_start} - {x.period_end}</td></tr>)}</tbody></table>{revenues.length===0&&<p className="p-3 text-sm text-slate-500">暂无收入记录。</p>}</div></section>
       <section className="rounded-xl border border-slate-800 bg-slate-900 p-5"><h2 className="mb-3 text-xl font-semibold">提现记录与到账跟踪</h2><div className="space-y-3">{withdrawals.map(x=><div key={x.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-800 p-3"><div><div className="font-medium">{x.platform} · {x.amount.toFixed(2)} {x.currency}</div><div className="text-xs text-slate-400">净到账预估 {x.net_amount.toFixed(2)} · 状态 {x.status} {x.arrived_at&&"· 到账 "+x.arrived_at}</div>{x.receipt_reference&&<div className="text-xs text-slate-500">凭证：{x.receipt_reference}</div>}</div><div className="flex flex-wrap gap-2"><button onClick={()=>void updateStatus(x.id,"submitted")} className="rounded border border-slate-600 px-2 py-1 text-xs">已提交</button><button onClick={()=>void updateStatus(x.id,"processing")} className="rounded border border-slate-600 px-2 py-1 text-xs">处理中</button><button onClick={()=>void updateStatus(x.id,"paid")} className="rounded border border-emerald-700 px-2 py-1 text-xs">已到账</button><button onClick={()=>void updateStatus(x.id,"rejected")} className="rounded border border-rose-800 px-2 py-1 text-xs">被拒绝</button></div></div>)}{withdrawals.length===0&&<p className="text-sm text-slate-500">暂无提现记录。</p>}</div></section>
       <p className="text-xs leading-5 text-slate-500">重要说明：汇总仅基于你手动录入的数据，按币种分别计算，不做未经核实的汇率换算，也不代表平台实时余额、税务意见或官方可提现金额。</p>
