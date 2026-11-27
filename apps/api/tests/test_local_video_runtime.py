@@ -5,6 +5,49 @@ from app.routers.local_video_runtime import assess_wan_vace_nodes
 
 
 class LocalVideoRuntimeTests(unittest.TestCase):
+    def test_explicit_template_builder_creates_only_user_wired_valid_graph(self):
+        from app.routers.local_video_runtime import LocalVideoTemplateNode, build_explicit_video_workflow
+        info = {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["wan.safetensors"]]}},
+                "output": ["WANVIDEOMODEL"],
+            },
+            "WanVideoSampler": {
+                "input": {"required": {"model": ["WANVIDEOMODEL"]}, "optional": {"steps": ["INT", {"default": 4}]}},
+                "output": ["IMAGE"],
+            },
+            "VHS_VideoCombine": {
+                "input": {"required": {"images": ["IMAGE"], "frame_rate": ["FLOAT"]}},
+            },
+        }
+        nodes = [
+            LocalVideoTemplateNode(node_id="1", class_type="WanVideoModelLoader", values={"model": "wan.safetensors"}),
+            LocalVideoTemplateNode(node_id="2", class_type="WanVideoSampler", connections={"model": {"node_id": "1", "output_index": 0}}, values={"steps": 4}),
+            LocalVideoTemplateNode(node_id="3", class_type="VHS_VideoCombine", connections={"images": {"node_id": "2", "output_index": 0}}, values={"frame_rate": 24}),
+        ]
+        result = build_explicit_video_workflow(nodes, info)
+        self.assertTrue(result["valid"], result["errors"])
+        self.assertEqual(result["workflow"]["2"]["inputs"]["model"], ["1", 0])
+        self.assertEqual(result["workflow"]["3"]["inputs"]["images"], ["2", 0])
+        self.assertTrue(result["validation"]["has_connected_generation_chain"])
+
+    def test_explicit_template_builder_rejects_wrong_socket_type(self):
+        from app.routers.local_video_runtime import LocalVideoTemplateNode, build_explicit_video_workflow
+        info = {
+            "WanVideoModelLoader": {"input": {"required": {"model": [["wan.safetensors"]]}}, "output": ["WANVIDEOMODEL"]},
+            "WanVideoSampler": {"input": {"required": {"model": ["WANVIDEOMODEL"]}}, "output": ["IMAGE"]},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"], "frame_rate": ["FLOAT"]}}},
+        }
+        nodes = [
+            LocalVideoTemplateNode(node_id="1", class_type="WanVideoModelLoader", values={"model": "wan.safetensors"}),
+            LocalVideoTemplateNode(node_id="2", class_type="WanVideoSampler", connections={"model": {"node_id": "1", "output_index": 0}}),
+            LocalVideoTemplateNode(node_id="3", class_type="VHS_VideoCombine", connections={"images": {"node_id": "1", "output_index": 0}, "frame_rate": 24}),
+        ]
+        result = build_explicit_video_workflow(nodes, info)
+        self.assertFalse(result["valid"])
+        self.assertIsNone(result["workflow"])
+        self.assertTrue(any("类型" in error for error in result["errors"]))
+
     def test_missing_runtime_does_not_claim_generation_ready(self):
         result = assess_wan_vace_nodes(None)
         self.assertEqual(result["status"], "unavailable")
