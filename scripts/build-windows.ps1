@@ -47,9 +47,16 @@ try {
     Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
 }
 
-# FFmpeg is user-managed and is not downloaded or bundled by this build.
-# The installed application discovers the existing runtime under AICOMICS_DATA_DIR\engines\FFmpeg.
-Write-Host "FFmpeg/FFprobe will be resolved from the existing local runtime at startup."
+# Require FFmpeg and FFprobe to be present and valid before packaging.
+$FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
+$FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
+foreach ($tool in @($FfmpegSource, $FfprobeSource)) {
+    if (!(Test-Path $tool) -or (Get-Item $tool).Length -lt 1MB) {
+        throw "Bundled media runtime is missing or invalid: $tool"
+    }
+}
+Write-Host "Bundled FFmpeg: $FfmpegSource"
+Write-Host "Bundled FFprobe: $FfprobeSource"
 
 
 Write-Host "[1/4] Checking PyInstaller..."
@@ -153,6 +160,8 @@ try {
     $env:APP_DATA_DIR = $ManualDataDir
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
+    $env:FFMPEG_PATH = $FfmpegSource
+    $env:FFPROBE_PATH = $FfprobeSource
     $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
 
     $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
