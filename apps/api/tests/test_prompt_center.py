@@ -17,7 +17,7 @@ from app.routers.prompts import (
     EvidenceInput, EvidenceVerifyInput, UpgradeCandidateInput, CandidateDecisionInput,
     create_trend_evidence, verify_trend_evidence, create_upgrade_candidate,
     approve_upgrade_candidate, reject_upgrade_candidate, research_trend_ranking,
-    collect_public_source, category_rankings, refresh_category_rankings,
+    collect_public_source, category_rankings, refresh_category_rankings, category_ranking_history,
 )
 from app.services.public_source_collector import (
     FeedCollectionError, parse_feed, validate_public_feed_url,
@@ -159,6 +159,15 @@ class PromptCenterTests(unittest.TestCase):
         result=refresh_category_rankings(self.db)
         self.assertEqual({item["category"] for item in result["snapshots"]},{"drama","prompt","screenplay"})
         self.assertEqual(self.db.query(PromptRankingSnapshot).filter(PromptRankingSnapshot.dimension.in_(["drama","prompt","screenplay"])).count(),3)
+
+    def test_category_ranking_history_returns_saved_snapshot_for_selected_category(self):
+        refresh_category_rankings(self.db)
+        drama = category_ranking_history("drama", self.db)
+        prompt = category_ranking_history("prompt", self.db)
+        self.assertEqual(len(drama["items"]), 1)
+        self.assertEqual(drama["items"][0]["category"], "drama")
+        self.assertEqual(len(prompt["items"]), 1)
+        self.assertEqual(prompt["items"][0]["category"], "prompt")
 
     def test_upgrade_candidate_requires_verified_multi_platform_multi_date_evidence(self):
         item = self.create_prompt_row()
