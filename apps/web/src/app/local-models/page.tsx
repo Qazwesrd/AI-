@@ -36,6 +36,13 @@ type InstallerInfo = { engine_status: string; model: string; model_size_bytes: n
 
 type LocalImageRuntime = {
   status: string; message: string; checkpoint_count: number; checkpoints: string[];
+  model_inventory?: {
+    items: Array<{ name: string; category: string; source: string; selector_node: string; status: string; load_tested: boolean }>;
+    total: number;
+    counts_by_category: Record<string, number>;
+    selectors: Record<string, { available: boolean; model_count?: number; reason?: string }>;
+    note: string;
+  };
   hardware: { ram_bytes: number | null; vram_bytes: number | null; gpu_level: string; reasons: string[]; note: string };
   limitations?: string;
 };
@@ -456,12 +463,31 @@ export default function LocalModelsPage() {
             <>
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">引擎状态</div><div className="mt-1 font-semibold">{imageRuntime.status === "ready" ? "ComfyUI 已连接" : imageRuntime.status === "not_running" ? "尚未连接（启动中或未识别）" : "检测异常"}</div></div>
-                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">已安装图片模型</div><div className="mt-1 font-semibold">{imageRuntime.checkpoint_count} 个 checkpoint</div></div>
+                <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">ComfyUI 可见图片模型</div><div className="mt-1 font-semibold">{imageRuntime.model_inventory?.total ?? imageRuntime.checkpoint_count} 个模型条目</div></div>
                 <div className="rounded-xl bg-white/[0.04] p-3"><div className="text-xs text-white/45">显存适配初筛</div><div className="mt-1 font-semibold">{({unknown:"未知",limited:"显存紧张",basic:"基础运行",capable:"具备一定余量",strong:"较充足"} as Record<string,string>)[imageRuntime.hardware?.gpu_level] || "待检测"}</div></div>
               </div>
               <div className="mt-3 rounded-xl bg-white/[0.04] p-3 text-sm">
                 <p>{imageRuntime.message}</p>
-                {imageRuntime.checkpoints.length > 0 && <div className="mt-2 space-y-1 text-white/65">{imageRuntime.checkpoints.slice(0,12).map((name) => <p key={name} className="break-all">• {name}</p>)}</div>}
+                {imageRuntime.model_inventory?.items?.length ? (
+                  <div className="mt-3 space-y-2">
+                    <p className="font-medium text-fuchsia-100">已扫描模型清单</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(imageRuntime.model_inventory.counts_by_category || {}).map(([category, count]) => (
+                        <span key={category} className="rounded-full border border-fuchsia-300/20 px-2 py-1 text-xs">{({checkpoint:"基础图片模型",vae:"VAE",lora:"LoRA",upscaler:"图片放大",controlnet:"ControlNet",clip_vision:"视觉编码器",ip_adapter:"IP-Adapter"} as Record<string,string>)[category] || category}：{count}</span>
+                      ))}
+                    </div>
+                    <div className="grid gap-1 sm:grid-cols-2">
+                      {imageRuntime.model_inventory.items.slice(0,100).map((item) => (
+                        <div key={item.category + ":" + item.name} className="rounded-lg border border-white/10 bg-black/20 p-2">
+                          <p className="break-all text-white/90">{item.name}</p>
+                          <p className="mt-1 text-xs text-white/45">{item.category} · {item.selector_node} · {item.load_tested ? "已实测加载" : "已发现，未实测加载"}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : imageRuntime.checkpoints.length > 0 ? (
+                  <div className="mt-2 space-y-1 text-white/65">{imageRuntime.checkpoints.slice(0,12).map((name) => <p key={name} className="break-all">• {name}</p>)}</div>
+                ) : <p className="mt-2 text-amber-100/70">当前没有从 ComfyUI 模型选择节点读取到图片模型条目。</p>}
                 {imageRuntime.hardware?.reasons?.map((reason,index) => <p key={index} className="mt-2 text-white/65">• {reason}</p>)}
               </div>
               <p className="mt-2 text-xs leading-5 text-amber-100/65">{imageRuntime.hardware?.note} {imageRuntime.limitations || "本阶段仅做本地引擎和模型检测，尚未提交图片生成任务。"}</p>
