@@ -6,8 +6,11 @@ It deliberately does not log into publisher websites or claim that a package was
 from __future__ import annotations
 
 import hashlib
+import html
+import io
 import json
 import re
+import zipfile
 from datetime import datetime
 from typing import Optional
 
@@ -27,7 +30,8 @@ PLATFORMS = [
     {"id":"qimao","name":"七猫中文网","region":"国内","language":["zh-CN"],"portal":"https://zuozhe.qimao.com/front/register-login/login?query=hasNavBar%3Dtrue&redirect=%2Ffront%2Findex","mode":"official_manual","api_publish":False,"revenue_sync":False,"payout":"平台作者端结算与提现；软件不代操作"},
     {"id":"jjwxc","name":"晋江文学城","region":"国内","language":["zh-CN"],"portal":"https://www.jjwxc.net/","mode":"official_manual","api_publish":False,"revenue_sync":False,"payout":"作者账务与提现以晋江作者后台为准"},
     {"id":"qidian","name":"起点中文网","region":"国内","language":["zh-CN"],"portal":"https://www.qidian.com/","mode":"official_manual","api_publish":False,"revenue_sync":False,"payout":"作者后台结算与提现以平台规则为准"},
-    {"id":"kdp","name":"Amazon Kindle Direct Publishing","region":"海外","language":["en","zh-CN","ja","es","fr","de","it","pt"],"portal":"https://kdp.amazon.com/","mode":"official_manual","api_publish":False,"revenue_sync":False,"payout":"KDP 官方账户管理税务与收款；本软件不发起付款"},
+    {"id":"kdp","name":"Amazon Kindle Direct Publishing (KDP)","region":"海外","language":["en","zh-CN","ja","es","fr","de","it","pt"],"portal":"https://kdp.amazon.com/","mode":"official_manual","api_publish":False,"revenue_sync":False,"formats":["EPUB","DOCX（按 KDP 当前要求检查）"],"cover_formats":["JPG","TIFF"],"workflow":"在 KDP Bookshelf 创建图书，填写书名、作者、简介、版权、分类、价格与地区；上传 EPUB 正文和封面，使用 Kindle Previewer/在线预览检查后由作者确认发布。","payout":"KDP 官方账户管理税务与收款并查看版税报告；本软件不发起付款"},
+    {"id":"google_play_books","name":"Google Play Books Partner Center","region":"海外","language":["en","zh-CN","ja","es","fr","de","it","pt"],"portal":"https://play.google.com/books/publish/","mode":"official_manual","api_publish":False,"revenue_sync":False,"formats":["EPUB","PDF"],"cover_formats":["JPG","PNG","TIFF","PDF"],"workflow":"在 Partner Center 添加图书并填写书目、作者、ISBN/GGKEY、题材、价格和销售地区；上传 EPUB/PDF 正文与封面，检查预览及价格后由作者确认发布。","payout":"Google Play Books Partner Center 的 Payment Center 管理付款资料；收益以月度 Earnings Report 对账，本软件不发起付款。"},
     {"id":"royalroad","name":"Royal Road","region":"海外","language":["en"],"portal":"https://www.royalroad.com/author-dashboard/submissions","mode":"official_manual","api_publish":False,"revenue_sync":False,"payout":"平台规则及作者收款项目以官方账户为准"},
     {"id":"inkitt","name":"Inkitt","region":"海外","language":["en","de","fr"],"portal":"https://www.inkitt.com/writers","mode":"official_manual","api_publish":False,"revenue_sync":False,"payout":"按平台作者计划/合同结算；不保证每部作品获得付费资格"},
 ]
@@ -185,12 +189,92 @@ def list_distribution_packages(novel_id: Optional[int] = None, db: Session = Dep
 
 
 @router.get("/packages/{package_id}/export")
-def export_distribution_package(package_id: int, format: str = Query(default="md", pattern="^(md|txt|json)$"), db: Session = Depends(get_db)):
+def _epub_document(markdown_text: str, title: str, language: str) -> bytes:
+    """Build a lightweight EPUB 3 file locally; no external conversion service."""
+    def inline_markup(value: str) -> str:
+        escaped = html.escape(value, quote=False)
+        escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+        escaped = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<em>\1</em>", escaped)
+        escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+        return escaped
+
+    rendered = []
+    paragraph = []
+    def flush_paragraph():
+        if paragraph:
+            rendered.append("<p>" + " ".join(inline_markup(part) for part in paragraph) + "</p>")
+            paragraph.clear()
+
+    for raw_line in markdown_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            flush_paragraph()
+        elif line == "---":
+            flush_paragraph()
+            rendered.append("<hr/>")
+        elif line.startswith("#"):
+            flush_paragraph()
+            level = min(6, len(line) - len(line.lstrip("#")))
+            heading = line[level:].strip()
+            rendered.append(f"<h{level}>{inline_markup(heading)}</h{level}>")
+        else:
+            paragraph.append(line)
+    flush_paragraph()
+
+    safe_title = html.escape(title, quote=True)
+    safe_language = html.escape(language or "en", quote=True)
+    identifier = "urn:sha256:" + hashlib.sha256(markdown_text.encode("utf-8")).hexdigest()
+    xhtml = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" '
+        f'xml:lang="{safe_language}" lang="{safe_language}"><head><title>{safe_title}</title>'
+        '<meta charset="utf-8"/><style>body{font-family:serif;line-height:1.65;margin:5%;}'
+        'h1,h2,h3{line-height:1.3;margin-top:1.6em;}p{text-indent:2em;margin:.7em 0;}'
+        'hr{margin:2em 0;border:0;border-top:1px solid #888;}</style></head>'
+        '<body><section epub:type="frontmatter"><h1>' + safe_title + '</h1></section>'
+        '<section epub:type="bodymatter">' + "".join(rendered) + '</section></body></html>'
+    )
+    nav = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+        '<head><title>Contents</title></head><body><nav epub:type="toc" id="toc">'
+        '<h1>Contents</h1><ol><li><a href="chapter.xhtml">' + safe_title +
+        '</a></li></ol></nav></body></html>'
+    )
+    opf = (
+        '<?xml version="1.0" encoding="utf-8"?>'
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id">'
+        '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        f'<dc:identifier id="book-id">{identifier}</dc:identifier><dc:title>{safe_title}</dc:title>'
+        f'<dc:language>{safe_language}</dc:language><meta property="dcterms:modified">{datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}</meta>'
+        '</metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>'
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+        '</manifest><spine><itemref idref="chapter"/></spine></package>'
+    )
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        archive.writestr("META-INF/container.xml",
+            '<?xml version="1.0" encoding="utf-8"?>'
+            '<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            '<rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>'
+            '</rootfiles></container>', compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr("OEBPS/content.opf", opf, compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr("OEBPS/nav.xhtml", nav, compress_type=zipfile.ZIP_DEFLATED)
+        archive.writestr("OEBPS/chapter.xhtml", xhtml, compress_type=zipfile.ZIP_DEFLATED)
+    return output.getvalue()
+
+
+@router.get("/packages/{package_id}/export")
+def export_distribution_package(package_id: int, format: str = Query(default="md", pattern="^(md|txt|json|epub)$"), db: Session = Depends(get_db)):
     row = db.query(NovelDistributionPackage).filter(NovelDistributionPackage.id == package_id).first()
     if not row:
         raise HTTPException(404,"发行稿件包不存在")
     filename = f"novel-{row.novel_id}-{row.platform_id}-{row.id}.{format}"
-    if format == "json":
+    if format == "epub":
+        body = _epub_document(row.manuscript_markdown, row.platform_name or "Novel", row.language)
+        media = "application/epub+zip"
+    elif format == "json":
         body = json.dumps({
             "package":package_dict(row),
             "manuscript_markdown":row.manuscript_markdown,
