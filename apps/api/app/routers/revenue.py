@@ -224,6 +224,13 @@ PLATFORM_CAPABILITIES = [
     {"platform": "快手", "official_portal": "https://cp.kuaishou.com/", "revenue_api": "未接入官方个人创作者收入 API", "payout_api": False, "payout_label": "前往快手创作者服务平台", "note": "在官方账户内确认可提现余额和收款方式。"},
     {"platform": "哔哩哔哩", "official_portal": "https://member.bilibili.com/", "revenue_api": "未接入官方个人创作者收入 API", "payout_api": False, "payout_label": "前往哔哩哔哩创作中心", "note": "在官方账户内查看收益与提现。"},
     {"platform": "红果短剧", "official_portal": "", "revenue_api": "未找到可确认的通用公开个人收益 API", "payout_api": False, "payout_label": "请在红果 App 内查看收益/结算", "note": "未确认可公开验证的创作者网页入口；不提供猜测链接。请以 App 内官方结算规则为准。"},
+    {"platform": "番茄小说", "official_portal": "https://fanqienovel.com/", "revenue_api": "未确认开放给本软件的个人作者收益 API", "payout_api": False, "payout_label": "前往番茄官方作者入口", "note": "作者后台查看作品数据、稿费与提现；请以作者端实时规则为准。"},
+    {"platform": "七猫中文网", "official_portal": "https://zuozhe.qimao.com/front/register-login/login?query=hasNavBar%3Dtrue&redirect=%2Ffront%2Findex", "revenue_api": "未确认开放给本软件的个人作者收益 API", "payout_api": False, "payout_label": "前往七猫作者中心", "note": "签约、作品授权、稿费和提现受作者协议及账号资格约束。"},
+    {"platform": "晋江文学城", "official_portal": "https://www.jjwxc.net/", "revenue_api": "未确认开放给本软件的个人作者收益 API", "payout_api": False, "payout_label": "前往晋江官方作者入口", "note": "作者账务、签约和提现以作者后台实际信息及合同为准。"},
+    {"platform": "起点中文网", "official_portal": "https://www.qidian.com/", "revenue_api": "未确认开放给本软件的个人作者收益 API", "payout_api": False, "payout_label": "前往起点官方入口", "note": "请登录官方作家专区查看稿费、结算与提现。"},
+    {"platform": "Amazon KDP", "official_portal": "https://kdp.amazon.com/", "revenue_api": "未确认可用于本软件的公开作者版税 API", "payout_api": False, "payout_label": "前往 KDP 官方账户", "note": "作者需在 KDP 官方账户完成税务和收款设置并查看版税付款记录。"},
+    {"platform": "Royal Road", "official_portal": "https://www.royalroad.com/author-dashboard/submissions", "revenue_api": "未确认开放的通用作者收入 API", "payout_api": False, "payout_label": "前往 Royal Road 作者后台", "note": "平台支持作者提交作品；具体变现和收款资格以官方账户为准。"},
+    {"platform": "Inkitt", "official_portal": "https://www.inkitt.com/writers", "revenue_api": "未确认开放的通用作者收入 API", "payout_api": False, "payout_label": "前往 Inkitt 作者入口", "note": "出版合同与收入取决于平台项目筛选和签约，不保证所有作品获得付费资格。"},
 ]
 
 
