@@ -198,5 +198,38 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertFalse(result["template_generated"])
 
 
+    def test_video_preview_rejects_path_traversal_metadata(self):
+        from fastapi import HTTPException
+        from app.routers import local_video_runtime as runtime
+        prompt_id = "a" * 32
+        history = {
+            prompt_id: {
+                "outputs": {
+                    "1": {"videos": [{"filename": "../outside.mp4", "subfolder": "", "type": "output"}]}
+                }
+            }
+        }
+        with patch.object(runtime, "_comfy_request", return_value=history):
+            with self.assertRaises(HTTPException) as caught:
+                runtime.preview_video_workflow_output(prompt_id)
+        self.assertEqual(caught.exception.status_code, 422)
+
+    def test_video_preview_rejects_parent_directory_subfolder(self):
+        from fastapi import HTTPException
+        from app.routers import local_video_runtime as runtime
+        prompt_id = "b" * 32
+        history = {
+            prompt_id: {
+                "outputs": {
+                    "1": {"videos": [{"filename": "render.mp4", "subfolder": "safe/../../outside", "type": "output"}]}
+                }
+            }
+        }
+        with patch.object(runtime, "_comfy_request", return_value=history):
+            with self.assertRaises(HTTPException) as caught:
+                runtime.preview_video_workflow_output(prompt_id)
+        self.assertEqual(caught.exception.status_code, 422)
+
+
 if __name__ == "__main__":
     unittest.main()
