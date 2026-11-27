@@ -884,6 +884,79 @@ def preview_video_workflow_output(prompt_id: str, output_index: int = 0):
 
 
 
+def assess_video_resource_preflight(workflow, diagnostics):
+    """Provide conservative, read-only suggestions from measured local resources and workflow settings."""
+    numeric_inputs = {}
+    for node in workflow.values() if isinstance(workflow, dict) else []:
+        inputs = node.get("inputs") if isinstance(node, dict) else None
+        if not isinstance(inputs, dict):
+            continue
+        for key, value in inputs.items():
+            normalized = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                if normalized in {"width", "height", "frames", "numframes", "length", "batchsize", "steps"}:
+                    numeric_inputs.setdefault(normalized, []).append(value)
+    settings = {key: max(values) for key, values in numeric_inputs.items() if values}
+    devices = diagnostics.get("devices", []) if isinstance(diagnostics, dict) else []
+    devices = [item for item in devices if isinstance(item, dict)]
+    warnings = []
+    recommendations = []
+    if not diagnostics.get("available"):
+        warnings.append("无法读取本机运行环境；资源状况未知，不能确认模型可加载。")
+        recommendations.append("先启动本机 ComfyUI 并重新检测运行环境，再提交生成。")
+    elif not devices:
+        warnings.append("ComfyUI 未报告可用加速设备，任务可能使用 CPU，生成速度可能很慢。")
+        recommendations.append("首次仅尝试低分辨率、短帧数和 batch=1；不要同时运行其他大型模型。")
+    else:
+        known = [item for item in devices if isinstance(item.get("vram_free_mb"), (int, float))]
+        if not known:
+            warnings.append("已发现计算设备，但未报告可用显存；无法估算模型加载余量。")
+            recommendations.append("先使用模型作者提供的低显存设置，并保留当前工作流副本。")
+        else:
+            free_mb = min(item["vram_free_mb"] for item in known)
+            if free_mb < 2048:
+                warnings.append("当前报告的可用显存低于 2 GB，加载视频模型失败或发生内存溢出的风险较高。")
+            elif free_mb < 4096:
+                warnings.append("当前报告的可用显存低于 4 GB，视频模型可能无法完整加载。")
+            elif free_mb < 8192:
+                warnings.append("当前可用显存有限，建议先用低分辨率、短帧数验证工作流。")
+            recommendations.append("先将宽、高和帧数分别降低到当前值约一半，batch 保持 1；确认能成功输出后再逐项提高。")
+    if settings:
+        recommendations.append("本次识别到的工作流参数：" + "、".join(f"{key}={value:g}" for key, value in sorted(settings.items())) + "。建议只在工作流副本中调整。")
+    else:
+        recommendations.append("未能从当前工作流识别标准分辨率/帧数参数；请按该模型节点的说明手动设置，不自动猜测节点参数。")
+    return {
+        "available": bool(diagnostics.get("available")),
+        "device_count": len(devices),
+        "devices": devices,
+        "workflow_settings": settings,
+        "warnings": warnings,
+        "recommendations": recommendations,
+        "requires_user_confirmation": bool(warnings),
+        "workflow_modified": False,
+        "generation_submitted": False,
+        "local_only": True,
+        "cloud_fallback": False,
+    }
+
+
+@router.post("/video-workflow/preflight")
+def preflight_video_workflow_endpoint(data: LocalVideoWorkflowInput):
+    """Validate a local video graph and report resource risks before queue submission."""
+    object_info = _local_object_info()
+    validation = validate_local_video_workflow(data.workflow, object_info)
+    if not validation["valid"]:
+        raise HTTPException(422, detail={"message": "工作流结构未通过预检，未提交任务。", **validation})
+    diagnostics = local_video_runtime_diagnostics()
+    assessment = assess_video_resource_preflight(data.workflow, diagnostics)
+    return {
+        "valid": True,
+        "validation": validation,
+        "resource_assessment": assessment,
+        "message": "工作流结构已通过检查；请先阅读本机资源风险和建议，再决定是否提交。预检不会修改工作流或启动生成。",
+    }
+
+
 @router.get("/video-runtime/diagnostics")
 def local_video_runtime_diagnostics():
     """Read-only local ComfyUI runtime and accelerator diagnostics; never downloads or queues work."""
