@@ -204,7 +204,7 @@ PLATFORM_CAPABILITIES = [
     {"platform": "抖音", "official_portal": "https://creator.douyin.com/", "revenue_api": "未确认通用个人创作者收入 API", "payout_api": False, "payout_label": "前往抖音创作者服务平台", "note": "软件不模拟登录或抓取私密账户页面。"},
     {"platform": "快手", "official_portal": "https://cp.kuaishou.com/", "revenue_api": "未接入官方个人创作者收入 API", "payout_api": False, "payout_label": "前往快手创作者服务平台", "note": "在官方账户内确认可提现余额和收款方式。"},
     {"platform": "哔哩哔哩", "official_portal": "https://member.bilibili.com/", "revenue_api": "未接入官方个人创作者收入 API", "payout_api": False, "payout_label": "前往哔哩哔哩创作中心", "note": "在官方账户内查看收益与提现。"},
-    {"platform": "红果短剧", "official_portal": "https://www.hongguo.com/", "revenue_api": "未找到可确认的通用公开个人收益 API", "payout_api": False, "payout_label": "前往红果官方入口", "note": "请以账号内官方结算规则为准。"},
+    {"platform": "红果短剧", "official_portal": "", "revenue_api": "未找到可确认的通用公开个人收益 API", "payout_api": False, "payout_label": "请在红果 App 内查看收益/结算", "note": "未确认可公开验证的创作者网页入口；不提供猜测链接。请以 App 内官方结算规则为准。"},
 ]
 
 
