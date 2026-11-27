@@ -118,24 +118,24 @@ export default function PromptResearchPage() {
       if (url.protocol !== "https:") { setMessage("只接受 HTTPS 公开来源。"); return; }
       let feedUrl = url.toString();
       let suggestedName = sourceName.trim();
-      const host = url.hostname.toLowerCase().replace(/^www\\./, "");
+      const host = url.hostname.toLowerCase().replace(/^www\./, "");
       if (host === "reddit.com") {
-        const subreddit = url.pathname.match(/^\\/r\\/([A-Za-z0-9_]+)\\/?$/);
-        const user = url.pathname.match(/^\\/user\\/([A-Za-z0-9_-]+)\\/?$/);
+        const subreddit = url.pathname.match(/^\/r\/([A-Za-z0-9_]+)\/?$/);
+        const user = url.pathname.match(/^\/user\/([A-Za-z0-9_-]+)\/?$/);
         if (subreddit) {
           feedUrl = `https://www.reddit.com/r/${subreddit[1]}/new/.rss`;
           suggestedName ||= `Reddit · r/${subreddit[1]} 最新公开内容`;
         } else if (user) {
           feedUrl = `https://www.reddit.com/user/${user[1]}/submitted/.rss`;
           suggestedName ||= `Reddit · ${user[1]} 公开投稿`;
-        } else if (/\\.(rss|xml)$/i.test(url.pathname)) {
+        } else if (/\.(rss|xml)$/i.test(url.pathname)) {
           suggestedName ||= `Reddit · ${url.pathname.split("/").filter(Boolean).slice(-1)[0] || "公开订阅"}`;
         } else {
           setMessage("已识别 Reddit，但请粘贴具体 subreddit 或用户主页地址，才能生成对应 RSS。");
           return;
         }
       } else if (host === "youtube.com" || host === "m.youtube.com") {
-        const channel = url.pathname.match(/^\\/channel\\/(UC[A-Za-z0-9_-]{20,})\\/?$/);
+        const channel = url.pathname.match(/^\/channel\/(UC[A-Za-z0-9_-]{20,})\/?$/);
         if (channel) {
           feedUrl = `https://www.youtube.com/feeds/videos.xml?channel_id=${channel[1]}`;
           suggestedName ||= `YouTube · ${channel[1]}`;
@@ -147,7 +147,7 @@ export default function PromptResearchPage() {
         }
       } else {
         suggestedName ||= `${sourcePlatform} · ${url.hostname}${url.pathname === "/" ? "" : url.pathname}`;
-        if (!/\\.(rss|xml)$/i.test(url.pathname) && !/feed|atom/i.test(url.pathname + url.search)) {
+        if (!/\.(rss|xml)$/i.test(url.pathname) && !/feed|atom/i.test(url.pathname + url.search)) {
           setSourceName(suggestedName);
           setMessage("已自动生成来源名称。该平台地址未发现可安全推导的官方 RSS/Atom 规则，请粘贴平台实际公开订阅地址后再添加；不会猜造地址。");
           return;
