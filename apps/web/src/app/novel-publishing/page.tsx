@@ -19,6 +19,7 @@ export default function NovelPublishingPage(){
   const [chapters,setChapters]=useState<Chapter[]>([]);
   const [localModels,setLocalModels]=useState<LocalModel[]>([]);
   const [translationLanguage,setTranslationLanguage]=useState("en");
+  const [distributionTranslationId,setDistributionTranslationId]=useState("");
   const [translationModel,setTranslationModel]=useState("");
   const [translationGlossary,setTranslationGlossary]=useState("{}");
   const [translations,setTranslations]=useState<Translation[]>([]);
@@ -157,7 +158,7 @@ export default function NovelPublishingPage(){
     try{
       const result=await api<{item:Package;message:string}>(`/api/novel-publishing/novels/${novelId}/packages`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({platform_id:platformId,pen_name:penName,language,synopsis,tags:tags.split(/[,，、]/).map(x=>x.trim()).filter(Boolean),rights_confirmed:rights,ai_assistance_disclosed:aiDisclosure}),
+        body:JSON.stringify({platform_id:platformId,pen_name:penName,language,synopsis,tags:tags.split(/[,，、]/).map(x=>x.trim()).filter(Boolean),rights_confirmed:rights,ai_assistance_disclosed:aiDisclosure,translation_id:distributionTranslationId?Number(distributionTranslationId):null}),
       });
       await api(`/api/novel-publishing/packages/${result.item.id}/submissions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:"prepared",note:"已在本机生成发行稿件包，尚未向平台提交。"})});
       setMessage(result.message);await load();
@@ -245,6 +246,7 @@ export default function NovelPublishingPage(){
             <select className={field+" mt-1"} value={platformId} onChange={e=>setPlatformId(e.target.value)}>{platforms.map(p=><option key={p.id} value={p.id}>{p.region} · {p.name}</option>)}</select>
           </label>
           <label className="text-sm">作者笔名<input className={field+" mt-1"} value={penName} onChange={e=>setPenName(e.target.value)} placeholder="填写你的作者笔名"/></label>
+          <label className="text-sm">发布版本<select className={field+" mt-1"} value={distributionTranslationId} onChange={e=>{setDistributionTranslationId(e.target.value);const selected=translations.find(x=>String(x.id)===e.target.value);if(selected)setLanguage(selected.target_language);}}><option value="">使用原文</option>{translations.filter(x=>x.status==="completed").map(x=><option key={x.id} value={x.id}>{x.target_language_name}译本 · #{x.id}</option>)}</select></label>
           <label className="text-sm">发行语言
             <select className={field+" mt-1"} value={language} onChange={e=>setLanguage(e.target.value)}>{[["zh-CN","简体中文"],["en","英语"],["ja","日语"],["es","西班牙语"],["fr","法语"],["de","德语"],["it","意大利语"],["pt","葡萄牙语"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
           </label>
@@ -273,7 +275,7 @@ export default function NovelPublishingPage(){
           const record=submissions.find(x=>x.package_id===pkg.id);
           const platform=platforms.find(x=>x.id===pkg.platform_id);
           return <article key={pkg.id} className="rounded-xl border border-purple-400/15 bg-black/20 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2"><div><strong>{pkg.platform_name}</strong><p className="mt-1 text-xs text-purple-300">小说 #{pkg.novel_id} · {pkg.language} · {pkg.word_count} 字 · {statusLabel[record?.status||pkg.status]||pkg.status}</p></div><span className="text-xs text-slate-500">SHA256 {pkg.content_hash.slice(0,12)}…</span></div>
+            <div className="flex flex-wrap items-center justify-between gap-2"><div><strong>{pkg.platform_name}</strong><p className="mt-1 text-xs text-purple-300">小说 #{pkg.novel_id} · {pkg.language} · {pkg.word_count} 字 · {pkg.translation_id?("译本 #"+pkg.translation_id+" · "):""} {statusLabel[record?.status||pkg.status]||pkg.status}</p></div><span className="text-xs text-slate-500">SHA256 {pkg.content_hash.slice(0,12)}…</span></div>
             <div className="mt-3 flex flex-wrap gap-2"><button onClick={()=>void exportPackage(pkg.id,"md")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 Markdown</button><button onClick={()=>void exportPackage(pkg.id,"txt")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 TXT</button><button onClick={()=>void exportPackage(pkg.id,"json")} className="rounded-lg border border-cyan-400/30 px-3 py-2 text-xs">导出 JSON</button><button onClick={()=>void openSubmission(pkg.id)} className="rounded-lg bg-cyan-800 px-3 py-2 text-xs">打开官方投稿入口</button></div>
             {record&&<div className="mt-3 flex flex-wrap items-center gap-2 text-xs"><span className="text-purple-200">投稿记录：{statusLabel[record.status]||record.status}</span>{record.external_work_url&&<a href={record.external_work_url} target="_blank" rel="noopener noreferrer" className="text-cyan-200">查看已发布作品 ↗</a>}
               <select className="rounded-lg bg-slate-900 p-2" value={record.status} onChange={e=>void updateSubmission(record.id,e.target.value)}><option value="prepared">已备稿</option><option value="submitted">已提交</option><option value="reviewing">审核中</option><option value="published">已发布（需提供作品链接）</option><option value="rejected">被拒绝</option><option value="paused">已暂停</option><option value="withdrawn">已撤稿</option></select>
