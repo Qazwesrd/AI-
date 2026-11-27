@@ -50,14 +50,6 @@
         "to": "web/public",
         "from": "../web/public"
       },
-      {
-        "to": "media/ffmpeg.exe",
-        "from": "build-resources/ffmpeg/ffmpeg.exe"
-      },
-      {
-        "to": "media/ffprobe.exe",
-        "from": "build-resources/ffmpeg/ffprobe.exe"
-      }
     ],
     "win": {
       "artifactName": "${productName}-Setup-${version}.${ext}",
