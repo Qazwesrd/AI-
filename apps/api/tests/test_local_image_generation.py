@@ -265,5 +265,34 @@ class StoryboardImageLinkTests(unittest.TestCase):
         self.assertEqual(data.shot_id, 11)
 
 
+class LocalImageTaskTerminalStatusTests(unittest.TestCase):
+    def test_completed_history_exposes_only_completed_outputs(self):
+        history = {
+            "a" * 32: {
+                "status": {"completed": True, "status_str": "success"},
+                "outputs": {"9": {"images": [{"filename": "frame.png", "subfolder": "", "type": "output"}]}},
+            }
+        }
+        with patch("app.routers.local_image_generation._local_request", return_value=history):
+            result = get_local_image_task("a" * 32)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["images"][0]["filename"], "frame.png")
+
+    def test_failed_history_returns_terminal_failure_instead_of_polling_forever(self):
+        history = {
+            "b" * 32: {
+                "status": {"completed": False, "status_str": "error"},
+                "outputs": {},
+                "messages": [["execution_error", {"exception_message": "private local path"}]],
+            }
+        }
+        with patch("app.routers.local_image_generation._local_request", return_value=history):
+            result = get_local_image_task("b" * 32)
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(result["error"])
+        self.assertNotIn("private local path", result["error"])
+        self.assertEqual(result["images"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
