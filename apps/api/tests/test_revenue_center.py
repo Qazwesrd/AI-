@@ -41,6 +41,7 @@ class RevenueCenterTests(unittest.TestCase):
         create_revenue(RevenueInput(platform="NovelPlatform", gross_amount=30, currency="CNY", status="payable"), self.db)
         create_revenue(RevenueInput(platform="NovelPlatform", gross_amount=40, currency="CNY", status="paid"), self.db)
         result = summary(self.db)["currency_totals"]["CNY"]
+        self.assertEqual(result["estimated_net"], 10)
         self.assertEqual(result["settled_net"], 20)
         self.assertEqual(result["payable_net"], 30)
         self.assertEqual(result["paid_net"], 40)
