@@ -433,6 +433,9 @@ class TranslationCreateInput(BaseModel):
 class TranslationChunkEditInput(BaseModel):
     translation: str = Field(max_length=100000)
 
+class TranslationGlossaryInput(BaseModel):
+    glossary: dict = Field(default_factory=dict)
+
 
 def _novel_source_signature(novel, chapters):
     source = "\n".join(
@@ -629,6 +632,26 @@ def translate_next_chunk(translation_id: int, db: Session = Depends(get_db)):
         row.last_error = str(exc)[:2000]
         db.commit()
         raise HTTPException(502,"本地翻译失败："+row.last_error)
+
+
+@router.patch("/translations/{translation_id}/glossary")
+def update_translation_glossary(
+    translation_id: int,
+    data: TranslationGlossaryInput,
+    db: Session = Depends(get_db),
+):
+    row = db.query(NovelTranslation).filter(NovelTranslation.id == translation_id).first()
+    if not row:
+        raise HTTPException(404, "译本任务不存在")
+    glossary = {}
+    for key, value in list(data.glossary.items())[:300]:
+        if isinstance(key, str) and isinstance(value, str) and key.strip() and value.strip():
+            glossary[key.strip()[:120]] = value.strip()[:160]
+    row.glossary = glossary
+    row.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(row)
+    return {"success": True, "item": translation_dict(row), "message": "术语表已更新；后续待翻译段落将使用新术语。已完成译文不会被自动覆盖。 "}
 
 
 @router.patch("/translations/{translation_id}/chapters/{chapter_number}/chunks/{chunk_index}")
