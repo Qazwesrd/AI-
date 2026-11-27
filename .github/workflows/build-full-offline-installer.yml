@@ -30,7 +30,7 @@ jobs:
       - name: Checkout installer scripts
         uses: actions/checkout@v4
         with:
-          ref: offline-ai-engine-integration
+          ref: ${{ github.ref }}
 
       - name: Find the successful desktop installer for this exact commit
         id: setup-run
