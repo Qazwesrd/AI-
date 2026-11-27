@@ -1,15 +1,21 @@
+import os
 import unittest
+from datetime import datetime, timedelta
+from unittest.mock import patch
 
+from cryptography.fernet import Fernet
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models.revenue import RevenueEntry, WithdrawalRecord
+from app.models.revenue import RevenueEntry, WithdrawalRecord, CreatorOAuthConnection
 from app.routers.revenue import (
     RevenueInput, WithdrawalInput, WithdrawalStatusInput,
     create_revenue, create_withdrawal, update_withdrawal, summary, list_platform_capabilities,
+    sync_google_creator_revenue,
 )
+from app.services.google_creator_oauth import encrypt_token
 
 
 class RevenueCenterTests(unittest.TestCase):
@@ -48,6 +54,48 @@ class RevenueCenterTests(unittest.TestCase):
             update_withdrawal(item["id"], WithdrawalStatusInput(status="paid"), self.db)
         updated = update_withdrawal(item["id"], WithdrawalStatusInput(status="paid", arrived_at="2026-11-27"), self.db)
         self.assertEqual(updated["item"]["status"], "paid")
+
+    def test_google_oauth_sync_records_estimated_and_payable_amounts_idempotently(self):
+        previous_key = os.environ.get("AI_COMIC_TOKEN_ENCRYPTION_KEY")
+        os.environ["AI_COMIC_TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode("ascii")
+        try:
+            connection = CreatorOAuthConnection(
+                provider="google_youtube_adsense", account_label="writer@example.com",
+                external_account_id="writer@example.com",
+                access_token_encrypted=encrypt_token("access-token"),
+                refresh_token_encrypted=encrypt_token("refresh-token"),
+                token_expires_at=datetime.utcnow() + timedelta(hours=1),
+                granted_scopes="https://www.googleapis.com/auth/yt-analytics-monetary.readonly https://www.googleapis.com/auth/adsense.readonly",
+                status="connected",
+            )
+            self.db.add(connection)
+            self.db.commit()
+            self.db.refresh(connection)
+
+            def fake_google_get(url, token):
+                if "youtubeanalytics.googleapis.com" in url:
+                    return {"rows":[["2026-11-26", 3.25]]}
+                if url.endswith("/v2/accounts?pageSize=100"):
+                    return {"accounts":[{"name":"accounts/pub-123"}]}
+                if "/payments" in url:
+                    return {"payments":[{"name":"accounts/pub-123/payments/unpaid","amount":"$12.50 USD","date":{}}]}
+                raise AssertionError(url)
+
+            with patch("app.routers.revenue.google_get_json", side_effect=fake_google_get):
+                first = sync_google_creator_revenue(connection.id, self.db)
+                second = sync_google_creator_revenue(connection.id, self.db)
+            self.assertEqual(first["analytics_days"], 1)
+            self.assertEqual(first["payment_records"], 1)
+            self.assertEqual(first["inserted"], 2)
+            self.assertEqual(second["inserted"], 0)
+            rows = self.db.query(RevenueEntry).order_by(RevenueEntry.platform).all()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row.status for row in rows}, {"estimated","payable"})
+        finally:
+            if previous_key is None:
+                os.environ.pop("AI_COMIC_TOKEN_ENCRYPTION_KEY", None)
+            else:
+                os.environ["AI_COMIC_TOKEN_ENCRYPTION_KEY"] = previous_key
 
     def test_platform_capabilities_never_advertise_unimplemented_direct_payout(self):
         result = list_platform_capabilities()
