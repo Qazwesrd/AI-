@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.routers.local_image_runtime import (
-    GIB, _checkpoint_names, _local_json, assess_image_hardware,
+    GIB, _checkpoint_names, _local_json, _selector_choices, assess_image_hardware,
 )
 
 
@@ -34,6 +34,13 @@ class LocalImageRuntimeTests(unittest.TestCase):
     def test_checkpoint_list_is_extracted(self):
         payload = {"CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["sd15.safetensors", "sdxl.safetensors"]]}}}}
         self.assertEqual(_checkpoint_names(payload), ["sd15.safetensors", "sdxl.safetensors"])
+
+    def test_model_selector_choices_are_enumerated(self):
+        payload = {"VAELoader": {"input": {"required": {"vae_name": [["vae-ft.safetensors", "sdxl_vae.safetensors"]]}}}}
+        self.assertEqual(
+            _selector_choices(payload, "vae_name"),
+            ["sdxl_vae.safetensors", "vae-ft.safetensors"],
+        )
 
     def test_checkpoint_response_shape_is_validated(self):
         self.assertEqual(_checkpoint_names({"_error": "HTTP 500"}), [])
