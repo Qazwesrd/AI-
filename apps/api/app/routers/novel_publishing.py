@@ -40,6 +40,7 @@ PLATFORMS = [
 class DistributionPackageInput(BaseModel):
     platform_id: str = Field(min_length=1, max_length=60)
     pen_name: str = Field(default="", max_length=120)
+    localized_title: str = Field(default="", max_length=300)
     language: str = Field(default="zh-CN", max_length=40)
     synopsis: str = Field(default="", max_length=10000)
     tags: list[str] = Field(default_factory=list, max_length=30)
@@ -96,8 +97,9 @@ def submission_dict(row):
     }
 
 
-def build_manuscript(novel, chapters, synopsis, pen_name, language, tags):
-    lines = [f"# {novel.title}", ""]
+def build_manuscript(novel, chapters, synopsis, pen_name, language, tags, localized_title=""):
+    publication_title = localized_title.strip() or novel.title
+    lines = [f"# {publication_title}", ""]
     if pen_name:
         lines.extend([f"**作者笔名：** {pen_name}", ""])
     lines.extend([f"**类型：** {novel.genre or '未分类'}", f"**语言：** {language}", ""])
@@ -165,7 +167,7 @@ def create_distribution_package(novel_id: int, data: DistributionPackageInput, d
         raise HTTPException(400,"小说没有正文，请先创建或导入章节")
     if not chapters and data.translation_id is None:
         chapters = [type("SourceChapter",(),{"title":"正文","chapter_number":1,"content":novel.source_text,"word_count":len(novel.source_text)})()]
-    manuscript = build_manuscript(novel,chapters,data.synopsis or novel.description,data.pen_name,data.language,[tag.strip() for tag in data.tags if tag.strip()][:30])
+    manuscript = build_manuscript(novel,chapters,data.synopsis or novel.description,data.pen_name,data.language,[tag.strip() for tag in data.tags if tag.strip()][:30],data.localized_title)
     digest = hashlib.sha256(manuscript.encode("utf-8")).hexdigest()
     row = NovelDistributionPackage(
         novel_id=novel_id,translation_id=data.translation_id,platform_id=platform["id"],platform_name=platform["name"],
