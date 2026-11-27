@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type Novel = {id:number;title:string;genre:string;chapter_count:number;word_count:number};
 type Platform = {id:string;name:string;region:string;language:string[];portal:string;mode:string;api_publish:boolean;revenue_sync:boolean;payout:string};
-type Package = {id:number;novel_id:number;platform_id:string;platform_name:string;pen_name:string;language:string;status:string;word_count:number;content_hash:string;created_at:string};
+type Package = {id:number;novel_id:number;translation_id:number|null;platform_id:string;platform_name:string;pen_name:string;language:string;status:string;word_count:number;content_hash:string;created_at:string};
 type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
 type LocalModel = {name:string};
