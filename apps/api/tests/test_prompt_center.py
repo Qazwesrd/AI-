@@ -130,7 +130,7 @@ class PromptCenterTests(unittest.TestCase):
         ]:
             for platform,day in [("平台甲","2026-11-20"),("平台乙","2026-11-26")]:
                 item=create_trend_evidence(EvidenceInput(
-                    platform=platform,work_title=title,observed_at=day,
+                    platform=platform,work_title=title,genre=("玄幻" if title=="热门漫剧A" else "悬疑" if title=="热门剧本B" else "其他"),observed_at=day,
                     metric_summary={"views":10000,"likes":500,"shares":60},
                     evidence_type=evidence_type,
                 ),self.db)["item"]
@@ -139,6 +139,7 @@ class PromptCenterTests(unittest.TestCase):
         add_test_run(prompt["id"],TestInput(score_overall=94,score_story=96),self.db)
         result=category_rankings(self.db)["categories"]
         self.assertEqual([x["title"] for x in result["drama"]["items"]],["热门漫剧A"])
+        self.assertEqual([x["title"] for x in result["drama"]["genre_items"]],["玄幻"])
         self.assertEqual([x["title"] for x in result["screenplay"]["items"]],["热门剧本B"])
         self.assertEqual([x["title"] for x in result["prompt"]["items"]],["测试提示词"])
         self.assertEqual([x["title"] for x in result["prompt"]["public_share_items"]],["公开提示词C"])
