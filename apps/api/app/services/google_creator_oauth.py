@@ -14,6 +14,7 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +31,7 @@ GOOGLE_SCOPES = [
 REDIRECT_URI = "http://127.0.0.1:8000/api/revenue/oauth/google/callback"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
+API_CALLBACK_URI = "http://127.0.0.1:8000/api/revenue/oauth/google/callback"
 
 
 class OAuthConfigurationError(RuntimeError):
@@ -139,13 +141,44 @@ def decrypt_token(value: str) -> str:
         raise OAuthConfigurationError("无法解密已保存的 OAuth 令牌；请检查本机加密密钥是否与授权时一致。") from exc
 
 
-def new_authorization():
+def start_loopback_listener():
+    """Listen once on a random loopback port; Google desktop redirects must have no path."""
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urllib.parse.urlsplit(self.path)
+            if parsed.path not in {"", "/"}:
+                self.send_error(404)
+                return
+            target = API_CALLBACK_URI + ("?" + parsed.query if parsed.query else "")
+            self.send_response(302)
+            self.send_header("Location", target)
+            self.end_headers()
+
+        def log_message(self, format, *args):
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    server.timeout = 300
+    port = server.server_address[1]
+    import threading
+
+    def serve_once():
+        try:
+            server.handle_request()
+        finally:
+            server.server_close()
+
+    threading.Thread(target=serve_once, daemon=True).start()
+    return f"http://127.0.0.1:{port}"
+
+
+def new_authorization(redirect_uri: str):
     verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).rstrip(b"=").decode("ascii")
     state = secrets.token_urlsafe(32)
     params = {
         "client_id": _client_id(),
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": " ".join(GOOGLE_SCOPES),
         "state": state,
@@ -174,12 +207,12 @@ def _post_form(url: str, fields: dict) -> dict:
     return data
 
 
-def exchange_code(code: str, verifier: str) -> dict:
+def exchange_code(code: str, verifier: str, redirect_uri: str) -> dict:
     fields = {
         "client_id": _client_id(),
         "code": code,
         "code_verifier": verifier,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": redirect_uri,
         "grant_type": "authorization_code",
     }
     secret = _client_secret()
