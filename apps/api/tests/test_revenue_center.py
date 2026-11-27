@@ -112,9 +112,10 @@ class RevenueCenterTests(unittest.TestCase):
         self.assertEqual(first["imported"],2)
         self.assertEqual(second["imported"],0)
         self.assertEqual(second["updated"],2)
-        paid=self.db.query(RevenueEntry).filter_by(platform="Google Play Books",status="paid").all()
-        self.assertEqual(len(paid),2)
-        self.assertAlmostEqual(sum(row.gross_amount for row in paid),11.25)
+        settled=self.db.query(RevenueEntry).filter_by(platform="Google Play Books",status="settled").all()
+        self.assertEqual(len(settled),2)
+        self.assertAlmostEqual(sum(row.gross_amount for row in settled),11.25)
+        self.assertTrue(all("不是银行到账凭证" in row.notes for row in settled))
 
         kdp=b"Month,Title,Currency,Estimated royalties\n2026-11,Novel B,USD,$3.45\n"
         imported=import_platform_report("kdp","kdp.csv",kdp,self.db)
@@ -122,6 +123,14 @@ class RevenueCenterTests(unittest.TestCase):
         kdp_row=self.db.query(RevenueEntry).filter_by(platform="Amazon KDP").one()
         self.assertEqual(kdp_row.status,"estimated")
         self.assertAlmostEqual(kdp_row.gross_amount,3.45)
+
+        payment=b"Payment Number,Payment Status,Payment Date,Marketplace,Currency,Payment Amount\\n123,Paid,2026-10-15,Amazon.com,USD,42.50\\n124,Pending,2026-10-15,Amazon.com,USD,12.00\\n"
+        payment_result=import_platform_report("kdp","payments.csv",payment,self.db)
+        self.assertEqual(payment_result["imported"],2)
+        payment_rows=self.db.query(RevenueEntry).filter(RevenueEntry.platform=="Amazon KDP",RevenueEntry.source_ref.like("report-import:kdp:%")).all()
+        stages={row.gross_amount:row.status for row in payment_rows}
+        self.assertEqual(stages[42.5],"paid")
+        self.assertEqual(stages[12.0],"payable")
 
     def test_kdp_and_google_play_books_are_official_report_only(self):
         result=list_platform_capabilities()
