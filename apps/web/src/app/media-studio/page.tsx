@@ -163,6 +163,29 @@ export default function MediaStudioPage() {
       return { ...node, values, connections };
     });
   }
+  async function autoBuildLocalVideoWorkflow() {
+    if (!prompt.trim()) { setMessage("请先填写视频画面描述，再让本机 AI 自动配置工作流。"); return; }
+    setWorkflowBusy(true); setWorkflowResult(null); setMessage("正在使用本机 Ollama 分析已安装的 Wan/VACE 节点并自动配置工作流……");
+    try {
+      const response = await fetch(`${API}/api/local-ai/video-workflow/auto-build`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, mode: "text_to_video", width: 832, height: 480, frames: Math.max(1, Math.min(241, Math.round(duration * 16))), fps: 16, steps: 20 }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        const detail = typeof data.detail === "object"
+          ? [data.detail.message, ...(data.detail.errors || []), ...(data.detail.missing || [])].filter(Boolean).join("；")
+          : data.detail;
+        throw new Error(detail || "本机 AI 自动配置失败");
+      }
+      setWorkflowJson(JSON.stringify(data.workflow, null, 2));
+      setWorkflowResult(data.validation || data);
+      setMessage(data.message || "本机 AI 已生成工作流草稿；尚未提交视频生成。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "本机 AI 自动配置失败");
+    } finally { setWorkflowBusy(false); }
+  }
+
   async function buildWizardWorkflow() {
     if (!wizardNodes.length) { setMessage("请先添加本机节点。"); return; }
     setWorkflowBusy(true); setWorkflowResult(null); setMessage("正在构建并预检本机工作流草稿……");
@@ -583,8 +606,10 @@ export default function MediaStudioPage() {
           </div>
 
           <section className="mt-4 rounded-xl border border-cyan-300/20 bg-black/20 p-4">
-            <h3 className="font-semibold text-cyan-100">新手节点向导（自动读取本机节点）</h3>
-            <p className="mt-1 text-xs leading-5 text-white/60">从已安装节点中逐个添加。参数、下拉选项和输出端口均来自本机 ComfyUI；连线必须由你明确选择，不会自动猜测。</p>
+            <h3 className="font-semibold text-cyan-100">AI 自动配置 Wan / VACE 工作流</h3>
+            <p className="mt-1 text-xs leading-5 text-white/60">优先使用本机 Ollama 根据已安装节点、模型选项和接口自动生成工作流，并由 ComfyUI 逐项预检。不会联网、不会下载模型、不会自动提交任务。</p>
+            <button onClick={autoBuildLocalVideoWorkflow} disabled={workflowBusy || !prompt.trim()} className="mt-3 rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">{workflowBusy ? "正在自动配置…" : "AI 自动配置工作流并预检"}</button>
+            <details className="mt-3"><summary className="cursor-pointer text-xs text-white/60">高级：手动节点向导（仅用于自动配置失败时排查）</summary>
             {templateCapabilities?.available ? <>
               <div className="mt-3 flex flex-wrap gap-2">
                 <select value={wizardClassType} onChange={event => setWizardClassType(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 p-2 text-sm">
@@ -632,7 +657,8 @@ export default function MediaStudioPage() {
                 <button onClick={() => setWizardNodes([])} disabled={workflowBusy || !wizardNodes.length} className="rounded-lg border border-white/15 px-3 py-2 text-sm disabled:opacity-40">清空节点</button>
                 <span className="text-xs text-white/50">已添加 {wizardNodes.length} 个节点；尚未提交生成</span>
               </div>
-            </> : <p className="mt-3 text-sm text-amber-200/80">尚未发现 Wan/VACE 专用节点。向导不会自动下载或安装节点。</p>}
+            </> : <p className="mt-3 text-sm text-amber-200/80">尚未发现 Wan/VACE 专用节点。自动配置会停止，不会自动下载或安装节点。</p>}
+            </details>
           </section>
           <details className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3">
             <summary className="cursor-pointer text-sm font-medium text-cyan-100">高级：按本机节点结构构建工作流草稿</summary>
