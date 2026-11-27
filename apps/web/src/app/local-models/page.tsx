@@ -196,20 +196,6 @@ export default function LocalModelsPage() {
 
   useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
 
-  // Local engines may still be starting after the desktop window appears.
-  // Refresh their read-only status briefly so the page does not stay stuck on
-  // the initial "not connected" result.
-  useEffect(() => {
-    let attempts = 0;
-    const timer = window.setInterval(() => {
-      attempts += 1;
-      void refreshRuntime();
-      void refreshImageRuntime();
-      if (attempts >= 12) window.clearInterval(timer);
-    }, 10000);
-    return () => window.clearInterval(timer);
-  }, [refreshRuntime, refreshImageRuntime]);
-
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
     if (!desktop) return;
@@ -244,7 +230,7 @@ export default function LocalModelsPage() {
     return () => window.clearInterval(timer);
   }, [installerInfo?.job.status, refreshInstaller]);
 
-  const refreshRuntime = async () => {
+  const refreshRuntime = useCallback(async () => {
     try {
       const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
       const result = await response.json();
@@ -254,7 +240,21 @@ export default function LocalModelsPage() {
     } catch (err) {
       setRuntime({ status: "error", models: [], message: err instanceof Error ? err.message : "本地引擎检测失败" });
     }
-  };
+  }, []);
+
+  // Local engines may still be starting after the desktop window appears.
+  // Refresh their read-only status briefly so the page does not stay stuck on
+  // the initial "not connected" result.
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void refreshRuntime();
+      void refreshImageRuntime();
+      if (attempts >= 12) window.clearInterval(timer);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshRuntime, refreshImageRuntime]);
 
   const installOllamaRuntime = async () => {
     const desktop = window.localAIInstallerDesktop;
