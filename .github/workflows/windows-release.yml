@@ -3,7 +3,7 @@ name: Windows desktop installer
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, offline-ai-engine-integration]
     paths:
       - "apps/**"
       - "packages/**"
