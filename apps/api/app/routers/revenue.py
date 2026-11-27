@@ -641,6 +641,25 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
             account_id = account_name.rsplit("/", 1)[-1]
             if not account_id:
                 continue
+            account_currency = str(account.get("currencyCode") or "").upper()
+            if account_currency not in CURRENCIES:
+                try:
+                    report_query = urllib.parse.urlencode({
+                        "dateRange": "LAST_7_DAYS",
+                        "metrics": "ESTIMATED_EARNINGS",
+                    })
+                    report = google_get_json(
+                        f"https://adsense.googleapis.com/v2/accounts/{urllib.parse.quote(account_id, safe='')}/reports:generate?{report_query}",
+                        access,
+                    )
+                    account_currency = next((
+                        str(header.get("currencyCode") or "").upper()
+                        for header in report.get("headers", [])
+                        if header.get("type") == "METRIC_CURRENCY"
+                        and str(header.get("currencyCode") or "").upper() in CURRENCIES
+                    ), "")
+                except OAuthProviderError as exc:
+                    adsense_warning = str(exc)[:1000]
             try:
                 payments = google_get_json(
                     f"https://adsense.googleapis.com/v2/accounts/{urllib.parse.quote(account_id, safe='')}/payments",
@@ -651,7 +670,7 @@ def sync_google_creator_revenue(connection_id: int, db: Session = Depends(get_db
                 continue
             for payment in payments.get("payments", []):
                 payment_name = str(payment.get("name") or "")
-                amount, currency = parse_money(payment.get("amount", ""), account.get("currencyCode"))
+                amount, currency = parse_money(payment.get("amount", ""), account_currency)
                 if amount is None or not currency:
                     skipped_currency_count += 1
                     continue
