@@ -49,7 +49,10 @@ export default function MediaStudioPage() {
   const [message, setMessage] = useState("");
   const [localVideoRuntime, setLocalVideoRuntime] = useState<LocalVideoRuntime | null>(null);
   const [videoRuntimeLoading, setVideoRuntimeLoading] = useState(false);
-  const [workflowJson, setWorkflowJson] = useState("");\n  const [workflowPromptId, setWorkflowPromptId] = useState("");\n  const [workflowBusy, setWorkflowBusy] = useState(false);\n  const [workflowResult, setWorkflowResult] = useState<any>(null);
+  const [workflowJson, setWorkflowJson] = useState("");
+  const [workflowPromptId, setWorkflowPromptId] = useState("");
+  const [workflowBusy, setWorkflowBusy] = useState(false);
+  const [workflowResult, setWorkflowResult] = useState<any>(null);
 
   async function loadLocalVideoRuntime() {
     setVideoRuntimeLoading(true);
@@ -153,7 +156,8 @@ export default function MediaStudioPage() {
       setMessage(error instanceof Error ? error.message : "查询本地任务失败");
     } finally { setWorkflowBusy(false); }
   }
-\n  async function createVideo() {
+
+  async function createVideo() {
     if (!prompt.trim()) {
       setMessage("请填写视频内容描述；软件会自动组合镜头、风格和技术要求，不需要先单独生成提示词。");
       return;
