@@ -197,7 +197,7 @@ class LocalAIRuntimeTests(unittest.TestCase):
     def test_resource_bundle_status_detects_separate_complete_install_without_modifying(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "resource-manifest.json").write_text(json.dumps({"bundle": "test"}), encoding="utf-8")
+            (root / "resource-manifest.json").write_text(json.dumps({"schema_version": 1, "product": "AI漫剧制作大师", "resource_bundle_version": "2026.11", "engines": [{"id": "ollama"}, {"id": "comfyui"}, {"id": "ffmpeg"}]}), encoding="utf-8")
             engine = root / "engines"
             files = [
                 "Ollama/runtime/ollama.exe",
@@ -226,7 +226,7 @@ class LocalAIRuntimeTests(unittest.TestCase):
 
     def test_resource_bundle_status_reports_missing_components_without_installing(self):
         with tempfile.TemporaryDirectory() as temp:
-            Path(temp, "resource-manifest.json").write_text('{"bundle":"test"}', encoding="utf-8")
+            Path(temp, "resource-manifest.json").write_text('{"schema_version":1,"product":"AI漫剧制作大师","resource_bundle_version":"2026.11","engines":[{"id":"ollama"},{"id":"comfyui"},{"id":"ffmpeg"}]}', encoding="utf-8")
             result = _resource_bundle_status(temp)
             self.assertEqual(result["status"], "incomplete")
             self.assertFalse(result["installed"])
