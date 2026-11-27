@@ -522,7 +522,7 @@ architecture, special_item, event, world, timeline。
             "messages": body["messages"],
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.2},
+            "options": {"temperature": 0.2, "num_ctx": 8192},
         }
         headers = {"Content-Type": "application/json"}
     else:
