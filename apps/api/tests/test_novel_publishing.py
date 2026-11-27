@@ -1,4 +1,6 @@
+import io
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
@@ -36,6 +38,11 @@ class NovelPublishingTests(unittest.TestCase):
         self.assertGreaterEqual(len(result["items"]), 6)
         self.assertTrue(all(item["api_publish"] is False for item in result["items"]))
         self.assertTrue(all(item["revenue_sync"] is False for item in result["items"]))
+        self.assertIn("kdp",{item["id"] for item in result["items"]})
+        self.assertIn("google_play_books",{item["id"] for item in result["items"]})
+        google=next(item for item in result["items"] if item["id"]=="google_play_books")
+        self.assertIn("EPUB",google["formats"])
+        self.assertIn("PDF",google["formats"])
 
     def test_create_exportable_distribution_package_and_submission(self):
         result = create_distribution_package(
@@ -54,6 +61,12 @@ class NovelPublishingTests(unittest.TestCase):
         exported = export_distribution_package(row.id, "md", self.db)
         self.assertIn("测试原创小说", exported.body.decode("utf-8"))
         self.assertIn("第一章", exported.body.decode("utf-8"))
+        epub=export_distribution_package(row.id,"epub",self.db)
+        with zipfile.ZipFile(io.BytesIO(epub.body)) as archive:
+            self.assertEqual(archive.read("mimetype"),b"application/epub+zip")
+            chapter=archive.read("OEBPS/chapter.xhtml").decode("utf-8")
+            self.assertIn("第一章",chapter)
+            self.assertIn("这是原创小说正文。",chapter)
 
         submission = create_submission_record(
             row.id, SubmissionInput(status="submitted", note="作者已在官网提交"), self.db
