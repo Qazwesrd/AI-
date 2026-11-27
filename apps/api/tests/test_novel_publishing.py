@@ -82,8 +82,8 @@ class NovelPublishingTests(unittest.TestCase):
 
     def test_amazon_and_google_play_accept_prepared_manuscript_packages(self):
         for platform_id, expected_name in (
-            ("kdp","Amazon Kindle Direct Publishing"),
-            ("google_play_books","Google Play Books"),
+            ("kdp","Amazon Kindle Direct Publishing (KDP)"),
+            ("google_play_books","Google Play Books Partner Center"),
         ):
             result=create_distribution_package(
                 self.novel.id,
