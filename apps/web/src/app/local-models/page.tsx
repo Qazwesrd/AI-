@@ -196,6 +196,20 @@ export default function LocalModelsPage() {
 
   useEffect(() => { void refresh(); void refreshRuntime(); void refreshInstaller(); void refreshHardwareReadiness(); void refreshImageRuntime(); }, [refresh, refreshInstaller, refreshHardwareReadiness, refreshImageRuntime]);
 
+  // Local engines may still be starting after the desktop window appears.
+  // Refresh their read-only status briefly so the page does not stay stuck on
+  // the initial "not connected" result.
+  useEffect(() => {
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      void refreshRuntime();
+      void refreshImageRuntime();
+      if (attempts >= 12) window.clearInterval(timer);
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [refreshRuntime, refreshImageRuntime]);
+
   useEffect(() => {
     const desktop = window.localAIInstallerDesktop;
     if (!desktop) return;
