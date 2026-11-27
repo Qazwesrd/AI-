@@ -9,7 +9,7 @@ type Package = {id:number;novel_id:number;translation_id:number|null;platform_id
 type Chapter = {id:number;chapter_number:number;title:string;word_count:number};
 type Submission = {id:number;package_id:number;status:string;external_work_url:string;note:string;submitted_at:string|null};
 type LocalModel = {name:string};
-type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;glossary?:Record<string,string>;chapters?:{chapter_number:number;title:string;translated_text:string;status:string;chunks?:{index:number;source:string;translation:string;status:string}[]}[]};
+type Translation = {id:number;novel_id:number;target_language:string;target_language_name:string;model_name:string;status:string;total_chunks:number;completed_chunks:number;progress_percent:number;last_error:string;glossary?:Record<string,string>;chapters?:{chapter_number:number;title:string;translated_text:string;status:string;completed_chunks:number;total_chunks:number;chunks?:{index:number;source:string;translation:string;status:string}[]}[]};
 
 export default function NovelPublishingPage(){
   const [novels,setNovels]=useState<Novel[]>([]);
