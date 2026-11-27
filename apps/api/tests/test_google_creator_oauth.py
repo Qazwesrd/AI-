@@ -73,6 +73,11 @@ class GoogleCreatorOAuthTests(unittest.TestCase):
     def test_parse_adsense_money_with_explicit_currency(self):
         self.assertEqual(parse_money("$1,234.56 USD"), (1234.56, "USD"))
         self.assertEqual(parse_money("€82.10 EUR"), (82.1, "EUR"))
+        self.assertEqual(parse_money("£87.65"), (87.65, "GBP"))
+        self.assertEqual(parse_money("R$ 120,50"), (120.5, "BRL"))
+        self.assertEqual(parse_money("$1,234.57"), (1234.57, None))
+        self.assertEqual(parse_money("¥1,235"), (1235.0, None))
+        self.assertEqual(parse_money("¥1,235", "JPY"), (1235.0, "JPY"))
         self.assertEqual(parse_money("not-a-payment"), (None, None))
 
 
