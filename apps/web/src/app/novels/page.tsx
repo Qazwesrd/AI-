@@ -212,7 +212,7 @@ export default function NovelsPage() {
     if (!approved) return;
 
     setLoading(true);
-    setMessage("正在调用AI模型分析小说，请稍候……");
+    setMessage("正在使用本机 Ollama 模型分析小说，请稍候；不会调用云端 API……");
 
     try {
       const data = await request(`/api/novels/${selected.id}/analyze-ai`, {
