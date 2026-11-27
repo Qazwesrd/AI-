@@ -124,7 +124,7 @@ export default function MediaStudioPage() {
     try {
       const response = await fetch(`${API}/api/local-ai/video-workflow/${validateOnly ? "validate" : "submit"}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ workflow, prompt }),
+        body: JSON.stringify({ workflow }),
       });
       const data = await response.json();
       if (!response.ok) {
