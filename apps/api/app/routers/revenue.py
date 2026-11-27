@@ -118,13 +118,15 @@ def summary(db: Session = Depends(get_db)):
     withdrawals = db.query(WithdrawalRecord).all()
     totals = {}
     for row in revenues:
-        item = totals.setdefault(row.currency, {"gross": 0.0, "fees": 0.0, "taxes": 0.0, "net": 0.0, "settled_net": 0.0, "payable_net": 0.0, "paid_net": 0.0})
+        item = totals.setdefault(row.currency, {"gross": 0.0, "fees": 0.0, "taxes": 0.0, "net": 0.0, "estimated_net": 0.0, "settled_net": 0.0, "payable_net": 0.0, "paid_net": 0.0})
         net = row.gross_amount - row.fee_amount - row.tax_amount
         item["gross"] += row.gross_amount
         item["fees"] += row.fee_amount
         item["taxes"] += row.tax_amount
         item["net"] += net
-        if row.status == "settled":
+        if row.status == "estimated":
+            item["estimated_net"] += net
+        elif row.status == "settled":
             item["settled_net"] += net
         elif row.status == "payable":
             item["payable_net"] += net
@@ -139,6 +141,7 @@ def summary(db: Session = Depends(get_db)):
         item["fees"] = round(item["fees"], 2)
         item["taxes"] = round(item["taxes"], 2)
         item["net"] = round(item["net"], 2)
+        item["estimated_net"] = round(item["estimated_net"], 2)
         item["settled_net"] = round(item["settled_net"], 2)
         item["payable_net"] = round(item["payable_net"], 2)
         item["paid_net"] = round(item["paid_net"], 2)
