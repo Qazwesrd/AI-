@@ -2,8 +2,10 @@ import json
 import re
 import hashlib
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 import urllib.request
 import urllib.error
+from urllib.request import ProxyHandler, build_opener
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,6 +19,11 @@ from app.routers.studio import runtime, decrypt_key
 from app.services.task_runtime import acquire_task_lease, release_task_lease, heartbeat_task_lease
 
 router = APIRouter(prefix="/api", tags=["AI小说深度分析"])
+
+# Local-only Ollama endpoint shared with the desktop runtime. Never read a
+# user-supplied URL here and never fall back to a cloud provider.
+LOCAL_OLLAMA_BASE_URL = "http://127.0.0.1:11435"
+_LOCAL_OLLAMA_OPENER = build_opener(ProxyHandler({}))
 
 CATEGORY_MAP = {
     "人物": "character",
@@ -260,6 +267,7 @@ def confirmed_character_alias_keys(row):
 
 
 class AIAnalysisInput(BaseModel):
+    # Kept for backward-compatible clients; local analysis never uses paid APIs.
     confirm_paid: bool = False
 
 
@@ -339,6 +347,36 @@ def extract_json(content):
         if start >= 0 and end > start:
             return json.loads(content[start:end + 1])
         raise ValueError("AI返回内容不是有效JSON")
+
+
+def choose_local_provider():
+    """Select an already-installed local Ollama model; no downloads or cloud fallback."""
+    request = urllib.request.Request(
+        LOCAL_OLLAMA_BASE_URL + "/api/tags",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with _LOCAL_OLLAMA_OPENER.open(request, timeout=5) as response:
+            payload = json.loads(response.read(2 * 1024 * 1024).decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, "本机 Ollama 未连接（127.0.0.1:11435）。请先启动本地引擎；不会切换到云端。") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(502, "本机 Ollama 返回的数据无法识别；未提交任何云端请求。") from exc
+
+    models = payload.get("models", []) if isinstance(payload, dict) else []
+    names = []
+    for item in models:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name") or item.get("model")
+        if isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", name):
+            names.append(name)
+    if not names:
+        raise HTTPException(404, "本机 Ollama 已连接，但没有发现已安装模型。请先在本地模型管理中安装/配置模型；软件不会自动下载。")
+    # The most recently listed local model is used by default. The model is
+    # recorded on the analysis job so progress and resume stay deterministic.
+    return SimpleNamespace(provider="ollama", model=names[0], base_url=LOCAL_OLLAMA_BASE_URL)
 
 
 def choose_provider(db):
@@ -476,15 +514,29 @@ architecture, special_item, event, world, timeline。
         ],
     }
 
-    url = config.base_url.rstrip("/") + "/chat/completions"
+    is_local_ollama = str(getattr(config, "provider", "")).lower() == "ollama"
+    if is_local_ollama:
+        url = config.base_url.rstrip("/") + "/api/chat"
+        request_body = {
+            "model": config.model,
+            "messages": body["messages"],
+            "stream": False,
+            "format": "json",
+            "options": {"temperature": 0.2},
+        }
+        headers = {"Content-Type": "application/json"}
+    else:
+        url = config.base_url.rstrip("/") + "/chat/completions"
+        request_body = body
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
 
     request = urllib.request.Request(
         url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
         method="POST",
     )
 
@@ -492,7 +544,10 @@ architecture, special_item, event, world, timeline。
         with urllib.request.urlopen(request, timeout=180) as response:
             result = json.loads(response.read().decode("utf-8"))
 
-        answer = result["choices"][0]["message"]["content"]
+        answer = (
+            result.get("message", {}).get("content", "")
+            if is_local_ollama else result["choices"][0]["message"]["content"]
+        )
         parsed = extract_json(answer)
 
         if not isinstance(parsed, dict):
@@ -695,7 +750,6 @@ def analyze_novel_with_ai(
     payload: AIAnalysisInput,
     db: Session = Depends(get_db),
 ):
-    require_cloud_ai_api_disabled()
     novel = db.query(Novel).filter(Novel.id == novel_id).first()
 
     if not novel:
@@ -706,35 +760,10 @@ def analyze_novel_with_ai(
     if not chapters:
         raise HTTPException(400, "请先导入小说或创建章节")
 
-    settings = runtime(db)
-
-    if not settings.network_enabled:
-        raise HTTPException(403, "网络调用总开关尚未开启")
-
-    config = choose_provider(db)
-
-    if not config:
-        raise HTTPException(
-            400,
-            "没有找到已启用且配置完整的文本AI模型。请先到AI设置配置DeepSeek、OpenAI、Grok、Gemini或其他文本模型。",
-        )
-
-    # 仅对明确标记为付费的服务要求付费总授权和本次确认。
-    # 免费服务无需打开付费授权；计费属性缺失时默认按付费处理。
-    is_paid = bool(getattr(config, "paid", True))
-    if is_paid and not settings.paid_api_allowed:
-        raise HTTPException(403, "该文本模型属于付费服务，尚未开启付费API总授权")
-
-    if is_paid and not payload.confirm_paid:
-        raise HTTPException(403, "本次AI分析可能产生费用，尚未获得明确确认")
-
-    try:
-        api_key = decrypt_key(config.encrypted_api_key)
-    except Exception as exc:
-        raise HTTPException(500, f"API密钥读取失败：{exc}") from exc
-
-    if not api_key:
-        raise HTTPException(400, "文本模型API密钥为空")
+    # Strict zero-cost desktop behavior: analyze only with an installed local
+    # Ollama model. Do not consult cloud provider settings or network toggles.
+    config = choose_local_provider()
+    api_key = ""
 
     chunks = make_chunks(chapters)
 
