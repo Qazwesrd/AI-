@@ -157,6 +157,7 @@ class NovelPublishingTests(unittest.TestCase):
             self.db,
         )
         self.assertEqual(edited["item"]["completed_chunks"], 1)
+        self.db.expire_all()
         detail = get_translation(translation_id, self.db)
         self.assertEqual(detail["chapters"][0]["chunks"][0]["translation"], "Human-reviewed translation.")
         self.assertEqual(self.db.query(Chapter).filter_by(novel_id=self.novel.id).one().content, "这是原创小说正文。")
