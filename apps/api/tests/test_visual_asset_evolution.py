@@ -126,8 +126,6 @@ class VisualAssetEvolutionTests(unittest.TestCase):
         self.assertEqual(snapshot["clothing"], "换成黑色轻甲，肩部有银色护甲")
         self.assertEqual(snapshot["holder"], "同伴")
 
-if __name__ == "__main__":
-    unittest.main()
 
 class LocalEvolutionResponseTests(unittest.TestCase):
     def test_parser_accepts_local_ollama_json_response(self):
@@ -144,4 +142,5 @@ class LocalEvolutionResponseTests(unittest.TestCase):
         from app.routers.ai_collaboration import _parse_local_evolution_response
         with self.assertRaises(ValueError):
             _parse_local_evolution_response("我认为人物没有变化。")
-
+if __name__ == "__main__":
+    unittest.main()
