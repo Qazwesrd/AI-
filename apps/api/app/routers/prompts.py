@@ -616,18 +616,38 @@ def _verified_evidence_ranking(db, accepted_types):
         if len(platforms) < 2 or len(dates) < 2:
             continue
         signals = []
+        daily_signal = defaultdict(float)
+        has_metrics = False
         for item in samples:
             metrics = item.metric_summary if isinstance(item.metric_summary,dict) else {}
             signal = 0.0
             for metric,weight in weights.items():
-                try: signal += weight * math.log1p(max(0.0,float(metrics.get(metric,0) or 0)))
+                try:
+                    value=max(0.0,float(metrics.get(metric,0) or 0))
+                    signal += weight * math.log1p(value)
+                    has_metrics = has_metrics or value > 0
                 except (TypeError,ValueError): pass
-            try: age=max(0,(today-date.fromisoformat(item.observed_at[:10])).days); decay=math.pow(0.5,age/14.0)
-            except (ValueError,TypeError): decay=0.25
+            try:
+                observed_day=date.fromisoformat(item.observed_at[:10])
+                age=max(0,(today-observed_day).days)
+                decay=math.pow(0.5,age/14.0)
+                daily_signal[observed_day.isoformat()] += signal
+            except (ValueError,TypeError):
+                decay=0.25
             signals.append(signal*decay)
+        if not has_metrics:
+            continue
+        ordered_daily=sorted(daily_signal.items())
+        growth_rate=None
+        if len(ordered_daily)>=2 and ordered_daily[-2][1]>0:
+            growth_rate=round((ordered_daily[-1][1]/ordered_daily[-2][1]-1)*100,2)
+        genres=[item.genre or "未分类" for item in samples]
+        genre=max(set(genres),key=genres.count) if genres else "未分类"
+        if len(set(genres))>1:
+            genre="分类待复核"
         score=sum(signals)/max(1,len(signals))+min(len(platforms),5)*2+min(len(dates),7)*1.25
         ranking.append({
-            "title":samples[0].work_title,"genre":samples[0].genre or "未分类","platforms":platforms,"platform_count":len(platforms),
+            "title":samples[0].work_title,"genre":genre,"growth_rate_pct":growth_rate,"platforms":platforms,"platform_count":len(platforms),
             "observed_days":dates,"sample_count":len(samples),"latest_observed_at":max(dates),
             "score":round(score,3),"evidence_ids":[item.id for item in samples],
             "evidence_types":sorted({item.evidence_type for item in samples}),
