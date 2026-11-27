@@ -206,10 +206,17 @@ def import_platform_report(platform_id: str, filename: str, content: bytes, db: 
             if len(warnings) < 5:
                 warnings.append(f"第 {line_number} 行金额或币种无法识别，已跳过")
             continue
-        row_fingerprint = hashlib.sha256(
-            (platform_id + "|" + json.dumps(row, sort_keys=True, ensure_ascii=False)).encode("utf-8")
-        ).hexdigest()
-        source_ref = f"report-import:{platform_id}:{row_fingerprint}"
+        stable_report_id = _report_header(row, ["Id", "Transaction ID", "Payment Number", "Payment ID"])
+        if stable_report_id:
+            stable_key = hashlib.sha256(
+                (platform_id + "|" + stable_report_id).encode("utf-8")
+            ).hexdigest()
+            source_ref = f"report-import:{platform_id}:id:{stable_key}"
+        else:
+            row_fingerprint = hashlib.sha256(
+                (platform_id + "|" + json.dumps(row, sort_keys=True, ensure_ascii=False)).encode("utf-8")
+            ).hexdigest()
+            source_ref = f"report-import:{platform_id}:row:{row_fingerprint}"
         existing = db.query(RevenueEntry).filter(RevenueEntry.source_ref == source_ref).first()
         notes = f"官方报表文件导入：{filename}；标题：{title or '未提供'}；第 {line_number} 行。"
         if amount < 0:
