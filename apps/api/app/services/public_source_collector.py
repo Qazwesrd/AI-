@@ -62,6 +62,12 @@ def validate_public_feed_url(url: str, platform: str | None = None) -> str:
         raise FeedCollectionError("仅允许 HTTPS 公开订阅源")
     if parsed.username or parsed.password or parsed.fragment:
         raise FeedCollectionError("订阅地址不能包含用户名、密码或片段")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise FeedCollectionError("订阅地址端口无效") from exc
+    if port not in (None, 443):
+        raise FeedCollectionError("公开订阅源只允许 HTTPS 标准端口 443")
     host = parsed.hostname.encode("idna").decode("ascii").lower().rstrip(".")
     query_keys = {key.lower() for key in urllib.parse.parse_qs(parsed.query)}
     if any(part in query_keys for part in ("token", "access_token", "api_key", "key", "secret")):
