@@ -75,6 +75,7 @@ class TrendEvidence(Base):
     id = Column(Integer, primary_key=True, index=True)
     platform = Column(String(100), nullable=False, index=True)
     work_title = Column(String(300), nullable=False)
+    genre = Column(String(100), nullable=False, default="未分类", index=True)
     work_url = Column(String(2000), default="")
     observed_at = Column(String(40), nullable=False, index=True)
     metric_summary = Column(JSON, nullable=False, default=dict)
