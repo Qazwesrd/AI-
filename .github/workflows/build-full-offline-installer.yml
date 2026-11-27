@@ -114,16 +114,16 @@ jobs:
             Write-Host "Verified required Ollama, ComfyUI, FFmpeg, StableDiffusionCpp, VACE, manifest and inventory entries."
           } finally { $archive.Dispose() }
 
-      - name: Assemble single offline ZIP and verify source hashes
+      - name: Prepare two separate delivery packages and verify source hashes
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
           $setupRoot = Join-Path $env:RUNNER_TEMP "setup-artifact"
           $resourceRoot = Join-Path $env:RUNNER_TEMP "resource-artifact"
-          $stage = Join-Path $env:RUNNER_TEMP "AI-Comic-Studio-Full-Offline-Installer"
           $output = Join-Path $PWD "offline-distribution"
-          New-Item -ItemType Directory -Path $stage,$output -Force | Out-Null
+          $setupOut = Join-Path $output "desktop-installer"
+          $resourceOut = Join-Path $output "ai-resource-bundle"
+          New-Item -ItemType Directory -Path $setupOut,$resourceOut -Force | Out-Null
 
           $setupFiles = @(Get-ChildItem $setupRoot -File -Filter "*Setup*.exe")
           if ($setupFiles.Count -ne 1) { throw "Expected exactly one Windows Setup executable; found $($setupFiles.Count)." }
@@ -142,46 +142,55 @@ jobs:
           $resourceActual = (Get-FileHash $resource.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($resourceExpected -ne $resourceActual) { throw "AI resource SHA-256 verification failed." }
 
-          Copy-Item $setup.FullName (Join-Path $stage "AI漫剧制作大师-Setup.exe")
-          Copy-Item $setupHashFile.FullName (Join-Path $stage "AI漫剧制作大师-Setup.exe.sha256")
-          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $stage "仅更新桌面程序.ps1")
-          Copy-Item $resource.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip")
-          Copy-Item $resourceHashFile.FullName (Join-Path $stage "AI漫剧大师-AI离线资源包-2026.11.zip.sha256")
-          Copy-Item "scripts/install-offline-bundle.ps1" (Join-Path $stage "一键离线安装.ps1")
+          Copy-Item $setup.FullName (Join-Path $setupOut "AI漫剧制作大师-Setup.exe")
+          Copy-Item $setupHashFile.FullName (Join-Path $setupOut "AI漫剧制作大师-Setup.exe.sha256")
+
+          Copy-Item $resource.FullName (Join-Path $resourceOut "AI漫剧大师-AI离线资源包-2026.11.zip")
+          Copy-Item $resourceHashFile.FullName (Join-Path $resourceOut "AI漫剧大师-AI离线资源包-2026.11.zip.sha256")
+          Copy-Item "scripts/install-offline-bundle.ps1" (Join-Path $resourceOut "一键离线安装.ps1")
+          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $resourceOut "仅更新桌面程序.ps1")
 
           $readme = @(
-            "AI漫剧制作大师完整离线安装包",
+            "AI漫剧制作大师双文件离线交付",
             "",
-            "1. 将整个 ZIP 解压到本地磁盘。",
-            "2. 在解压目录打开 PowerShell，执行：",
-            "   powershell -ExecutionPolicy Bypass -File .\一键离线安装.ps1",
-            "3. 按提示选择程序安装目录和 AI 模型数据目录。",
-            "4. 安装程序会校验资源包 SHA-256、解压资源并逐文件校验。",
-            "5. 完成后重新启动 Windows 或重新登录，使环境变量生效。",
-            "6. 日后升级只运行：powershell -ExecutionPolicy Bypass -File .\仅更新桌面程序.ps1 -InstallerPath .\AI漫剧制作大师-Setup.exe；不要再次运行一键离线安装脚本。",
+            "交付物一：AI漫剧制作大师-Setup.exe（桌面软件本体安装器）",
+            "交付物二：AI漫剧大师-AI离线资源包-2026.11.zip（本地 AI 引擎和模型资源）",
             "",
-            "本交付物包含当前提交构建的 Windows 程序安装器和完整 AI 离线资源包，不需要安装时联网下载模型。",
-            "桌面程序升级与 AI 资源部署分离：升级脚本只校验并运行程序安装器，不读取、解压、替换或删除现有引擎、模型和项目数据。",
-            "首次安装建议数据盘至少预留约 32 GiB 可用空间。",
-            "Ryzen 7 4800U / Vega 集显尚未获得本机性能认证；不承诺 GPU 加速。"
+            "两者分开下载、分开保存，不要把 AI 资源包重新打进桌面安装器。",
+            "首次安装：将两个主文件及其 SHA-256 校验文件放在同一目录；同时保留本目录内的一键离线安装.ps1，然后运行：",
+            "powershell -ExecutionPolicy Bypass -File .\一键离线安装.ps1",
+            "按提示分别选择程序安装目录和 AI 数据目录。两个目录必须独立。",
+            "安装脚本会校验资源包 SHA-256、ZIP 路径、磁盘空间和资源文件清单；只补充缺失的引擎目录，不覆盖现有引擎、模型或用户数据。",
+            "日后只更新桌面程序时运行：powershell -ExecutionPolicy Bypass -File .\仅更新桌面程序.ps1 -InstallerPath .\AI漫剧制作大师-Setup.exe",
+            "桌面更新脚本不会解压、替换或删除 AI 引擎、模型和项目数据。",
+            "",
+            "本地视频模型和集显性能须以目标电脑实测为准；CI CPU 测试不代表 Ryzen 7 4800U/Vega GPU 已获得性能认证。"
           ) -join [Environment]::NewLine
-          Set-Content -LiteralPath (Join-Path $stage "安装说明.txt") -Value $readme -Encoding utf8
+          Set-Content -LiteralPath (Join-Path $resourceOut "安装说明.txt") -Value $readme -Encoding utf8
 
-          $zip = Join-Path $output "AI漫剧制作大师-完整离线安装包.zip"
-          if (Test-Path $zip) { Remove-Item $zip -Force }
-          [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip, [System.IO.Compression.CompressionLevel]::NoCompression, $false)
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-          "$hash  $(Split-Path -Leaf $zip)" | Set-Content "$zip.sha256" -Encoding ascii
-          Write-Host "Complete offline ZIP created: $zip"
-          Write-Host ("ZIP size: {0:N2} GiB" -f ((Get-Item $zip).Length / 1GB))
-          Write-Host "SHA256: $hash"
+          Write-Host "Verified two independent deliverables."
+          Write-Host ("Desktop setup: {0:N2} MiB" -f ((Get-Item (Join-Path $setupOut "AI漫剧制作大师-Setup.exe")).Length / 1MB))
+          Write-Host ("AI resource bundle: {0:N2} GiB" -f ((Get-Item (Join-Path $resourceOut "AI漫剧大师-AI离线资源包-2026.11.zip")).Length / 1GB))
 
-      - name: Upload complete offline installer
+      - name: Upload desktop application installer only
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Comic-Studio-Full-Offline-Installer
+          name: AI-Comic-Studio-Desktop-Installer
           path: |
-            offline-distribution/AI漫剧制作大师-完整离线安装包.zip
-            offline-distribution/AI漫剧制作大师-完整离线安装包.zip.sha256
+            offline-distribution/desktop-installer/AI漫剧制作大师-Setup.exe
+            offline-distribution/desktop-installer/AI漫剧制作大师-Setup.exe.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload AI resource bundle separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Comic-Studio-AI-Resource-Bundle
+          path: |
+            offline-distribution/ai-resource-bundle/AI漫剧大师-AI离线资源包-2026.11.zip
+            offline-distribution/ai-resource-bundle/AI漫剧大师-AI离线资源包-2026.11.zip.sha256
+            offline-distribution/ai-resource-bundle/一键离线安装.ps1
+            offline-distribution/ai-resource-bundle/仅更新桌面程序.ps1
+            offline-distribution/ai-resource-bundle/安装说明.txt
           if-no-files-found: error
           retention-days: 30
