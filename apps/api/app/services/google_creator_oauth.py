@@ -186,7 +186,6 @@ def new_authorization(redirect_uri: str):
         "code_challenge_method": "S256",
         "access_type": "offline",
         "prompt": "consent",
-        "include_granted_scopes": "true",
     }
     return AUTH_URL + "?" + urllib.parse.urlencode(params), state, verifier
 
