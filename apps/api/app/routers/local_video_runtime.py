@@ -814,6 +814,40 @@ def _auto_video_missing_prerequisites(catalog, mode):
     return missing
 
 
+def _validate_auto_video_mode_graph(workflow, mode):
+    """Ensure image-to-video and VACE drafts actually use their required source nodes."""
+    if mode == "text_to_video":
+        return []
+    nodes = {
+        str(node_id): node for node_id, node in workflow.items()
+        if isinstance(node, dict) and isinstance(node.get("inputs"), dict)
+    }
+    source_ids = {
+        node_id for node_id, node in nodes.items()
+        if any(token in str(node.get("class_type", "")).lower()
+               for token in ("loadimage", "imageloader", "loadvideo", "videoloader"))
+    }
+    if not source_ids:
+        return ["生成的工作流没有实际参考图/视频输入节点"]
+    if mode == "vace" and not any("vace" in str(node.get("class_type", "")).lower() for node in nodes.values()):
+        return ["生成的工作流没有实际 VACE 处理节点"]
+    connected_to_video = False
+    for target_id, node in nodes.items():
+        target_name = str(node.get("class_type", "")).lower()
+        if not any(token in target_name for token in ("wanvideo", "wan_video", "vace")):
+            continue
+        inputs = node.get("inputs") or {}
+        for value in inputs.values():
+            if isinstance(value, list) and len(value) == 2 and str(value[0]) in source_ids:
+                connected_to_video = True
+                break
+        if connected_to_video:
+            break
+    if not connected_to_video:
+        return ["参考图/视频输入节点没有连接到 Wan/VACE 视频处理链路"]
+    return []
+
+
 def _auto_video_node_catalog(object_info):
     catalog = []
     for class_name, info in object_info.items():
@@ -884,10 +918,11 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
         nodes = [LocalVideoTemplateNode.model_validate(item) for item in specification["nodes"]]
         prompt_input_count = _apply_video_request_values(nodes, object_info, data)
         result = build_explicit_video_workflow(nodes, object_info)
-        if not result["valid"]:
+        mode_errors = _validate_auto_video_mode_graph(result.get("workflow") or {}, data.mode) if result["valid"] else []
+        if not result["valid"] or mode_errors:
             raise HTTPException(422, detail={
-                "message": "AI 已生成工作流草稿，但本机结构预检未通过；没有提交生成任务。",
-                "errors": result["errors"],
+                "message": "AI 已生成工作流草稿，但本机结构或当前模式的参考素材链路预检未通过；没有提交生成任务。",
+                "errors": (result.get("errors") or []) + mode_errors,
                 "workflow": result.get("workflow"),
             })
         return {
