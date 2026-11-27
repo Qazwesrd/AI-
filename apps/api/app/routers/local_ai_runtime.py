@@ -19,6 +19,101 @@ TEST_PROMPT = "请用简体中文写一句话，说明你已成功在本机运�
 OPENER = build_opener(ProxyHandler({}))
 
 
+def _resource_bundle_status(data_directory: str | None = None):
+    """Inspect the separately installed AI resource bundle without changing it."""
+    configured = (data_directory or os.environ.get("AICOMICS_DATA_DIR") or os.environ.get("APP_DATA_DIR") or "").strip()
+    if not configured:
+        return {
+            "status": "not_configured", "installed": False, "data_directory": None,
+            "manifest_present": False, "manifest_valid": False, "components": {},
+            "message": "尚未配置 AI 资源包数据目录。请先单独安装 AI 离线资源包，再执行检测。",
+            "local_only": True, "downloaded": False, "cloud_fallback": False,
+            "modified": False,
+        }
+    root = Path(configured).expanduser()
+    manifest_path = root / "resource-manifest.json"
+    manifest_present = manifest_path.is_file()
+    manifest_valid = False
+    manifest_error = None
+    if manifest_present:
+        try:
+            if manifest_path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("资源清单超过 2 MiB")
+            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest_valid = isinstance(manifest_data, (dict, list))
+            if not manifest_valid:
+                manifest_error = "资源清单顶层格式不是 JSON 对象或数组"
+        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+            manifest_error = str(exc)[:300]
+
+    engines = root / "engines"
+    def file_exists(relative):
+        candidate = engines / relative
+        try:
+            return candidate.is_file()
+        except OSError:
+            return False
+    def directory_exists(relative):
+        candidate = engines / relative
+        try:
+            return candidate.is_dir()
+        except OSError:
+            return False
+
+    comfy_layouts = [
+        ("ComfyUI/python_embeded/python.exe", "ComfyUI/ComfyUI/main.py"),
+        ("ComfyUI/venv/Scripts/python.exe", "ComfyUI/main.py"),
+    ]
+    comfy_ready = any(file_exists(python) and file_exists(main) for python, main in comfy_layouts)
+    video_cli_found = False
+    stable_root = engines / "StableDiffusionCpp"
+    if stable_root.is_dir():
+        for current, dirs, files in os.walk(stable_root):
+            dirs[:] = [name for name in dirs if not (Path(current) / name).is_symlink()]
+            if "sd-cli.exe" in files:
+                video_cli_found = True
+                break
+    components = {
+        "ollama_runtime": file_exists("Ollama/runtime/ollama.exe"),
+        "ollama_model_store": directory_exists("Ollama/models/blobs"),
+        "comfyui_runtime": comfy_ready,
+        "ffmpeg": file_exists("FFmpeg/ffmpeg.exe"),
+        "ffprobe": file_exists("FFmpeg/ffprobe.exe"),
+        "stable_diffusion_cpp": video_cli_found,
+        "vace_model": file_exists("VACE/models/wan2.1-v3-vace-1.3b-q4_0.gguf"),
+        "vace_text_encoder": file_exists("VACE/models/umt5-xxl-encoder-q4_k_m.gguf"),
+        "vace_vae": file_exists("VACE/models/pig_wan_vae_fp32-f16.gguf"),
+    }
+    missing = [name for name, present in components.items() if not present]
+    installed = manifest_valid and not missing
+    if installed:
+        status = "installed"
+        message = "已识别独立 AI 资源包；必要引擎和资源目录均存在。模型能否实际加载仍需单独测试。"
+    elif not manifest_present:
+        status = "not_installed"
+        message = "未找到 AI 资源包安装清单。桌面程序与 AI 资源包是分开安装的；请使用独立资源包安装脚本。"
+    elif not manifest_valid:
+        status = "manifest_invalid"
+        message = "发现资源清单但无法读取或格式无效；没有修改任何文件。"
+    else:
+        status = "incomplete"
+        message = "发现资源包清单，但部分组件缺失；不会自动下载或覆盖，请查看缺失项目。"
+    return {
+        "status": status, "installed": installed, "data_directory": str(root),
+        "manifest_present": manifest_present, "manifest_valid": manifest_valid,
+        "manifest_error": manifest_error, "components": components, "missing_components": missing,
+        "message": message, "local_only": True, "downloaded": False,
+        "cloud_fallback": False, "modified": False,
+    }
+
+
+@router.get("/resource-bundle/status")
+def local_resource_bundle_status():
+    """Report whether the separately installed resource bundle is present."""
+    return _resource_bundle_status()
+
+
+
 class LocalModelTestInput(BaseModel):
     model: str = Field(min_length=1, max_length=128)
 
