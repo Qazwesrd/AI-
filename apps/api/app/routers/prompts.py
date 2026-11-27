@@ -875,7 +875,8 @@ def list_public_research_sources(db: Session = Depends(get_db)):
     return {"items": [public_source_dict(row) for row in rows],
             "supported_platform_domains": [
                 "youtube.com", "bilibili.com", "douyin.com", "kuaishou.com",
-                "tiktok.com", "facebook.com", "hongguo.com"
+                "tiktok.com", "facebook.com", "hongguo.com", "reddit.com",
+                "royalroad.com", "wattpad.com", "tapas.io", "inkitt.com", "pixiv.net"
             ],
             "notice": "仅支持用户明确配置的 HTTPS RSS/Atom 公开订阅源；平台域名须在允许范围内。当前不代表这些平台均提供官方 RSS 接口。采集内容全部待人工核验。"
     }
