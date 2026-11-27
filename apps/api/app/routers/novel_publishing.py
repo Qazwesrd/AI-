@@ -17,7 +17,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.novel import Novel, Chapter, NovelDistributionPackage, NovelSubmissionRecord
+from app.models.novel import Novel, Chapter, NovelDistributionPackage, NovelSubmissionRecord, NovelTranslation
+from app.routers.local_ai_runtime import _installed_models, _ollama_request, MODEL_NAME_PATTERN
 
 router = APIRouter(prefix="/api/novel-publishing", tags=["AI小说创作与国内外发行"])
 
@@ -303,3 +304,239 @@ def update_submission_record(submission_id: int, data: SubmissionUpdate, db: Ses
     db.commit()
     db.refresh(row)
     return {"success":True,"item":submission_dict(row)}
+
+
+# Local-only chapter translation. Each translation is stored as a separate edition;
+# source chapters are never overwritten and no paid/cloud API is called.
+TRANSLATION_LANGUAGES = {
+    "en":"英语", "ja":"日语", "ko":"韩语", "es":"西班牙语",
+    "fr":"法语", "de":"德语", "it":"意大利语", "pt":"葡萄牙语",
+    "ru":"俄语", "ar":"阿拉伯语", "th":"泰语", "vi":"越南语",
+    "id":"印尼语", "tr":"土耳其语", "zh-CN":"简体中文",
+    "zh-TW":"繁体中文",
+}
+
+
+class TranslationCreateInput(BaseModel):
+    target_language: str = Field(min_length=2, max_length=40)
+    model_name: str = Field(min_length=1, max_length=160)
+    glossary: dict = Field(default_factory=dict)
+
+
+def _novel_source_signature(novel, chapters):
+    source = "\\n".join(
+        f"{chapter.chapter_number}:{chapter.title}\\n{chapter.content}"
+        for chapter in chapters
+    ) if chapters else (novel.source_text or "")
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _translation_chunks(text, limit=4200):
+    paragraphs = [part.strip() for part in (text or "").splitlines() if part.strip()]
+    chunks, current = [], ""
+    for paragraph in paragraphs:
+        while len(paragraph) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(paragraph[:limit])
+            paragraph = paragraph[limit:]
+        candidate = paragraph if not current else current + "\\n\\n" + paragraph
+        if len(candidate) > limit and current:
+            chunks.append(current)
+            current = paragraph
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks or [""]
+
+
+def translation_dict(row):
+    return {
+        "id":row.id,"novel_id":row.novel_id,"source_signature":row.source_signature,
+        "target_language":row.target_language,"target_language_name":TRANSLATION_LANGUAGES.get(row.target_language,row.target_language),
+        "model_name":row.model_name,"status":row.status,"total_chunks":row.total_chunks,
+        "completed_chunks":row.completed_chunks,"progress_percent":round(row.completed_chunks/max(1,row.total_chunks)*100,1),
+        "glossary":row.glossary or {},"last_error":row.last_error or "",
+        "created_at":row.created_at.isoformat() if row.created_at else None,
+        "updated_at":row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get("/translation/languages")
+def list_translation_languages():
+    return {"items":[{"code":code,"name":name} for code,name in TRANSLATION_LANGUAGES.items()],
+            "engine":"本机已安装 Ollama 模型","cloud_fallback":False,"paid_api":False}
+
+
+@router.post("/novels/{novel_id}/translations")
+def create_translation(novel_id: int, data: TranslationCreateInput, db: Session = Depends(get_db)):
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404,"小说不存在")
+    if data.target_language not in TRANSLATION_LANGUAGES:
+        raise HTTPException(400,"暂不支持该目标语言")
+    model_name = data.model_name.strip()
+    if not MODEL_NAME_PATTERN.fullmatch(model_name):
+        raise HTTPException(400,"本地模型名称格式无效")
+    try:
+        installed = {item["name"] for item in _installed_models()}
+    except HTTPException as exc:
+        raise HTTPException(exc.status_code,exc.detail)
+    if model_name not in installed:
+        raise HTTPException(404,"所选模型未安装在本机；不会自动下载模型")
+    chapters = db.query(Chapter).filter(Chapter.novel_id == novel_id).order_by(Chapter.chapter_number).all()
+    source_rows = [(x.chapter_number,x.title,x.content or "") for x in chapters]
+    if not source_rows and (novel.source_text or "").strip():
+        source_rows = [(1,"正文",novel.source_text)]
+    if not source_rows:
+        raise HTTPException(400,"小说正文为空，请先上传 TXT、DOCX 或其他支持的文档")
+    source_signature = _novel_source_signature(novel,chapters)
+    translated_chapters = []
+    total_chunks = 0
+    for number,title,content in source_rows:
+        chunks = _translation_chunks(content)
+        translated_chapters.append({
+            "chapter_number":number,"title":title,
+            "chunks":[{"source":chunk,"translation":"","status":"pending"} for chunk in chunks],
+        })
+        total_chunks += len(chunks)
+    glossary = {}
+    for key,value in list(data.glossary.items())[:300]:
+        if isinstance(key,str) and isinstance(value,str) and key.strip() and value.strip():
+            glossary[key.strip()[:120]] = value.strip()[:160]
+    row = NovelTranslation(
+        novel_id=novel_id,source_signature=source_signature,target_language=data.target_language,
+        model_name=model_name,status="pending",total_chunks=total_chunks,completed_chunks=0,
+        chapters_data=translated_chapters,glossary=glossary,last_error="",
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return {"success":True,"item":translation_dict(row),
+            "message":"已建立独立译本任务。原文不会修改；点击逐段翻译即可使用本机模型处理，不会调用付费 API 或云端模型。"}
+
+
+@router.get("/translations")
+def list_translations(novel_id: Optional[int] = None, db: Session = Depends(get_db)):
+    query = db.query(NovelTranslation)
+    if novel_id is not None:
+        query = query.filter(NovelTranslation.novel_id == novel_id)
+    rows = query.order_by(NovelTranslation.created_at.desc()).limit(200).all()
+    return {"items":[translation_dict(row) for row in rows]}
+
+
+@router.get("/translations/{translation_id}")
+def get_translation(translation_id: int, db: Session = Depends(get_db)):
+    row = db.query(NovelTranslation).filter(NovelTranslation.id == translation_id).first()
+    if not row:
+        raise HTTPException(404,"译本任务不存在")
+    result = translation_dict(row)
+    result["chapters"] = [
+        {"chapter_number":chapter["chapter_number"],"title":chapter["title"],
+         "completed_chunks":sum(1 for chunk in chapter["chunks"] if chunk["status"]=="completed"),
+         "total_chunks":len(chapter["chunks"]),
+         "translated_text":"\\n\\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),
+         "status":"completed" if all(chunk["status"]=="completed" for chunk in chapter["chunks"]) else "pending"}
+        for chapter in (row.chapters_data or [])
+    ]
+    return result
+
+
+@router.post("/translations/{translation_id}/translate-next")
+def translate_next_chunk(translation_id: int, db: Session = Depends(get_db)):
+    row = db.query(NovelTranslation).filter(NovelTranslation.id == translation_id).first()
+    if not row:
+        raise HTTPException(404,"译本任务不存在")
+    if row.status == "completed":
+        return {"success":True,"item":translation_dict(row),"message":"该译本已经全部完成。"}
+    novel = db.query(Novel).filter(Novel.id == row.novel_id).first()
+    if not novel:
+        raise HTTPException(404,"原小说不存在")
+    source_chapters = db.query(Chapter).filter(Chapter.novel_id == row.novel_id).order_by(Chapter.chapter_number).all()
+    if _novel_source_signature(novel,source_chapters) != row.source_signature:
+        row.status = "source_changed"
+        row.last_error = "原文在翻译期间发生变化；为避免错位，已暂停该译本。请基于最新原文新建译本。"
+        db.commit()
+        raise HTTPException(409,row.last_error)
+    chapter_data = row.chapters_data or []
+    target = None
+    for chapter in chapter_data:
+        for chunk_index,chunk in enumerate(chapter["chunks"]):
+            if chunk["status"] != "completed":
+                target = (chapter,chunk_index,chunk)
+                break
+        if target:
+            break
+    if not target:
+        row.status = "completed"
+        db.commit()
+        return {"success":True,"item":translation_dict(row),"message":"译本全部完成。"}
+    chapter,chunk_index,chunk = target
+    language_name = TRANSLATION_LANGUAGES.get(row.target_language,row.target_language)
+    glossary_lines = [f"{key} => {value}" for key,value in (row.glossary or {}).items()]
+    system = (
+        f"你是专业小说译者。将输入完整翻译为{language_name}（语言代码 {row.target_language}）。"
+        "不得摘要、删节、续写或解释；保留段落、对话、情绪、人物关系、时态与叙事视角。"
+        "专有名词按术语表固定翻译；没有列出的名字保持前后一致。只输出译文，不要输出说明或标题。"
+    )
+    prompt = "【术语表】\\n" + ("\\n".join(glossary_lines) if glossary_lines else "无") + "\\n\\n【原文】\\n" + chunk["source"]
+    row.status = "running"
+    row.last_error = ""
+    db.commit()
+    try:
+        result = _ollama_request(
+            "/api/generate",
+            {"model":row.model_name,"system":system,"prompt":prompt,"stream":False,
+             "options":{"num_predict":4096,"temperature":0.2}},
+            timeout=240.0,
+        )
+        translated = result.get("response") if isinstance(result,dict) else None
+        if not isinstance(translated,str) or not translated.strip():
+            raise HTTPException(502,"本机模型未返回有效译文")
+        chunk["translation"] = translated.strip()
+        chunk["status"] = "completed"
+        row.chapters_data = chapter_data
+        row.completed_chunks += 1
+        row.status = "completed" if row.completed_chunks >= row.total_chunks else "pending"
+        row.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(row)
+        return {"success":True,"item":translation_dict(row),
+                "current_chapter":chapter["chapter_number"],"current_chunk":chunk_index+1,
+                "translated_text":translated.strip(),
+                "message":"本段翻译完成并已保存到独立译本；原文未修改。"}
+    except HTTPException as exc:
+        row.status = "error"
+        row.last_error = str(exc.detail)[:2000]
+        db.commit()
+        raise
+    except Exception as exc:
+        row.status = "error"
+        row.last_error = str(exc)[:2000]
+        db.commit()
+        raise HTTPException(502,"本地翻译失败："+row.last_error)
+
+
+@router.get("/translations/{translation_id}/export")
+def export_translation(translation_id: int, format: str = Query(default="md",pattern="^(md|txt|json)$"), db: Session = Depends(get_db)):
+    row = db.query(NovelTranslation).filter(NovelTranslation.id == translation_id).first()
+    if not row:
+        raise HTTPException(404,"译本任务不存在")
+    novel = db.query(Novel).filter(Novel.id == row.novel_id).first()
+    lines = [f"# {novel.title if novel else 'Novel'}",f"\n**Language:** {TRANSLATION_LANGUAGES.get(row.target_language,row.target_language)}",""]
+    for chapter in (row.chapters_data or []):
+        lines.extend([f"## {chapter['title']}",""])
+        lines.extend(["\\n\\n".join(chunk["translation"] for chunk in chapter["chunks"] if chunk["translation"]),""])
+    manuscript = "\\n".join(lines).strip()+"\\n"
+    if format == "json":
+        body = json.dumps({"translation":translation_dict(row),"manuscript":manuscript},ensure_ascii=False,indent=2)
+        media = "application/json; charset=utf-8"
+    elif format == "txt":
+        body = re.sub(r"^#{1,6}\\s*","",manuscript,flags=re.MULTILINE)
+        media = "text/plain; charset=utf-8"
+    else:
+        body = manuscript
+        media = "text/markdown; charset=utf-8"
+    return Response(content=body,media_type=media,headers={"Content-Disposition":f'attachment; filename="novel-{row.novel_id}-{row.target_language}-translation.{format}"'})
