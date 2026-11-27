@@ -41,6 +41,7 @@ class DistributionPackageInput(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=30)
     rights_confirmed: bool
     ai_assistance_disclosed: bool
+    translation_id: Optional[int] = None
 
 
 class SubmissionInput(BaseModel):
@@ -70,7 +71,7 @@ SUBMISSION_STATUSES = {"prepared","submitted","reviewing","published","rejected"
 
 def package_dict(row):
     return {
-        "id":row.id,"novel_id":row.novel_id,"platform_id":row.platform_id,
+        "id":row.id,"novel_id":row.novel_id,"translation_id":row.translation_id,"platform_id":row.platform_id,
         "platform_name":row.platform_name,"pen_name":row.pen_name,"language":row.language,
         "synopsis":row.synopsis,"tags":row.tags or [],"content_hash":row.content_hash,
         "rights_confirmed":bool(row.rights_confirmed),
@@ -135,14 +136,35 @@ def create_distribution_package(novel_id: int, data: DistributionPackageInput, d
     if not data.ai_assistance_disclosed:
         raise HTTPException(400,"请确认已按目标平台规则处理 AI 辅助创作披露要求")
     chapters = db.query(Chapter).filter(Chapter.novel_id == novel_id).order_by(Chapter.chapter_number).all()
-    if not chapters and not novel.source_text.strip():
+    if data.translation_id is not None:
+        translation = db.query(NovelTranslation).filter(
+            NovelTranslation.id == data.translation_id,
+            NovelTranslation.novel_id == novel_id,
+        ).first()
+        if not translation:
+            raise HTTPException(404,"所选译本不存在或不属于当前小说")
+        if translation.status != "completed":
+            raise HTTPException(409,"所选译本尚未全部翻译完成")
+        if translation.target_language != data.language:
+            raise HTTPException(400,"发行语言必须与所选译本语言一致")
+        if _novel_source_signature(novel,chapters) != translation.source_signature:
+            raise HTTPException(409,"原文在译本生成后发生变化；请先重新翻译，避免发布过期译文")
+        chapters = [
+            type("TranslatedChapter",(),{
+                "title":chapter["title"],"chapter_number":chapter["chapter_number"],
+                "content":"\\n\\n".join(chunk["translation"] for chunk in chapter["chunks"]),
+                "word_count":len(re.sub(r"\\s+","", "\\n".join(chunk["translation"] for chunk in chapter["chunks"]))),
+            })()
+            for chapter in (translation.chapters_data or [])
+        ]
+    elif not chapters and not novel.source_text.strip():
         raise HTTPException(400,"小说没有正文，请先创建或导入章节")
-    if not chapters:
+    if not chapters and data.translation_id is None:
         chapters = [type("SourceChapter",(),{"title":"正文","chapter_number":1,"content":novel.source_text,"word_count":len(novel.source_text)})()]
     manuscript = build_manuscript(novel,chapters,data.synopsis or novel.description,data.pen_name,data.language,[tag.strip() for tag in data.tags if tag.strip()][:30])
     digest = hashlib.sha256(manuscript.encode("utf-8")).hexdigest()
     row = NovelDistributionPackage(
-        novel_id=novel_id,platform_id=platform["id"],platform_name=platform["name"],
+        novel_id=novel_id,translation_id=data.translation_id,platform_id=platform["id"],platform_name=platform["name"],
         pen_name=data.pen_name.strip(),language=data.language,synopsis=data.synopsis or novel.description,
         tags=[tag.strip() for tag in data.tags if tag.strip()][:30],manuscript_markdown=manuscript,
         content_hash=digest,rights_confirmed=True,ai_assistance_disclosed=True,status="prepared",
