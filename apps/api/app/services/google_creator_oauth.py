@@ -159,7 +159,7 @@ def get_email(access_token: str) -> str:
     return str(data.get("email") or data.get("id") or "Google账户")
 
 
-def parse_money(value: str):
+def parse_money(value: str, fallback_currency: str | None = None):
     import re
     raw = str(value or "").strip()
     match = re.search(r"-?[0-9][0-9,]*(?:\\.[0-9]+)?", raw)
@@ -168,6 +168,6 @@ def parse_money(value: str):
     amount = float(match.group(0).replace(",", ""))
     upper = raw.upper()
     currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR") if code in upper), None)
-    if currency is None:
-        currency = "USD" if "$" in raw else ("EUR" if "€" in raw else ("GBP" if "£" in raw else ("JPY" if "¥" in raw else None)))
+    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR"}:
+        currency = fallback_currency
     return amount, currency
