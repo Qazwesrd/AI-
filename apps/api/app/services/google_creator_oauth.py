@@ -257,13 +257,37 @@ def get_email(access_token: str) -> str:
     return str(data.get("email") or data.get("id") or "Google账户")
 
 
-def parse_money(value: str, fallback_currency: str | None = None):
+def parse_numeric_amount(value: str):
     import re
     raw = str(value or "").strip()
-    match = re.search(r"-?[0-9][0-9,]*(?:\.[0-9]+)?", raw)
+    match = re.search(r"-?[0-9][0-9.,]*", raw)
     if not match:
+        return None
+    token = match.group(0)
+    sign = -1 if token.startswith("-") else 1
+    token = token.lstrip("-")
+    if "," in token and "." in token:
+        if token.rfind(",") > token.rfind("."):
+            token = token.replace(".", "").replace(",", ".")
+        else:
+            token = token.replace(",", "")
+    elif "," in token:
+        tail = token.rsplit(",", 1)[-1]
+        token = token.replace(",", ".") if len(tail) in (1, 2) else token.replace(",", "")
+    elif token.count(".") > 1:
+        parts = token.split(".")
+        token = "".join(parts) if len(parts[-1]) == 3 else "".join(parts[:-1]) + "." + parts[-1]
+    try:
+        return sign * float(token)
+    except ValueError:
+        return None
+
+
+def parse_money(value: str, fallback_currency: str | None = None):
+    raw = str(value or "").strip()
+    amount = parse_numeric_amount(raw)
+    if amount is None:
         return None, None
-    amount = float(match.group(0).replace(",", ""))
     upper = raw.upper()
     currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "KRW", "TWD", "BRL", "MXN", "ARS", "CLP", "COP", "PEN", "PLN", "SEK", "NOK", "DKK", "CZK", "HUF", "RON", "TRY", "RUB", "UAH", "AED", "SAR", "QAR", "ILS", "ZAR", "EGP", "THB", "VND", "IDR", "MYR", "PHP", "PKR", "BDT") if code in upper), None)
     if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD","KRW","TWD","BRL","MXN","ARS","CLP","COP","PEN","PLN","SEK","NOK","DKK","CZK","HUF","RON","TRY","RUB","UAH","AED","SAR","QAR","ILS","ZAR","EGP","THB","VND","IDR","MYR","PHP","PKR","BDT"}:
