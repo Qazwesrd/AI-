@@ -248,7 +248,7 @@ class PromptCenterTests(unittest.TestCase):
         self.assertEqual(result["items"][0]["work_title"], "跨平台样本")
         self.assertEqual(result["items"][0]["platform_count"], 2)
         self.assertFalse(result["items"][0]["contains_public_prompt"])
-        self.assertIn("尚未接入各平台自动抓取", result["notice"])
+        self.assertIn("部分公开 RSS/Atom 来源可自动发现候选", result["notice"])
 
     def test_public_trend_ranking_ignores_samples_without_numeric_engagement(self):
         for platform,day in [("平台甲","2026-11-20"),("平台乙","2026-11-26")]:
