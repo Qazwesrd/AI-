@@ -82,7 +82,7 @@ jobs:
           New-Item -ItemType Directory -Path $temp -Force | Out-Null
           $release = Invoke-RestMethod -Headers @{ "User-Agent" = "AI-Comic-Studio-CI" } -Uri "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
           $asset = $release.assets |
-            Where-Object { $_.name -match "win64-gpl.*\\.zip$" -and $_.name -notmatch "shared" } |
+            Where-Object { $_.name -match "win64-gpl.*\.zip$" -and $_.name -notmatch "shared" } |
             Select-Object -First 1
           if (!$asset) { throw "No static Windows FFmpeg GPL build found in the latest release." }
           $archive = Join-Path $temp "ffmpeg.zip"
