@@ -8,12 +8,20 @@ type Prompt = { id: number; name: string; current_version: number; content: stri
 type Evidence = { id: number; platform: string; work_title: string; work_url: string; observed_at: string; metric_summary: Record<string, unknown>; reliability: string; is_verified: boolean; verification_note: string };
 type Candidate = { id: number; prompt_id: number; base_version: number; proposed_name: string; proposed_content: string; change_reason: string; expected_impact: string; evidence_ids: number[]; status: string; decision_note: string };
 type TrendRank = { rank:number; work_title:string; platforms:string[]; platform_count:number; observed_days:string[]; sample_count:number; latest_observed_at:string; trend_score:number; evidence_types:string[]; contains_public_prompt:boolean; evidence_ids:number[]; score_method:string };
+type ResearchSource = { id:number; platform:string; name:string; feed_url:string; enabled:boolean; refresh_interval_minutes:number; last_collected_at:string|null; last_status:string; last_error:string };
+type CollectionRun = { id:number; source_id:number; status:string; discovered_count:number; inserted_count:number; duplicate_count:number; error_message:string; started_at:string|null };
 
 export default function PromptResearchPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [trendRanking, setTrendRanking] = useState<TrendRank[]>([]);
+  const [sources, setSources] = useState<ResearchSource[]>([]);
+  const [collectionRuns, setCollectionRuns] = useState<CollectionRun[]>([]);
+  const [sourcePlatform, setSourcePlatform] = useState("YouTube");
+  const [sourceName, setSourceName] = useState("");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [sourceInterval, setSourceInterval] = useState("360");
   const [evidenceType, setEvidenceType] = useState("作品趋势证据");
   const [selectedPrompt, setSelectedPrompt] = useState("");
   const [platform, setPlatform] = useState("红果");
@@ -40,16 +48,20 @@ export default function PromptResearchPage() {
 
   async function load() {
     try {
-      const [p, e, c, t] = await Promise.all([
+      const [p, e, c, t, s, r] = await Promise.all([
         api<{items: Prompt[]}>("/api/prompts"),
         api<{items: Evidence[]}>("/api/prompts/research/evidence"),
         api<{items: Candidate[]}>("/api/prompts/research/candidates"),
         api<{items: TrendRank[]}>("/api/prompts/research/trends/ranking"),
+        api<{items: ResearchSource[]}>("/api/prompts/research/sources"),
+        api<{items: CollectionRun[]}>("/api/prompts/research/sources/runs"),
       ]);
       setPrompts(p.items || []);
       setEvidence(e.items || []);
       setCandidates(c.items || []);
       setTrendRanking(t.items || []);
+      setSources(s.items || []);
+      setCollectionRuns(r.items || []);
       if (!selectedPrompt && p.items?.length) setSelectedPrompt(String(p.items[0].id));
     } catch (error) { setMessage(error instanceof Error ? error.message : "加载研究数据失败"); }
   }
@@ -60,6 +72,43 @@ export default function PromptResearchPage() {
   }, []);
 
   const currentPrompt = prompts.find(p => String(p.id) === selectedPrompt) || null;
+
+  async function addPublicSource() {
+    if (!sourceName.trim() || !sourceUrl.trim()) return setMessage("请填写来源名称和公开 RSS/Atom HTTPS 地址。");
+    setBusy(true);
+    try {
+      await api("/api/prompts/research/sources", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({platform:sourcePlatform, name:sourceName, feed_url:sourceUrl, refresh_interval_minutes:Number(sourceInterval)}),
+      });
+      setSourceName(""); setSourceUrl("");
+      setMessage("公开来源已添加。后台会按刷新间隔自动采集；你也可以立即手动采集。");
+      await load();
+    } catch(error) { setMessage(error instanceof Error ? error.message : "添加来源失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function collectSource(id:number) {
+    setBusy(true);
+    try {
+      const result = await api<{message:string}>(`/api/prompts/research/sources/${id}/collect`, {method:"POST"});
+      setMessage(result.message);
+      await load();
+    } catch(error) { setMessage(error instanceof Error ? error.message : "采集失败"); }
+    finally { setBusy(false); }
+  }
+
+  async function toggleSource(source:ResearchSource) {
+    setBusy(true);
+    try {
+      await api(`/api/prompts/research/sources/${source.id}`, {
+        method:"PATCH", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({enabled:!source.enabled}),
+      });
+      await load();
+    } catch(error) { setMessage(error instanceof Error ? error.message : "更新来源失败"); }
+    finally { setBusy(false); }
+  }
 
   async function addEvidence() {
     if (!platform.trim() || !workTitle.trim() || !observedAt) return setMessage("请填写平台、作品名称和采样日期。");
@@ -139,6 +188,46 @@ export default function PromptResearchPage() {
           <p className="mt-2 text-sm text-purple-200/70">公开来源或人工录入 → 人工核验 → 多平台、多日期交叉验证 → 生成候选 → 你明确批准后更新正式版本。</p>
         </header>
         {message && <div role="status" className="rounded-xl border border-cyan-300/20 bg-cyan-950/30 p-3 text-sm text-cyan-100">{message}</div>}
+
+        <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><h2 className="text-lg font-bold">公开来源自动采集适配器</h2><p className="mt-1 text-xs text-white/50">添加平台允许访问的公开 RSS/Atom 地址；后台每 15 分钟检查到期任务，按每个来源设置的间隔采集。</p></div>
+            <button disabled={busy} onClick={()=>void load()} className="rounded-xl border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100">刷新来源状态</button>
+          </div>
+          <div className="mt-3 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs text-amber-100/80">
+            安全边界：仅 HTTPS；仅允许 YouTube、B站、抖音、快手、TikTok、Facebook、红果等平台域名；只读取 RSS/Atom 标题、链接、日期和短摘要；不模拟登录、不绕过访问限制。当前不是这些平台全部都提供 RSS，必须填写真实可用的公开订阅地址。自动发现的数据一律待人工核验。
+          </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <label className="text-xs">平台
+              <select value={sourcePlatform} onChange={e=>setSourcePlatform(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2 text-sm">
+                {["YouTube","B站","抖音","快手","TikTok","Facebook","红果短剧"].map(x=><option key={x}>{x}</option>)}
+              </select>
+            </label>
+            <label className="text-xs">来源名称<input value={sourceName} onChange={e=>setSourceName(e.target.value)} placeholder="例如：频道公开更新订阅" className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/></label>
+            <label className="text-xs">刷新间隔
+              <select value={sourceInterval} onChange={e=>setSourceInterval(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2 text-sm">
+                <option value="60">每 1 小时</option><option value="180">每 3 小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option>
+              </select>
+            </label>
+            <div className="flex items-end"><button disabled={busy} onClick={()=>void addPublicSource()} className="w-full rounded-lg bg-fuchsia-600 px-3 py-2 text-sm font-semibold disabled:opacity-50">添加公开来源</button></div>
+          </div>
+          <label className="mt-3 block text-xs">公开 RSS / Atom HTTPS 地址
+            <input value={sourceUrl} onChange={e=>setSourceUrl(e.target.value)} placeholder="https://www.youtube.com/feeds/videos.xml?channel_id=..." className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/>
+          </label>
+          <div className="mt-4 space-y-2">
+            {sources.map(source=><div key={source.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><strong className="text-sm">{source.name}</strong><span className="text-xs text-cyan-200">{source.platform}</span><span className={source.enabled?"text-xs text-emerald-300":"text-xs text-white/40"}>{source.enabled?"自动采集已启用":"已暂停"}</span></div>
+                <p className="mt-1 break-all text-[11px] text-white/40">{source.feed_url}</p><p className="mt-1 text-xs text-white/50">间隔 {source.refresh_interval_minutes} 分钟 · 状态 {source.last_status} · 最近采集 {source.last_collected_at||"尚未采集"}</p>
+                {source.last_error&&<p className="mt-1 text-xs text-amber-200">{source.last_error}</p>}
+              </div>
+              <div className="flex gap-2"><button disabled={busy} onClick={()=>void collectSource(source.id)} className="rounded-lg border border-cyan-300/30 px-3 py-2 text-xs text-cyan-100">立即采集</button><button disabled={busy} onClick={()=>void toggleSource(source)} className="rounded-lg border border-white/15 px-3 py-2 text-xs">{source.enabled?"暂停":"启用"}</button></div>
+            </div>)}
+            {!sources.length&&<p className="py-5 text-center text-sm text-white/40">还没有配置公开订阅源。添加一个真实可访问的 RSS/Atom 地址即可开始。</p>}
+          </div>
+          <details className="mt-4"><summary className="cursor-pointer text-xs text-cyan-200">查看最近采集记录（{collectionRuns.length}）</summary>
+            <div className="mt-2 space-y-2">{collectionRuns.slice(0,20).map(run=><div key={run.id} className="rounded-lg border border-white/10 p-2 text-xs text-white/60">来源 #{run.source_id} · {run.status} · 发现 {run.discovered_count} · 新增 {run.inserted_count} · 重复 {run.duplicate_count} {run.error_message&&"· "+run.error_message}</div>)}</div>
+          </details>
+        </section>
 
         <section className="rounded-2xl border border-white/10 bg-white/[0.04] p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
