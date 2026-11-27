@@ -47,18 +47,9 @@ try {
     Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
 }
 
-# FFmpeg and FFprobe are downloaded by CI and bundled into the offline installer.
-$FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
-$FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
-foreach ($tool in @($FfmpegSource, $FfprobeSource)) {
-    if (!(Test-Path $tool) -or (Get-Item $tool).Length -lt 1MB) {
-        throw "Bundled media runtime is missing or invalid: $tool"
-    }
-}
-$SystemFfmpeg = $FfmpegSource
-$SystemFfprobe = $FfprobeSource
-Write-Host "Bundled FFmpeg: $FfmpegSource"
-Write-Host "Bundled FFprobe: $FfprobeSource"
+# FFmpeg is user-managed and is not downloaded or bundled by this build.
+# The installed application discovers the existing runtime under AICOMICS_DATA_DIR\engines\FFmpeg.
+Write-Host "FFmpeg/FFprobe will be resolved from the user\x27s existing local runtime at startup."
 
 
 Write-Host "[1/4] Checking PyInstaller..."
