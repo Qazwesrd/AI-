@@ -21,13 +21,21 @@ export default function SetupWizardPage() {
   const [bundleCheck, setBundleCheck] = useState<Check | null>(null);
   const [imageCheck, setImageCheck] = useState<Check | null>(null);
   const [videoCheck, setVideoCheck] = useState<Check | null>(null);
+  const [ollamaCheck, setOllamaCheck] = useState<Check | null>(null);
+  const [localModels, setLocalModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [modelTest, setModelTest] = useState<Check | null>(null);
   const [busy, setBusy] = useState(false);
+  const [testingModel, setTestingModel] = useState(false);
 
   async function scan() {
     setBusy(true);
     setBundleCheck(null);
     setImageCheck(null);
     setVideoCheck(null);
+    setOllamaCheck(null);
+    setLocalModels([]);
+    setModelTest(null);
     const checkOne = async (path: string): Promise<Check> => {
       try {
         const response = await fetch(`${API}${path}`, { cache: "no-store" });
@@ -57,18 +65,54 @@ export default function SetupWizardPage() {
         return { status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" };
       }
     };
-    const [bundle, image, video] = await Promise.all([
+    const checkOllama = async (): Promise<Check> => {
+      try {
+        const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) return { status: "error", message: data.detail || `检测失败（HTTP ${response.status}）` };
+        const models = Array.isArray(data.models) ? data.models.map((item: any) => item.name).filter((name: unknown): name is string => typeof name === "string") : [];
+        setLocalModels(models);
+        setSelectedModel(current => current && models.includes(current) ? current : (models[0] || ""));
+        return { status: data.status || "unknown", message: data.message || "本地文字模型检测完成", detail: models.length ? `已安装模型：${models.join("、")}` : "Ollama 已响应，但没有发现已安装模型。" };
+      } catch (error) {
+        return { status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" };
+      }
+    };
+    const [bundle, image, video, ollama] = await Promise.all([
       checkBundle(),
       checkOne("/api/local-ai/image-runtime"),
       checkOne("/api/local-ai/video-runtime"),
+      checkOllama(),
     ]);
     setBundleCheck(bundle);
     setImageCheck(image);
     setVideoCheck(video);
+    setOllamaCheck(ollama);
     setBusy(false);
   }
 
   const statusLabel = (check: Check | null) => !check ? "尚未检测" : check.status === "ready" || check.status === "available" ? "引擎已响应" : check.status === "not_running" || check.status === "unavailable" ? "尚未连接" : check.status;
+
+  async function testSelectedModel() {
+    if (!selectedModel) return;
+    setTestingModel(true);
+    setModelTest(null);
+    try {
+      const response = await fetch(`${API}/api/local-ai/test`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: selectedModel }),
+      });
+      const data = await response.json();
+      setModelTest(response.ok
+        ? { status: "success", message: data.message || "本地模型推理测试成功", detail: data.response || "" }
+        : { status: "error", message: data.detail || `测试失败（HTTP ${response.status}）` });
+    } catch (error) {
+      setModelTest({ status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" });
+    } finally {
+      setTestingModel(false);
+    }
+  }
 
   return (
     <main className="min-h-screen bg-[#070512] px-4 py-8 text-white md:px-8">
@@ -98,9 +142,21 @@ export default function SetupWizardPage() {
             <h3 className="text-xl font-bold text-cyan-100">{guide[step].title}</h3>
             <p className="mt-3 text-sm leading-7 text-slate-200">{guide[step].body}</p>
             {step === 1 && <div className="mt-4 space-y-3">
-              <button onClick={scan} disabled={busy} className="rounded-xl bg-cyan-700 px-5 py-3 text-sm font-semibold disabled:opacity-50">{busy ? "正在检测本地引擎…" : "检测图片与视频引擎"}</button>
-              <div className="grid gap-3 md:grid-cols-3">
-                {[["独立 AI 资源包", bundleCheck], ["图片引擎", imageCheck], ["视频引擎", videoCheck]].map(([name, check]) => <div key={name as string} className="rounded-lg border border-white/10 bg-black/20 p-3"><p className="font-semibold">{name as string}：{statusLabel(check as Check | null)}</p><p className="mt-1 text-xs leading-5 text-slate-300">{(check as Check | null)?.message || "点击上方按钮检测"}</p>{(check as Check | null)?.detail && <p className="mt-2 break-all text-xs leading-5 text-cyan-100/70">{(check as Check).detail}</p>}</div>)}
+              <button onClick={scan} disabled={busy} className="rounded-xl bg-cyan-700 px-5 py-3 text-sm font-semibold disabled:opacity-50">{busy ? "正在检测本地引擎…" : "检测资源包与全部本地引擎"}</button>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                {[["独立 AI 资源包", bundleCheck], ["文字模型引擎", ollamaCheck], ["图片引擎", imageCheck], ["视频引擎", videoCheck]].map(([name, check]) => <div key={name as string} className="rounded-lg border border-white/10 bg-black/20 p-3"><p className="font-semibold">{name as string}：{statusLabel(check as Check | null)}</p><p className="mt-1 text-xs leading-5 text-slate-300">{(check as Check | null)?.message || "点击上方按钮检测"}</p>{(check as Check | null)?.detail && <p className="mt-2 break-all text-xs leading-5 text-cyan-100/70">{(check as Check).detail}</p>}</div>)}
+              </div>
+              <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+                <p className="font-semibold">本地文字模型实际推理测试</p>
+                <p className="mt-1 text-xs leading-5 text-slate-300">只测试本机已安装模型，不会下载模型，也不会调用云端。</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <select value={selectedModel} onChange={event => { setSelectedModel(event.target.value); setModelTest(null); }} disabled={!localModels.length || testingModel} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-sm">
+                    {!localModels.length && <option value="">未发现已安装模型</option>}
+                    {localModels.map(model => <option key={model} value={model}>{model}</option>)}
+                  </select>
+                  <button onClick={testSelectedModel} disabled={!selectedModel || testingModel} className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">{testingModel ? "正在本地推理…" : "测试所选模型"}</button>
+                </div>
+                {modelTest && <div className="mt-3 rounded-lg border border-white/10 p-3 text-xs leading-6"><p className={modelTest.status === "success" ? "text-emerald-200" : "text-amber-200"}>{modelTest.message}</p>{modelTest.detail && <p className="mt-1 whitespace-pre-wrap text-slate-300">{modelTest.detail}</p>}</div>}
               </div>
             </div>}
             {step === 2 && <div className="mt-4 rounded-lg border border-amber-300/20 bg-amber-950/20 p-3 text-xs leading-6 text-amber-100">重要：先备份现有模型目录。不同模型架构要求不同节点和子目录，不能只凭文件扩展名判断兼容。资源包里的模型说明优先于通用目录建议。</div>}
