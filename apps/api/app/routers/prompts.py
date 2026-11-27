@@ -590,7 +590,7 @@ def research_trend_ranking(db: Session = Depends(get_db)):
     return {
         "items": ranking,
         "verified_evidence_count": len(rows),
-        "notice": "只统计人工核验的漫剧/作品趋势证据；提示词分享证据与剧本证据分别进入独立榜单，不混入漫剧热度排名。",
+        "notice": "只统计人工核验的漫剧/作品趋势证据；提示词分享证据与剧本证据分别进入独立榜单，不混入漫剧热度排名。当前仍需人工录入，尚未接入各平台自动抓取。",
     }
 
 
