@@ -284,6 +284,81 @@ class LocalVideoWorkflowInput(BaseModel):
     workflow: dict = Field(min_length=1)
 
 
+class LocalVideoTemplateNode(BaseModel):
+    node_id: str = Field(min_length=1, max_length=64)
+    class_type: str = Field(min_length=1, max_length=200)
+    values: dict = Field(default_factory=dict)
+    connections: dict = Field(default_factory=dict)
+
+
+class LocalVideoTemplateBuildInput(BaseModel):
+    nodes: list[LocalVideoTemplateNode] = Field(min_length=1, max_length=MAX_WORKFLOW_NODES)
+
+
+def build_explicit_video_workflow(nodes, object_info):
+    """Build an API prompt only from explicit user-selected nodes, values and links."""
+    errors = []
+    workflow = {}
+    by_id = {}
+    for node in nodes:
+        if node.node_id in by_id:
+            errors.append(f"节点编号重复：{node.node_id}")
+            continue
+        by_id[node.node_id] = node
+    for node in nodes:
+        info = object_info.get(node.class_type) if isinstance(object_info, dict) else None
+        if not isinstance(info, dict):
+            errors.append(f"节点 {node.node_id}：本机未安装节点 {node.class_type}。")
+            continue
+        schema = _node_input_schema(info)
+        known = {**schema["required"], **schema["optional"]}
+        unknown = (set(node.values) | set(node.connections)) - set(known)
+        if unknown:
+            errors.append(f"节点 {node.node_id} 存在未知输入：{', '.join(sorted(unknown))}。")
+        overlap = set(node.values) & set(node.connections)
+        if overlap:
+            errors.append(f"节点 {node.node_id} 的输入不能同时指定常量和连线：{', '.join(sorted(overlap))}。")
+        inputs = dict(node.values)
+        for input_name, connection in node.connections.items():
+            if input_name not in known:
+                continue
+            if not isinstance(connection, dict):
+                errors.append(f"节点 {node.node_id} 的连线 {input_name} 格式无效。")
+                continue
+            source_id = connection.get("node_id")
+            output_index = connection.get("output_index")
+            source = by_id.get(str(source_id))
+            if source is None:
+                errors.append(f"节点 {node.node_id} 的输入 {input_name} 指向未声明节点 {source_id}。")
+                continue
+            source_info = object_info.get(source.class_type)
+            outputs = _node_output_schema(source_info) if isinstance(source_info, dict) else []
+            if not isinstance(output_index, int) or isinstance(output_index, bool) or output_index < 0 or output_index >= len(outputs):
+                errors.append(f"节点 {node.node_id} 的输入 {input_name} 指定了无效输出端口。")
+                continue
+            target_type = known[input_name].get("type")
+            source_type = outputs[output_index].get("type")
+            wildcard = {"*", "ANY", "ANY_TYPE"}
+            if target_type and source_type and target_type not in wildcard and source_type not in wildcard and target_type != source_type:
+                errors.append(f"节点 {node.node_id}.{input_name} 类型 {target_type} 与 {source.class_type}[{output_index}] 类型 {source_type} 不匹配。")
+                continue
+            inputs[input_name] = [str(source_id), output_index]
+        for required_name in schema["required"]:
+            if required_name not in inputs:
+                errors.append(f"节点 {node.node_id}（{node.class_type}）缺少必填输入 {required_name}。")
+        for input_name, value in node.values.items():
+            choices = known.get(input_name, {}).get("choices", [])
+            if choices and value not in choices:
+                errors.append(f"节点 {node.node_id}.{input_name} 的值不在本机可用选项中。")
+        workflow[node.node_id] = {"class_type": node.class_type, "inputs": inputs}
+    if errors:
+        return {"valid": False, "errors": errors[:100], "workflow": None}
+    validation = validate_local_video_workflow(workflow, object_info)
+    if not validation["valid"]:
+        return {"valid": False, "errors": validation["errors"], "workflow": workflow, "validation": validation}
+    return {"valid": True, "errors": [], "workflow": workflow, "validation": validation}
+
+
 def validate_local_video_workflow(workflow, object_info):
     """Validate an API-format ComfyUI graph against the live local node schema."""
     errors = []
@@ -637,6 +712,23 @@ def video_workflow_template_capabilities():
     if not isinstance(info, dict) or info.get("_error"):
         raise HTTPException(503, "无法读取本机 ComfyUI 节点信息；未生成工作流。")
     return build_video_template_capabilities(info)
+
+
+@router.post("/video-workflow/build")
+def build_video_workflow_endpoint(data: LocalVideoTemplateBuildInput):
+    """Build an API workflow from explicit local node/input/link selections; never infer links."""
+    object_info = _local_object_info()
+    if not isinstance(object_info, dict) or object_info.get("_error"):
+        raise HTTPException(503, "无法读取本机 ComfyUI 节点信息；未生成工作流。")
+    result = build_explicit_video_workflow(data.nodes, object_info)
+    if not result["valid"]:
+        raise HTTPException(422, detail={"message": "模板构建未通过本机节点结构校验。", **result})
+    return {
+        **result,
+        "message": "已根据明确指定的节点、参数和连线生成 API 工作流；尚未提交生成任务。",
+        "local_only": True,
+        "cloud_fallback": False,
+    }
 
 
 @router.post("/video-workflow/validate")
