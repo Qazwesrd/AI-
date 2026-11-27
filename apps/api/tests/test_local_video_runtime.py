@@ -154,6 +154,7 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertTrue(result["has_wan_video_nodes"])
         self.assertTrue(result["has_video_output_node"])
+        self.assertTrue(result["has_connected_generation_chain"])
 
     def test_api_workflow_preflight_rejects_disconnected_generation_chain(self):
         from app.routers.local_video_runtime import validate_local_video_workflow
