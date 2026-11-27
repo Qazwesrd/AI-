@@ -93,6 +93,7 @@ const navigation = [
       ["⚙️", "AI模型管理", "/ai-center"],
       ["🧩", "本地模型与引擎", "/local-models"],
       ["🧭", "AI资源包新手配置向导", "/setup-wizard"],
+      ["🔄", "软件与本地模型更新中心", "/updates"],
       ["🖼️", "本地图片生成工作台", "/local-image-studio"],
       ["🎞️", "视频生成与音频中心", "/media-studio"],
       ["📊", "AI调用记录", "/ai-center#usage-logs"],
