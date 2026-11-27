@@ -195,6 +195,7 @@ export default function PromptCenterPage() {
             <p className="mt-2 text-sm text-purple-200/70">管理自己的提示词、版本和实测成绩。正式提示词更新必须由你确认。</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a href="/prompts/research" className="rounded-xl border border-cyan-300/30 px-4 py-2 text-sm text-cyan-100">爆款研究与升级审批</a>
             <button onClick={exportPrompts} className="rounded-xl border border-white/15 px-4 py-2 text-sm">导出提示词</button>
             <button onClick={() => importRef.current?.click()} className="rounded-xl border border-white/15 px-4 py-2 text-sm">导入提示词</button>
             <input ref={importRef} type="file" accept="application/json,.json" className="hidden" onChange={e => void importPrompts(e.target.files?.[0])} />
