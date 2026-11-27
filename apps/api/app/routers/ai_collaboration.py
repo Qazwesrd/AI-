@@ -49,6 +49,7 @@ class ImportPayload(BaseModel):
 
 
 class LocalEvolutionAnalyzeInput(BaseModel):
+    asset_id: int | None = Field(default=None, ge=1)
     max_assets: int = Field(default=30, ge=1, le=80)
 
 
@@ -736,6 +737,10 @@ def analyze_chapter_asset_evolution_locally(
         data = asset.data if isinstance(asset.data, dict) else {}
         if data.get("source_novel_id") == novel_id:
             scoped_assets.append(asset)
+    if payload.asset_id is not None:
+        scoped_assets = [item for item in scoped_assets if item.id == payload.asset_id]
+        if not scoped_assets:
+            raise HTTPException(404, "所选素材不存在、未确认或不属于当前小说")
     scoped_assets = scoped_assets[:payload.max_assets]
     if not scoped_assets:
         raise HTTPException(409, "该小说还没有已确认并关联的视觉素材；请先在视觉素材中心导入并确认人物、场景和道具。")
@@ -907,7 +912,8 @@ def review_proposal(proposal_id: int, payload: ReviewPayload, db: Session = Depe
             "hairstyle_after": item.hairstyle_after, "injury_after": item.injury_after,
             "equipment_after": item.equipment_after, "condition_after": item.condition_after,
             "holder": item.holder, "evidence": item.evidence, "confirmed": True,
-            "source": "ai_web_proposal", "proposal_id": item.id,
+            "source": "local_ollama" if str(item.source_task_key or "").startswith("local_ollama:") else "ai_web_proposal",
+            "proposal_id": item.id,
             "recorded_at": datetime.utcnow().isoformat(),
         })
         history.sort(key=lambda x: (int(x.get("chapter_number") or 0), str(x.get("recorded_at") or "")))
