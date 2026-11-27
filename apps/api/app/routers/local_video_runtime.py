@@ -760,6 +760,39 @@ def _extract_auto_workflow_json(value):
     return parsed
 
 
+def _apply_video_request_values(nodes, object_info, data):
+    """Inject the user's prompt and numeric targets into matching live node inputs."""
+    prompt_inputs = 0
+    numeric_values = {
+        "width": data.width, "height": data.height,
+        "length": data.frames, "frames": data.frames,
+        "numframes": data.frames, "framecount": data.frames,
+        "fps": data.fps, "framerate": data.fps,
+        "steps": data.steps, "numsteps": data.steps,
+    }
+    for node in nodes:
+        info = object_info.get(node.class_type, {})
+        schema = _node_input_schema(info)
+        known = {**schema["required"], **schema["optional"]}
+        for input_name, field in known.items():
+            compact = re.sub(r"[^a-z0-9]", "", input_name.lower())
+            input_type = field.get("type")
+            if (
+                input_type == "STRING"
+                and "negative" not in compact
+                and ("prompt" in compact or compact in {"text", "positive"})
+                and input_name not in node.connections
+            ):
+                node.values[input_name] = data.prompt.strip()
+                prompt_inputs += 1
+            elif input_type in {"INT", "FLOAT"} and input_name not in node.connections:
+                if compact in numeric_values:
+                    node.values[input_name] = numeric_values[compact]
+    if prompt_inputs == 0:
+        raise HTTPException(422, "本机 Wan/VACE 节点中没有可安全写入视频提示词的文本输入；未生成工作流。")
+    return prompt_inputs
+
+
 def _auto_video_node_catalog(object_info):
     catalog = []
     for class_name, info in object_info.items():
@@ -829,6 +862,7 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
         if not specification["nodes"]:
             raise HTTPException(422, "本机模型判断当前节点信息不足以可靠构建 Wan/VACE 工作流；未生成或提交任务。")
         nodes = [LocalVideoTemplateNode.model_validate(item) for item in specification["nodes"]]
+        prompt_input_count = _apply_video_request_values(nodes, object_info, data)
         result = build_explicit_video_workflow(nodes, object_info)
         if not result["valid"]:
             raise HTTPException(422, detail={
@@ -840,6 +874,7 @@ def auto_build_local_video_workflow(data: LocalVideoAutoBuildInput):
             **result,
             "model": model,
             "mode": data.mode,
+            "prompt_inputs_configured": prompt_input_count,
             "generation_ready": False,
             "workflow_execution_verified": False,
             "message": "本机 Ollama 已自动配置工作流并通过 ComfyUI 节点、参数、连接和视频输出结构预检。尚未实际加载模型或生成视频；请先检查草稿，再手动提交本地队列。",
