@@ -460,6 +460,12 @@ async function startManagedAiEngines(dataDir) {
       stdio: ["ignore", "pipe", "pipe"]
     });
     logChild("OLLAMA", ollamaProcess);
+    const ready = await waitForLocalService(11435, "/api/tags", ollamaProcess, 30000);
+    if (ready) {
+      console.log("[OLLAMA] Local service is ready on 127.0.0.1:11435.");
+    } else {
+      console.warn("[OLLAMA] Process was started but the service did not become ready within 30 seconds. Existing model files were not changed; check the local engine status and logs.");
+    }
   } else {
     console.warn("[OLLAMA] Existing runtime/models were not both detected; no model download, replacement, or migration will be attempted.");
   }
