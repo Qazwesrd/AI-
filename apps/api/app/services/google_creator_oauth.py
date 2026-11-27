@@ -265,7 +265,7 @@ def parse_money(value: str, fallback_currency: str | None = None):
         return None, None
     amount = float(match.group(0).replace(",", ""))
     upper = raw.upper()
-    currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD") if code in upper), None)
-    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD"}:
+    currency = next((code for code in ("USD", "EUR", "GBP", "JPY", "CNY", "HKD", "CAD", "AUD", "INR", "SGD", "CHF", "NZD", "KRW", "TWD") if code in upper), None)
+    if currency is None and fallback_currency in {"USD","EUR","GBP","JPY","CNY","HKD","CAD","AUD","INR","SGD","CHF","NZD","KRW","TWD"}:
         currency = fallback_currency
     return amount, currency
