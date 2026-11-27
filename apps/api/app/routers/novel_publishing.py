@@ -56,6 +56,14 @@ class SubmissionUpdate(BaseModel):
     note: str = Field(default="", max_length=5000)
 
 
+class AIAssistPromptInput(BaseModel):
+    task: str = Field(min_length=1, max_length=40)
+    chapter_id: Optional[int] = None
+    target_language: str = Field(default="zh-CN", max_length=40)
+    platform_id: str = Field(default="", max_length=60)
+    extra_requirements: str = Field(default="", max_length=5000)
+
+
 SUBMISSION_STATUSES = {"prepared","submitted","reviewing","published","rejected","paused","withdrawn"}
 
 
@@ -203,6 +211,63 @@ def list_submission_records(package_id: Optional[int] = None, db: Session = Depe
     return {"items":[submission_dict(row) for row in rows]}
 
 
+
+
+@router.post("/novels/{novel_id}/ai-assist-prompt")
+def build_ai_assist_prompt(novel_id: int, data: AIAssistPromptInput, db: Session = Depends(get_db)):
+    novel = db.query(Novel).filter(Novel.id == novel_id).first()
+    if not novel:
+        raise HTTPException(404,"小说不存在")
+    platform = next((item for item in PLATFORMS if item["id"] == data.platform_id),None) if data.platform_id else None
+    chapter = None
+    if data.chapter_id is not None:
+        chapter = db.query(Chapter).filter(Chapter.id == data.chapter_id, Chapter.novel_id == novel_id).first()
+        if not chapter:
+            raise HTTPException(404,"章节不存在或不属于该小说")
+    tasks = {
+        "concept": "请帮助我构思原创小说核心创意、题材定位、读者画像、独特卖点和冲突引擎。先提出3个差异明显的方案，再比较并推荐一个，不得套用现有作品的人物、世界观或具体桥段。",
+        "outline": "请为这部原创小说设计长篇大纲：核心主题、世界规则、主线目标、主要反派、人物弧光、阶段目标、卷纲、每卷高潮和结尾钩子。保证因果闭环、伏笔可回收、人物动机可信。",
+        "characters": "请设计人物档案和关系网：姓名、身份、目标、恐惧、缺陷、能力边界、外貌、服装、说话习惯、人物弧光、人物关系变化。角色之间必须有差异，不得用空洞标签替代行为动机。",
+        "chapter": "请续写下一章。严格承接现有章节事实、人物状态、时间线、伏笔和世界规则；先列出本章目标与冲突，再输出完整章节正文。禁止擅自复活人物、改变设定或提前揭示未到时机的秘密。",
+        "polish": "请对提供的章节进行专业网文编辑：检查节奏、开篇吸引力、场景调度、人物动机、对白、逻辑漏洞、重复表达和章节结尾钩子。先给问题清单，再给保留原意的修订稿，不得擅自改变关键剧情。",
+        "translate": "请将小说内容翻译为目标语言。保留人物姓名、专有名词、世界观术语、称谓关系和章节编号；先建立术语表，再逐段翻译。译文要符合目标语言读者的自然表达，不得删节、改写剧情或擅自增加内容。",
+        "synopsis": "请为目标平台撰写作品标题备选、短简介、长简介、标签、关键词和前三章推荐语。突出独特卖点和核心冲突，避免剧透结局，不得虚构正文没有的设定。",
+        "localize": "请对作品进行目标市场本地化建议：读者偏好、文化语境、称谓、计量单位、节奏、标题、简介和标签。只提出可解释的适配建议，不得改变人物身份、核心主题或原作因果关系。",
+    }
+    if data.task not in tasks:
+        raise HTTPException(400,"不支持的 AI 创作任务")
+    context = [
+        f"小说标题：{novel.title}",
+        f"题材：{novel.genre}",
+        f"现有简介：{novel.description or '尚未填写'}",
+        f"目标语言：{data.target_language}",
+        f"目标平台：{platform['name'] if platform else '通用创作'}",
+    ]
+    if chapter:
+        context.extend([
+            f"当前章节：第{chapter.chapter_number}章 {chapter.title}",
+            "当前章节正文：",
+            (chapter.content or "")[:24000],
+        ])
+    prompt = (
+        "你是专业长篇小说策划、编辑与跨语言出版顾问。请严格以用户提供的作品资料为依据，"
+        "保持人物、时间线、设定和版权边界一致。对不确定的事实先提问，不要编造既有正文。\n\n"
+        + "\n".join(context)
+        + "\n\n任务要求：\n" + tasks[data.task]
+        + ("\n\n额外要求：\n" + data.extra_requirements.strip() if data.extra_requirements.strip() else "")
+        + "\n\n输出时区分正文事实、编辑建议和新增创作内容。"
+    )
+    return {
+        "success":True,"task":data.task,"task_name":data.task,
+        "prompt":prompt,"platform":platform["name"] if platform else "",
+        "target_language":data.target_language,
+        "execution_mode":"copy_to_user_selected_free_or_local_AI",
+        "automatic_paid_api_call":False,
+        "message":"已生成 AI 创作任务提示词。当前不会自动调用付费 API；可复制到你选择的本地或免费 AI 工具，审阅结果后再保存进小说项目。",
+    }
+
+
+
 @router.patch("/submissions/{submission_id}")
 def update_submission_record(submission_id: int, data: SubmissionUpdate, db: Session = Depends(get_db)):
     row = db.query(NovelSubmissionRecord).filter(NovelSubmissionRecord.id == submission_id).first()
@@ -211,6 +276,8 @@ def update_submission_record(submission_id: int, data: SubmissionUpdate, db: Ses
     if data.status not in SUBMISSION_STATUSES:
         raise HTTPException(400,"无效的投稿状态")
     target_url = data.external_work_url.strip()
+    if data.status == "published" and not target_url:
+        raise HTTPException(400,"标记为已发布必须填写平台实际作品链接")
     if target_url and not (target_url.startswith("https://") or target_url.startswith("http://")):
         raise HTTPException(400,"作品链接必须是有效 HTTP/HTTPS 地址")
     row.status = data.status
