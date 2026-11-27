@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db, SessionLocal
@@ -331,8 +331,18 @@ class EvidenceInput(BaseModel):
     work_title: str = Field(min_length=1, max_length=300)
     genre: str = Field(default="未分类", max_length=100)
     work_url: str = Field(default="", max_length=2000)
-    observed_at: str = Field(min_length=8, max_length=40)
+    observed_at: str = Field(min_length=10, max_length=40)
     metric_summary: dict = Field(default_factory=dict)
+
+    @field_validator("observed_at")
+    @classmethod
+    def validate_observed_at(cls, value):
+        normalized = value.strip()
+        try:
+            datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("采样日期必须使用 ISO 日期或时间格式，例如 2026-11-27") from exc
+        return normalized
     evidence_type: str = Field(default="作品趋势证据", max_length=100)
     reliability: str = Field(default="待核验", max_length=30)
 
