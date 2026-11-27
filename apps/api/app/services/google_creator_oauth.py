@@ -28,7 +28,6 @@ GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/yt-analytics-monetary.readonly",
     "https://www.googleapis.com/auth/adsense.readonly",
 ]
-REDIRECT_URI = "http://127.0.0.1:8000/api/revenue/oauth/google/callback"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 API_CALLBACK_URI = "http://127.0.0.1:8000/api/revenue/oauth/google/callback"
