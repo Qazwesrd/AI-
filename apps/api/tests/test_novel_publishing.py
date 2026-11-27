@@ -5,11 +5,13 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models.novel import Novel, Chapter, NovelDistributionPackage, NovelSubmissionRecord
+from app.models.novel import Novel, Chapter, NovelDistributionPackage, NovelSubmissionRecord, NovelTranslation
 from app.routers.novel_publishing import (
     DistributionPackageInput, SubmissionInput, SubmissionUpdate,
     create_distribution_package, create_submission_record, update_submission_record,
     export_distribution_package, list_novel_distribution_platforms, build_ai_assist_prompt,
+    TranslationCreateInput, create_translation, translate_next_chunk, get_translation,
+    export_translation, _translation_chunks,
 )
 
 
@@ -76,6 +78,35 @@ class NovelPublishingTests(unittest.TestCase):
         self.assertIn("长篇大纲", result["prompt"])
         self.assertIn("Amazon Kindle", result["prompt"])
         self.assertFalse(result["automatic_paid_api_call"])
+
+    def test_translation_chunks_keep_real_paragraph_breaks(self):
+        chunks = _translation_chunks("第一段。\\n\\n第二段。")
+        self.assertEqual(chunks, ["第一段。\\n\\n第二段。"])
+
+    @patch("app.routers.novel_publishing._installed_models", return_value=[{"name":"local-translate-model"}])
+    @patch("app.routers.novel_publishing._ollama_request", return_value={"response":"Translated original text."})
+    def test_local_translation_saves_separate_edition_without_changing_source(self, mock_generate, mock_models):
+        original = self.db.query(Chapter).filter_by(novel_id=self.novel.id).one().content
+        created = create_translation(
+            self.novel.id,
+            TranslationCreateInput(target_language="en",model_name="local-translate-model",glossary={"测试原创小说":"Test Original Novel"}),
+            self.db,
+        )
+        translation_id = created["item"]["id"]
+        self.assertEqual(created["item"]["status"],"pending")
+        result = translate_next_chunk(translation_id,self.db)
+        self.assertEqual(result["item"]["status"],"completed")
+        detail = get_translation(translation_id,self.db)
+        self.assertIn("Translated original text.",detail["chapters"][0]["translated_text"])
+        exported = export_translation(translation_id,"md",self.db)
+        self.assertIn("Translated original text.",exported.body.decode("utf-8"))
+        self.assertEqual(self.db.query(Chapter).filter_by(novel_id=self.novel.id).one().content,original)
+        mock_generate.assert_called_once()
+
+    def test_translation_rejects_uninstalled_local_model(self):
+        with patch("app.routers.novel_publishing._installed_models",return_value=[]):
+            with self.assertRaises(Exception):
+                create_translation(self.novel.id,TranslationCreateInput(target_language="en",model_name="missing-model"),self.db)
 
     def test_published_submission_requires_real_platform_url(self):
         package = create_distribution_package(
