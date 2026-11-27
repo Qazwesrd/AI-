@@ -7,9 +7,11 @@ import json
 import re
 import uuid
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/local-ai", tags=["本地视频生成"])
@@ -441,6 +443,68 @@ def get_video_workflow_status(prompt_id: str):
         "local_only": True, "cloud_fallback": False,
         "message": "已完成并发现视频输出。" if completed and videos else "任务已结束但未发现标准视频输出，请查看 ComfyUI 工作流输出。" if completed else "任务仍在运行或执行失败，请稍后刷新并查看本机 ComfyUI 队列。",
     }
+
+
+@router.get("/video-workflow/{prompt_id}/preview")
+def preview_video_workflow_output(prompt_id: str, output_index: int = 0):
+    """Stream a completed video output from the fixed local ComfyUI /view endpoint."""
+    if not PROMPT_ID_PATTERN.fullmatch(prompt_id):
+        raise HTTPException(400, "任务编号格式无效。")
+    if output_index < 0 or output_index > 49:
+        raise HTTPException(400, "视频输出序号超出范围。")
+    history = _comfy_request("/history/" + prompt_id, timeout=15.0)
+    item = history.get(prompt_id)
+    if not isinstance(item, dict):
+        raise HTTPException(404, "本地任务尚无历史记录。")
+    outputs = item.get("outputs") if isinstance(item.get("outputs"), dict) else {}
+    videos = []
+    for node_id, output in outputs.items():
+        if not isinstance(output, dict):
+            continue
+        for key in ("videos", "gifs"):
+            values = output.get(key)
+            if isinstance(values, list):
+                for value in values[:50]:
+                    if isinstance(value, dict) and isinstance(value.get("filename"), str):
+                        videos.append(value)
+    if output_index >= len(videos):
+        raise HTTPException(404, "该任务没有对应的视频输出。")
+    selected = videos[output_index]
+    filename = selected["filename"]
+    subfolder = selected.get("subfolder", "")
+    media_type = selected.get("type", "output")
+    if len(filename) > 500 or len(subfolder) > 500 or media_type not in ("output", "temp"):
+        raise HTTPException(422, "ComfyUI 视频输出元数据无效。")
+    query = urlencode({"filename": filename, "subfolder": subfolder, "type": media_type})
+    request = Request(COMFYUI_BASE_URL + "/view?" + query, headers={"Accept": "video/*"})
+    try:
+        response = _OPENER.open(request, timeout=30.0)
+    except HTTPError as exc:
+        raise HTTPException(502, f"读取本机视频输出失败（HTTP {exc.code}）。") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(503, "无法读取本机 ComfyUI 视频输出。") from exc
+
+    content_type = response.headers.get("Content-Type", "video/mp4")
+    if not (content_type.startswith("video/") or content_type == "image/gif"):
+        response.close()
+        raise HTTPException(415, "ComfyUI 返回的文件不是受支持的视频格式。")
+
+    def stream():
+        total = 0
+        try:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > 512 * 1024 * 1024:
+                    break
+                yield chunk
+        finally:
+            response.close()
+
+    headers = {"Content-Disposition": "inline", "Cache-Control": "no-store"}
+    return StreamingResponse(stream(), media_type=content_type, headers=headers)
 
 
 @router.get("/video-runtime")
