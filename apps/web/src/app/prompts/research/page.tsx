@@ -13,6 +13,7 @@ type CollectionRun = { id:number; source_id:number; status:string; discovered_co
 type CategoryRankItem = {rank:number;title:string;platforms?:string[];observed_days?:string[];latest_observed_at?:string;growth_rate_pct?:number|null;sample_count?:number;score:number;test_count?:number;version?:number;score_basis?:string};
 type RankingFreshness = {mode:string;ui_poll_seconds:number;collector_scheduler_seconds:number;latest_verified_evidence_created_at:string|null;latest_observed_at:string|null;latest_source_collection_at:string|null;latest_snapshot_at:string|null};
 type CategoryRankings = {drama:{title:string;items:CategoryRankItem[];genre_items:{rank:number;title:string;work_count:number;sample_count:number;score:number;platforms:string[]}[];verified_evidence_count:number};prompt:{title:string;items:CategoryRankItem[];public_share_items:CategoryRankItem[];verified_evidence_count:number};screenplay:{title:string;items:CategoryRankItem[];verified_evidence_count:number}};
+type RankingHistoryItem = {id:number;category:string;created_at:string|null;ranking:CategoryRankItem[]};
 
 export default function PromptResearchPage() {
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -23,6 +24,8 @@ export default function PromptResearchPage() {
   const [rankingsUpdatedAt,setRankingsUpdatedAt]=useState<string>("");
   const [rankingFreshness,setRankingFreshness]=useState<RankingFreshness|null>(null);
   const [rankTab,setRankTab]=useState<"drama"|"prompt"|"screenplay">("drama");
+  const [rankingHistory,setRankingHistory]=useState<RankingHistoryItem[]>([]);
+  const [historyLoading,setHistoryLoading]=useState(false);
   const [sources, setSources] = useState<ResearchSource[]>([]);
   const [collectionRuns, setCollectionRuns] = useState<CollectionRun[]>([]);
   const [sourcePlatform, setSourcePlatform] = useState("YouTube");
@@ -119,6 +122,15 @@ export default function PromptResearchPage() {
       await load();
     } catch(error) { setMessage(error instanceof Error ? error.message : "添加来源失败"); }
     finally { setBusy(false); }
+  }
+
+  async function loadRankingHistory(category:"drama"|"prompt"|"screenplay"){
+    setHistoryLoading(true);
+    try{
+      const result=await api<{items:RankingHistoryItem[]}>(`/api/prompts/research/rankings/history?category=${category}`);
+      setRankingHistory(result.items||[]);
+    }catch(e){setMessage(e instanceof Error?e.message:"读取排行榜历史失败");}
+    finally{setHistoryLoading(false);}
   }
 
   async function refreshAllRankings(){
@@ -289,10 +301,12 @@ export default function PromptResearchPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><h2 className="text-xl font-bold">爆款分类排行榜 · 自动刷新</h2><p className="mt-1 text-xs text-white/50">榜单每 15 秒自动重新读取并计算；切回页面时立即刷新。来源数据按各自采集间隔更新，不把延迟数据伪装成实时数据。</p><p className="mt-1 text-xs text-emerald-200">最近刷新：{rankingsUpdatedAt?new Date(rankingsUpdatedAt).toLocaleString():"等待首次更新"} · 最新已核验证据记录创建：{rankingFreshness?.latest_verified_evidence_created_at?new Date(rankingFreshness.latest_verified_evidence_created_at).toLocaleString():"暂无"} · 最新样本观察日：{rankingFreshness?.latest_observed_at||"暂无"} · 最近公开来源采集：{rankingFreshness?.latest_source_collection_at?new Date(rankingFreshness.latest_source_collection_at).toLocaleString():"暂无"} · 后台采集检查：每 {Math.round((rankingFreshness?.collector_scheduler_seconds||900)/60)} 分钟</p></div>
             <button disabled={busy} onClick={()=>void refreshAllRankings()} className="rounded-xl bg-fuchsia-700 px-4 py-2 text-sm font-semibold disabled:opacity-50">刷新并保存三类榜单</button>
+            <button disabled={historyLoading} onClick={()=>void loadRankingHistory(rankTab)} className="rounded-xl border border-white/15 px-4 py-2 text-sm disabled:opacity-50">{historyLoading?"读取历史中…":"查看当前分类历史快照"}</button>
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             {(["drama","prompt","screenplay"] as const).map(key=><button key={key} onClick={()=>setRankTab(key)} className={rankTab===key?"rounded-lg bg-cyan-700 px-4 py-2 text-sm":"rounded-lg border border-white/15 px-4 py-2 text-sm text-white/70"}>{key==="drama"?"漫剧作品排名":key==="prompt"?"提示词排名":"剧本排名"}</button>)}
           </div>
+          {rankingHistory.length>0&&<section className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3"><h3 className="text-sm font-semibold">历史排名快照 · {rankTab==="drama"?"漫剧":rankTab==="prompt"?"提示词":"剧本"}</h3><div className="mt-2 space-y-2">{rankingHistory.map(snapshot=><details key={snapshot.id} className="rounded-lg border border-white/10 p-2"><summary className="cursor-pointer text-xs">{snapshot.created_at?new Date(snapshot.created_at).toLocaleString():"时间未知"} · {snapshot.ranking.length} 个排名项目</summary><ol className="mt-2 space-y-1 text-xs text-white/70">{snapshot.ranking.slice(0,20).map((item,index)=><li key={item.title||index}>{item.rank||index+1}. {item.title} · {item.score??item.average_score??"—"}</li>)}</ol></details>)}</div></section>}
           {categoryRankings&&(()=>{
             const current=categoryRankings[rankTab];
             return <div className="mt-4 overflow-x-auto">
