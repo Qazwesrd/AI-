@@ -180,11 +180,11 @@ def import_platform_report(platform_id: str, filename: str, content: bytes, db: 
             if payment_header and _report_amount(row.get(payment_header, "")) is not None:
                 amount_header = payment_header
                 amount_value = row.get(payment_header, "")
-                row_status = "paid" if payment_status == "paid" else "payable" if payment_status in {"pending", "processing"} else "settled"
+                row_status = "paid" if payment_status == "paid" else "payable" if payment_status in {"pending", "processing", "failed"} else "settled"
             elif net_earnings_header and _report_amount(row.get(net_earnings_header, "")) is not None:
                 amount_header = net_earnings_header
                 amount_value = row.get(net_earnings_header, "")
-                row_status = "payable" if payment_status in {"pending", "processing"} else "settled"
+                row_status = "payable" if payment_status in {"pending", "processing", "failed"} else "settled"
             elif estimated_header:
                 amount_header = estimated_header
                 amount_value = row.get(estimated_header, "")
