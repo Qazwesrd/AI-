@@ -57,6 +57,7 @@ const styles = [
 
 export default function VisualStudioPage() {
   const [category, setCategory] = useState("characters");
+  const [workspaceMode, setWorkspaceMode] = useState<"assets" | "3d">("assets");
   const [assets, setAssets] = useState<Asset[]>([]);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [sourceNovelId, setSourceNovelId] = useState("");
@@ -122,6 +123,7 @@ export default function VisualStudioPage() {
     const params = new URLSearchParams(window.location.search);
     const requestedCategory = params.get("category");
     const requestedNovelId = params.get("novelId");
+    if (params.get("mode") === "3d") { setWorkspaceMode("3d"); setCategory("characters"); }
     if (requestedCategory && categories.some((item) => item.key === requestedCategory)) setCategory(requestedCategory);
     if (requestedNovelId) setSourceNovelId(requestedNovelId);
   }, []);
@@ -414,10 +416,11 @@ export default function VisualStudioPage() {
           className="mb-5 inline-flex items-center gap-2 rounded-xl border border-purple-300/30 bg-purple-950/60 px-4 py-2.5 text-sm font-medium text-white transition hover:border-purple-300/70 hover:bg-purple-800/60"
         >← 返回主页</a>
         <div className="text-sm text-purple-300">AI COMIC STUDIO / VISUAL LAB</div>
-        <h1 className="mt-2 text-3xl font-bold">AI视觉素材生产中心</h1>
+        <h1 className="mt-2 text-3xl font-bold">{workspaceMode === "3d" ? "三维素材生成工作区" : "AI视觉素材生产中心"}</h1>
         <p className="mt-2 text-sm text-slate-300">
-          统一管理人物、场景、普通道具、武器刀具、服装、建筑和特殊物品，并为后续镜头生成提供统一视觉参考。
+          {workspaceMode === "3d" ? "选择已审核确认的人物素材，生成真实可编辑的 GLB 三维模型。外部 3D 服务可能收费，未经逐次确认不会提交。" : "统一管理人物、场景、普通道具、武器刀具、服装、建筑和特殊物品，并为后续镜头生成提供统一视觉参考。"}
         </p>
+        {workspaceMode === "3d" && <div className="rounded-xl border border-cyan-300/25 bg-cyan-950/30 p-4 text-sm text-cyan-100">三维生成仅显示已确认的人物素材。尚无已确认素材时，请先返回“人物角色”完成导入和审核。<a className="ml-2 underline" href="/visual-studio?category=characters">返回人物素材</a></div>}
       </header>
 
       {message && (
@@ -524,7 +527,7 @@ export default function VisualStudioPage() {
 
       <section className={panel}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-xl font-semibold">当前素材库</h2>
+          <h2 className="text-xl font-semibold">{workspaceMode === "3d" ? "可用于三维生成的已确认人物" : "当前素材库"}</h2>
           <div className="flex flex-wrap gap-2">
             <select className="max-w-xs rounded-xl border border-purple-300/20 bg-slate-900 px-3 py-2 text-sm text-white" value={sourceNovelId} onChange={(e) => { setSourceNovelId(e.target.value); const url = new URL(window.location.href); if (e.target.value) url.searchParams.set("novelId", e.target.value); else url.searchParams.delete("novelId"); window.history.replaceState({}, "", url.toString()); }}>
               <option value="">选择小说，同步 AI 分析资产</option>
@@ -534,11 +537,11 @@ export default function VisualStudioPage() {
           </div>
           <button className={button} onClick={loadAssets}>刷新素材</button>
         </div>
-        {assets.length === 0 ? (
-          <p className="text-sm text-slate-400">当前分类还没有素材。</p>
+        {(workspaceMode === "3d" ? assets.filter((item) => item.confirmed).length : assets.length) === 0 ? (
+          <p className="text-sm text-slate-400">{workspaceMode === "3d" ? "当前没有已确认的人物素材，请先导入小说分析结果并审核确认。" : "当前分类还没有素材。"}</p>
         ) : (
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {assets.map((item) => (
+            {(workspaceMode === "3d" ? assets.filter((item) => item.confirmed) : assets).map((item) => (
               <article key={item.id} className="rounded-xl border border-purple-300/15 bg-slate-900/70 p-4">
                 <div className="flex items-center justify-between gap-2">
                   <h3 className="font-semibold">{item.name}</h3>
