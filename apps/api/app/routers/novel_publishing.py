@@ -191,7 +191,6 @@ def list_distribution_packages(novel_id: Optional[int] = None, db: Session = Dep
     return {"items":[package_dict(row) for row in rows]}
 
 
-@router.get("/packages/{package_id}/export")
 def _epub_document(markdown_text: str, title: str, language: str) -> bytes:
     """Build a lightweight EPUB 3 file locally; no external conversion service."""
     def inline_markup(value: str) -> str:
