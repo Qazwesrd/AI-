@@ -79,6 +79,7 @@ export default function VisualStudioPage() {
   const [localImageRuntimeMessage, setLocalImageRuntimeMessage] = useState("正在检测本地 ComfyUI 图片模型…");
   const [localPromptId, setLocalPromptId] = useState("");
   const [localTaskStatus, setLocalTaskStatus] = useState("");
+  const [localTaskImages, setLocalTaskImages] = useState<Array<{ filename: string; subfolder: string; type: string }>>([]);
   const [confirm3dPaid, setConfirm3dPaid] = useState(false);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -104,12 +105,26 @@ export default function VisualStudioPage() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.detail || "读取本地图片任务失败");
       setLocalTaskStatus(result.status || "unknown");
+      setLocalTaskImages(Array.isArray(result.images) ? result.images : []);
       if (result.status === "completed") setMessage(`本地图片已生成完成，任务编号：${localPromptId}`);
       else if (result.status === "failed") setMessage(result.error || "本地图片生成失败");
       else setMessage(`本地图片任务状态：${result.status || "排队中"}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "读取本地图片任务失败");
     }
+  }
+
+  async function archiveLocalImage(filename: string, subfolder: string, type: string) {
+    if (!localPromptId) return;
+    try {
+      const response = await fetch(`${API}/api/local-ai/images/tasks/${localPromptId}/archive`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, subfolder, type }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.detail || "归档图片失败");
+      setMessage(result.message || `图片已保存到本地素材库：${result.name || filename}`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "归档图片失败"); }
   }
 
   async function loadNovels() {
@@ -547,7 +562,7 @@ export default function VisualStudioPage() {
             <div className="rounded-xl border border-cyan-300/20 bg-cyan-950/20 p-3 text-xs text-cyan-100">
               <div className="font-semibold">本地图片引擎：{localCheckpoints.length ? `发现 ${localCheckpoints.length} 个模型` : "尚未发现可用 checkpoint"}</div>
               <p className="mt-1 text-slate-300">{localImageRuntimeMessage}</p>
-              {localPromptId && <div className="mt-2 flex flex-wrap items-center gap-2"><span>任务：{localPromptId} · {localTaskStatus}</span><button type="button" className="rounded-lg border border-cyan-300/30 px-2 py-1" onClick={refreshLocalImageTask}>刷新本地任务</button></div>}
+              {localPromptId && <div className="mt-2 space-y-2"><div className="flex flex-wrap items-center gap-2"><span>任务：{localPromptId} · {localTaskStatus}</span><button type="button" className="rounded-lg border border-cyan-300/30 px-2 py-1" onClick={refreshLocalImageTask}>刷新本地任务</button></div>{localTaskImages.map((image) => <div key={`${image.filename}:${image.subfolder}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 p-2"><span className="break-all">{image.filename}</span><button type="button" className="rounded-lg border border-cyan-300/30 px-2 py-1" onClick={() => void archiveLocalImage(image.filename, image.subfolder, image.type)}>保存到本地素材库</button></div>)}</div>}
             </div>
             <div className="flex flex-wrap gap-2">
               <button className={button} disabled={busy} onClick={createTask}>创建图片任务</button>
