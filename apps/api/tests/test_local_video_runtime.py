@@ -554,8 +554,6 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
 
     def test_auto_builder_uses_local_model_and_returns_only_validated_draft(self):
         from app.routers import local_video_runtime as runtime
-        from fastapi.testclient import TestClient
-        from app.main import app
 
         specification = {
             "nodes": [
@@ -569,18 +567,17 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
                  "connections": {"images": {"node_id": "2", "output_index": 0}}},
             ]
         }
+        data = runtime.LocalVideoAutoBuildInput(
+            prompt="夜色中的城市飞行镜头", mode="text_to_video",
+            width=832, height=480, frames=33, fps=16, steps=20,
+        )
         with (
             patch.object(runtime, "_local_object_info", return_value=self._node_info()),
             patch.object(runtime, "_installed_models", return_value=[{"name": "qwen2.5:7b"}]),
             patch.object(runtime, "_ollama_request", return_value={"response": json.dumps(specification, ensure_ascii=False)}) as ollama,
         ):
-            client = TestClient(app)
-            response = client.post("/api/local-ai/video-workflow/auto-build", json={
-                "prompt": "夜色中的城市飞行镜头", "mode": "text_to_video",
-                "width": 832, "height": 480, "frames": 33, "fps": 16, "steps": 20,
-            })
-        self.assertEqual(response.status_code, 200, response.text)
-        payload = response.json()
+            payload = runtime.auto_build_local_video_workflow(data)
+        self.assertTrue(payload["valid"])
         self.assertTrue(payload["valid"])
         self.assertFalse(payload["generation_ready"])
         self.assertFalse(payload["cloud_fallback"])
@@ -591,19 +588,17 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
 
     def test_auto_builder_stops_when_wan_nodes_are_missing(self):
         from app.routers import local_video_runtime as runtime
-        from fastapi.testclient import TestClient
-        from app.main import app
+        from fastapi import HTTPException
 
+        data = runtime.LocalVideoAutoBuildInput(prompt="测试视频提示词", mode="text_to_video")
         with (
             patch.object(runtime, "_local_object_info", return_value={"SaveImage": {"input": {}}}),
             patch.object(runtime, "_ollama_request") as ollama,
         ):
-            client = TestClient(app)
-            response = client.post("/api/local-ai/video-workflow/auto-build", json={
-                "prompt": "测试视频提示词", "mode": "text_to_video",
-            })
-        self.assertEqual(response.status_code, 409)
-        self.assertIn("Wan/VACE", response.json()["detail"]["missing"][0])
+            with self.assertRaises(HTTPException) as caught:
+                runtime.auto_build_local_video_workflow(data)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertIn("Wan/VACE", caught.exception.detail["missing"][0])
         ollama.assert_not_called()
 
     def test_auto_workflow_json_parser_rejects_missing_nodes_array(self):
