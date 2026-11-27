@@ -444,9 +444,6 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(result["local_only"])
         self.assertFalse(result["cloud_fallback"])
 
-if __name__ == "__main__":
-    unittest.main()
-
 
     def test_runtime_diagnostics_normalizes_local_device_vram(self):
         from app.routers import local_video_runtime as runtime
@@ -533,6 +530,81 @@ if __name__ == "__main__":
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["videos"][0]["filename"], "sample.mp4")
         self.assertFalse(result["failed"])
+
+if __name__ == "__main__":
+    unittest.main()
+
+class LocalVideoAutoBuildTests(unittest.TestCase):
+    def _node_info(self):
+        return {
+            "WanVideoModelLoader": {
+                "input": {"required": {"model": [["wan-local.safetensors"]]}},
+                "output": ["MODEL"], "output_name": ["MODEL"],
+            },
+            "WanVideoSampler": {
+                "input": {"required": {"model": ["MODEL"], "prompt": ["STRING"]}},
+                "output": ["IMAGE"], "output_name": ["images"],
+            },
+            "VHS_VideoCombine": {
+                "input": {"required": {"images": ["IMAGE"], "frame_rate": ["INT"]}},
+                "output": ["VHS_FILENAMES"], "output_name": ["filenames"],
+            },
+        }
+
+    def test_auto_builder_uses_local_model_and_returns_only_validated_draft(self):
+        from app.routers import local_video_runtime as runtime
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        specification = {
+            "nodes": [
+                {"node_id": "1", "class_type": "WanVideoModelLoader",
+                 "values": {"model": "wan-local.safetensors"}, "connections": {}},
+                {"node_id": "2", "class_type": "WanVideoSampler",
+                 "values": {"prompt": "夜色中的城市飞行镜头"},
+                 "connections": {"model": {"node_id": "1", "output_index": 0}}},
+                {"node_id": "3", "class_type": "VHS_VideoCombine",
+                 "values": {"frame_rate": 16},
+                 "connections": {"images": {"node_id": "2", "output_index": 0}}},
+            ]
+        }
+        with patch.object(runtime, "_local_object_info", return_value=self._node_info()), \\
+             patch.object(runtime, "_installed_models", return_value=[{"name": "qwen2.5:7b"}]), \\
+             patch.object(runtime, "_ollama_request", return_value={"response": json.dumps(specification, ensure_ascii=False)}) as ollama:
+            client = TestClient(app)
+            response = client.post("/api/local-ai/video-workflow/auto-build", json={
+                "prompt": "夜色中的城市飞行镜头", "mode": "text_to_video",
+                "width": 832, "height": 480, "frames": 33, "fps": 16, "steps": 20,
+            })
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["valid"])
+        self.assertFalse(payload["generation_ready"])
+        self.assertFalse(payload["cloud_fallback"])
+        self.assertEqual(payload["model"], "qwen2.5:7b")
+        self.assertEqual(len(payload["workflow"]), 3)
+        ollama.assert_called_once()
+        self.assertEqual(ollama.call_args.args[0], "/api/generate")
+
+    def test_auto_builder_stops_when_wan_nodes_are_missing(self):
+        from app.routers import local_video_runtime as runtime
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with patch.object(runtime, "_local_object_info", return_value={"SaveImage": {"input": {}}}), \\
+             patch.object(runtime, "_ollama_request") as ollama:
+            client = TestClient(app)
+            response = client.post("/api/local-ai/video-workflow/auto-build", json={
+                "prompt": "测试视频提示词", "mode": "text_to_video",
+            })
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("Wan/VACE", response.json()["detail"]["missing"][0])
+        ollama.assert_not_called()
+
+    def test_auto_workflow_json_parser_rejects_missing_nodes_array(self):
+        from app.routers.local_video_runtime import _extract_auto_workflow_json
+        with self.assertRaises(ValueError):
+            _extract_auto_workflow_json('{"workflow": {}}')
 
 if __name__ == "__main__":
     unittest.main()
