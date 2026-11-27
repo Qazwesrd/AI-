@@ -55,7 +55,7 @@ export default function BeginnerQuickStart() {
         <strong>零费用使用提醒：</strong>小说导入、文本编辑、素材整理，以及本地 FFmpeg 视频合成和质检可在电脑上完成，不按 AI API 次数收费。第三方 AI 网页、云端模型和在线素材服务可能收费或消耗额度；严格零支出时，请只使用本地功能并保持云端调用关闭。不要提交任何价格、额度或计费方式不明确的任务。
       </div>
       <div className="mt-3 flex flex-wrap gap-3 text-xs">
-        <a href="/help" className="text-cyan-200 underline underline-offset-4">查看新手说明</a>
+        <a href="/setup-wizard" className="text-cyan-200 underline underline-offset-4">AI资源包配置向导</a>\n        <a href="/help" className="text-cyan-200 underline underline-offset-4">查看完整说明书</a>
         <a href="/system-diagnostics" className="text-purple-200 underline underline-offset-4">检查电脑运行环境</a>
         <a href="/backup-center" className="text-purple-200 underline underline-offset-4">先备份项目</a>
       </div>
