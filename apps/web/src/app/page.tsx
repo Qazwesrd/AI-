@@ -69,7 +69,7 @@ const navigation = [
     items: [
       ["🎬", "AI漫剧制作", "/novels"],
       ["🖼️", "本地图片生成", "/local-image-studio"],
-      ["✂️", "AI视频剪辑", "/video-editor"],
+      ["✂️", "AI视频剪辑", "/video-editor"],\n      ["🎞️", "本地视频工作台", "/media-studio"],
       ["📜", "剧本与分镜", "/storyboard"],
       ["🧊", "三维素材生成", "/visual-studio"],
       ["🧭", "统一任务中心", "/tasks"],
@@ -222,7 +222,7 @@ export default function Home() {
               <p className="mt-1 text-xs leading-5 text-purple-100/70">一步一步检查图片模型、视频模型、目录与引擎状态。</p>
               <span className="mt-3 inline-block text-xs text-cyan-200">开始配置 →</span>
             </a>
-            <a href="/local-models" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
+            <a href="/media-studio" className="glass rounded-2xl border border-fuchsia-300/30 p-4 transition hover:border-fuchsia-200/70">\n              <div className="text-2xl">🎞️</div><h2 className="mt-2 font-bold text-fuchsia-100">本地视频工作台</h2>\n              <p className="mt-1 text-xs leading-5 text-purple-100/70">查看 Wan/VACE 本地视频模型，并进入视频生成与音频中心。</p>\n              <span className="mt-3 inline-block text-xs text-fuchsia-200">进入视频工作台 →</span>\n            </a>\n            <a href="/local-models" className="glass rounded-2xl p-4 transition hover:border-purple-200/70">
               <div className="text-2xl">🧩</div><h2 className="mt-2 font-bold text-white">本地模型管理</h2>
               <p className="mt-1 text-xs leading-5 text-purple-100/70">查看模型清单、硬件建议和本地引擎识别结果。</p>
               <span className="mt-3 inline-block text-xs text-purple-200">管理模型 →</span>
@@ -302,7 +302,7 @@ export default function Home() {
                   ["📖", "小说解析", "/novels"],
                   ["👥", "人物识别", "/visual-studio"],
                   ["🎞️", "智能分镜", "/storyboard"],
-                  ["🎥", "视频生成", "/media-studio"],
+                  ["🎥", "本地视频工作台", "/media-studio"],\n                  ["✂️", "智能视频剪辑", "/video-editor"],
                   ["🧭", "统一任务", "/tasks"],
                   ["📘", "使用说明", "/help"]
                 ].map(([icon, name, href]) => (
