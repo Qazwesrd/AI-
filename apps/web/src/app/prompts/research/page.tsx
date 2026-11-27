@@ -340,7 +340,7 @@ export default function PromptResearchPage() {
             </table>
             {!trendRanking.length&&<p className="py-5 text-center text-sm text-white/40">暂无满足跨平台、跨日期且已核验条件的作品。</p>}
           </div>
-          <p className="mt-2 text-[11px] text-white/40">评分采用公开互动指标对数加权、14天热度衰减和跨平台/跨日期加权。当前数据仍需人工录入；不能从作品热度推断其内部提示词。</p>
+          <p className="mt-2 text-[11px] text-white/40">评分采用公开互动指标对数加权、14天热度衰减和跨平台/跨日期加权。RSS/Atom 自动采集只发现公开条目，互动数值须在人工核验时补录或通过手工证据登记；不能从作品热度推断其内部提示词。</p>
         </section>
 
         <section className="grid gap-5 lg:grid-cols-2">
