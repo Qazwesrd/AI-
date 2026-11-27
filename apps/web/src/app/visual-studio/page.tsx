@@ -168,6 +168,36 @@ export default function VisualStudioPage() {
 
   useEffect(() => { loadNovels(); void loadLocalImageRuntime(); }, []);
 
+  // Poll only the explicitly submitted local ComfyUI task. Stop on terminal states
+  // and when the component unmounts; never submit another generation automatically.
+  useEffect(() => {
+    if (!localPromptId || ["completed", "failed", "error"].includes(localTaskStatus.toLowerCase())) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const response = await fetch(`${API}/api/local-ai/images/tasks/${localPromptId}`, { cache: "no-store" });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || "读取本地图片任务失败");
+        if (cancelled) return;
+        setLocalTaskStatus(result.status || "unknown");
+        setLocalTaskImages(Array.isArray(result.images) ? result.images : []);
+        if (["completed", "failed", "error"].includes(String(result.status || "").toLowerCase())) {
+          setMessage(result.status === "completed"
+            ? `本地图片生成完成：${localPromptId}。请选择需要的图片保存到素材库。`
+            : result.error || "本地图片生成失败，请查看 ComfyUI 错误信息。");
+          return;
+        }
+      } catch (error) {
+        if (!cancelled) setLocalImageRuntimeMessage(error instanceof Error ? error.message : "读取本地图片任务失败");
+      }
+      if (!cancelled) timer = setTimeout(poll, 4000);
+    };
+    timer = setTimeout(poll, 1200);
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [localPromptId, localTaskStatus]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const requestedCategory = params.get("category");
