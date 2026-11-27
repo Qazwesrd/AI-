@@ -28,9 +28,9 @@ export default function VideoEditorPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [handoff, setHandoff] = useState<Handoff | null>(null);
-  const [webResult, setWebResult] = useState("");
+  const [webResult, setWebResult] = useState("");\n  const [localModels, setLocalModels] = useState<{name: string; size_bytes?: number | null}[]>([]);\n  const [localModel, setLocalModel] = useState("");\n  const [localRuntimeMessage, setLocalRuntimeMessage] = useState("正在检测本地 Ollama…");
 
-  async function loadAll() {
+  async function loadLocalModels() {\n    try {\n      const response = await fetch(`${API}/api/local-ai/runtime`, { cache: "no-store" });\n      const data = await response.json();\n      if (!response.ok) throw new Error(data.detail || "本地模型检测失败");\n      const models = Array.isArray(data.models) ? data.models : [];\n      setLocalModels(models);\n      setLocalRuntimeMessage(data.message || "本地模型检测完成");\n      if (models.length && !localModel) setLocalModel(models[0].name);\n    } catch (error) {\n      setLocalModels([]);\n      setLocalRuntimeMessage(error instanceof Error ? error.message : "本地模型引擎未连接");\n    }\n  }\n\n  async function analyzeWithLocalModel() {\n    if (!selected.length) return setMessage("请先选择要分析的视频。");\n    if (!localModel) return setMessage("本机没有检测到已安装的 Ollama 模型，请先配置本地模型。");\n    if (!instruction.trim()) return setMessage("请先填写剪辑要求。");\n    setBusy(true);\n    setMessage("正在用本地视觉模型分析视频关键帧，请稍候……");\n    try {\n      const response = await fetch(`${API}/api/video-editor/local-analyze`, {\n        method: "POST", headers: { "Content-Type": "application/json" },\n        body: JSON.stringify({ model: localModel, instruction, source_paths: selected })\n      });\n      const data = await response.json();\n      if (!response.ok) throw new Error(data.detail || "本地视频分析失败");\n      setMessage(`${data.message} 已分析 ${data.frames_analyzed} 帧，任务编号：${data.id}`);\n      await loadAll();\n    } catch (error) {\n      setMessage(error instanceof Error ? error.message : "本地视频分析失败");\n    } finally { setBusy(false); }\n  }\n\n  async function loadAll() {
     try {
       const [fileResponse, audioResponse, otherResponse, jobResponse] = await Promise.all([
         fetch(`${API}/api/media/files?category=video`),
@@ -50,7 +50,7 @@ export default function VideoEditorPage() {
     }
   }
 
-  useEffect(() => { void loadAll(); }, []);
+  useEffect(() => { void loadAll(); void loadLocalModels(); }, []);
 
   async function uploadFiles(list: FileList | null) {
     if (!list?.length) return;
@@ -254,7 +254,7 @@ export default function VideoEditorPage() {
           </div>
 
           <div className={panel}>
-            <h2 className="mb-4 text-xl font-semibold">第二步：描述剪辑要求</h2>
+            <h2 className="mb-4 text-xl font-semibold">第二步：描述剪辑要求</h2>\n            <div className="mb-5 rounded-xl border border-emerald-300/25 bg-emerald-950/20 p-4">\n              <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-emerald-100">本地 AI 视频理解与剪辑</h3><button onClick={() => void loadLocalModels()} className="rounded-lg border border-white/20 px-3 py-1.5 text-xs">重新检测</button></div>\n              <p className="mt-2 text-xs leading-5 text-white/60">{localRuntimeMessage}</p>\n              <label className="mb-2 mt-3 block text-sm">本地视觉模型（Ollama）</label>\n              <select value={localModel} onChange={e => setLocalModel(e.target.value)} className="w-full rounded-lg border border-white/15 bg-black/30 p-3">\n                <option value="">请选择本机已安装模型</option>\n                {localModels.map(item => <option key={item.name} value={item.name}>{item.name}</option>)}\n              </select>\n              <button disabled={busy || !localModel || !instruction.trim() || !selected.length} onClick={() => void analyzeWithLocalModel()} className="mt-3 rounded-xl bg-emerald-700 px-5 py-3 font-semibold disabled:opacity-40">用本地 AI 分析视频并生成剪辑方案</button>\n              <p className="mt-2 text-xs text-emerald-100/60">只抽取少量关键帧发送到本机 Ollama；原视频不上传云端。需要支持图像输入的视觉模型。此步骤生成剪辑方案，不是生成全新视频。</p>\n            </div>
             <label className="mb-2 block text-sm">AI 服务商 ID（内置 API 模式）</label>
             <input value={provider} onChange={e => setProvider(e.target.value)} className="mb-4 w-full rounded-lg border border-white/15 bg-black/30 p-3" />
             <label className="mb-2 block text-sm">AI 模型名称</label>
