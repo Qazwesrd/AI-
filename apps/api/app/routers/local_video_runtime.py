@@ -376,6 +376,69 @@ def _comfy_request(path, payload=None, timeout=15.0):
         raise HTTPException(502, "ComfyUI 返回了无法识别的数据。") from exc
 
 
+def build_video_template_capabilities(object_info):
+    """Discover installed Wan/VACE building blocks without guessing workflow wiring."""
+    if not isinstance(object_info, dict) or object_info.get("_error"):
+        return {"available": False, "roles": {}, "nodes": [], "message": "本机 ComfyUI 节点信息不可用。"}
+    role_terms = {
+        "model_loader": ("model loader", "model_loader", "load model"),
+        "text_encoder": ("text encoder", "t5", "umt5", "cliptextencode"),
+        "text_encode": ("text encode", "textencode", "prompt"),
+        "sampler": ("sampler",),
+        "vae_loader": ("vae loader", "load vae"),
+        "decode": ("decode", "vae decode"),
+        "image_input": ("loadimage", "load image", "image loader"),
+        "video_input": ("loadvideo", "load video", "video loader"),
+        "vace": ("vace",),
+        "video_output": ("videocombine", "savevideo", "video combine"),
+    }
+    roles = {}
+    discovered = []
+    for class_name, info in object_info.items():
+        if not isinstance(class_name, str) or not isinstance(info, dict):
+            continue
+        lowered = class_name.lower().replace("_", " ")
+        schema = _node_input_schema(info)
+        matching = [
+            role for role, terms in role_terms.items()
+            if any(term in lowered for term in terms)
+        ]
+        if not matching:
+            continue
+        entry = {
+            "class_type": class_name,
+            "roles": matching,
+            "input_schema": schema,
+        }
+        discovered.append(entry)
+        for role in matching:
+            roles.setdefault(role, []).append(class_name)
+    for role in roles:
+        roles[role] = sorted(roles[role])[:30]
+    return {
+        "available": bool(discovered),
+        "roles": roles,
+        "nodes": discovered[:120],
+        "message": (
+            "已读取本机节点输入和模型选项。下一步可据此构建模板；当前只做能力发现，不会生成猜测性的工作流。"
+            if discovered else "未发现可用于构建视频工作流的 Wan/VACE 节点。"
+        ),
+        "template_generated": False,
+        "generation_ready": False,
+        "local_only": True,
+        "cloud_fallback": False,
+    }
+
+
+@router.get("/video-workflow/template-capabilities")
+def video_workflow_template_capabilities():
+    """Return live node roles and inputs for safe, version-aware template construction."""
+    info = _local_object_info()
+    if not isinstance(info, dict) or info.get("_error"):
+        raise HTTPException(503, "无法读取本机 ComfyUI 节点信息；未生成工作流。")
+    return build_video_template_capabilities(info)
+
+
 @router.post("/video-workflow/validate")
 def validate_video_workflow_endpoint(data: LocalVideoWorkflowInput):
     object_info = _local_object_info()
