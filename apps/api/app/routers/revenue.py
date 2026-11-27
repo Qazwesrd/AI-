@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, SessionLocal
 from app.models.revenue import (
     RevenueEntry, WithdrawalRecord, CreatorOAuthConnection, OAuthAuthorizationState,
 )
@@ -576,3 +576,29 @@ def google_oauth_status():
         "optional_environment": ["GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "AI_COMIC_TOKEN_ENCRYPTION_KEY"],
         "note": "可在收益中心保存 Google Desktop OAuth Client ID；Windows 使用 DPAPI 保护本机 Fernet 密钥，其他系统使用本机权限受限密钥文件。YouTube Analytics 提供预估收入；AdSense Payments 可读取未付款和已付款记录。API 不执行提现。",
     }
+
+
+
+def sync_due_creator_accounts_background():
+    """Refresh connected Google accounts every six hours; no action occurs without prior OAuth consent."""
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        rows = db.query(CreatorOAuthConnection).filter(
+            CreatorOAuthConnection.provider == GOOGLE_PROVIDER,
+            CreatorOAuthConnection.status == "connected",
+        ).all()
+        due_ids = [
+            row.id for row in rows
+            if row.last_sync_at is None or row.last_sync_at <= now - timedelta(hours=6)
+        ]
+        results = []
+        for connection_id in due_ids[:10]:
+            try:
+                result = sync_google_creator_revenue(connection_id, db)
+                results.append({"connection_id": connection_id, "success": True, "inserted": result.get("inserted", 0)})
+            except Exception as exc:
+                results.append({"connection_id": connection_id, "success": False, "error": str(exc)[:500]})
+        return {"checked": len(rows), "due": len(due_ids), "results": results}
+    finally:
+        db.close()
