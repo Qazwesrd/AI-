@@ -47,11 +47,9 @@ export default function PromptCenterPage() {
 
   async function load() {
     try {
-      const [c, p] = await Promise.all([
-        api<{ items: Category[] }>("/api/prompts/categories"),
-        api<{ items: Prompt[] }>("/api/prompts" + (search ? "?q=" + encodeURIComponent(search) : "")),
-      ]);
+      const c = await api<{ items: Category[] }>("/api/prompts/categories");
       setCategories(c.items || []);
+      const p = await api<{ items: Prompt[] }>("/api/prompts" + (search ? "?q=" + encodeURIComponent(search) : ""));
       setPrompts(p.items || []);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "加载提示词失败");
