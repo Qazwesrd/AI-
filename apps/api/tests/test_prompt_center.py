@@ -298,6 +298,11 @@ class PromptCenterTests(unittest.TestCase):
         self.assertEqual(items[0]["url"], "https://www.youtube.com/watch?v=abc")
         self.assertLessEqual(len(items[0]["summary_excerpt"]), 300)
 
+    def test_feed_parser_rejects_xml_entity_declarations_after_large_whitespace_prefix(self):
+        payload = b" " * 5000 + b'<!DOCTYPE rss [<!ENTITY x "expanded">]><rss><channel/></rss>'
+        with self.assertRaises(FeedCollectionError):
+            parse_feed(payload)
+
     def test_feed_parser_rejects_xml_entities_and_bad_urls(self):
         with self.assertRaises(FeedCollectionError):
             parse_feed(b'<!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><rss/>')
