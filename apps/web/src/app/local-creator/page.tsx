@@ -28,6 +28,7 @@ async function readApiError(response: Response, fallback: string) {
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type RuntimeModel = { name: string; size_bytes?: number | null };
+type PackageProgressEvent = { type: string; total?: number; completed?: number; title?: string; item?: { stage: string; title: string; content: string }; stages?: Array<{ stage: string; title: string; content: string }>; stage_count?: number; detail?: string };
 type RuntimeInfo = { status: "ready" | "not_running"; models: RuntimeModel[]; message: string };
 type Novel = { id: number; title: string; chapter_count?: number };
 type Chapter = { id: number; chapter_number: number; title: string; word_count: number };
@@ -169,7 +170,7 @@ export default function LocalCreatorPage() {
       if (!response.body) throw new Error("浏览器未提供流式响应能力；请检查桌面端运行环境。");
       const reader = response.body.getReader(), decoder = new TextDecoder();
       let buffer = "", completed = false;
-      const handleEvent = (event: any) => {
+      const handleEvent = (event: PackageProgressEvent) => {
         if (event.type === "started") setPackageProgress({ completed: 0, total: event.total || 5, current: "准备开始" });
         else if (event.type === "stage_started") setPackageProgress(current => ({ ...current, current: event.title || "正在生成" }));
         else if (event.type === "stage_completed") {
