@@ -62,6 +62,15 @@ class AnalysisChunkSizingTests(unittest.TestCase):
         states = {"2": "context_rejected", "2.1": "completed"}
         self.assertFalse(chunk_tree_is_complete("2", saved, states))
 
+    def test_unprocessable_context_leaf_is_never_considered_complete(self):
+        saved = {"4.1": [{"name": "前半已完成"}]}
+        states = {
+            "4": "context_rejected",
+            "4.1": "completed",
+            "4.2": "context_limit_unprocessable",
+        }
+        self.assertFalse(chunk_tree_is_complete("4", saved, states))
+
     def test_unknown_submission_is_not_mistaken_for_completed_leaf(self):
         saved = {"3.1": [{"name": "已完成"}]}
         states = {"3": "context_rejected", "3.1": "completed", "3.2": "submission_unknown"}
