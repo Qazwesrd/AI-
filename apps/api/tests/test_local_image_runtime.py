@@ -77,6 +77,21 @@ class LocalImageRuntimeTests(unittest.TestCase):
         self.assertEqual(result["gpu_level"], "unknown")
         self.assertTrue(any("不能据此判断没有 GPU" in item for item in result["reasons"]))
 
+    def test_hardware_assessment_recognizes_amd_integrated_graphics_without_fake_vram(self):
+        result = assess_image_hardware({
+            "memory": {"total_bytes": 16 * GIB},
+            "gpu": {
+                "status": "detected", "vendor": "AMD",
+                "name": "AMD Radeon(TM) Graphics", "vram_bytes": None,
+                "shared_memory": True,
+            },
+        })
+        self.assertEqual(result["gpu_level"], "integrated_shared_memory")
+        self.assertEqual(result["gpu_vendor"], "AMD")
+        self.assertTrue(result["gpu_shared_memory"])
+        self.assertIsNone(result["vram_bytes"])
+        self.assertTrue(any("不能把共享内存容量当作独立显存" in item for item in result["reasons"]))
+
 
 if __name__ == "__main__":
     unittest.main()
