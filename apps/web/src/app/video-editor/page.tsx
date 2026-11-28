@@ -57,7 +57,11 @@ export default function VideoEditorPage() {
     try {
       const response = await fetch(`${API}/api/video-editor/local-analyze`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: localModel, instruction, source_paths: selected })
+        body: JSON.stringify({
+          model: localModel,
+          instruction: `${instruction}\n\n字幕语言要求：${subtitleLanguage === "en" ? "请使用英语生成字幕文本和相关语言内容。" : subtitleLanguage === "zh-en" ? "请同时提供中文和英文双语字幕文本。" : "请使用简体中文生成字幕文本和相关语言内容。"}`,
+          source_paths: selected
+        })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "本地视频分析失败");
