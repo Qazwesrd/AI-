@@ -9,6 +9,7 @@ import socket
 from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 
@@ -357,6 +358,59 @@ def get_local_novel_context(novel_id: int, chapter_id: int):
         }
     finally:
         db.close()
+
+
+
+
+def _episode_package_progress_events(payload: LocalEpisodePackageInput):
+    """Emit NDJSON stage events; preserve completed work if a later stage fails."""
+    model = payload.model.strip()
+    if not MODEL_NAME_PATTERN.fullmatch(model):
+        yield json.dumps({"type":"error","status":400,"detail":"模型名称格式无效"}, ensure_ascii=False) + "\n"
+        return
+    try:
+        installed = {x["name"] for x in _installed_models()}
+    except HTTPException as exc:
+        yield json.dumps({"type":"error","status":exc.status_code,"detail":exc.detail}, ensure_ascii=False) + "\n"
+        return
+    if model not in installed:
+        yield json.dumps({"type":"error","status":404,"detail":"所选模型未安装在本机；不会自动下载模型。"}, ensure_ascii=False) + "\n"
+        return
+    stages = [
+        ("screenplay","第一步：剧本",CREATIVE_TASKS["screenplay"]),
+        ("character","第二步：人物设定与连续性清单",CREATIVE_TASKS["character"]+" 输出角色外貌、发型、服装、配色、能力、伤势和随身道具固定设定表。"),
+        ("plot","第三步：剧情结构与场景道具清单",CREATIVE_TASKS["plot"]+" 列出场景、时间、道具及状态变化。"),
+        ("storyboard","第四步：逐镜分镜",CREATIVE_TASKS["storyboard"]+" 每镜引用人物固定设定，保持服装、发型、道具和场景空间连续。"),
+        ("image_prompt","第五步：逐镜图片提示词",CREATIVE_TASKS["image_prompt"]+" 每条提示词带有角色固定外观、服装、场景和道具连续性描述，并注明对应镜号。"),
+    ]
+    outputs, previous = [], ""
+    yield json.dumps({"type":"started","total":5,"completed":0}, ensure_ascii=False) + "\n"
+    for index,(key,label,instruction) in enumerate(stages,1):
+        yield json.dumps({"type":"stage_started","stage":key,"title":label,"index":index,"total":5}, ensure_ascii=False) + "\n"
+        system = "你是专业中文漫剧编剧、导演和分镜师。使用简体中文；不得擅自改变核心剧情；不足信息标注待确认。画面风格："+payload.style+"。保持人物身份、外貌、发型、服装、配色、场景和道具连续。任务要求："+instruction
+        prompt = "【原始章节素材】\n"+payload.source_text.strip()
+        if payload.extra_requirements.strip(): prompt += "\n\n【用户额外要求】\n"+payload.extra_requirements.strip()
+        if previous: prompt += "\n\n【前序阶段成果，必须继承】\n"+previous[-9000:]
+        prompt += "\n\n请完成"+label+"，输出结构化、可编辑内容。"
+        try:
+            result = _ollama_request("/api/generate", {"model":model,"system":system,"prompt":prompt,"stream":False,"options":{"num_predict":1400,"temperature":0.35}}, timeout=1800.0)
+        except HTTPException as exc:
+            yield json.dumps({"type":"error","status":exc.status_code,"detail":f"{label}生成失败；已完成{len(outputs)}步，未切换云端。{exc.detail}","completed":len(outputs),"stages":outputs}, ensure_ascii=False)+"\n"
+            return
+        response = result.get("response") if isinstance(result,dict) else None
+        if not isinstance(response,str) or not response.strip():
+            yield json.dumps({"type":"error","status":502,"detail":f"{label}没有返回有效内容；已完成{len(outputs)}步，未切换云端。","completed":len(outputs),"stages":outputs}, ensure_ascii=False)+"\n"
+            return
+        item={"stage":key,"title":label,"content":response.strip()[:16000]}
+        outputs.append(item); previous += "\n\n"+label+"\n"+item["content"]
+        yield json.dumps({"type":"stage_completed","completed":len(outputs),"total":5,"item":item}, ensure_ascii=False)+"\n"
+    yield json.dumps({"type":"completed","status":"success","engine":"ollama","model":model,"style":payload.style,"stages":outputs,"stage_count":5,"network_used":False,"downloaded":False,"cloud_fallback":False,"saved_automatically":False,"message":"整章创作包已在本机生成。请检查后手动复制保存。"}, ensure_ascii=False)+"\n"
+
+
+@router.post("/generate-package-progress")
+def generate_local_episode_package_progress(payload: LocalEpisodePackageInput):
+    return StreamingResponse(_episode_package_progress_events(payload), media_type="application/x-ndjson",
+        headers={"Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no"})
 
 
 @router.post("/generate-package")
