@@ -28,7 +28,7 @@ async function readApiError(response: Response, fallback: string) {
 
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type RuntimeModel = { name: string; size_bytes?: number | null };
-type PackageProgressEvent = { type: string; total?: number; completed?: number; title?: string; item?: { stage: string; title: string; content: string }; stages?: Array<{ stage: string; title: string; content: string }>; stage_count?: number; detail?: string };
+type PackageProgressEvent = { type: string; total?: number; completed?: number; title?: string; stage?: string; text?: string; item?: { stage: string; title: string; content: string }; stages?: Array<{ stage: string; title: string; content: string }>; partial?: { stage: string; title: string; content: string }; stage_count?: number; detail?: string };
 type RuntimeInfo = { status: "ready" | "not_running"; models: RuntimeModel[]; message: string };
 type Novel = { id: number; title: string; chapter_count?: number };
 type Chapter = { id: number; chapter_number: number; title: string; word_count: number };
@@ -172,12 +172,14 @@ export default function LocalCreatorPage() {
       let buffer = "", completed = false;
       const handleEvent = (event: PackageProgressEvent) => {
         if (event.type === "started") setPackageProgress({ completed: 0, total: event.total || 5, current: "准备开始" });
-        else if (event.type === "stage_started") setPackageProgress(current => ({ ...current, current: event.title || "正在生成" }));
+        else if (event.type === "stage_started") { setPackageProgress(current => ({ ...current, current: event.title || "正在生成" })); setPackageStages(current => [...current.filter(item => item.stage !== event.stage), { stage: event.stage || "current", title: event.title || "正在生成", content: "" }]); }
+        else if (event.type === "token" && event.stage && event.text) setPackageStages(current => current.map(item => item.stage === event.stage ? { ...item, content: (item.content + event.text!).slice(-16000) } : item));
         else if (event.type === "stage_completed") {
           setPackageStages(current => [...current.filter(item => item.stage !== event.item.stage), event.item]);
           setPackageProgress({ completed: event.completed, total: event.total, current: event.item.title });
         } else if (event.type === "error") {
-          if (Array.isArray(event.stages)) setPackageStages(event.stages);
+          if (Array.isArray(event.stages)) setPackageStages(current => [...event.stages!, ...current.filter(item => !event.stages!.some(done => done.stage === item.stage))]);
+          if (event.partial?.content) setPackageStages(current => [...current.filter(item => item.stage !== event.partial!.stage), event.partial!]);
           throw new Error(event.detail || "本地创作包生成失败；没有切换到云端");
         } else if (event.type === "completed") {
           completed = true; setPackageStages(event.stages || []);
