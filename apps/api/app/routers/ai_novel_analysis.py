@@ -284,7 +284,7 @@ def unknown_chunk_keys(chunk_states):
 # chapter label, provider framing, and output budget. The previous 14,000-character
 # chunks exceeded the context window of several configured chat models.
 DEFAULT_ANALYSIS_CHUNK_CHARS = 3000
-ANALYSIS_CHUNKING_VERSION = "context-safe-v2"
+ANALYSIS_CHUNKING_VERSION = "context-safe-v3"
 
 
 def make_chunks(chapters, limit=DEFAULT_ANALYSIS_CHUNK_CHARS):
@@ -371,6 +371,45 @@ def choose_provider(db):
     items.sort(key=lambda x: priority.get(x.provider.lower(), 99))
 
     return items[0] if items else None
+
+
+class ContextLengthRejected(RuntimeError):
+    """The provider explicitly rejected the prompt before producing a completion."""
+
+
+CONTEXT_LENGTH_ERROR_MARKERS = (
+    "prompt is longer than the context length",
+    "context length",
+    "maximum context",
+    "max context",
+    "too many tokens",
+    "token limit",
+    "maximum number of tokens",
+)
+
+
+def is_context_length_error(status_code, response_body):
+    if int(status_code or 0) != 400:
+        return False
+    body = str(response_body or "").casefold()
+    return any(marker in body for marker in CONTEXT_LENGTH_ERROR_MARKERS)
+
+
+def split_text_for_context_retry(content):
+    """Split text into two non-empty, lossless pieces, preferring a nearby newline."""
+    content = str(content or "")
+    if len(content) < 2:
+        return None
+    midpoint = len(content) // 2
+    lower = max(1, midpoint - max(1, len(content) // 10))
+    upper = min(len(content) - 1, midpoint + max(1, len(content) // 10))
+    cut = content.rfind("\\n", lower, upper)
+    if cut <= 0:
+        cut = midpoint
+    left, right = content[:cut], content[cut:]
+    if not left or not right or left + right != content:
+        return None
+    return left, right
 
 
 def analyze_chunk(config, api_key, content, chapter_label):
@@ -513,6 +552,10 @@ architecture, special_item, event, world, timeline。
 
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:2000]
+        if is_context_length_error(exc.code, detail):
+            raise ContextLengthRejected(
+                f"模型明确拒绝了超出上下文容量的请求（HTTP {exc.code}）：{detail}"
+            ) from exc
         raise RuntimeError(f"模型接口返回HTTP {exc.code}: {detail}") from exc
     except Exception as exc:
         raise RuntimeError(f"AI分析请求失败：{exc}") from exc
