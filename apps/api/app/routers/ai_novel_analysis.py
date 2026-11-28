@@ -280,6 +280,28 @@ def unknown_chunk_keys(chunk_states):
     ]
 
 
+def chunk_tree_is_complete(root_key, saved_results, chunk_states):
+    """Return true only when a root chunk or all recursively split leaves are saved."""
+    if root_key in saved_results:
+        return True
+    if (chunk_states or {}).get(root_key) != "context_rejected":
+        return False
+    return (
+        chunk_tree_is_complete(root_key + ".1", saved_results, chunk_states)
+        and chunk_tree_is_complete(root_key + ".2", saved_results, chunk_states)
+    )
+
+
+def append_chunk_tree_results(root_key, saved_results, chunk_states, output):
+    """Append leaf results in original left-to-right source order."""
+    if root_key in saved_results:
+        output.extend(saved_results[root_key])
+        return
+    if (chunk_states or {}).get(root_key) == "context_rejected":
+        append_chunk_tree_results(root_key + ".1", saved_results, chunk_states, output)
+        append_chunk_tree_results(root_key + ".2", saved_results, chunk_states, output)
+
+
 # Conservative default for Chinese text: reserve context for the large system prompt,
 # chapter label, provider framing, and output budget. The previous 14,000-character
 # chunks exceeded the context window of several configured chat models.
@@ -951,15 +973,7 @@ def analyze_novel_with_ai(
         request_started = False
 
     def root_is_complete(root_key):
-        state = chunk_states.get(root_key)
-        if root_key in saved_results:
-            return True
-        if state != "context_rejected":
-            return False
-        return (
-            root_is_complete(root_key + ".1")
-            and root_is_complete(root_key + ".2")
-        )
+        return chunk_tree_is_complete(root_key, saved_results, chunk_states)
 
     for index, chunk in enumerate(chunks, start=1):
         chunk_key = str(index)
@@ -1071,16 +1085,10 @@ def analyze_novel_with_ai(
             ) from exc
 
     all_items = []
-    def append_piece_results(piece_key):
-        if piece_key in saved_results:
-            all_items.extend(saved_results[piece_key])
-            return
-        if chunk_states.get(piece_key) == "context_rejected":
-            append_piece_results(piece_key + ".1")
-            append_piece_results(piece_key + ".2")
-
     for index in range(1, len(chunks) + 1):
-        append_piece_results(str(index))
+        append_chunk_tree_results(
+            str(index), saved_results, chunk_states, all_items
+        )
 
     merged_items = merge_analysis_items(all_items)
 
