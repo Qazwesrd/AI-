@@ -9,6 +9,7 @@ from app.routers.ai_novel_analysis import (
     split_text_for_context_retry,
     chunk_tree_is_complete,
     append_chunk_tree_results,
+    MIN_CONTEXT_RETRY_CHARS,
 )
 
 
@@ -22,6 +23,9 @@ class AnalysisChunkSizingTests(unittest.TestCase):
         self.assertTrue(is_context_length_error(400, "maximum context length is 4096 tokens"))
         self.assertFalse(is_context_length_error(500, "context length"))
         self.assertFalse(is_context_length_error(400, "invalid api key"))
+
+    def test_context_retry_stops_before_pathological_tiny_requests(self):
+        self.assertIsNone(split_text_for_context_retry("短" * (MIN_CONTEXT_RETRY_CHARS - 1)))
 
     def test_context_retry_split_is_lossless(self):
         source = ("第一段内容。" * 100) + "\\n" + ("第二段内容。" * 100)
