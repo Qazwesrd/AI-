@@ -55,7 +55,7 @@ class SystemDiagnosticsTests(unittest.TestCase):
         }), patch("app.routers.system._detect_windows_video_adapters", return_value=amd):
             result = _detect_gpu_hardware()
         self.assertEqual(result["vendor"], "AMD")
-        self.assertIsNone(result["vram_bytes")
+        self.assertIsNone(result["vram_bytes"])
 
     def test_model_tier_recommends_small_model_for_low_ram(self):
         result = _recommend_local_model_tier(6 * 1024 ** 3, None)
