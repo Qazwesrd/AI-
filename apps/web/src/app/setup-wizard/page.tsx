@@ -54,11 +54,23 @@ export default function SetupWizardPage() {
           const checkpoints = Array.isArray(data.checkpoints) ? data.checkpoints.filter((name: unknown): name is string => typeof name === "string") : [];
           setImageModels(checkpoints);
           setSelectedImageModel(current => current && checkpoints.includes(current) ? current : (checkpoints[0] || ""));
-          return { status: data.status || "unknown", message: data.message || "图片引擎检测完成", detail: `已发现 ${count} 个图片模型条目；可测试基础 checkpoint：${checkpoints.length} 个；硬件建议：${data.hardware?.gpu_level || "未知"}。发现条目不代表已实测加载。` };
+          const imageAdvice = checkpoints.length
+            ? "下一步：选择一个 checkpoint，运行低分辨率单张测试；成功返回图片后才算可用。"
+            : "下一步：把已取得且许可允许使用的图片模型放入 ComfyUI/models/checkpoints，点击重新检测；不会自动下载模型。";
+          return { status: data.status || "unknown", message: data.message || "图片引擎检测完成", detail: `已发现 ${count} 个图片模型条目；可测试基础 checkpoint：${checkpoints.length} 个；硬件建议：${data.hardware?.gpu_level || "未知"}。发现条目不代表已实测加载。 ${imageAdvice}` };
         }
         const count = data.model_inventory_count ?? data.model_inventory?.length ?? 0;
         const folders = data.model_folders ? Object.entries(data.model_folders).map(([name, item]: [string, any]) => `${name}: ${item.count ?? 0}`).join("；") : "模型目录信息未返回";
-        return { status: data.status || "unknown", message: data.message || "视频引擎检测完成", detail: `已发现 ${count} 个视频模型条目；目录：${folders}。生成就绪：${data.generation_ready ? "是" : "否"}。` };
+        const missingNodes = Array.isArray(data.missing_required_nodes) ? data.missing_required_nodes.filter((name: unknown): name is string => typeof name === "string") : [];
+        const videoAdvice = data.generation_ready
+          ? "下一步：先导入短片段工作流并运行低分辨率/短时长测试，确认输出文件可打开。"
+          : missingNodes.length
+            ? `缺少专用节点：${missingNodes.join("、")}。下一步：按节点作者说明安装兼容版本后重启 ComfyUI，再重新检测；本向导不会擅自下载或覆盖节点。`
+            : data.status === "unavailable" || data.status === "not_running"
+              ? "下一步：启动本机 ComfyUI，再点击重新检测；无需配置云端 API。"
+              : "下一步：检查视频模型目录、节点清单和资源包说明；未通过预检前不要提交生成任务。";
+        const reason = typeof data.reason === "string" && data.reason ? `检测原因：${data.reason}。` : "";
+        return { status: data.status || "unknown", message: data.message || "视频引擎检测完成", detail: `已发现 ${count} 个视频模型条目；目录：${folders}。生成就绪：${data.generation_ready ? "是" : "否"}。 ${reason}${videoAdvice}` };
       } catch (error) {
         return { status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" };
       }
@@ -84,7 +96,7 @@ export default function SetupWizardPage() {
         const models = Array.isArray(data.models) ? data.models.map((item: any) => item.name).filter((name: unknown): name is string => typeof name === "string") : [];
         setLocalModels(models);
         setSelectedModel(current => current && models.includes(current) ? current : (models[0] || ""));
-        return { status: data.status || "unknown", message: data.message || "本地文字模型检测完成", detail: models.length ? `已安装模型：${models.join("、")}` : "Ollama 已响应，但没有发现已安装模型。" };
+        return { status: data.status || "unknown", message: data.message || "本地文字模型检测完成", detail: models.length ? `已安装模型：${models.join("、")}。下一步：选择一个模型执行本地推理测试。` : "Ollama 已响应，但没有发现已安装模型。下一步：在模型管理中导入已有本地模型，或在明确确认下载来源、流量和许可证后再下载；不会自动切换云端。" };
       } catch (error) {
         return { status: "unavailable", message: error instanceof Error ? error.message : "无法连接本地 API" };
       }
