@@ -4,10 +4,59 @@ from pathlib import Path
 
 from unittest.mock import patch
 
-from app.routers.system import _check_local_ai_tools, _health_status, _recommend_local_model_tier, _scan_local_model_files
+from app.routers.system import _check_local_ai_tools, _health_status, _recommend_local_model_tier, _scan_local_model_files, _parse_windows_video_adapters, _detect_gpu_hardware
 
 
 class SystemDiagnosticsTests(unittest.TestCase):
+
+    def test_windows_detects_amd_integrated_graphics_without_faking_dedicated_vram(self):
+        adapters = _parse_windows_video_adapters([{
+            "Name": "AMD Radeon(TM) Graphics",
+            "AdapterRAM": 536870912,
+            "DriverVersion": "31.0.12027.9001",
+        }])
+        self.assertEqual(len(adapters), 1)
+        gpu = adapters[0]
+        self.assertEqual(gpu["vendor"], "AMD")
+        self.assertTrue(gpu["shared_memory"])
+        self.assertIsNone(gpu["vram_bytes"])
+        self.assertEqual(gpu["reported_adapter_memory_bytes"], 536870912)
+        self.assertFalse(gpu["dedicated_vram_confirmed"])
+        self.assertIn("共享", gpu["note"])
+
+    def test_windows_detects_intel_integrated_graphics(self):
+        adapters = _parse_windows_video_adapters({
+            "Name": "Intel(R) Iris(R) Xe Graphics",
+            "AdapterRAM": 1073741824,
+        })
+        self.assertEqual(adapters[0]["vendor"], "Intel")
+        self.assertTrue(adapters[0]["shared_memory"])
+        self.assertIsNone(adapters[0]["vram_bytes"])
+
+    def test_gpu_detection_prefers_nvidia_telemetry_when_available(self):
+        nvidia = {
+            "status": "detected", "vendor": "NVIDIA",
+            "name": "GeForce RTX", "vram_bytes": 8 * 1024 ** 3,
+        }
+        with patch("app.routers.system._detect_nvidia_gpu", return_value=nvidia), patch(
+            "app.routers.system._detect_windows_video_adapters"
+        ) as windows:
+            result = _detect_gpu_hardware()
+        self.assertEqual(result, nvidia)
+        windows.assert_not_called()
+
+    def test_gpu_detection_uses_windows_adapter_when_nvidia_not_present(self):
+        amd = {
+            "status": "detected", "vendor": "AMD", "name": "AMD Radeon(TM) Graphics",
+            "vram_bytes": None, "shared_memory": True,
+        }
+        with patch("app.routers.system._detect_nvidia_gpu", return_value={
+            "status": "not_detected", "vendor": None, "name": None, "vram_bytes": None,
+        }), patch("app.routers.system._detect_windows_video_adapters", return_value=amd):
+            result = _detect_gpu_hardware()
+        self.assertEqual(result["vendor"], "AMD")
+        self.assertIsNone(result["vram_bytes")
+
     def test_model_tier_recommends_small_model_for_low_ram(self):
         result = _recommend_local_model_tier(6 * 1024 ** 3, None)
         self.assertEqual(result["tier"], "very_small_or_not_recommended")
