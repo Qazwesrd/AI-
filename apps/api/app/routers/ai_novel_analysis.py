@@ -907,6 +907,8 @@ def analyze_novel_with_ai(
         if piece_key in saved_results:
             return
 
+        active_chunk_key = piece_key
+        request_started = False
         state = chunk_states.get(piece_key)
         if state == "context_limit_unprocessable":
             raise ContextLengthRejected(
@@ -922,8 +924,6 @@ def analyze_novel_with_ai(
             process_adaptive_piece(piece_key + ".2", parts[1], label + "（后半）")
             return
 
-        active_chunk_key = piece_key
-        request_started = False
         chunk_states[piece_key] = "submitting"
         persist_chunk_state()
 
