@@ -199,7 +199,7 @@ def _parse_windows_video_adapters(payload):
         except (TypeError, ValueError, OverflowError):
             reported_memory = None
         integrated = any(token in lowered for token in (
-            "radeon(tm) graphics", "radeon graphics", "intel uhd", "intel iris",
+            "radeon(tm) graphics", "radeon graphics", "intel uhd", "intel iris", "iris",
             "intel(r) graphics", "vega",
         ))
         results.append({
