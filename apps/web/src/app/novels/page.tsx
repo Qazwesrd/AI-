@@ -456,7 +456,7 @@ export default function NovelsPage() {
                     <button onClick={importTxt} disabled={loading} className="rounded-xl bg-purple-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
                       导入小说文件（支持多种格式）
                     </button>
-                    <button onClick={analyze} disabled={loading || chapters.length === 0 || analysisProgress?.status === "interrupted_unknown"} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
+                    <button onClick={() => analyze()} disabled={loading || chapters.length === 0 || analysisProgress?.status === "interrupted_unknown"} className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold disabled:opacity-50">
                       ✨ AI深度分析小说
                     </button>
                   </div>
