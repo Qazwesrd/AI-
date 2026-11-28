@@ -307,6 +307,31 @@ def execute_job(job_id: int, data: ExecuteEditInput, db: Session = Depends(get_d
         raise HTTPException(500, f"视频剪辑执行失败：{exc}")
 
 
+def _build_local_video_analysis_prompt(data, frame_manifest, sources):
+    source_manifest = []
+    for index, path in enumerate(sources, 1):
+        info = probe_media(path)
+        duration = float((info.get("format") or {}).get("duration") or 0)
+        source_manifest.append({
+            "file_index": index,
+            "file_name": path.name,
+            "duration_seconds": round(duration, 3),
+        })
+    return (
+        "你是专业视频剪辑师。你将收到按顺序排列的视频关键帧，"
+        "每帧的来源文件和时间戳如下。请根据用户要求分析实际可见画面，"
+        "生成可执行剪辑 JSON。不要虚构帧中看不到的细节；声音、对白和镜头间动作"
+        "无法仅凭静态抽帧确认时，必须写入 notes。"
+        "输出格式：title, summary, segments, width, height, subtitle_text, notes。"
+        "segments 每项必须含 file_index（从 1 开始）、start、end、description。"
+        "时间必须在对应源视频时长内，start >= 0，end > start。"
+        "\\n用户剪辑要求：\\n" + data.instruction
+        + "\\n抽帧清单：\\n" + json.dumps(frame_manifest, ensure_ascii=False)
+        + "\\n源视频清单：\\n" + json.dumps(source_manifest, ensure_ascii=False)
+        + "\\n只返回 JSON，不要 Markdown。"
+    )
+
+
 @router.post("/local-analyze")
 def analyze_video_with_local_vision_model(data: LocalVideoAnalyzeInput, db: Session = Depends(get_db)):
     """Analyze sampled frames with an already-installed local Ollama vision model.
@@ -352,23 +377,7 @@ def analyze_video_with_local_vision_model(data: LocalVideoAnalyzeInput, db: Sess
                     })
         if not frame_images:
             raise RuntimeError("没有提取到可供本地视觉模型分析的画面")
-        prompt = (
-            "你是专业视频剪辑师。你将收到按顺序排列的视频关键帧，"
-            "每帧的来源文件和时间戳如下。请根据用户要求分析实际可见画面，"
-            "生成可执行剪辑 JSON。不要虚构帧中看不到的细节；声音、对白和镜头间动作"
-            "无法仅凭静态抽帧确认时，必须写入 notes。"
-            "输出格式：title, summary, segments, width, height, subtitle_text, notes。"
-            "segments 每项必须含 file_index（从 1 开始）、start、end、description。"
-            "时间必须在对应源视频时长内，start >= 0，end > start。"
-            "\\n用户剪辑要求：\\n" + data.instruction
-            + "\\n抽帧清单：\\n" + json.dumps(frame_manifest, ensure_ascii=False)
-            + "\\n源视频清单：\\n" + json.dumps([
-                {"file_index": i, "file_name": path.name,
-                 "duration_seconds": round(float((probe_media(path).get("format") or {}).get("duration") or 0), 3)}
-                for i, path in enumerate(sources, 1)
-            ], ensure_ascii=False)
-            + "\\n只返回 JSON，不要 Markdown。"
-        )
+        prompt = _build_local_video_analysis_prompt(data, frame_manifest, sources)
         result = _ollama_request("/api/generate", {
             "model": model, "prompt": prompt, "images": frame_images,
             "stream": False, "format": "json",
