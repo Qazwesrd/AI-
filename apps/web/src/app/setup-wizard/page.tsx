@@ -211,7 +211,7 @@ export default function SetupWizardPage() {
                 <p className="font-semibold">本地图片模型实际推理测试</p>
                 <p className="mt-1 text-xs leading-5 text-slate-300">使用已安装的 checkpoint，在本机 ComfyUI 生成一张 512×512、4 步测试图。会占用本机资源；不会下载模型、调用云端或产生付费请求。</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <select value={selectedImageModel} onChange={event => { setSelectedImageModel(event.target.value); setImageTest(null); }} disabled={!imageModels.length || testingImage} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-sm">
+                  <select value={selectedImageModel} onChange={event => { setSelectedImageModel(event.target.value); setImageTest(null); setImagePromptId(""); }} disabled={!imageModels.length || testingImage} className="min-w-0 flex-1 rounded-lg border border-white/15 bg-slate-900 px-3 py-2 text-sm">
                     {!imageModels.length && <option value="">未发现可测试的 checkpoint</option>}
                     {imageModels.map(model => <option key={model} value={model}>{model}</option>)}
                   </select>
