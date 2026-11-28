@@ -284,7 +284,7 @@ def unknown_chunk_keys(chunk_states):
 # chapter label, provider framing, and output budget. The previous 14,000-character
 # chunks exceeded the context window of several configured chat models.
 DEFAULT_ANALYSIS_CHUNK_CHARS = 3000
-ANALYSIS_CHUNKING_VERSION = "context-safe-v3"
+ANALYSIS_CHUNKING_VERSION = "context-safe-v4"
 
 
 def make_chunks(chapters, limit=DEFAULT_ANALYSIS_CHUNK_CHARS):
@@ -868,67 +868,155 @@ def analyze_novel_with_ai(
     job.last_error = ""
     db.commit()
 
+    active_chunk_key = ""
+    request_started = False
+
+    def persist_chunk_state():
+        job.chunk_results = merge_chunk_state(saved_results, chunk_states)
+        job.status = "running"
+        job.updated_at = datetime.utcnow()
+        db.commit()
+        heartbeat_task_lease(db, "analysis", job.id)
+
+    def process_adaptive_piece(piece_key, piece_text, label):
+        nonlocal active_chunk_key, request_started
+
+        if piece_key in saved_results:
+            return
+
+        state = chunk_states.get(piece_key)
+        if state == "context_rejected":
+            parts = split_text_for_context_retry(piece_text)
+            if not parts:
+                raise ContextLengthRejected(
+                    f"{label}即使缩小后仍无法再拆分；请调整模型或上下文设置。"
+                )
+            process_adaptive_piece(piece_key + ".1", parts[0], label + "（前半）")
+            process_adaptive_piece(piece_key + ".2", parts[1], label + "（后半）")
+            return
+
+        active_chunk_key = piece_key
+        request_started = False
+        chunk_states[piece_key] = "submitting"
+        persist_chunk_state()
+
+        request_started = True
+        try:
+            result_items = analyze_chunk(config, api_key, piece_text, label)
+        except ContextLengthRejected:
+            # A provider HTTP 400 explicitly rejected this prompt. This is the
+            # only failure class eligible for automatic, lossless subdivision.
+            parts = split_text_for_context_retry(piece_text)
+            if not parts:
+                chunk_states[piece_key] = "context_limit_unprocessable"
+                persist_chunk_state()
+                raise
+            chunk_states[piece_key] = "context_rejected"
+            persist_chunk_state()
+            request_started = False
+            process_adaptive_piece(piece_key + ".1", parts[0], label + "（前半）")
+            process_adaptive_piece(piece_key + ".2", parts[1], label + "（后半）")
+            return
+
+        saved_results[piece_key] = result_items
+        chunk_states[piece_key] = "completed"
+        job.chunk_results = merge_chunk_state(saved_results, chunk_states)
+        job.completed_chunks = sum(
+            1 for root_index in range(1, len(chunks) + 1)
+            if str(root_index) in saved_results or root_is_complete(str(root_index))
+        )
+        job.status = "partial"
+        job.last_error = ""
+        job.updated_at = datetime.utcnow()
+        db.add(AIUsageLog(
+            provider=config.provider,
+            model=config.model,
+            task="novel_deep_analysis",
+            status="success",
+            detail=f"小说：{novel.title}；分析片段：{label}；任务：{job.id}",
+        ))
+        db.commit()
+        heartbeat_task_lease(db, "analysis", job.id)
+        request_started = False
+
+    def root_is_complete(root_key):
+        state = chunk_states.get(root_key)
+        if root_key in saved_results:
+            return True
+        if state != "context_rejected":
+            return False
+        return (
+            root_is_complete(root_key + ".1")
+            and root_is_complete(root_key + ".2")
+        )
+
     for index, chunk in enumerate(chunks, start=1):
         chunk_key = str(index)
-        if chunk_key in saved_results:
+        if root_is_complete(chunk_key):
             continue
 
+        active_chunk_key = chunk_key
         request_started = False
         try:
-            # Persist the exact chunk being submitted before contacting the provider.
-            chunk_states[chunk_key] = "submitting"
-            job.chunk_results = merge_chunk_state(saved_results, chunk_states)
-            job.status = "running"
-            job.updated_at = datetime.utcnow()
-            db.commit()
-            heartbeat_task_lease(db, "analysis", job.id)
-
-            request_started = True
-            result_items = analyze_chunk(
-                config,
-                api_key,
+            process_adaptive_piece(
+                chunk_key,
                 chunk,
                 f"第{index}/{len(chunks)}段",
             )
-
-            saved_results[chunk_key] = result_items
-            chunk_states[chunk_key] = "completed"
+            job.completed_chunks = sum(
+                1 for root_index in range(1, len(chunks) + 1)
+                if root_is_complete(str(root_index))
+            )
             job.chunk_results = merge_chunk_state(saved_results, chunk_states)
-            job.completed_chunks = len(saved_results)
             job.status = "partial"
             job.last_error = ""
             job.updated_at = datetime.utcnow()
-
-            db.add(AIUsageLog(
-                provider=config.provider,
-                model=config.model,
-                task="novel_deep_analysis",
-                status="success",
-                detail=f"小说：{novel.title}；分析片段：{index}/{len(chunks)}；任务：{job.id}",
-            ))
             db.commit()
-            heartbeat_task_lease(db, "analysis", job.id)
-
         except Exception as exc:
             db.rollback()
-            job = db.query(NovelAnalysisJob).filter(NovelAnalysisJob.id == job.id).first()
-            current_results, current_states = split_chunk_state(job.chunk_results if job else {})
-            result_already_saved = chunk_key in current_results
+            job = db.query(NovelAnalysisJob).filter(
+                NovelAnalysisJob.id == job.id
+            ).first()
+            current_results, current_states = split_chunk_state(
+                job.chunk_results if job else {}
+            )
+            result_already_saved = active_chunk_key in current_results
+            explicit_context_rejection = isinstance(exc, ContextLengthRejected)
+
             if result_already_saved:
-                # The response and chunk result were committed; only a later
-                # local heartbeat failed. Preserve the completed result.
-                current_states[chunk_key] = "completed"
+                current_states[active_chunk_key] = "completed"
+            elif explicit_context_rejection:
+                current_states[active_chunk_key] = "context_limit_unprocessable"
             else:
-                current_states[chunk_key] = "submission_unknown" if request_started else "pending"
+                current_states[active_chunk_key] = (
+                    "submission_unknown" if request_started else "pending"
+                )
+
             if job:
                 job.chunk_results = merge_chunk_state(current_results, current_states)
-                job.completed_chunks = len(current_results)
-                job.status = "partial" if result_already_saved or not request_started else "interrupted_unknown"
+                job.completed_chunks = sum(
+                    1 for root_index in range(1, len(chunks) + 1)
+                    if str(root_index) in current_results
+                    or current_states.get(str(root_index)) == "context_rejected"
+                    and (
+                        current_states.get(str(root_index) + ".1") == "completed"
+                        and current_states.get(str(root_index) + ".2") == "completed"
+                    )
+                )
+                job.status = (
+                    "partial" if result_already_saved or explicit_context_rejection
+                    or not request_started else "interrupted_unknown"
+                )
                 job.last_error = (
-                    f"第{index}/{len(chunks)}段结果已保存，但本地任务心跳更新失败；可安全继续。"
+                    f"{active_chunk_key}结果已保存；本地后续处理失败，可安全续作。"
                     if result_already_saved else (
-                        f"第{index}/{len(chunks)}段请求已发出，但结果无法确认；请核对服务商用量记录后再人工续作。诊断详情：{str(exc)[:900]}"
-                        if request_started else f"第{index}/{len(chunks)}段请求尚未发出：{str(exc)[:1600]}"
+                        f"{active_chunk_key}明确触发模型上下文限制，已安全停止自动拆分；"
+                        "请更换支持更长上下文的模型或调整模型设置。"
+                        if explicit_context_rejection else (
+                            f"{active_chunk_key}请求已发出但结果无法确认；请核对服务商用量记录后再人工续作。"
+                            f"诊断详情：{str(exc)[:900]}"
+                            if request_started else f"{active_chunk_key}请求尚未发出：{str(exc)[:1600]}"
+                        )
                     )
                 )
                 job.updated_at = datetime.utcnow()
@@ -937,30 +1025,51 @@ def analyze_novel_with_ai(
                         provider=config.provider,
                         model=config.model,
                         task="novel_deep_analysis",
-                        status="submission_unknown" if request_started else "failed",
-                        detail=f"小说：{novel.title}；片段：{index}/{len(chunks)}；任务：{job.id}；{str(exc)[:1200]}",
+                        status=(
+                            "context_limit_rejected" if explicit_context_rejection
+                            else "submission_unknown" if request_started else "failed"
+                        ),
+                        detail=f"小说：{novel.title}；片段：{active_chunk_key}；任务：{job.id}；{str(exc)[:1200]}",
                     ))
                 db.commit()
-            release_task_lease(db, "analysis", job_id, False, job.last_error if job else str(exc)[:2000])
+
+            release_task_lease(
+                db, "analysis", job_id, False,
+                job.last_error if job else str(exc)[:2000]
+            )
             if result_already_saved:
                 raise HTTPException(
                     502,
-                    f"第{index}/{len(chunks)}段分析结果已保存，但本地心跳更新失败；不会重复调用该片段，可再次点击继续。",
+                    f"{active_chunk_key}结果已保存；不会重复调用已完成片段，可再次点击继续。",
+                ) from exc
+            if explicit_context_rejection:
+                raise HTTPException(
+                    502,
+                    f"{active_chunk_key}已被模型明确拒绝，当前片段无法继续拆分。"
+                    "已保留此前结果，可更换模型后续作。",
                 ) from exc
             if request_started:
                 raise HTTPException(
                     502,
-                    f"第{index}/{len(chunks)}段分析结果不确定，已阻止自动重试。"
-                    f"请先核对服务商用量记录，再到统一任务中心人工确认。任务编号：{job.id if job else '未知'}",
+                    f"{active_chunk_key}分析结果不确定，已阻止自动重试。"
+                    f"请核对服务商用量记录后再到统一任务中心人工确认。任务编号：{job.id if job else '未知'}",
                 ) from exc
             raise HTTPException(
                 502,
-                f"第{index}/{len(chunks)}段分析请求尚未发出，已保存之前完成的片段；可再次点击继续。错误：{exc}",
+                f"{active_chunk_key}请求尚未发出，已保存之前完成的片段；可再次点击继续。错误：{exc}",
             ) from exc
 
     all_items = []
+    def append_piece_results(piece_key):
+        if piece_key in saved_results:
+            all_items.extend(saved_results[piece_key])
+            return
+        if chunk_states.get(piece_key) == "context_rejected":
+            append_piece_results(piece_key + ".1")
+            append_piece_results(piece_key + ".2")
+
     for index in range(1, len(chunks) + 1):
-        all_items.extend(saved_results.get(str(index), []))
+        append_piece_results(str(index))
 
     merged_items = merge_analysis_items(all_items)
 
