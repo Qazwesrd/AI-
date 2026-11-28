@@ -220,9 +220,9 @@ class LocalAIRuntimeTests(unittest.TestCase):
     def test_package_progress_events_emit_each_completed_stage(self):
         from app.routers.local_ai_runtime import _episode_package_progress_events
         payload = LocalEpisodePackageInput(model="qwen2.5:3b", source_text="章节")
-        generated = [{"response": f"阶段{i}成果"} for i in range(1, 6)]
+        generated = [iter([f"阶段{i}成果"]) for i in range(1, 6)]
         with patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name":"qwen2.5:3b"}]), patch(
-            "app.routers.local_ai_runtime._ollama_request", side_effect=generated
+            "app.routers.local_ai_runtime._ollama_stream", side_effect=generated
         ) as request:
             events = [__import__("json").loads(line) for line in _episode_package_progress_events(payload)]
         done = [event for event in events if event["type"] == "stage_completed"]
@@ -235,7 +235,7 @@ class LocalAIRuntimeTests(unittest.TestCase):
         from app.routers.local_ai_runtime import _episode_package_progress_events
         payload = LocalEpisodePackageInput(model="qwen2.5:3b", source_text="章节")
         with patch("app.routers.local_ai_runtime._installed_models", return_value=[{"name":"qwen2.5:3b"}]), patch(
-            "app.routers.local_ai_runtime._ollama_request", side_effect=[{"response":"已完成第一阶段"}, HTTPException(504,"推理等待超时")]
+            "app.routers.local_ai_runtime._ollama_stream", side_effect=[iter(["已完成第一阶段"]), HTTPException(504,"推理等待超时")]
         ):
             events = [__import__("json").loads(line) for line in _episode_package_progress_events(payload)]
         self.assertEqual(events[-1]["type"], "error")
