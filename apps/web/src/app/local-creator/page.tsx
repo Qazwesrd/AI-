@@ -2,6 +2,30 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+function formatElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return minutes > 0 ? `${minutes}分${remainder}秒` : `${remainder}秒`;
+}
+
+async function readApiError(response: Response, fallback: string) {
+  let detail = "";
+  try {
+    const data = await response.json();
+    detail = typeof data.detail === "string" ? data.detail : "";
+  } catch {
+    detail = "";
+  }
+  if (response.status === 504) {
+    return detail || "本地模型仍在推理，但等待响应超时。请检查 Ollama 窗口和电脑资源；不要立即重复提交。";
+  }
+  if (response.status === 503) {
+    return detail || "生成请求无法连接本机 Ollama。请重新检测本地引擎状态。";
+  }
+  return detail || `${fallback}（HTTP ${response.status}）`;
+}
+
+
 const API = process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000";
 type RuntimeModel = { name: string; size_bytes?: number | null };
 type RuntimeInfo = { status: "ready" | "not_running"; models: RuntimeModel[]; message: string };
@@ -31,6 +55,8 @@ export default function LocalCreatorPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(false);
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [novels, setNovels] = useState<Novel[]>([]);
   const [novelId, setNovelId] = useState("");
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -51,6 +77,16 @@ export default function LocalCreatorPage() {
       setError(err instanceof Error ? err.message : "本地引擎检测失败");
     }
   }, []);
+
+  useEffect(() => {
+    if (!loading && !packageLoading) return;
+    const timer = window.setInterval(() => {
+      if (generationStartedAt !== null) {
+        setElapsedSeconds(Math.max(0, Math.floor((Date.now() - generationStartedAt) / 1000)));
+      }
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [loading, packageLoading, generationStartedAt]);
 
   useEffect(() => {
     void refresh();
@@ -104,31 +140,31 @@ export default function LocalCreatorPage() {
   async function generate() {
     if (!model) { setError("请先安装并选择一个本地模型"); return; }
     if (!source.trim()) { setError("请先选择章节载入资料，或粘贴创作素材"); return; }
-    setLoading(true); setError(""); setResult("");
+    setLoading(true); setError(""); setResult(""); setGenerationStartedAt(Date.now()); setElapsedSeconds(0);
     try {
       const response = await fetch(`${API}/api/local-ai/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model, task, style, source_text: source, extra_requirements: extra }),
       });
+      if (!response.ok) throw new Error(await readApiError(response, "本地生成失败"));
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "本地生成失败");
       setResult(data.response || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : "本地生成失败；没有切换到云端");
-    } finally { setLoading(false); }
+    } finally { setLoading(false); setGenerationStartedAt(null); }
   }
 
   async function generatePackage() {
     if (!model || !source.trim()) { setError("请先选择本地模型并载入章节资料"); return; }
-    setPackageLoading(true); setError(""); setResult(""); setPackageStages([]);
+    setPackageLoading(true); setError(""); setResult(""); setPackageStages([]); setGenerationStartedAt(Date.now()); setElapsedSeconds(0);
     try {
       const response = await fetch(`${API}/api/local-ai/generate-package`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, style, source_text: source, extra_requirements: extra }) });
+      if (!response.ok) throw new Error(await readApiError(response, "整章创作包生成失败"));
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "整章创作包生成失败");
       setPackageStages(data.stages || []);
       setNotice("五阶段创作包已生成，结果仅保存在当前页面，尚未写入原稿。");
     } catch (err) { setError(err instanceof Error ? err.message : "本地创作包生成失败；没有切换到云端"); }
-    finally { setPackageLoading(false); }
+    finally { setPackageLoading(false); setGenerationStartedAt(null); }
   }
 
   async function copyResult() {
@@ -197,6 +233,7 @@ export default function LocalCreatorPage() {
         </div>
         <button disabled={packageLoading || loading || !model || !source.trim() || runtime?.status !== "ready"} onClick={() => void generatePackage()} className="mt-3 rounded-xl border border-cyan-300/40 px-5 py-3 font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40">{packageLoading ? "正在依次生成五个阶段，请耐心等待…" : "一键生成整章创作包（5阶段）"}</button>
         <p className="mt-2 text-xs text-white/45">整套流程会连续调用本机模型五次，速度取决于电脑性能；不会产生云端 API 费用，也不会自动保存。</p>
+        {(loading || packageLoading) && <div role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 p-4"><p className="font-semibold text-cyan-100">{packageLoading ? "整章创作包正在本机生成" : "本地模型正在推理"}</p><p className="mt-1 text-sm text-white/75">已等待 {formatElapsed(elapsedSeconds)}。Ollama 状态检测成功只代表服务可访问，不代表模型已完成生成；CPU 推理可能需要较长时间。</p><p className="mt-1 text-xs text-white/55">请保持 Ollama 运行，不要重复点击提交。此页面不会自动切换云端，也不会因等待时间较长而重复发送请求。</p></div>}
         {error && <p role="alert" className="mt-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
       </section>
 
