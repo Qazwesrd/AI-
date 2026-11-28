@@ -912,7 +912,18 @@ def analyze_novel_with_ai(
                 persist_chunk_state()
                 raise
             chunk_states[piece_key] = "context_rejected"
-            persist_chunk_state()
+            job.chunk_results = merge_chunk_state(saved_results, chunk_states)
+            job.status = "running"
+            job.updated_at = datetime.utcnow()
+            db.add(AIUsageLog(
+                provider=config.provider,
+                model=config.model,
+                task="novel_deep_analysis",
+                status="context_limit_rejected",
+                detail=f"小说：{novel.title}；片段：{label}；HTTP 400上下文超限，已拆分；任务：{job.id}",
+            ))
+            db.commit()
+            heartbeat_task_lease(db, "analysis", job.id)
             request_started = False
             process_adaptive_piece(piece_key + ".1", parts[0], label + "（前半）")
             process_adaptive_piece(piece_key + ".2", parts[1], label + "（后半）")
