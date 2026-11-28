@@ -84,18 +84,6 @@ export default function VisualStudioPage() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // Homepage deep links must open the requested asset category/workspace.
-  // Without this initialization every shortcut silently landed on Characters.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestedCategory = params.get("category");
-    if (requestedCategory && categories.some(item => item.key === requestedCategory)) {
-      setCategory(requestedCategory);
-    }
-    if (params.get("mode") === "3d") {
-      setWorkspaceMode("3d");
-    }
-  }, []);
 
   async function loadLocalImageRuntime() {
     try {
