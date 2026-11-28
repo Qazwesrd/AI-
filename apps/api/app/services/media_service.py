@@ -153,37 +153,66 @@ def probe_media(path):
 
 # Packaged desktop media-tool discovery.
 def _bundled_media_path(filename: str) -> str:
-    from pathlib import Path
+    """Find a user-provided FFmpeg binary without requiring it to be bundled."""
     import os
     import sys
+    from pathlib import Path
+    from shutil import which
 
-    configured = os.environ.get(
-        "FFMPEG_PATH" if filename == "ffmpeg.exe" else "FFPROBE_PATH"
-    )
-    if configured and Path(configured).is_file():
-        return configured
+    is_ffmpeg = filename.lower().startswith("ffmpeg")
+    command = "ffmpeg" if is_ffmpeg else "ffprobe"
+    configured = os.environ.get("FFMPEG_PATH" if is_ffmpeg else "FFPROBE_PATH")
+    if configured:
+        configured_path = Path(configured).expanduser()
+        if configured_path.is_file():
+            return str(configured_path.resolve())
+        # Accept a directory in the explicit setting as a convenience.
+        directory_candidate = configured_path / filename
+        if directory_candidate.is_file():
+            return str(directory_candidate.resolve())
 
     candidates = []
+    data_root = os.environ.get("AICOMICS_DATA_DIR") or os.environ.get("APP_DATA_DIR")
+    if data_root:
+        root = Path(data_root).expanduser()
+        candidates.extend([
+            root / "engines" / "FFmpeg" / "bin" / filename,
+            root / "FFmpeg" / "bin" / filename,
+            root / "engines" / "ffmpeg" / "bin" / filename,
+            root / "tools" / "ffmpeg" / "bin" / filename,
+        ])
+
+    # Common user-managed Windows installations; no files are downloaded or changed.
+    home = Path.home()
+    candidates.extend([
+        home / "ffmpeg" / "bin" / filename,
+        home / "Downloads" / "ffmpeg" / "bin" / filename,
+        Path("C:/ffmpeg/bin") / filename,
+        Path("C:/Program Files/ffmpeg/bin") / filename,
+        Path("C:/Program Files (x86)/ffmpeg/bin") / filename,
+    ])
+
     if getattr(sys, "frozen", False):
-        candidates.append(
-            Path(sys.executable).resolve().parent.parent / "media" / filename
-        )
-        candidates.append(
-            Path(sys.executable).resolve().parent / "media" / filename
-        )
+        executable_dir = Path(sys.executable).resolve().parent
+        candidates.extend([
+            executable_dir.parent / "media" / filename,
+            executable_dir / "media" / filename,
+        ])
 
     for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
+        try:
+            if candidate.is_file():
+                return str(candidate.resolve())
+        except OSError:
+            continue
 
-    from shutil import which
-    command = "ffmpeg" if filename == "ffmpeg.exe" else "ffprobe"
     found = which(command)
     if found:
         return found
 
     raise FileNotFoundError(
-        f"找不到 {command}。请检查软件媒体组件是否完整安装。"
+        f"找不到 {command}。请将 FFmpeg 的 bin 目录加入 PATH，"
+        "或放入软件数据目录的 engines/FFmpeg/bin；软件不会自动下载。"
     )
 
 
