@@ -211,18 +211,40 @@ export default function NovelsPage() {
     );
     if (!approved) return;
 
+    const novelId = selected.id;
+    let progressPolling = false;
+    const progressTimer = window.setInterval(async () => {
+      if (progressPolling) return;
+      progressPolling = true;
+      try {
+        const progress = await request(`/api/novels/${novelId}/analysis-progress`);
+        if (progress.has_job) {
+          setAnalysisProgress(progress);
+          const completed = Number(progress.completed_chunks || 0);
+          const total = Number(progress.total_chunks || 0);
+          if (total > 0) {
+            setMessage(`本机 AI 正在分析小说：${completed}/${total} 段（${progress.progress_percent ?? Math.round(completed / total * 100)}%）。分析只使用本地 Ollama，不调用云端 API……`);
+          }
+        }
+      } catch {
+        // Progress polling is best-effort; the main analysis request remains authoritative.
+      } finally {
+        progressPolling = false;
+      }
+    }, 2500);
+
     setLoading(true);
     setMessage("正在使用本机 Ollama 模型分析小说，请稍候；不会调用云端 API……");
 
     try {
-      const data = await request(`/api/novels/${selected.id}/analyze-ai`, {
+      const data = await request(`/api/novels/${novelId}/analyze-ai`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
 
-      const result = await request(`/api/novels/${selected.id}/analysis`);
-      const progress = await request(`/api/novels/${selected.id}/analysis-progress`);
+      const result = await request(`/api/novels/${novelId}/analysis`);
+      const progress = await request(`/api/novels/${novelId}/analysis-progress`);
       setAnalysis(result.items || []);
       setAnalysisProgress(progress.has_job ? progress : null);
       setMessage(data.message || "AI深度分析完成");
@@ -243,6 +265,7 @@ export default function NovelsPage() {
         setMessage(error instanceof Error ? error.message : "AI分析失败");
       }
     } finally {
+      window.clearInterval(progressTimer);
       setLoading(false);
     }
   }
