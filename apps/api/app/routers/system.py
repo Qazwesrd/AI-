@@ -200,7 +200,7 @@ def _parse_windows_video_adapters(payload):
             reported_memory = None
         integrated = any(token in lowered for token in (
             "radeon(tm) graphics", "radeon graphics", "intel uhd", "intel iris", "iris",
-            "intel(r) graphics", "vega",
+            "intel(r) graphics",
         ))
         results.append({
             "status": "detected",
