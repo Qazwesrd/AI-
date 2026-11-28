@@ -115,6 +115,47 @@ def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0
         raise HTTPException(502, "本地 Ollama 返回了无法识别的数据")
 
 
+
+def _ollama_stream(payload: dict, timeout: float = 1800.0):
+    """Yield Ollama response fragments from its NDJSON stream, loopback only."""
+    data = json.dumps({**payload, "stream": True}).encode("utf-8")
+    request = Request(
+        OLLAMA_BASE_URL + "/api/generate", data=data,
+        headers={"Content-Type": "application/json"}, method="POST",
+    )
+    try:
+        with OPENER.open(request, timeout=timeout) as response:
+            while True:
+                raw_line = response.readline(1024 * 1024)
+                if not raw_line:
+                    break
+                try:
+                    event = json.loads(raw_line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise HTTPException(502, "本地 Ollama 流式响应格式无法识别") from exc
+                if not isinstance(event, dict):
+                    raise HTTPException(502, "本地 Ollama 返回了无效流式数据")
+                if event.get("error"):
+                    raise HTTPException(502, "本地 Ollama 推理错误：" + str(event["error"])[:500])
+                fragment = event.get("response")
+                if isinstance(fragment, str) and fragment:
+                    yield fragment
+                if event.get("done"):
+                    return
+    except HTTPError as exc:
+        raise HTTPException(502, f"本地 Ollama 返回错误：HTTP {exc.code}") from exc
+    except TimeoutError as exc:
+        raise HTTPException(504, "本地 Ollama 流式推理等待超时。请检查电脑资源；不要立即重复提交。") from exc
+    except URLError as exc:
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise HTTPException(504, "本地 Ollama 流式推理等待超时。请检查电脑资源；不要立即重复提交。") from exc
+        raise HTTPException(503, "无法连接本机 Ollama 服务（127.0.0.1:11434）。") from exc
+    except OSError as exc:
+        if isinstance(exc, (TimeoutError, socket.timeout)):
+            raise HTTPException(504, "本地 Ollama 流式推理等待超时。请检查电脑资源；不要立即重复提交。") from exc
+        raise HTTPException(503, "本机 Ollama 流式连接中断；请勿立即重复提交。") from exc
+
+
 def _installed_models():
     payload = _ollama_request("/api/tags")
     models = payload.get("models", []) if isinstance(payload, dict) else []
@@ -392,13 +433,16 @@ def _episode_package_progress_events(payload: LocalEpisodePackageInput):
         if payload.extra_requirements.strip(): prompt += "\n\n【用户额外要求】\n"+payload.extra_requirements.strip()
         if previous: prompt += "\n\n【前序阶段成果，必须继承】\n"+previous[-9000:]
         prompt += "\n\n请完成"+label+"，输出结构化、可编辑内容。"
+        response_parts = []
         try:
-            result = _ollama_request("/api/generate", {"model":model,"system":system,"prompt":prompt,"stream":False,"options":{"num_predict":1400,"temperature":0.35}}, timeout=1800.0)
+            for fragment in _ollama_stream({"model":model,"system":system,"prompt":prompt,"options":{"num_predict":1400,"temperature":0.35}}, timeout=1800.0):
+                response_parts.append(fragment)
+                yield json.dumps({"type":"token","stage":key,"text":fragment}, ensure_ascii=False)+"\n"
         except HTTPException as exc:
-            yield json.dumps({"type":"error","status":exc.status_code,"detail":f"{label}生成失败；已完成{len(outputs)}步，未切换云端。{exc.detail}","completed":len(outputs),"stages":outputs}, ensure_ascii=False)+"\n"
+            yield json.dumps({"type":"error","status":exc.status_code,"detail":f"{label}生成失败；已完成{len(outputs)}步，当前阶段可能未完成。{exc.detail}","completed":len(outputs),"stages":outputs,"partial":{"stage":key,"title":label,"content":"".join(response_parts)[-16000:]}}, ensure_ascii=False)+"\n"
             return
-        response = result.get("response") if isinstance(result,dict) else None
-        if not isinstance(response,str) or not response.strip():
+        response = "".join(response_parts)
+        if not response.strip():
             yield json.dumps({"type":"error","status":502,"detail":f"{label}没有返回有效内容；已完成{len(outputs)}步，未切换云端。","completed":len(outputs),"stages":outputs}, ensure_ascii=False)+"\n"
             return
         item={"stage":key,"title":label,"content":response.strip()[:16000]}
