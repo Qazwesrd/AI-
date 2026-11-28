@@ -107,6 +107,17 @@ function resolveAiResourcePaths(dataDir) {
 
 function hasManagedAiResources(directory) {
   if (!directory) return false;
+  // Preserve an existing application profile even when it contains project
+  // data but no AI engine yet. Otherwise a fresh preferred E: folder could
+  // silently take precedence and make the user's existing novels/projects
+  // appear to have disappeared after an upgrade.
+  const existingProjectData = [
+    path.join(directory, "storage", "ai_comic_studio.db"),
+    path.join(directory, "ai_comic_studio.db")
+  ].some((file) => {
+    try { return fs.existsSync(file) && fs.statSync(file).isFile() && fs.statSync(file).size > 0; }
+    catch { return false; }
+  });
   // Only count assets physically inside this candidate directory. Global
   // USERPROFILE/.ollama or Program Files runtimes must never make an empty
   // candidate look like the user's data folder.
@@ -130,7 +141,7 @@ function hasManagedAiResources(directory) {
       fs.existsSync(layout.python) && fs.existsSync(layout.main)
     )
   );
-  return localModels || localComfy;
+  return existingProjectData || localModels || localComfy;
 }
 
 function resolveManagedDataDirectory() {
