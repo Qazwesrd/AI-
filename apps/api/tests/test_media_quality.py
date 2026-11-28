@@ -165,5 +165,36 @@ class AdvancedMediaQualityScanTests(unittest.TestCase):
                 scan_media_quality(path)
 
 
+
+class UserProvidedFfmpegDiscoveryTests(unittest.TestCase):
+    def test_discovers_ffmpeg_and_ffprobe_in_managed_data_directory(self):
+        import os
+        from app.services.media_service import _bundled_media_path
+
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = Path(directory) / "engines" / "FFmpeg" / "bin"
+            bin_dir.mkdir(parents=True)
+            ffmpeg = bin_dir / "ffmpeg.exe"
+            ffprobe = bin_dir / "ffprobe.exe"
+            ffmpeg.write_bytes(b"ffmpeg")
+            ffprobe.write_bytes(b"ffprobe")
+            with patch.dict(os.environ, {
+                "AICOMICS_DATA_DIR": directory,
+                "APP_DATA_DIR": directory,
+            }, clear=False), patch("shutil.which", return_value=None):
+                self.assertEqual(_bundled_media_path("ffmpeg.exe"), str(ffmpeg.resolve()))
+                self.assertEqual(_bundled_media_path("ffprobe.exe"), str(ffprobe.resolve()))
+
+    def test_accepts_explicit_directory_for_ffmpeg_setting(self):
+        import os
+        from app.services.media_service import _bundled_media_path
+
+        with tempfile.TemporaryDirectory() as directory:
+            ffmpeg = Path(directory) / "ffmpeg.exe"
+            ffmpeg.write_bytes(b"ffmpeg")
+            with patch.dict(os.environ, {"FFMPEG_PATH": directory}, clear=False):
+                self.assertEqual(_bundled_media_path("ffmpeg.exe"), str(ffmpeg.resolve()))
+
+
 if __name__ == "__main__":
     unittest.main()
