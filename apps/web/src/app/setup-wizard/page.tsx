@@ -28,6 +28,7 @@ export default function SetupWizardPage() {
   const [imageModels, setImageModels] = useState<string[]>([]);
   const [selectedImageModel, setSelectedImageModel] = useState("");
   const [imageTest, setImageTest] = useState<Check | null>(null);
+  const [imagePromptId, setImagePromptId] = useState("");
   const [testingImage, setTestingImage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [testingModel, setTestingModel] = useState(false);
@@ -41,6 +42,7 @@ export default function SetupWizardPage() {
     setLocalModels([]);
     setModelTest(null);
     setImageTest(null);
+    setImagePromptId("");
     setImageModels([]);
     const checkOne = async (path: string): Promise<Check> => {
       try {
@@ -141,9 +143,33 @@ export default function SetupWizardPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || `图片测试失败（HTTP ${response.status}）`);
-      setImageTest({ status: "submitted", message: "本地图片推理任务已提交", detail: `任务编号：${data.prompt_id}；模型：${data.checkpoint}；种子：${data.seed}。这只代表已进入本机 ComfyUI 队列，等待完成并成功保存图片后才算推理通过。请到图片生成工作台查看任务结果。` });
+      setImagePromptId(data.prompt_id);
+      setImageTest({ status: "submitted", message: "本地图片任务已进入 ComfyUI 队列，尚未判定生成成功", detail: "任务编号：" + data.prompt_id + "；模型：" + data.checkpoint + "；种子：" + data.seed + "。点击“检查实际生成结果”读取任务状态；只有任务完成且返回图片文件，才计为推理通过。" });
     } catch (error) {
+      setImagePromptId("");
       setImageTest({ status: "error", message: error instanceof Error ? error.message : "图片测试失败" });
+    } finally {
+      setTestingImage(false);
+    }
+  }
+
+  async function checkImageGenerationResult() {
+    if (!imagePromptId) return;
+    setTestingImage(true);
+    try {
+      const response = await fetch(API + "/api/local-ai/images/tasks/" + encodeURIComponent(imagePromptId), { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "任务查询失败（HTTP " + response.status + "）");
+      if (data.status === "failed") {
+        setImageTest({ status: "error", message: "本地图片推理失败", detail: data.error || "ComfyUI 报告任务执行失败，请检查本机节点、模型和运行日志。" });
+      } else if (data.status === "completed" && Array.isArray(data.images) && data.images.length > 0) {
+        const files = data.images.map((item: any) => item.filename).filter((name: unknown): name is string => typeof name === "string");
+        setImageTest({ status: "success", message: "本地图片推理成功，ComfyUI 已返回生成文件", detail: "任务编号：" + imagePromptId + "\n生成文件：" + (files.join("、") || "已返回图片输出") + "\n该结果证明本机工作流已完成并输出图片；尚未验证不同模型、分辨率和长时间稳定性。" });
+      } else {
+        setImageTest({ status: "submitted", message: "本地图片仍在排队或生成中", detail: "任务编号：" + imagePromptId + "；当前状态：" + (data.status || "queued_or_running") + "。请稍后再次检查。" });
+      }
+    } catch (error) {
+      setImageTest({ status: "unavailable", message: error instanceof Error ? error.message : "无法查询本地图片任务" });
     } finally {
       setTestingImage(false);
     }
@@ -190,8 +216,9 @@ export default function SetupWizardPage() {
                     {imageModels.map(model => <option key={model} value={model}>{model}</option>)}
                   </select>
                   <button onClick={testSelectedImageModel} disabled={!selectedImageModel || testingImage} className="rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold disabled:opacity-40">{testingImage ? "正在提交本地测试…" : "生成测试图片"}</button>
+                  {imagePromptId && <button onClick={checkImageGenerationResult} disabled={testingImage} className="rounded-lg border border-cyan-400/40 px-4 py-2 text-sm font-semibold text-cyan-100 disabled:opacity-40">{testingImage ? "正在查询…" : "检查实际生成结果"}</button>}
                 </div>
-                {imageTest && <div className="mt-3 rounded-lg border border-white/10 p-3 text-xs leading-6"><p className={imageTest.status === "submitted" ? "text-cyan-200" : "text-amber-200"}>{imageTest.message}</p>{imageTest.detail && <p className="mt-1 whitespace-pre-wrap text-slate-300">{imageTest.detail}</p>}</div>}
+                {imageTest && <div className="mt-3 rounded-lg border border-white/10 p-3 text-xs leading-6"><p className={imageTest.status === "success" ? "text-emerald-200" : imageTest.status === "submitted" ? "text-cyan-200" : "text-amber-200"}>{imageTest.message}</p>{imageTest.detail && <p className="mt-1 whitespace-pre-wrap text-slate-300">{imageTest.detail}</p>}</div>}
               </div>
 
               <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
