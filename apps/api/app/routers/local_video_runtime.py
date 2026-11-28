@@ -829,8 +829,22 @@ def _validate_auto_video_mode_graph(workflow, mode):
     }
     if not source_ids:
         return ["生成的工作流没有实际参考图/视频输入节点"]
-    if mode == "vace" and not any("vace" in str(node.get("class_type", "")).lower() for node in nodes.values()):
+    vace_ids = {
+        node_id for node_id, node in nodes.items()
+        if "vace" in str(node.get("class_type", "")).lower()
+    }
+    if mode == "vace" and not vace_ids:
         return ["生成的工作流没有实际 VACE 处理节点"]
+    if mode == "vace":
+        # A VACE node merely existing in the graph is not enough: the selected
+        # reference media must feed the VACE processor itself.
+        vace_has_reference = any(
+            isinstance(value, list) and len(value) == 2 and str(value[0]) in source_ids
+            for node_id in vace_ids
+            for value in (nodes[node_id].get("inputs") or {}).values()
+        )
+        if not vace_has_reference:
+            return ["参考图/视频没有连接到 VACE 专用处理节点"]
     connected_to_video = False
     for target_id, node in nodes.items():
         target_name = str(node.get("class_type", "")).lower()
