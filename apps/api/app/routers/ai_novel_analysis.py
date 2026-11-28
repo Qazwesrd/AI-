@@ -280,7 +280,14 @@ def unknown_chunk_keys(chunk_states):
     ]
 
 
-def make_chunks(chapters, limit=14000):
+# Conservative default for Chinese text: reserve context for the large system prompt,
+# chapter label, provider framing, and output budget. The previous 14,000-character
+# chunks exceeded the context window of several configured chat models.
+DEFAULT_ANALYSIS_CHUNK_CHARS = 3000
+ANALYSIS_CHUNKING_VERSION = "context-safe-v2"
+
+
+def make_chunks(chapters, limit=DEFAULT_ANALYSIS_CHUNK_CHARS):
     chunks = []
     current = ""
 
@@ -745,7 +752,7 @@ def analyze_novel_with_ai(
         f"{chapter.chapter_number}|{chapter.title}|{chapter.content or ''}"
         for chapter in chapters
     )
-    source_signature = hashlib.sha256(source_payload.encode("utf-8")).hexdigest()
+    source_signature = hashlib.sha256((ANALYSIS_CHUNKING_VERSION + "\n" + source_payload).encode("utf-8")).hexdigest()
 
     job = db.query(NovelAnalysisJob).filter(
         NovelAnalysisJob.novel_id == novel_id,
