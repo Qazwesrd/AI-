@@ -247,15 +247,16 @@ class LocalAIRuntimeTests(unittest.TestCase):
     def test_ollama_stream_yields_fragments_and_requests_stream_mode(self):
         from app.routers.local_ai_runtime import _ollama_stream
         class Response:
-            def __enter__(self): return self
-            def __exit__(self, *args): return False
-            def readline(self, limit):
-                lines = [
+            def __init__(self):
+                self.lines = [
                     b'{"response":"\xe4\xbd\xa0","done":false}\n',
                     b'{"response":"\xe5\xa5\xbd","done":false}\n',
                     b'{"response":"","done":true}\n',
                 ]
-                return lines.pop(0) if lines else b""
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def readline(self, limit):
+                return self.lines.pop(0) if self.lines else b""
         with patch("app.routers.local_ai_runtime.OPENER.open", return_value=Response()) as opener:
             self.assertEqual(list(_ollama_stream({"model":"qwen2.5:3b","prompt":"hi","stream":False})), ["你","好"])
         request = opener.call_args.args[0]
