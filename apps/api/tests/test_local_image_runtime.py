@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from app.routers.local_image_runtime import (
-    GIB, _checkpoint_names, _local_json, _selector_choices, assess_image_hardware, local_image_runtime,
+    GIB, _checkpoint_names, _local_json, _selector_choices, _summarize_comfy_devices, assess_image_hardware, local_image_runtime,
 )
 
 
@@ -63,6 +63,24 @@ class LocalImageRuntimeTests(unittest.TestCase):
         ), patch("app.routers.local_image_runtime._get_hardware_profile", return_value={"memory": {}, "gpu": {}}):
             result = local_image_runtime()
         self.assertEqual(result["device_count"], 1)
+
+    def test_comfy_device_report_distinguishes_cpu_from_gpu_backend(self):
+        report = _summarize_comfy_devices([
+            {"name": "AMD Radeon Graphics", "type": "cpu", "vram_total": 0},
+            {"name": "AMD Radeon RX", "type": "directml", "vram_total": 4096, "vram_free": 2048},
+        ])
+        self.assertEqual(report["device_count"], 2)
+        self.assertEqual(report["gpu_device_count"], 1)
+        self.assertTrue(report["gpu_acceleration_reported"])
+        self.assertEqual(report["devices"][1]["type"], "directml")
+        self.assertEqual(report["devices"][1]["vram_total_bytes"], 4096)
+
+    def test_comfy_device_report_does_not_infer_gpu_from_device_name(self):
+        report = _summarize_comfy_devices([
+            {"name": "AMD Radeon(TM) Graphics", "type": "cpu"},
+        ])
+        self.assertFalse(report["gpu_acceleration_reported"])
+        self.assertEqual(report["gpu_device_count"], 0)
 
     def test_hardware_assessment_warns_for_low_vram(self):
         result = assess_image_hardware({
