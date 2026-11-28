@@ -28,6 +28,17 @@ class LocalAIRuntimeTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 504)
         self.assertIn("推理等待超时", caught.exception.detail)
 
+    def test_urllib_wrapped_socket_timeout_is_not_reported_as_disconnected(self):
+        from urllib.error import URLError
+        import socket
+        wrapped_timeout = URLError(socket.timeout("read timed out"))
+        with patch("app.routers.local_ai_runtime.OPENER.open", side_effect=wrapped_timeout):
+            with self.assertRaises(HTTPException) as caught:
+                _ollama_request("/api/generate", {"model": "qwen2.5:3b"}, timeout=1800)
+        self.assertEqual(caught.exception.status_code, 504)
+        self.assertIn("等待响应", caught.exception.detail)
+        self.assertNotIn("无法连接本机 Ollama", caught.exception.detail)
+
     def test_ollama_connection_failure_has_distinct_message(self):
         from urllib.error import URLError
         with patch("app.routers.local_ai_runtime.OPENER.open", side_effect=URLError("refused")):
