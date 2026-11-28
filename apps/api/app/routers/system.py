@@ -242,11 +242,17 @@ def _detect_windows_video_adapters():
 
 
 def _detect_gpu_hardware():
-    """Prefer authoritative NVIDIA telemetry; otherwise identify Windows adapters by name."""
+    """Prefer working NVIDIA telemetry, but do not hide another detected Windows adapter."""
     nvidia = _detect_nvidia_gpu()
-    if nvidia.get("vendor") == "NVIDIA" and nvidia.get("status") in {"detected", "unavailable"}:
+    if nvidia.get("vendor") == "NVIDIA" and nvidia.get("status") == "detected":
         return nvidia
-    return _detect_windows_video_adapters() or nvidia
+    windows_adapter = _detect_windows_video_adapters()
+    if windows_adapter and windows_adapter.get("vendor") != "NVIDIA":
+        # A broken/stale nvidia-smi must not mask a usable AMD/Intel integrated GPU.
+        return windows_adapter
+    if nvidia.get("vendor") == "NVIDIA":
+        return nvidia
+    return windows_adapter or nvidia
 
 
 def _recommend_local_model_tier(ram_bytes, vram_bytes):
