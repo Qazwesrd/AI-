@@ -49,23 +49,31 @@ class VideoEditorAudioModeTests(unittest.TestCase):
 
             self.assertTrue(Path(output).is_file())
             self.assertGreater(size, 0)
-            return calls[-1]
+            return calls
 
     def test_replace_mode_uses_only_external_audio_track(self):
-        args = self._run_plan("replace")
+        args = self._run_plan("replace")[-1]
         self.assertIn("1:a:0", args)
         self.assertNotIn("-filter_complex", args)
 
     def test_mix_mode_mixes_original_and_external_audio(self):
-        args = self._run_plan("mix", original_has_audio=True)
+        args = self._run_plan("mix", original_has_audio=True)[-1]
         self.assertIn("-filter_complex", args)
         filter_graph = args[args.index("-filter_complex") + 1]
         self.assertIn("amix=inputs=2", filter_graph)
         self.assertIn("[original]", filter_graph)
         self.assertIn("[music]", filter_graph)
 
+
+    def test_silent_source_segment_gets_synthetic_audio_for_concat_compatibility(self):
+        calls = self._run_plan("mix", original_has_audio=False)
+        segment_args = calls[0]
+        self.assertIn("anullsrc=channel_layout=stereo:sample_rate=48000", segment_args)
+        self.assertIn("1:a:0", segment_args)
+        self.assertIn("-map", segment_args)
+
     def test_mix_mode_works_when_source_has_no_audio(self):
-        args = self._run_plan("mix", original_has_audio=False)
+        args = self._run_plan("mix", original_has_audio=False)[-1]
         self.assertIn("1:a:0", args)
         self.assertNotIn("-filter_complex", args)
 
