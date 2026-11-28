@@ -5,6 +5,7 @@ No model pulls, cloud fallback, arbitrary endpoints, or automatic process startu
 import json
 import re
 from urllib.error import HTTPError, URLError
+import socket
 from urllib.request import ProxyHandler, Request, build_opener
 
 from fastapi import APIRouter, HTTPException
@@ -91,8 +92,24 @@ def _ollama_request(path: str, payload: dict | None = None, timeout: float = 2.0
             "本地 Ollama 已接受请求，但模型推理等待超时。请检查 Ollama 窗口和电脑资源；"
             "不要立即重复提交，以免产生重复计算。"
         ) from exc
-    except (URLError, OSError):
-        raise HTTPException(503, "无法连接本机 Ollama 服务（127.0.0.1:11434）。请检查服务是否运行。")
+    except URLError as exc:
+        # urllib wraps socket read/connect timeouts in URLError(reason=...).
+        # Treat those as inference waits, not a stopped Ollama service.
+        if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+            raise HTTPException(
+                504,
+                "本地 Ollama 请求仍在等待响应，可能是模型推理较慢。请检查 Ollama 窗口和电脑资源；"
+                "不要立即重复提交，以免产生重复计算。"
+            ) from exc
+        raise HTTPException(503, "无法连接本机 Ollama 服务（127.0.0.1:11434）。请检查服务是否运行。") from exc
+    except OSError as exc:
+        if isinstance(exc, (TimeoutError, socket.timeout)):
+            raise HTTPException(
+                504,
+                "本地 Ollama 请求等待超时，可能是模型推理较慢。请检查 Ollama 窗口和电脑资源；"
+                "不要立即重复提交，以免产生重复计算。"
+            ) from exc
+        raise HTTPException(503, "无法连接本机 Ollama 服务（127.0.0.1:11434）。请检查服务是否运行。") from exc
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise HTTPException(502, "本地 Ollama 返回了无法识别的数据")
 
