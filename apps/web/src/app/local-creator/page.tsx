@@ -162,7 +162,7 @@ export default function LocalCreatorPage() {
     setPackageProgress({ completed: 0, total: 5, current: "正在连接本机 Ollama" });
     setGenerationStartedAt(Date.now()); setElapsedSeconds(0);
     try {
-      const response = await fetch(\`\${API}/api/local-ai/generate-package-progress\`, {
+      const response = await fetch(`${API}/api/local-ai/generate-package-progress`, {
         method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson" },
         body: JSON.stringify({ model, style, source_text: source, extra_requirements: extra }),
       });
