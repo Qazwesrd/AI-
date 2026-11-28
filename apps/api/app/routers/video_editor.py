@@ -325,9 +325,9 @@ def _build_local_video_analysis_prompt(data, frame_manifest, sources):
         "输出格式：title, summary, segments, width, height, subtitle_text, notes。"
         "segments 每项必须含 file_index（从 1 开始）、start、end、description。"
         "时间必须在对应源视频时长内，start >= 0，end > start。"
-        "\n用户剪辑要求：\\n" + data.instruction
-        + "\n抽帧清单：\\n" + json.dumps(frame_manifest, ensure_ascii=False)
-        + "\n源视频清单：\\n" + json.dumps(source_manifest, ensure_ascii=False)
+        "\n用户剪辑要求：\n" + data.instruction
+        + "\n抽帧清单：\n" + json.dumps(frame_manifest, ensure_ascii=False)
+        + "\n源视频清单：\n" + json.dumps(source_manifest, ensure_ascii=False)
         + "\n只返回 JSON，不要 Markdown。"
     )
 
