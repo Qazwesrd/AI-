@@ -162,6 +162,23 @@ class LocalVideoRuntimeTests(unittest.TestCase):
         self.assertTrue(any("不在本机可用选项" in error for error in result["errors"]))
         self.assertTrue(any("引用了不存在的节点" in error for error in result["errors"]))
 
+
+    def test_api_workflow_preflight_rejects_missing_required_node_inputs(self):
+        from app.routers.local_video_runtime import validate_local_video_workflow
+        info = {
+            "WanVideoSampler": {"input": {"required": {
+                "steps": ["INT"], "cfg": ["FLOAT"]
+            }}},
+            "VHS_VideoCombine": {"input": {"required": {"images": ["IMAGE"]}}},
+        }
+        workflow = {
+            "1": {"class_type": "WanVideoSampler", "inputs": {"steps": 20}},
+            "2": {"class_type": "VHS_VideoCombine", "inputs": {"images": ["1", 0]}},
+        }
+        result = validate_local_video_workflow(workflow, info)
+        self.assertFalse(result["valid"])
+        self.assertTrue(any("缺少必需输入：cfg" in error for error in result["errors"]))
+
     def test_api_workflow_preflight_rejects_graph_without_video_output(self):
         from app.routers.local_video_runtime import validate_local_video_workflow
         info = {"WanVideoSampler": {"input": {"required": {"steps": ["INT"]}}}}
