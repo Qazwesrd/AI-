@@ -908,6 +908,10 @@ def analyze_novel_with_ai(
             return
 
         state = chunk_states.get(piece_key)
+        if state == "context_limit_unprocessable":
+            raise ContextLengthRejected(
+                f"{label}此前已确认无法继续拆分；请更换模型或调整上下文设置后再续作。"
+            )
         if state == "context_rejected":
             parts = split_text_for_context_retry(piece_text)
             if not parts:
@@ -1022,11 +1026,8 @@ def analyze_novel_with_ai(
                 job.chunk_results = merge_chunk_state(current_results, current_states)
                 job.completed_chunks = sum(
                     1 for root_index in range(1, len(chunks) + 1)
-                    if str(root_index) in current_results
-                    or current_states.get(str(root_index)) == "context_rejected"
-                    and (
-                        current_states.get(str(root_index) + ".1") == "completed"
-                        and current_states.get(str(root_index) + ".2") == "completed"
+                    if chunk_tree_is_complete(
+                        str(root_index), current_results, current_states
                     )
                 )
                 job.status = (
