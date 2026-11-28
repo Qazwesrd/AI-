@@ -1,4 +1,5 @@
 import math
+import urllib.parse
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -787,7 +788,9 @@ def category_ranking_history(category: str = "drama", db: Session = Depends(get_
 # User-configured public RSS/Atom sources. No platform login, private API, or hidden-content scraping.
 class PublicSourceInput(BaseModel):
     platform: str = Field(min_length=1, max_length=100)
-    name: str = Field(min_length=1, max_length=200)
+    # The source name is optional: when omitted, derive a readable name from
+    # the selected platform and validated feed hostname.
+    name: str = Field(default="", max_length=200)
     feed_url: str = Field(min_length=12, max_length=2000)
     refresh_interval_minutes: int = Field(default=360, ge=15, le=10080)
 
@@ -899,24 +902,32 @@ def list_public_research_sources(db: Session = Depends(get_db)):
 
 @router.post("/research/sources")
 def create_public_research_source(data: PublicSourceInput, db: Session = Depends(get_db)):
+    platform = data.platform.strip()
     try:
-        safe_url = validate_public_feed_url(data.feed_url, data.platform.strip())
+        # Validate both the URL shape/domain and the actual remote response before
+        # persisting it. This prevents a syntactically valid webpage or dead URL
+        # from being presented as a working RSS/Atom source.
+        safe_url = validate_public_feed_url(data.feed_url, platform)
+        verified_items = fetch_public_feed(safe_url, platform)
     except FeedCollectionError as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, f"RSS/Atom 地址验证失败：{exc}")
     duplicate = db.query(PublicResearchSource).filter(PublicResearchSource.feed_url == safe_url).first()
     if duplicate:
         raise HTTPException(409, "该公开订阅源已经添加")
+    parsed = urllib.parse.urlsplit(safe_url)
+    source_name = data.name.strip() or f"{platform} · {parsed.hostname}"
     row = PublicResearchSource(
-        platform=data.platform.strip(), name=data.name.strip(), feed_url=safe_url,
+        platform=platform, name=source_name[:200], feed_url=safe_url,
         source_type="rss_atom", enabled=True,
         refresh_interval_minutes=data.refresh_interval_minutes,
-        last_status="待采集",
+        last_status="已验证" if verified_items else "已验证（暂无条目）",
     )
     db.add(row)
     db.commit()
     db.refresh(row)
     return {"success": True, "item": public_source_dict(row),
-            "message": "来源已添加；首次采集将在后台周期任务到期时运行，也可立即手动采集。请确保该地址是平台允许访问的公开 RSS/Atom 源。"
+            "verified": True, "verified_item_count": len(verified_items),
+            "message": f"公开 RSS/Atom 地址已通过 HTTPS、域名及实际订阅内容验证（发现 {len(verified_items)} 条目）。来源名称可留空，由系统按平台和域名自动生成。"
     }
 
 
