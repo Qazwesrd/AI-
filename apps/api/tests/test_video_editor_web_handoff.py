@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.routers.video_editor import (
-    WebHandoffInput, _map_web_plan, _build_web_handoff_details,
+    WebHandoffInput, LocalVideoAnalyzeInput, _map_web_plan, _build_web_handoff_details,
+    _build_local_video_analysis_prompt,
 )
 
 
@@ -62,6 +63,25 @@ class VideoEditorWebHandoffTests(unittest.TestCase):
         }]}
         with self.assertRaisesRegex(ValueError, "未授权"):
             _map_web_plan(plan, ["/local/storage/source.mp4"])
+
+
+    def test_local_video_analysis_prompt_uses_real_newlines_and_source_durations(self):
+        data = LocalVideoAnalyzeInput(
+            model="vision-local",
+            instruction="保留人物说话镜头",
+            source_paths=["/storage/videos/source.mp4"],
+        )
+        with patch("app.routers.video_editor.probe_media", return_value={
+            "format": {"duration": "12.5"}, "streams": [{"codec_type": "video"}]
+        }):
+            prompt = _build_local_video_analysis_prompt(
+                data,
+                [{"file_index": 1, "timestamp_seconds": 2.5}],
+                [Path("/storage/videos/source.mp4")],
+            )
+        self.assertIn("\n用户剪辑要求：\n保留人物说话镜头", prompt)
+        self.assertIn('"duration_seconds": 12.5', prompt)
+        self.assertNotIn("\\n用户剪辑要求", prompt)
 
     def test_web_plan_requires_non_empty_segments(self):
         with self.assertRaisesRegex(ValueError, "segments"):
