@@ -47,16 +47,17 @@ try {
     Remove-Item Env:PYTHONIOENCODING -ErrorAction SilentlyContinue
 }
 
-# Require FFmpeg and FFprobe to be present and valid before packaging.
+# FFmpeg is user-managed and is not downloaded or bundled by this installer.
+# The desktop app discovers an existing local FFmpeg/FFprobe pair at runtime.
 $FfmpegSource = Join-Path $Desktop "build-resources\ffmpeg\ffmpeg.exe"
 $FfprobeSource = Join-Path $Desktop "build-resources\ffmpeg\ffprobe.exe"
-foreach ($tool in @($FfmpegSource, $FfprobeSource)) {
-    if (!(Test-Path $tool) -or (Get-Item $tool).Length -lt 1MB) {
-        throw "Bundled media runtime is missing or invalid: $tool"
-    }
+$HasBundledMediaTools = (Test-Path $FfmpegSource) -and (Test-Path $FfprobeSource) -and
+    (Get-Item $FfmpegSource).Length -ge 1MB -and (Get-Item $FfprobeSource).Length -ge 1MB
+if ($HasBundledMediaTools) {
+    Write-Host "Optional local build media tools detected; installer will still use the user's configured FFmpeg."
+} else {
+    Write-Host "FFmpeg/FFprobe are not bundled. The installed app will discover the user's existing local tools."
 }
-Write-Host "Bundled FFmpeg: $FfmpegSource"
-Write-Host "Bundled FFprobe: $FfprobeSource"
 
 
 Write-Host "[1/4] Checking PyInstaller..."
@@ -160,8 +161,13 @@ try {
     $env:APP_DATA_DIR = $ManualDataDir
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
-    $env:FFMPEG_PATH = $FfmpegSource
-    $env:FFPROBE_PATH = $FfprobeSource
+    if ($HasBundledMediaTools) {
+        $env:FFMPEG_PATH = $FfmpegSource
+        $env:FFPROBE_PATH = $FfprobeSource
+    } else {
+        Remove-Item Env:FFMPEG_PATH -ErrorAction SilentlyContinue
+        Remove-Item Env:FFPROBE_PATH -ErrorAction SilentlyContinue
+    }
     $ApiProcess = Start-Process -FilePath $ApiExe -WorkingDirectory $Api -PassThru -WindowStyle Hidden -RedirectStandardOutput $ApiLog -RedirectStandardError $ApiErrorLog
 
     $NodeCommand = Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
