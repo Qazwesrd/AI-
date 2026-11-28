@@ -306,6 +306,7 @@ def append_chunk_tree_results(root_key, saved_results, chunk_states, output):
 # chapter label, provider framing, and output budget. The previous 14,000-character
 # chunks exceeded the context window of several configured chat models.
 DEFAULT_ANALYSIS_CHUNK_CHARS = 3000
+MIN_CONTEXT_RETRY_CHARS = 256
 ANALYSIS_CHUNKING_VERSION = "context-safe-v3"
 
 
@@ -420,7 +421,7 @@ def is_context_length_error(status_code, response_body):
 def split_text_for_context_retry(content):
     """Split text into two non-empty, lossless pieces, preferring a nearby newline."""
     content = str(content or "")
-    if len(content) < 2:
+    if len(content) < MIN_CONTEXT_RETRY_CHARS:
         return None
     midpoint = len(content) // 2
     lower = max(1, midpoint - max(1, len(content) // 10))
