@@ -64,6 +64,7 @@ export default function LocalCreatorPage() {
   const [contextLoading, setContextLoading] = useState(false);
   const [packageLoading, setPackageLoading] = useState(false);
   const [packageStages, setPackageStages] = useState<Array<{ stage: string; title: string; content: string }>>([]);
+  const [packageProgress, setPackageProgress] = useState({ completed: 0, total: 5, current: "" });
 
   const refresh = useCallback(async () => {
     setError("");
@@ -156,15 +157,45 @@ export default function LocalCreatorPage() {
 
   async function generatePackage() {
     if (!model || !source.trim()) { setError("请先选择本地模型并载入章节资料"); return; }
-    setPackageLoading(true); setError(""); setResult(""); setPackageStages([]); setGenerationStartedAt(Date.now()); setElapsedSeconds(0);
+    setPackageLoading(true); setError(""); setResult(""); setPackageStages([]);
+    setPackageProgress({ completed: 0, total: 5, current: "正在连接本机 Ollama" });
+    setGenerationStartedAt(Date.now()); setElapsedSeconds(0);
     try {
-      const response = await fetch(`${API}/api/local-ai/generate-package`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model, style, source_text: source, extra_requirements: extra }) });
+      const response = await fetch(\`\${API}/api/local-ai/generate-package-progress\`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/x-ndjson" },
+        body: JSON.stringify({ model, style, source_text: source, extra_requirements: extra }),
+      });
       if (!response.ok) throw new Error(await readApiError(response, "整章创作包生成失败"));
-      const data = await response.json();
-      setPackageStages(data.stages || []);
-      setNotice("五阶段创作包已生成，结果仅保存在当前页面，尚未写入原稿。");
-    } catch (err) { setError(err instanceof Error ? err.message : "本地创作包生成失败；没有切换到云端"); }
-    finally { setPackageLoading(false); setGenerationStartedAt(null); }
+      if (!response.body) throw new Error("浏览器未提供流式响应能力；请检查桌面端运行环境。");
+      const reader = response.body.getReader(), decoder = new TextDecoder();
+      let buffer = "", completed = false;
+      const handleEvent = (event: any) => {
+        if (event.type === "started") setPackageProgress({ completed: 0, total: event.total || 5, current: "准备开始" });
+        else if (event.type === "stage_started") setPackageProgress(current => ({ ...current, current: event.title || "正在生成" }));
+        else if (event.type === "stage_completed") {
+          setPackageStages(current => [...current.filter(item => item.stage !== event.item.stage), event.item]);
+          setPackageProgress({ completed: event.completed, total: event.total, current: event.item.title });
+        } else if (event.type === "error") {
+          if (Array.isArray(event.stages)) setPackageStages(event.stages);
+          throw new Error(event.detail || "本地创作包生成失败；没有切换到云端");
+        } else if (event.type === "completed") {
+          completed = true; setPackageStages(event.stages || []);
+          setPackageProgress({ completed: event.stage_count || 5, total: event.stage_count || 5, current: "全部完成" });
+          setNotice("五阶段创作包已生成，结果仅保存在当前页面，尚未写入原稿。");
+        }
+      };
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n"); buffer = lines.pop() || "";
+        for (const line of lines) if (line.trim()) handleEvent(JSON.parse(line));
+        if (done) break;
+      }
+      if (buffer.trim()) handleEvent(JSON.parse(buffer));
+      if (!completed) throw new Error("本地连接中断或响应提前结束。已显示的阶段结果仍保留；请勿立即重复提交。");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "本地创作包生成失败；没有切换到云端");
+    } finally { setPackageLoading(false); setGenerationStartedAt(null); }
   }
 
   async function copyResult() {
@@ -233,7 +264,7 @@ export default function LocalCreatorPage() {
         </div>
         <button disabled={packageLoading || loading || !model || !source.trim() || runtime?.status !== "ready"} onClick={() => void generatePackage()} className="mt-3 rounded-xl border border-cyan-300/40 px-5 py-3 font-semibold text-cyan-100 disabled:cursor-not-allowed disabled:opacity-40">{packageLoading ? "正在依次生成五个阶段，请耐心等待…" : "一键生成整章创作包（5阶段）"}</button>
         <p className="mt-2 text-xs text-white/45">整套流程会连续调用本机模型五次，速度取决于电脑性能；不会产生云端 API 费用，也不会自动保存。</p>
-        {(loading || packageLoading) && <div role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 p-4"><p className="font-semibold text-cyan-100">{packageLoading ? "整章创作包正在本机生成" : "本地模型正在推理"}</p><p className="mt-1 text-sm text-white/75">已等待 {formatElapsed(elapsedSeconds)}。Ollama 状态检测成功只代表服务可访问，不代表模型已完成生成；CPU 推理可能需要较长时间。</p><p className="mt-1 text-xs text-white/55">请保持 Ollama 运行，不要重复点击提交。此页面不会自动切换云端，也不会因等待时间较长而重复发送请求。</p></div>}
+        {(loading || packageLoading) && <div role="status" aria-live="polite" className="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 p-4"><p className="font-semibold text-cyan-100">{packageLoading ? `整章创作包：${packageProgress.completed}/${packageProgress.total} 阶段完成` : "本地模型正在推理"}</p>{packageLoading && <p className="mt-1 text-sm text-cyan-100">{packageProgress.current}</p>}<p className="mt-1 text-sm text-white/75">已等待 {formatElapsed(elapsedSeconds)}。Ollama 状态检测成功只代表服务可访问，不代表模型已完成生成；CPU 推理可能需要较长时间。</p><p className="mt-1 text-xs text-white/55">请保持 Ollama 运行，不要重复点击提交。此页面不会自动切换云端，也不会因等待时间较长而重复发送请求。</p></div>}
         {error && <p role="alert" className="mt-3 rounded-lg bg-red-500/10 p-3 text-sm text-red-200">{error}</p>}
       </section>
 
