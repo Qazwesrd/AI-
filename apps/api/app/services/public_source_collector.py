@@ -107,8 +107,8 @@ def _strip_markup(value: str) -> str:
 def parse_feed(payload: bytes) -> list[dict]:
     if not payload or len(payload) > MAX_FEED_BYTES:
         raise FeedCollectionError("订阅内容为空或超过 2 MB 限制")
-    prefix = payload[:4096].upper()
-    if b"<!DOCTYPE" in prefix or b"<!ENTITY" in prefix:
+    normalized_payload = payload.upper()
+    if b"<!DOCTYPE" in normalized_payload or b"<!ENTITY" in normalized_payload:
         raise FeedCollectionError("拒绝包含 XML DTD/实体声明的订阅内容")
     try:
         root = ET.fromstring(payload)
