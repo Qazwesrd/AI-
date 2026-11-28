@@ -256,7 +256,12 @@ export default function NovelsPage() {
       const progress = await request(`/api/novels/${novelId}/analysis-progress`);
       setAnalysis(result.items || []);
       setAnalysisProgress(progress.has_job ? progress : null);
-      setMessage(data.message || "AI深度分析完成");
+      try {
+        const synced = await request(`/api/visual/assets/import-analysis/${novelId}`, { method: "POST" });
+        setMessage(`${data.message || "AI深度分析完成"}；视觉素材已自动同步：新增 ${synced.created ?? 0} 项、更新 ${synced.updated ?? 0} 项、跳过 ${synced.skipped ?? 0} 项。`);
+      } catch {
+        setMessage((data.message || "AI深度分析完成") + "；素材自动同步未完成，请在视觉素材中心点击“同步AI识别结果”重试。");
+      }
     } catch (error) {
       try {
         const progress = await request(`/api/novels/${selected.id}/analysis-progress`);
