@@ -16,10 +16,26 @@ from app.routers.local_ai_runtime import (
     _bounded_continuity,
     LocalEpisodePackageInput,
     generate_local_episode_package,
+    _ollama_request,
 )
 
 
 class LocalAIRuntimeTests(unittest.TestCase):
+    def test_ollama_inference_timeout_is_not_reported_as_disconnected(self):
+        with patch("app.routers.local_ai_runtime.OPENER.open", side_effect=TimeoutError()):
+            with self.assertRaises(HTTPException) as caught:
+                _ollama_request("/api/generate", {"model": "qwen2.5:3b"}, timeout=1800)
+        self.assertEqual(caught.exception.status_code, 504)
+        self.assertIn("推理等待超时", caught.exception.detail)
+
+    def test_ollama_connection_failure_has_distinct_message(self):
+        from urllib.error import URLError
+        with patch("app.routers.local_ai_runtime.OPENER.open", side_effect=URLError("refused")):
+            with self.assertRaises(HTTPException) as caught:
+                _ollama_request("/api/tags")
+        self.assertEqual(caught.exception.status_code, 503)
+        self.assertIn("无法连接本机 Ollama", caught.exception.detail)
+
     def test_lists_only_valid_local_model_names(self):
         with patch(
             "app.routers.local_ai_runtime._ollama_request",
