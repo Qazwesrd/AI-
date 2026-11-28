@@ -7,6 +7,8 @@ from app.routers.ai_novel_analysis import (
     make_chunks,
     is_context_length_error,
     split_text_for_context_retry,
+    chunk_tree_is_complete,
+    append_chunk_tree_results,
 )
 
 
@@ -28,6 +30,38 @@ class AnalysisChunkSizingTests(unittest.TestCase):
         self.assertEqual(parts[0] + parts[1], source)
         self.assertTrue(parts[0])
         self.assertTrue(parts[1])
+
+    def test_recursive_split_resume_skips_saved_left_branch_and_keeps_order(self):
+        saved = {
+            "1.1": [{"name": "左侧已完成"}],
+            "1.2.1": [{"name": "右侧前半已完成"}],
+            "1.2.2": [{"name": "右侧后半已完成"}],
+        }
+        states = {
+            "1": "context_rejected",
+            "1.2": "context_rejected",
+            "1.1": "completed",
+            "1.2.1": "completed",
+            "1.2.2": "completed",
+        }
+
+        self.assertTrue(chunk_tree_is_complete("1", saved, states))
+        output = []
+        append_chunk_tree_results("1", saved, states, output)
+        self.assertEqual(
+            [item["name"] for item in output],
+            ["左侧已完成", "右侧前半已完成", "右侧后半已完成"],
+        )
+
+    def test_recursive_split_is_incomplete_when_any_leaf_is_missing(self):
+        saved = {"2.1": [{"name": "已完成"}]}
+        states = {"2": "context_rejected", "2.1": "completed"}
+        self.assertFalse(chunk_tree_is_complete("2", saved, states))
+
+    def test_unknown_submission_is_not_mistaken_for_completed_leaf(self):
+        saved = {"3.1": [{"name": "已完成"}]}
+        states = {"3": "context_rejected", "3.1": "completed", "3.2": "submission_unknown"}
+        self.assertFalse(chunk_tree_is_complete("3", saved, states))
 
     def test_long_chapter_is_split_without_losing_source_text(self):
         source = "小说正文。" * 5000
