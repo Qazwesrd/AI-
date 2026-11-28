@@ -162,15 +162,17 @@ export default function PromptResearchPage() {
   }
 
   async function addPublicSource() {
-    if (!sourceName.trim() || !sourceUrl.trim()) return setMessage("请填写来源名称和公开 RSS/Atom HTTPS 地址。");
+    if (!sourceUrl.trim()) return setMessage("请先生成或填写公开 RSS/Atom HTTPS 地址；来源名称可以留空，由系统自动生成。");
     setBusy(true);
     try {
-      await api("/api/prompts/research/sources", {
+      const result = await api<{verified?:boolean;verified_item_count?:number;item?:ResearchSource}>("/api/prompts/research/sources", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body:JSON.stringify({platform:sourcePlatform, name:sourceName, feed_url:sourceUrl, refresh_interval_minutes:Number(sourceInterval)}),
       });
       setSourceName(""); setSourceUrl("");
-      setMessage("公开来源已添加。后台会按刷新间隔自动采集；你也可以立即手动采集。");
+      setMessage(result.verified
+        ? `公开来源已添加并完成真实订阅验证，发现 ${result.verified_item_count ?? 0} 条目。来源名称可由系统自动生成。`
+        : "公开来源已添加，请在列表中查看验证状态。");
       await load();
     } catch(error) { setMessage(error instanceof Error ? error.message : "添加来源失败"); }
     finally { setBusy(false); }
@@ -323,7 +325,7 @@ export default function PromptResearchPage() {
                 {["YouTube","B站","抖音","快手","TikTok","Facebook","红果短剧","Reddit","Royal Road","Wattpad","Tapas","Inkitt","Pixiv"].map(x=><option key={x}>{x}</option>)}
               </select>
             </label>
-            <label className="text-xs">来源名称<input value={sourceName} onChange={e=>setSourceName(e.target.value)} placeholder="例如：频道公开更新订阅" className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/></label>
+            <label className="text-xs">来源名称（可留空自动生成）<input value={sourceName} onChange={e=>setSourceName(e.target.value)} placeholder="留空则按平台和域名自动生成" className="mt-1 w-full rounded-lg bg-black/20 p-2 text-sm"/></label>
             <label className="text-xs">刷新间隔
               <select value={sourceInterval} onChange={e=>setSourceInterval(e.target.value)} className="mt-1 w-full rounded-lg bg-[#171326] p-2 text-sm">
                 <option value="15">每 15 分钟</option><option value="30">每 30 分钟</option><option value="60">每 1 小时</option><option value="180">每 3 小时</option><option value="360">每 6 小时</option><option value="720">每 12 小时</option><option value="1440">每天</option><option value="10080">每周</option>
