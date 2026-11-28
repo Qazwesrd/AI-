@@ -146,8 +146,23 @@ def assess_image_hardware(hardware: dict):
         reasons.append("系统内存达到 16 GiB 基础建议；复杂工作流仍可能需要更多内存。")
 
     if vram is None:
-        level = "unknown"
-        reasons.append("未读取到 NVIDIA 显存信息；可能使用其他品牌显卡或 CPU，不能据此判断没有 GPU。")
+        vendor = str(gpu.get("vendor") or "").upper()
+        gpu_status = gpu.get("status")
+        if gpu.get("shared_memory"):
+            level = "integrated_shared_memory"
+            reasons.append(
+                f"已识别到 {vendor or '集成'} 集成显卡，但未确认独立显存；它可能与系统内存共享。"
+                "不能把共享内存容量当作独立显存，也不能仅凭设备名称确认 ComfyUI 可用 GPU 后端。"
+            )
+        elif gpu_status == "detected" and vendor in {"AMD", "INTEL"}:
+            level = "detected_no_vram"
+            reasons.append(
+                f"已识别到 {vendor} 显卡，但当前没有可靠的独立显存数据。"
+                "请以 ComfyUI /system_stats 实际设备列表和一次成功推理为准。"
+            )
+        else:
+            level = "unknown"
+            reasons.append("未读取到可靠的显存信息；可能使用 AMD/Intel 显卡、CPU 或未安装驱动，不能据此判断没有 GPU。")
     elif vram < 4 * GIB:
         level = "limited"
         reasons.append("显存低于 4 GiB，现代扩散模型可能无法顺畅运行；建议先使用轻量模型并降低分辨率。")
@@ -164,6 +179,9 @@ def assess_image_hardware(hardware: dict):
     return {
         "ram_bytes": ram,
         "vram_bytes": vram,
+        "gpu_vendor": gpu.get("vendor"),
+        "gpu_name": gpu.get("name"),
+        "gpu_shared_memory": bool(gpu.get("shared_memory")),
         "gpu_level": level,
         "reasons": reasons,
         "note": "以上是保守的初步建议，不是硬件兼容保证。实际速度和可运行模型取决于显卡类型、驱动、量化方式、模型架构、分辨率和工作流。",
