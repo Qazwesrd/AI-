@@ -643,6 +643,11 @@ class LocalVideoAutoBuildTests(unittest.TestCase):
         }
         errors = _validate_auto_video_mode_graph(workflow, "vace")
         self.assertTrue(any("VACE" in error for error in errors))
+        # A VACE node present in the graph but not wired to the reference
+        # media must be rejected even if the Wan sampler consumes that media.
+        workflow["3"] = {"class_type": "WanVideoVACEEncode", "inputs": {"latent": ["2", 0]}}
+        errors = _validate_auto_video_mode_graph(workflow, "vace")
+        self.assertTrue(any("连接到 VACE" in error for error in errors))
         workflow["3"] = {"class_type": "WanVideoVACEEncode", "inputs": {"image": ["1", 0]}}
         self.assertEqual(_validate_auto_video_mode_graph(workflow, "vace"), [])
 
