@@ -1,4 +1,5 @@
 import ctypes
+import json
 import os
 import shutil
 import sqlite3
@@ -163,6 +164,91 @@ def _detect_nvidia_gpu():
         }
 
 
+
+def _parse_windows_video_adapters(payload):
+    """Parse local Windows WMI display adapters without treating shared RAM as VRAM."""
+    try:
+        adapters = json.loads(payload) if isinstance(payload, str) else payload
+    except (TypeError, ValueError):
+        return []
+    if isinstance(adapters, dict):
+        adapters = [adapters]
+    if not isinstance(adapters, list):
+        return []
+    results = []
+    for adapter in adapters:
+        if not isinstance(adapter, dict):
+            continue
+        name = str(adapter.get("Name") or adapter.get("name") or "").strip()
+        if not name:
+            continue
+        lowered = name.casefold()
+        if "nvidia" in lowered:
+            vendor = "NVIDIA"
+        elif "amd" in lowered or "radeon" in lowered:
+            vendor = "AMD"
+        elif "intel" in lowered or "iris" in lowered:
+            vendor = "Intel"
+        else:
+            vendor = "Unknown"
+        raw_memory = adapter.get("AdapterRAM", adapter.get("adapter_ram"))
+        try:
+            reported_memory = int(raw_memory) if raw_memory is not None else None
+            if reported_memory is not None and reported_memory <= 0:
+                reported_memory = None
+        except (TypeError, ValueError, OverflowError):
+            reported_memory = None
+        integrated = any(token in lowered for token in (
+            "radeon(tm) graphics", "radeon graphics", "intel uhd", "intel iris",
+            "intel(r) graphics", "vega",
+        ))
+        results.append({
+            "status": "detected",
+            "vendor": vendor,
+            "name": name[:240],
+            "vram_bytes": None,
+            "reported_adapter_memory_bytes": reported_memory,
+            "shared_memory": integrated,
+            "dedicated_vram_confirmed": False,
+            "driver_version": str(adapter.get("DriverVersion") or "")[:80] or None,
+            "note": (
+                "已识别到集成显卡；系统内存可能与 GPU 共享，WMI 报告值不等于独立显存。不能据此承诺 ComfyUI GPU 加速，需以实际运行时设备检测为准。"
+                if integrated else
+                "已识别到 Windows 显示适配器；WMI 显存字段可能不准确，因此不作为独立显存容量或加速能力证明。"
+            ),
+        })
+    return results
+
+
+def _detect_windows_video_adapters():
+    """Detect AMD/Intel/NVIDIA display names through local Windows WMI only."""
+    if os.name != "nt":
+        return None
+    command = (
+        "Get-CimInstance Win32_VideoController | "
+        "Select-Object Name,AdapterRAM,DriverVersion | ConvertTo-Json -Compress"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, timeout=5, check=False,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        adapters = _parse_windows_video_adapters(result.stdout)
+        return adapters[0] if adapters else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def _detect_gpu_hardware():
+    """Prefer authoritative NVIDIA telemetry; otherwise identify Windows adapters by name."""
+    nvidia = _detect_nvidia_gpu()
+    if nvidia.get("vendor") == "NVIDIA" and nvidia.get("status") in {"detected", "unavailable"}:
+        return nvidia
+    return _detect_windows_video_adapters() or nvidia
+
+
 def _recommend_local_model_tier(ram_bytes, vram_bytes):
     gib = 1024 ** 3
     ram_gib = ram_bytes / gib if ram_bytes else None
@@ -196,7 +282,7 @@ def _recommend_local_model_tier(ram_bytes, vram_bytes):
 
 def _get_hardware_profile():
     ram_bytes = _physical_memory_bytes()
-    gpu = _detect_nvidia_gpu()
+    gpu = _detect_gpu_hardware()
     try:
         cpu_count = os.cpu_count()
     except Exception:
@@ -214,7 +300,7 @@ def _get_hardware_profile():
         "gpu": gpu,
         "model_sizing": _recommend_local_model_tier(ram_bytes, gpu.get("vram_bytes")),
         "network_used": False,
-        "note": "仅读取本机 CPU、物理内存和可选 NVIDIA 驱动信息；不进行压力测试、不改变系统设置、不下载模型。",
+        "note": "仅读取本机 CPU、物理内存和可选显卡驱动/Windows 显示适配器信息；核显共享内存不会冒充独立显存，不进行压力测试、不改变系统设置、不下载模型。",
     }
 
 
