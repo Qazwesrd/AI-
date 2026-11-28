@@ -45,6 +45,18 @@ class SystemDiagnosticsTests(unittest.TestCase):
         self.assertEqual(result, nvidia)
         windows.assert_not_called()
 
+    def test_gpu_detection_uses_amd_adapter_when_nvidia_telemetry_is_unavailable(self):
+        amd = {
+            "status": "detected", "vendor": "AMD", "name": "AMD Radeon(TM) Graphics",
+            "vram_bytes": None, "shared_memory": True,
+        }
+        with patch("app.routers.system._detect_nvidia_gpu", return_value={
+            "status": "unavailable", "vendor": "NVIDIA", "name": None, "vram_bytes": None,
+        }), patch("app.routers.system._detect_windows_video_adapters", return_value=amd):
+            result = _detect_gpu_hardware()
+        self.assertEqual(result["vendor"], "AMD")
+        self.assertTrue(result["shared_memory"])
+
     def test_gpu_detection_uses_windows_adapter_when_nvidia_not_present(self):
         amd = {
             "status": "detected", "vendor": "AMD", "name": "AMD Radeon(TM) Graphics",
