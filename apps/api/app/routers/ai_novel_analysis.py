@@ -284,7 +284,7 @@ def unknown_chunk_keys(chunk_states):
 # chapter label, provider framing, and output budget. The previous 14,000-character
 # chunks exceeded the context window of several configured chat models.
 DEFAULT_ANALYSIS_CHUNK_CHARS = 3000
-ANALYSIS_CHUNKING_VERSION = "context-safe-v4"
+ANALYSIS_CHUNKING_VERSION = "context-safe-v3"
 
 
 def make_chunks(chapters, limit=DEFAULT_ANALYSIS_CHUNK_CHARS):
