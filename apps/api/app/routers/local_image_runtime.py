@@ -125,6 +125,48 @@ def _scan_comfy_models(opener=None):
     }
 
 
+
+def _summarize_comfy_devices(devices):
+    """Expose ComfyUI's actual runtime devices without guessing from adapter names."""
+    if not isinstance(devices, list):
+        devices = []
+    summaries = []
+    for index, device in enumerate(devices[:16]):
+        if not isinstance(device, dict):
+            continue
+        device_type = str(device.get("type") or "unknown").strip().lower()
+        name = str(device.get("name") or device.get("device_name") or "未命名设备").strip()
+        try:
+            vram_total = int(device.get("vram_total")) if device.get("vram_total") is not None else None
+        except (TypeError, ValueError, OverflowError):
+            vram_total = None
+        try:
+            vram_free = int(device.get("vram_free")) if device.get("vram_free") is not None else None
+        except (TypeError, ValueError, OverflowError):
+            vram_free = None
+        accelerated = device_type not in {"cpu", "unknown", ""}
+        summaries.append({
+            "index": int(device.get("index", index)) if str(device.get("index", index)).isdigit() else index,
+            "name": name[:240],
+            "type": device_type,
+            "accelerated": accelerated,
+            "vram_total_bytes": vram_total,
+            "vram_free_bytes": vram_free,
+        })
+    gpu_devices = [item for item in summaries if item["accelerated"]]
+    return {
+        "devices": summaries,
+        "device_count": len(summaries),
+        "gpu_device_count": len(gpu_devices),
+        "gpu_acceleration_reported": bool(gpu_devices),
+        "note": (
+            "ComfyUI 已在运行时设备列表中报告加速设备；仍需实际工作流推理成功才能确认模型可用。"
+            if gpu_devices else
+            "ComfyUI 当前没有报告明确的 GPU 加速设备；即使 Windows 能识别 AMD/Intel 显卡，也不代表当前 PyTorch/ComfyUI 后端已启用 GPU。"
+        ),
+    }
+
+
 def _checkpoint_names(object_info):
     # Kept for existing callers and tests.
     if not isinstance(object_info, dict) or object_info.get("_error"):
@@ -226,7 +268,7 @@ def local_image_runtime():
     ]
     # ComfyUI /system_stats returns devices as a top-level sibling of system.
     # Reading system.devices silently reported zero devices on real installations.
-    devices = stats.get("devices") if isinstance(stats.get("devices"), list) else []
+    device_report = _summarize_comfy_devices(stats.get("devices"))
     return {
         "engine": "comfyui",
         "status": "ready",
@@ -234,7 +276,7 @@ def local_image_runtime():
         "checkpoint_count": len(checkpoints),
         "checkpoints": checkpoints,
         "model_inventory": inventory,
-        "device_count": len(devices),
+        **device_report,
         "hardware": hardware,
         "network_used": False,
         "downloaded": False,
