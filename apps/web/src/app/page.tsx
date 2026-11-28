@@ -1,4 +1,5 @@
 import BeginnerQuickStart from "../components/beginner-quick-start";
+import HomeBackground from "../components/home-background";
 
 const features = [
   {
@@ -102,22 +103,12 @@ const navigation = [
 export default function Home() {
   return (
     <main className="cosmic min-h-screen">
-      <div className="black-hole" aria-hidden="true" />
-      <div className="nebula nebula-one" />
-      <div className="nebula nebula-two" />
-      <div className="nebula-cloud nebula-cloud-a" />
-      <div className="nebula-cloud nebula-cloud-b" />
-      <div className="nebula-cloud nebula-cloud-c" />
-      <div className="nebula-cloud nebula-cloud-d" />
-      <div className="nebula-cloud nebula-cloud-e" />
-      <div className="nebula-cloud nebula-cloud-f" />
-            
-            
-<div className="meteor meteor-one" />
-      <div className="meteor meteor-two" />
-      <div className="meteor meteor-three" />
-      <div className="meteor meteor-four" />
-      <div className="meteor meteor-five" />
+      <HomeBackground />
+      <div className="sakura-layer" aria-hidden="true">
+        {Array.from({ length: 22 }, (_, index) => (
+          <span key={index} className={`sakura-petal sakura-petal-${index % 8}`} />
+        ))}
+      </div>
 
       <div className="main-layout relative z-10 flex min-h-screen">
 
