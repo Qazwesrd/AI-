@@ -226,7 +226,11 @@ def validate_local_video_workflow(workflow, object_info):
             errors.append(f"缺少节点：{node_type}")
             continue
         schema = _input_schema(schema_info)
-        for name, value in node.get("inputs", {}).items():
+        supplied_inputs = node.get("inputs", {})
+        for required_name, required_spec in schema.items():
+            if required_spec.get("required") and required_name not in supplied_inputs:
+                errors.append(f"节点 {node_id} 缺少必需输入：{required_name}")
+        for name, value in supplied_inputs.items():
             if name not in schema:
                 errors.append(f"节点 {node_id} 缺少有效输入定义：{name}")
                 continue
