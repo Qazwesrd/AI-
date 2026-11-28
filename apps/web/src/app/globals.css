@@ -2659,3 +2659,82 @@ body {
   }
 }
 /* ===== GLOBAL COSMIC BACKGROUND CONSISTENCY FIX END ===== */
+
+
+/* ===== User photo background + sakura fall (homepage) ===== */
+.cosmic {
+  background-color: #f7dce7 !important;
+  background-image:
+    linear-gradient(180deg, rgba(20, 10, 18, .24), rgba(20, 10, 18, .48)),
+    var(--home-bg-image, linear-gradient(135deg, #f7dce7, #d9b6c9 52%, #9d829d)) !important;
+  background-size: cover !important;
+  background-position: center 38% !important;
+  background-attachment: fixed !important;
+}
+.cosmic::before, .cosmic::after,
+.cosmic .nebula, .cosmic .nebula-cloud,
+.cosmic .black-hole, .cosmic .meteor {
+  display: none !important;
+}
+.home-background-controls {
+  position: fixed;
+  z-index: 30;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  gap: 8px;
+}
+.home-background-controls button {
+  border: 1px solid rgba(255,255,255,.55);
+  border-radius: 999px;
+  padding: 9px 14px;
+  color: white;
+  background: rgba(45, 20, 42, .72);
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  box-shadow: 0 4px 18px rgba(30, 10, 25, .2);
+}
+.home-background-controls button:hover {
+  background: rgba(100, 42, 83, .9);
+}
+.sakura-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+.sakura-petal {
+  position: absolute;
+  top: -8vh;
+  left: var(--petal-left, 50%);
+  width: var(--petal-size, 13px);
+  height: calc(var(--petal-size, 13px) * 1.45);
+  border-radius: 85% 10% 80% 15%;
+  background: linear-gradient(145deg, rgba(255,245,249,.96), rgba(255,174,204,.88) 58%, rgba(235,119,165,.78));
+  box-shadow: 0 1px 5px rgba(255, 224, 237, .4);
+  opacity: .86;
+  transform: rotate(35deg);
+  animation: sakuraFall var(--petal-duration, 15s) linear var(--petal-delay, 0s) infinite;
+}
+.sakura-petal-0 { --petal-left: 4%; --petal-size: 10px; --petal-duration: 17s; --petal-delay: -7s; }
+.sakura-petal-1 { --petal-left: 12%; --petal-size: 15px; --petal-duration: 21s; --petal-delay: -13s; }
+.sakura-petal-2 { --petal-left: 21%; --petal-size: 9px; --petal-duration: 14s; --petal-delay: -3s; }
+.sakura-petal-3 { --petal-left: 30%; --petal-size: 13px; --petal-duration: 19s; --petal-delay: -11s; }
+.sakura-petal-4 { --petal-left: 39%; --petal-size: 11px; --petal-duration: 16s; --petal-delay: -5s; }
+.sakura-petal-5 { --petal-left: 49%; --petal-size: 16px; --petal-duration: 22s; --petal-delay: -16s; }
+.sakura-petal-6 { --petal-left: 59%; --petal-size: 9px; --petal-duration: 15s; --petal-delay: -9s; }
+.sakura-petal-7 { --petal-left: 69%; --petal-size: 14px; --petal-duration: 20s; --petal-delay: -2s; }
+.sakura-petal:nth-child(9) { --petal-left: 78%; --petal-size: 11px; --petal-duration: 18s; --petal-delay: -12s; }
+.sakura-petal:nth-child(10) { --petal-left: 87%; --petal-size: 15px; --petal-duration: 23s; --petal-delay: -8s; }
+.sakura-petal:nth-child(11) { --petal-left: 95%; --petal-size: 10px; --petal-duration: 16s; --petal-delay: -4s; }
+.sakura-petal:nth-child(n+12) { animation-delay: calc(var(--petal-delay, -4s) - 4s); }
+@keyframes sakuraFall {
+  0% { transform: translate3d(0, -8vh, 0) rotate(0deg); opacity: 0; }
+  8% { opacity: .9; }
+  50% { transform: translate3d(5vw, 52vh, 0) rotate(220deg); }
+  100% { transform: translate3d(-4vw, 112vh, 0) rotate(520deg); opacity: .12; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sakura-petal { animation: none !important; display: none; }
+}
