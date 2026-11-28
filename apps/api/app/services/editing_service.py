@@ -237,16 +237,35 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
 
     try:
         clips = []
+        has_any_original_audio = False
         for index, segment in enumerate(plan["segments"]):
             output_clip = work / f"segment_{index:04d}.mp4"
             duration = float(segment["end"]) - float(segment["start"])
+            source_info = probe_media(segment["file_path"])
+            source_has_audio = any(
+                stream.get("codec_type") == "audio"
+                for stream in source_info.get("streams", [])
+                if isinstance(stream, dict)
+            )
+            has_any_original_audio = has_any_original_audio or source_has_audio
             args = [
                 "-ss", str(segment["start"]),
                 "-i", segment["file_path"],
+            ]
+            if not source_has_audio:
+                # Give every intermediate clip the same audio stream layout so
+                # FFmpeg concat does not fail when silent and voiced clips mix.
+                args += [
+                    "-f", "lavfi",
+                    "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+                ]
+            args += [
                 "-t", str(duration),
                 "-vf",
                 f"scale={plan['width']}:{plan['height']}:force_original_aspect_ratio=decrease,"
                 f"pad={plan['width']}:{plan['height']}:(ow-iw)/2:(oh-ih)/2",
+                "-map", "0:v:0",
+                "-map", "0:a:0" if source_has_audio else "1:a:0",
                 "-c:v", "libx264",
                 "-preset", "veryfast",
                 "-crf", "21",
@@ -288,9 +307,7 @@ def execute_edit_plan(plan, subtitle_path=None, audio_path=None, audio_mode="rep
             args += ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
         elif audio and audio_mode == "mix":
             # Mix selected audio with the original clip audio when available.
-            streams = probe_media(clips[0]).get("streams", [])
-            has_original_audio = any(x.get("codec_type") == "audio" for x in streams)
-            if has_original_audio:
+            if has_any_original_audio:
                 args += [
                     "-filter_complex",
                     "[0:a:0]volume=1.0[original];"
