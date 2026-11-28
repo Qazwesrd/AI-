@@ -24,13 +24,12 @@ on:
       - ".github/workflows/windows-release.yml"
 
 permissions:
-  contents: write
+  contents: read
 
-# Serialize master release builds so two commits cannot upload the same
-# versioned assets to one GitHub Release at the same time. PR validation
-# builds remain independent per pull request and never publish releases.
+# Serialize installer builds to prevent overlapping artifact generation.
+# This workflow uploads a verified Actions artifact only; it never publishes Releases.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('windows-installer-pr-{0}', github.event.pull_request.number) || 'windows-installer-master-release' }}
+  group: ${{ github.event_name == 'pull_request' && format('windows-installer-pr-{0}', github.event.pull_request.number) || 'windows-installer-final-artifact' }}
   cancel-in-progress: false
 
 jobs:
@@ -126,122 +125,5 @@ jobs:
           Write-Host "Size: $([math]::Round($installer.Length / 1MB, 2)) MB"
           Write-Host "SHA256: $hash"
 
-      - name: Read desktop version
-        id: desktop-version
-        shell: pwsh
-        run: |
-          $package = Get-Content "apps/desktop/package.json" -Raw | ConvertFrom-Json
-          if (!$package.version -or $package.version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid desktop version in package.json." }
-          "version=$($package.version)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "Release version: $($package.version)"
-
-      - name: Upload installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: AI-Comic-Studio-Windows-Setup
-          path: |
-            apps/desktop/release/*Setup*.exe
-            apps/desktop/release/*Setup*.exe.sha256
-            scripts/update-desktop-only.ps1
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Publish Windows installer to GitHub Releases
-        if: github.ref == 'refs/heads/master'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-          $version = "${{ steps.desktop-version.outputs.version }}"
-          $tag = "desktop-v$version"
-          $title = "AI漫剧制作大师 Windows $version"
-          $notes = @'
-          Windows 桌面安装包。
-
-          - 包含桌面启动器、本地 API 和 Web 前端。
-          - 安装器内置 FFmpeg / FFprobe，开箱即可使用。
-          - 提供桌面专用升级脚本；升级只更新程序，不部署或覆盖本地 AI 引擎和模型。
-          - 本地模型与本地图片引擎按已安装资源运行；任何外部 AI 服务均需用户主动配置和确认。
-          '@
-
-          # Ensure the git tag exists before creating or resolving the Release.
-          $tagRef = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" 2>$null
-          if ($LASTEXITCODE -ne 0 -or !$tagRef) {
-            git tag $tag $env:GITHUB_SHA
-            if ($LASTEXITCODE -ne 0) { throw "创建版本 Git 标签失败：$tag" }
-            git push origin "refs/tags/$tag"
-            if ($LASTEXITCODE -ne 0) { throw "推送版本 Git 标签失败：$tag" }
-          }
-
-          # Resolve by listing releases instead of the tag lookup endpoint.
-          # GitHub can briefly return 404 for releases created in the same job.
-          $releaseList = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100"
-          if ($LASTEXITCODE -ne 0 -or !$releaseList) { throw "无法读取 GitHub Releases 列表。" }
-          $release = @($releaseList | ConvertFrom-Json | Where-Object { $_.tag_name -eq $tag } | Select-Object -First 1)[0]
-          if (!$release) {
-            $payload = @{
-              tag_name = $tag
-              target_commitish = $env:GITHUB_SHA
-              name = $title
-              body = $notes
-              draft = $true
-              prerelease = $false
-            } | ConvertTo-Json -Depth 5
-            $release = $payload | gh api --method POST "repos/$env:GITHUB_REPOSITORY/releases" --input - | ConvertFrom-Json
-            if ($LASTEXITCODE -ne 0 -or !$release.id) { throw "创建 GitHub Release 失败。" }
-          }
-          if (!$release.id) { throw "Release 信息缺少 ID，无法安全上传资产。" }
-
-          $releaseDir = Join-Path $PWD "apps/desktop/release"
-          Copy-Item "scripts/update-desktop-only.ps1" (Join-Path $releaseDir "update-desktop-only.ps1") -Force
-          $files = @(Get-ChildItem $releaseDir -File | Where-Object {
-            $_.Name -like "*Setup*.exe" -or
-            $_.Name -like "*Setup*.exe.sha256" -or
-            $_.Name -eq "update-desktop-only.ps1"
-          } | Sort-Object Name)
-          if ($files.Count -ne 3) { throw "预期上传 3 个正式交付文件（安装器、SHA-256、桌面专用升级脚本），实际找到 $($files.Count) 个。" }
-
-          $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
-          if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法读取 Release 资产。" }
-          $assets = @($assetResponse | ConvertFrom-Json)
-          $expectedAssetNames = @($files | ForEach-Object { $_.Name -replace '[^\x00-\x7F]+', '.' })
-          foreach ($asset in $assets) {
-            if ($expectedAssetNames -notcontains $asset.name) {
-              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($asset.id)"
-              if ($LASTEXITCODE -ne 0) { throw "无法清理非正式交付资产：$($asset.name)" }
-            }
-          }
-          foreach ($file in $files) {
-            # GitHub normalizes non-ASCII release asset names to a dot in the API response.
-            # Compare the normalized name so retries replace the correct existing asset.
-            $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
-            $existingAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
-            if ($existingAsset) {
-              gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$($existingAsset.id)"
-              if ($LASTEXITCODE -ne 0) { throw "无法替换旧发布资产：$($file.Name)" }
-            }
-            Write-Host "Uploading $($file.Name)"
-            $encodedName = [uri]::EscapeDataString($file.Name)
-            Invoke-RestMethod -Method Post -Uri "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets?name=$encodedName" -Headers @{
-              Authorization = "Bearer $env:GH_TOKEN"
-              Accept = "application/vnd.github+json"
-              "X-GitHub-Api-Version" = "2022-11-28"
-            } -ContentType "application/octet-stream" -InFile $file.FullName | Out-Null
-          }
-
-          $assetResponse = gh api "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)/assets"
-          if ($LASTEXITCODE -ne 0 -or !$assetResponse) { throw "无法核对 Release 资产。" }
-          $assets = @($assetResponse | ConvertFrom-Json)
-          if ($assets.Count -ne 3) { throw "正式 Release 应只包含 3 个交付资产，实际为 $($assets.Count) 个。" }
-          foreach ($file in $files) {
-            $expectedAssetName = $file.Name -replace '[^\x00-\x7F]+', '.'
-            $verifiedAsset = $assets | Where-Object { $_.name -eq $expectedAssetName } | Select-Object -First 1
-            if (!$verifiedAsset -or $verifiedAsset.state -ne "uploaded" -or $verifiedAsset.size -ne $file.Length) {
-              throw "Release 资产校验失败：$($file.Name)；API 名称：$expectedAssetName"
-            }
-          }
-
-          gh api --method PATCH "repos/$env:GITHUB_REPOSITORY/releases/$($release.id)" -F draft=false -f make_latest=true
-          if ($LASTEXITCODE -ne 0) { throw "Release 资产核对通过，但发布草稿失败。" }
-          Write-Host "Release $tag published with $($files.Count) verified assets."
+      # Final delivery remains a verified Actions artifact; this workflow must not create
+      # Git tags or publish GitHub Releases. The user downloads only after acceptance.
