@@ -172,6 +172,13 @@ export default function NovelsPage() {
       await openNovel(selected);
       setMessage(`导入成功：${data.chapter_count ?? 0} 章，共 ${data.word_count ?? 0} 字${data.outdated_story_projects ? `；${data.outdated_story_projects} 个旧剧本项目已标记为需要复核` : ""}`);
       if (fileRef.current) fileRef.current.value = "";
+      const startLocalAnalysis = window.confirm(
+        "小说已导入。是否立即使用本机已安装的 Ollama 模型自动识别人物、场景、道具、服装和剧情设定？\\n\\n" +
+        "仅在本机运行，不调用云端 API、不自动下载模型，也不会产生 API 调用费用。"
+      );
+      if (startLocalAnalysis) {
+        await analyze(true);
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "小说导入失败，请检查文件格式或后端服务");
     } finally {
@@ -200,16 +207,18 @@ export default function NovelsPage() {
     }
   }
 
-  async function analyze() {
+  async function analyze(skipConfirmation = false) {
     if (!selected) return;
 
-    const approved = window.confirm(
-      "即将使用本机 Ollama 已安装的文本模型进行小说深度分析。\\n\\n" +
-      "分析仅在本机运行，不调用云端 API，不自动下载模型，也不会产生 API 调用费用。\\n" +
-      "如果本地引擎或模型不可用，软件会明确提示并停止，不会切换到云端。\\n\\n" +
-      "是否开始？"
-    );
-    if (!approved) return;
+    if (!skipConfirmation) {
+      const approved = window.confirm(
+        "即将使用本机 Ollama 已安装的文本模型进行小说深度分析。\\n\\n" +
+        "分析仅在本机运行，不调用云端 API，不自动下载模型，也不会产生 API 调用费用。\\n" +
+        "如果本地引擎或模型不可用，软件会明确提示并停止，不会切换到云端。\\n\\n" +
+        "是否开始？"
+      );
+      if (!approved) return;
+    }
 
     const novelId = selected.id;
     let progressPolling = false;
