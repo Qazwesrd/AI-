@@ -244,5 +244,37 @@ class LocalAIRuntimeTests(unittest.TestCase):
         self.assertEqual(events[-1]["status"], 504)
 
 
+    def test_ollama_stream_yields_fragments_and_requests_stream_mode(self):
+        from app.routers.local_ai_runtime import _ollama_stream
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def readline(self, limit):
+                lines = [
+                    b'{"response":"\xe4\xbd\xa0","done":false}\n',
+                    b'{"response":"\xe5\xa5\xbd","done":false}\n',
+                    b'{"response":"","done":true}\n',
+                ]
+                return lines.pop(0) if lines else b""
+        with patch("app.routers.local_ai_runtime.OPENER.open", return_value=Response()) as opener:
+            self.assertEqual(list(_ollama_stream({"model":"qwen2.5:3b","prompt":"hi","stream":False})), ["你","好"])
+        request = opener.call_args.args[0]
+        body = __import__("json").loads(request.data.decode("utf-8"))
+        self.assertTrue(body["stream"])
+        self.assertEqual(request.full_url, "http://127.0.0.1:11434/api/generate")
+
+    def test_ollama_stream_maps_midstream_timeout_to_504(self):
+        from app.routers.local_ai_runtime import _ollama_stream
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def readline(self, limit): raise TimeoutError("slow model")
+        with patch("app.routers.local_ai_runtime.OPENER.open", return_value=Response()):
+            with self.assertRaises(HTTPException) as caught:
+                list(_ollama_stream({"model":"qwen2.5:3b","prompt":"hi"}))
+        self.assertEqual(caught.exception.status_code, 504)
+
+
+
 if __name__ == "__main__":
     unittest.main()
